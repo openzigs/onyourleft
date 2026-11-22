@@ -73,6 +73,7 @@ import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
 import { ModelPacer, modelPacerInput, modelPacerTerrain } from './model-pacer';
+import type { PacerDoing } from './pacer-doing';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
@@ -452,9 +453,10 @@ export interface GamePort {
    */
   riderGhostOffered?(): boolean;
   /**
-   * The AI pacer — #2712, ADR 0072: a model on this device's instance picks
-   * the pacer's plan and intent every few seconds and writes a line of
-   * feedback (`instance/pacer-port.ts`). Absent, or not `offered()`, the
+   * The AI pacer — #2712, ADR 0072; #2835, ADR 0083: every few seconds this
+   * device decides what the pacer does, from the rider's gap and the road,
+   * and a model on its instance writes a line of feedback
+   * (`instance/pacer-port.ts`). Absent, or not `offered()`, the
    * choice is never drawn and nothing is sent: a rider with no instance
    * loses this and nothing else. ⚠️ An optional member threaded through JSX,
    * so a `main.tsx` that stopped supplying it is GREEN in `check:wiring`;
@@ -1455,6 +1457,12 @@ function GameScreen({
   /** Its line on the screen now, or `undefined`. */
   const [pacerSay, setPacerSay] = useState<string | undefined>();
   const pacerSayRef = useRef<string | undefined>(undefined);
+  /**
+   * What it is doing, as its last frame said (`model-pacer.ts` §`pacerDoing`),
+   * for the HUD's pacer power field (#2864, the owner's ruling of 2026-11-20).
+   * A ref: the HUD is drawn from the frame's state, which re-renders it.
+   */
+  const pacerDoingRef = useRef<PacerDoing | undefined>(undefined);
   // #2292: a course chosen on a game's course picker (the Games tab) opens
   // this setup with that game's switch on (`shell/routes.ts`
   // §`hrefForGamePlay`). Read once, on mount, as the route is; the switch is
@@ -2088,6 +2096,9 @@ function GameScreen({
       if (!value || offer === undefined) return;
       setAiPacerStatus('asking');
       void offer.pacerStatus().then((status) => {
+        // #2835: the AI pacer is on in the ride menu and consented to, so the
+        // model is loaded now and not at "Go". Nothing of the rider's is sent.
+        if (status.kind === 'offered' && status.consented) void offer.warmPacer();
         if (!unmountedRef.current) setAiPacerStatus(status);
       });
     },
@@ -2107,6 +2118,10 @@ function GameScreen({
     if (offer === undefined || typeof status !== 'object' || status.kind !== 'offered') return;
     setAiPacerStatus('asking');
     void offer.consentToPacer(status).then((after) => {
+      // #2835: consent given with the switch on is the same moment.
+      if (aiPacerRef.current.wanted && after.kind === 'offered' && after.consented) {
+        void offer.warmPacer();
+      }
       if (!unmountedRef.current) setAiPacerStatus(after);
     });
   }, [props.port]);
@@ -2488,6 +2503,7 @@ function GameScreen({
     modelPacerRef.current?.director.end();
     modelPacerRef.current = undefined;
     pacerSayRef.current = undefined;
+    pacerDoingRef.current = undefined;
     setPacerSay(undefined);
     // #1042: a ride that was on the stage has ended, by *End ride* or by
     // leaving, and the recording under it (if any) keeps how its race against
@@ -3803,22 +3819,23 @@ function GameScreen({
       if (simulation.state.soloDraft !== undefined) {
         trainerPortRef.current?.soloDraftStepped?.(simulation.state.soloDraft);
       }
-      // #2712, ADR 0072: the AI pacer — asks on the ride's own clock, never
-      // waits, and puts each applied answer in force on the simulation from
-      // the seconds ridden it arrived at. It moves the pacer and nothing
-      // else: nothing here reaches the gradient below or any trainer write.
+      // #2712, ADR 0072, and #2835, ADR 0083: the AI pacer — the device
+      // decides its intent on the ride's own clock and puts it in force on
+      // the simulation at once, then asks the model for a line and never
+      // waits for it. It moves the pacer and nothing else: nothing here
+      // reaches the gradient below or any trainer write.
       const directed = modelPacerRef.current;
       let pacerArrived: string | undefined;
       if (directed !== undefined) {
         const said = directed.director.frame({
           riddenSeconds: simulation.state.ridden,
-          input: (inForce) =>
-            modelPacerInput({
+          ride: () => ({
+            riderSpeed: simulation.state.ride.speed,
+            seen: modelPacerInput({
               state: simulation.state,
               plan: directed.plan,
               profile: chosen.profile,
               riderMassKilograms: directed.riderMassKilograms,
-              inForce,
               // #2760: what the rider's own sensors say, each left out when
               // it is not live, and a zone only of a threshold they set.
               sensors: {
@@ -3833,6 +3850,7 @@ function GameScreen({
                 thresholdHeartRate: ownThresholdsRef.current.heartRate,
               },
             }),
+          }),
           // ADR 0082: where the pacer is on the road, for the terrain rule.
           terrain: () => modelPacerTerrain(simulation.state, chosen.profile),
           direct: (direction, from) => {
@@ -3840,6 +3858,7 @@ function GameScreen({
           },
         });
         pacerArrived = said.arrived;
+        pacerDoingRef.current = said.doing;
         if (said.showing !== pacerSayRef.current) {
           pacerSayRef.current = said.showing;
           setPacerSay(said.showing);
@@ -5348,6 +5367,11 @@ function GameScreen({
               // #2426: in the draft by the simulation's own `draftEvent` state.
               soloInDraft: state.soloDraft.inDraft,
             })}
+        // #2864, the owner's ruling of 2026-11-20: the AI pacer's power, the
+        // watts its tick rode on the last step, and what it is doing.
+        {...(modelPacerRef.current === undefined
+          ? {}
+          : { aiPacer: { watts: state.bot?.power, doing: pacerDoingRef.current } })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={

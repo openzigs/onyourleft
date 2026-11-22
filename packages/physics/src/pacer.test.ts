@@ -49,6 +49,9 @@ import {
   metres,
   metresPerSecond,
   pacedPowerWatts,
+  PACER_SURGE_CEILING,
+  PACER_SURGE_MOST,
+  PACING_FACTOR_CEILING,
   routeProfile,
   seconds,
   unixSeconds,
@@ -427,6 +430,30 @@ describe('an AI pacer’s direction — #2712, ADR 0072 D-2', () => {
     expect(directed.distance).toBeGreaterThan(free.distance);
     const eased: BotCourse = { ...courseOn(FLAT), direction: { plan: 'even', intent: 'ease' } };
     expect(botDemand(MID_ROUTE, eased).power).toBeLessThan(pacedPowerWatts(PLAN, 0));
+  });
+
+  it('reaches 115 % of the flat figure only on a surge, and the chase stays at 110 % — ADR 0092 D-4', () => {
+    const flat = pacedPowerWatts(PLAN, 0) as number;
+    const chase = { plan: 'climber', intent: 'lift', by: 0.1 } as const;
+    const chased = botDemand(MID_ROUTE, { ...courseOn(CLIMB), direction: chase });
+    expect(chased.power).toBeCloseTo(flat * PACING_FACTOR_CEILING, 9);
+    const surging = botDemand(MID_ROUTE, {
+      ...courseOn(CLIMB),
+      direction: { ...chase, surge: PACER_SURGE_MOST },
+    });
+    expect(surging.power).toBeCloseTo(flat * PACER_SURGE_CEILING, 9);
+    expect(surging.power).toBe(directedPowerWatts(PLAN, surging.grade, { ...chase, surge: 0.08 }));
+    // The surge moves the bot through the same tick, and nothing else.
+    let chasing: RideState = MID_ROUTE;
+    let surged: RideState = MID_ROUTE;
+    for (let tick = 0; tick < 15; tick += 1) {
+      chasing = advanceBot(chasing, seconds(1), { ...courseOn(CLIMB), direction: chase }).state;
+      surged = advanceBot(surged, seconds(1), {
+        ...courseOn(CLIMB),
+        direction: { ...chase, surge: PACER_SURGE_MOST },
+      }).state;
+    }
+    expect(surged.distance).toBeGreaterThan(chasing.distance);
   });
 });
 

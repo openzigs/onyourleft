@@ -34,12 +34,14 @@ import {
   keepScreenOnNotice,
   keepScreenOnLaidOut,
   KEEP_SCREEN_ON_SEEN,
+  TABLET_VIEWPORTS,
 } from './ride-stage';
 
 import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
 import { pacerSayProblem } from '@onyourleft/domain';
 
 import { AI_PACER_LINE } from './ai-pacer-line';
+import { applyInsets, NO_INSETS, PIXEL_TABLET_LANDSCAPE_INSETS, type Insets } from './insets';
 
 import type { StageMeasurement } from './ride-harness';
 
@@ -798,6 +800,112 @@ test.describe('the AI pacer’s line, large enough to read while riding — #276
             (each) => each.name.startsWith('control:') && overlap(each.box, seen.box),
           );
           expect(controls.map(describeItem)).toEqual([]);
+        });
+      }
+    });
+  }
+});
+
+/**
+ * THE AI PACER'S POWER, ON THE TABLET'S HUD — #2864, the owner's ruling of
+ * 2026-11-20: *"Show the pacer's power on the ride screen: its current watts
+ * and what it is doing"*.
+ *
+ * `ride.html?aipacer=saying` rides with the AI pacer on. On each tablet — the
+ * owner's 1280×800 with its insets read off the device (top 36, bottom 32),
+ * 800×1280 upright with the same assumed, and 1024×768 with none — the
+ * *Pacer power* reading is read back off the engine: drawn, whole and
+ * unclipped, its watts and what the pacer is doing in it, inside the safe
+ * area, the topmost thing where it is, and over no other reading, panel or
+ * control, with the anchors on and off. Away from a tablet it gives way
+ * (`theme.css` §"THE AI PACER'S POWER, ON A TABLET ONLY"), which the line's
+ * own case above holds at 1024×600 by the notices clearing the route panel.
+ */
+test.describe('the AI pacer’s power on the tablet’s HUD — #2864', () => {
+  const insetsOf = (viewport: Viewport): Insets =>
+    viewport.width === 1024 ? NO_INSETS : PIXEL_TABLET_LANDSCAPE_INSETS;
+
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`drawn whole, with its watts and what it is doing, in the safe area and over nothing — ${viewport.name}`, async ({
+      page,
+    }) => {
+      const insets = insetsOf(viewport);
+      await applyInsets(page, insets);
+      await openRide(page, viewport, '?aipacer=saying');
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('.oyl-hud__field')].some(
+          (each) => each.querySelector('dt')?.textContent === 'Pacer power',
+        ),
+      );
+      const read = await page.evaluate(() => {
+        const field = [...document.querySelectorAll<HTMLElement>('.oyl-hud__field')].find(
+          (each) => each.querySelector('dt')?.textContent === 'Pacer power',
+        );
+        if (field === undefined) return undefined;
+        const clipped: string[] = [];
+        for (const each of [field, ...field.querySelectorAll<HTMLElement>('*')]) {
+          if (
+            each.scrollWidth > each.clientWidth + 1 ||
+            each.scrollHeight > each.clientHeight + 1
+          ) {
+            if (each.clientWidth > 0) clipped.push(each.className || each.tagName);
+          }
+        }
+        const detail = field.querySelector('.oyl-hud__detail')?.getBoundingClientRect();
+        return {
+          text: (field.querySelector('dd')?.textContent ?? '').trim(),
+          clipped,
+          detailDrawn: detail !== undefined && detail.width * detail.height > 1,
+        };
+      });
+      expect(read, 'the Pacer power reading is on the HUD').toBeDefined();
+      console.log(`#2864 the AI pacer's power — ${viewport.name}: “${read?.text ?? ''}”`);
+      expect(read?.text, 'its watts, then what it is doing').toMatch(/^\d+ W [a-z]/u);
+      expect(read?.detailDrawn, 'what it is doing is drawn').toBe(true);
+      expect(read?.clipped, 'nothing in it is clipped or scrolled').toEqual([]);
+      for (const [how, measured] of await bothWays(page)) {
+        await test.step(how, () => {
+          const field = named(measured.items, 'reading: Pacer power');
+          expect(field.onTop, 'the reading is the topmost thing where it is').toBe(true);
+          const safe = {
+            left: field.box.left - insets.left,
+            top: field.box.top - insets.top,
+            right: field.box.right - insets.left,
+            bottom: field.box.bottom - insets.top,
+            width: field.box.width,
+            height: field.box.height,
+          };
+          expect(
+            inside(safe, {
+              ...viewport,
+              width: viewport.width - insets.left - insets.right,
+              height: viewport.height - insets.top - insets.bottom,
+            }),
+            `the reading is inside the safe area: ${describeItem(field)}`,
+          ).toBe(true);
+          expect(overlap(field.box, riderBox(viewport)), 'the reading is over the rider').toBe(
+            false,
+          );
+          const others = measured.items.filter(
+            (each) => each !== field && each.box.height > 1 && overlap(each.box, field.box),
+          );
+          expect(others.map(describeItem)).toEqual([]);
+          // Over no panel but the tier it is drawn in, and that tier, one
+          // reading longer, still clear of the leaning rider.
+          const tier = measured.panels.find((each) =>
+            each.name.includes('oyl-hud__fields--secondary'),
+          );
+          const panels = measured.panels.filter(
+            (each) => each !== tier && each.box.height > 1 && overlap(each.box, field.box),
+          );
+          expect(panels.map(describeItem)).toEqual([]);
+          expect(tier, 'the secondary tier is on the stage').toBeDefined();
+          if (tier !== undefined) {
+            expect(
+              overlap(tier.box, riderBox(viewport)),
+              `the tier is over the rider: ${describeItem(tier)}`,
+            ).toBe(false);
+          }
         });
       }
     });

@@ -40,8 +40,9 @@ function ridableRoute(): RidableRoute {
   return { id: 'a', name: 'Quarry climb', profile: routeProfile(points), attempts: 0 };
 }
 
-function offering(): PacerPort {
-  let consented = false;
+/** An instance that offers a local model: `agreed`, the rider's consent as it stands; `warmed` counts the warm-ups. */
+function offering(agreed = false, warmed: { count: number } = { count: 0 }): PacerPort {
+  let consented = agreed;
   const status = (): PacerStatus => ({
     kind: 'offered',
     instance: 'https://ride.example',
@@ -59,13 +60,17 @@ function offering(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => {
+      warmed.count += 1;
+      return Promise.resolve(true);
+    },
     startPacerRide: () => Promise.resolve(true),
     decidePacer: () => Promise.resolve({ kind: 'failed' }),
     endPacerRide: () => Promise.resolve(),
   };
 }
 
-const port = (): GamePort => ({
+const port = (aiPacer: PacerPort = offering()): GamePort => ({
   listRoutes: () => Promise.resolve([ridableRoute()]),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
@@ -73,7 +78,7 @@ const port = (): GamePort => ({
     cadence: { value: undefined, live: false, paired: false },
     heartRate: { value: undefined, live: false, paired: false },
   }),
-  aiPacer: offering(),
+  aiPacer,
 });
 
 let mounted: Mounted | undefined;
@@ -95,17 +100,17 @@ function buttonNamed(root: ParentNode, words: string): HTMLButtonElement | undef
   );
 }
 
-async function aiPacerOn(): Promise<Mounted> {
+async function aiPacerOn(aiPacer?: PacerPort): Promise<Mounted> {
   const tree = await mount(
     <main>
       <h1>Trainer game</h1>
-      <GameView port={port()} />
+      <GameView port={port(aiPacer)} />
     </main>,
   );
   await settle();
   await activateWithKeyboard(switchNamed(tree.container, 'Ride against a pacer') as HTMLElement);
   await settle();
-  const ai = switchNamed(tree.container, 'Let the AI on your instance steer the pacer');
+  const ai = switchNamed(tree.container, 'Let the AI on your server coach you through the pacer');
   expect(ai).toBeDefined();
   await activateWithKeyboard(ai as HTMLElement);
   await settle();
@@ -137,7 +142,7 @@ describe('the AI pacer on the picker — #2712', () => {
     await activateWithKeyboard(buttonNamed(mounted.container, 'Allow the AI pacer') as HTMLElement);
     await settle();
     await settle();
-    expect(mounted.container.textContent).toContain('The AI will steer the pacer on this ride.');
+    expect(mounted.container.textContent).toContain('The AI will coach you on this ride.');
     const withdraw = buttonNamed(mounted.container, 'Withdraw consent');
     expect(withdraw).toBeDefined();
     expect(keyboardReachableElements(document)).toContain(withdraw);
@@ -148,5 +153,24 @@ describe('the AI pacer on the picker — #2712', () => {
     await settle();
     await settle();
     expect(buttonNamed(mounted.container, 'Allow the AI pacer')).toBeDefined();
+  });
+});
+
+describe('the model is warmed from the ride menu, not at “Go” — #2835, ADR 0083 D-4', () => {
+  it('warms it when the switch goes on and the rider had already agreed', async () => {
+    const warmed = { count: 0 };
+    mounted = await aiPacerOn(offering(true, warmed));
+    expect(mounted.container.textContent).toContain('The AI will coach you on this ride.');
+    expect(warmed.count).toBe(1);
+  });
+
+  it('sends nothing before the rider has agreed, and warms it once they do', async () => {
+    const warmed = { count: 0 };
+    mounted = await aiPacerOn(offering(false, warmed));
+    expect(warmed.count).toBe(0);
+    await activateWithKeyboard(buttonNamed(mounted.container, 'Allow the AI pacer') as HTMLElement);
+    await settle();
+    await settle();
+    expect(warmed.count).toBe(1);
   });
 });

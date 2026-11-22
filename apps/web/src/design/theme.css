@@ -10352,6 +10352,34 @@ select.oyl-input {
   }
 }
 
+/*
+ * THE AI PACER'S POWER, ON A TABLET ONLY — #2864, the owner's ruling of
+ * 2026-11-20 (*"Show the pacer's power on the ride screen"*).
+ *
+ * A ride with the AI pacer adds one secondary reading, *Pacer power*: its
+ * watts and, under them, what it is doing. On a 1024×600 laptop window that
+ * put the notices under the tier into the route panel
+ * (`ride-notices.browser.spec.ts` §"the AI pacer's line"), measured. ⚠️ #419
+ * asks that what gives way be recorded, so: **away from a tablet the field
+ * gives way, as the solo Draft does** (the section above) — hidden by clip, so
+ * a screen reader still reads it in its place. A tablet, at least 50 rem wide
+ * and 47 rem tall, draws it: measured there by `ride-notices.browser.spec.ts`
+ * §"#2864", with the owner's tablet insets at 1280×800.
+ */
+@media not all and (min-width: 50rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--pacer-power {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 /* ⚠️ **And on a tablet from 50 rem tall, beside the pacer and the ghost, the
    wind gives way to it** — #2425, recorded as #419 asks. There #2434's
    *Calories* is the second row's third track (§"THE CALORIE ESTIMATE IN THE

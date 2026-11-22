@@ -626,14 +626,17 @@ export interface RideFacts {
   /**
    * The AI pacer's decision log for this ride — #2712, ADR 0072 D-5: every
    * ask, oldest first, with the seconds ridden it was asked and answered at
-   * and what became of it, and the pacer-code version it was ridden under
+   * and what became of it — since #2835 (ADR 0083 D-5) each one a decision of
+   * the device's, with the direction ridden, the rule that set it, where the
+   * rider was against the pacer and a word for what became of the line —
+   * and the pacer-code version it was ridden under
    * (`@onyourleft/domain` §`MODEL_PACER_CODE_VERSION`), with the pacer's
    * W/kg, the route, the air and position, and the game ride's start on the
    * recording's clock (#2712's review): the whole of what the pacer did, so
    * the pacer replays from it (§`pacerDirectionAt`). Known only while riding, like
    * {@link workoutFinished}; absent for a ride with no AI pacer.
    *
-   * It holds a plan and an intent from two closed lists and no text: **the
+   * It holds numbers and words from closed lists and no text: **the
    * lines of feedback the rider was shown are not kept.** The instance keeps
    * no copy (ADR 0036 D-3 (c)).
    *

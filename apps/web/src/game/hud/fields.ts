@@ -70,6 +70,7 @@ import {
 } from '../../units/format';
 import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
+import { PACER_DOING_TEXT, PACER_OWN_PACE_TEXT, type PacerDoing } from '../pacer-doing';
 import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
@@ -350,6 +351,39 @@ export interface ChasedGap {
   readonly drafted?: boolean | undefined;
 }
 
+/** The AI pacer on the HUD. @see HudInput.aiPacer */
+export interface AiPacerHud {
+  /** What the pacer rode on the simulation's last step: `GameState.bot.power`, the power its tick rode. */
+  readonly watts: number | undefined;
+  /** What it is doing (`model-pacer.ts` §`pacerDoing`); `undefined` with no decision in force. */
+  readonly doing: PacerDoing | undefined;
+}
+
+/** The key of the AI pacer's power — #2864. @see pacerPowerReading */
+export const PACER_POWER_KEY = 'pacer-power';
+
+/** The AI pacer's power field's label. ⚠️ Draft wording for the owner. */
+export const PACER_POWER_LABEL = 'Pacer power';
+
+/**
+ * The AI pacer's power and what it is doing — the owner's ruling of
+ * 2026-11-20: its watts, whole, as the rider's own power field is, and the
+ * words of `pacer-doing.ts` under them (*"Pacer 185 W · waiting for you"*).
+ * A dash before the pacer has ridden a step. Never stale: it is the
+ * simulation's, not a sensor's.
+ */
+export function pacerPowerReading(pacer: AiPacerHud): HudReading {
+  const { watts } = pacer;
+  return {
+    key: PACER_POWER_KEY,
+    label: PACER_POWER_LABEL,
+    value: watts === undefined || !Number.isFinite(watts) ? NO_READING : String(Math.round(watts)),
+    unit: 'W',
+    stale: false,
+    detail: pacer.doing === undefined ? PACER_OWN_PACE_TEXT : PACER_DOING_TEXT[pacer.doing],
+  };
+}
+
 /**
  * The room, on the HUD — #783: how many other riders are near, and the gap to
  * ONE rider the rider chose. **Never a list, and never an order, in these
@@ -502,6 +536,15 @@ export interface HudInput {
    * {@link soloDraft}.
    */
   readonly soloInDraft?: boolean | undefined;
+  /**
+   * The AI pacer, on a ride with one — the owner's ruling of 2026-11-20 on
+   * #2864: *"Show the pacer's power on the ride screen: its current watts and
+   * what it is doing"*. Drawn by {@link pacerPowerReading} beside the gaps.
+   * Absent on every other ride, so its HUD reads exactly as it did; chosen at
+   * the start of the ride and held for it, so the field never appears or
+   * vanishes mid-ride.
+   */
+  readonly aiPacer?: AiPacerHud | undefined;
   /**
    * The Delivery round, on a Delivery ride — #1812. Absent on every other
    * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
@@ -816,6 +859,9 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     wattsPerKilogramReading(power, input.riderMass),
     ...zoneReading(power, input.thresholdPower, input.powerZoneTime),
     ...gapReadings(input),
+    // #2864: the AI pacer's power, beside its gap. Only on a ride with the AI
+    // pacer, which is never in a room, and held for the ride.
+    ...(input.aiPacer === undefined ? [] : [pacerPowerReading(input.aiPacer)]),
     ...roomReadings(input.room),
     // #2425: a solo ride's draft, where a room's would be; a ride runs one.
     ...(input.soloDraft === undefined
