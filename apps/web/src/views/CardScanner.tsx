@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import type { CameraFacing } from '../camera/camera-port';
+import { SCAN_CONSENT_STATEMENT } from '../camera/consent';
 import { ScanViewfinder } from '../camera/ScanViewfinder';
 import type { CameraController } from '../camera/session';
 import { usePairingScan } from '../camera/usePairingScan';
@@ -23,10 +24,20 @@ import { StatusMessage } from '../design/StatusMessage';
  * - **Inside the app, never as a link** (D-6): the code is read from the
  *   camera's pixels here, and `oyl-instance:` is no URL scheme this app
  *   registers (`instance/no-url-handler.test.ts`).
- * - **The one camera pipeline and its one consent** (`camera/boundary.test.ts`,
- *   ADR 0033 D-4: *"scanning counts as camera use"*): the reads are
+ * - **The one camera pipeline** (`camera/boundary.test.ts`): the reads are
  *   `session.ts` §`readPairingCode`'s, through `usePairingScan`, which keep no
- *   frame. A device whose rider has not agreed to the camera is told where to.
+ *   frame.
+ * - **Asked in place, and for the scan alone** (#2856). A device whose rider
+ *   has not agreed to the camera used to be sent to the Camera screen, a long
+ *   page about being filmed while riding, with a ten-minute claim code running
+ *   out. Now the press shows `consent.ts` §`SCAN_CONSENT_STATEMENT` here, and
+ *   *Use the camera* records the scan's own narrower agreement
+ *   (`session.ts` §`agreeToScan`) and opens the scanner. That agreement turns
+ *   the camera on to read a code and admits nothing else: the Camera screen
+ *   still finds this device not agreed. A rider who HAS agreed to the camera
+ *   is not asked again (ADR 0033 D-4: *"scanning counts as camera use"*).
+ *   The narrower agreement supersedes that same D-4 and ADR 0029 D-5 in
+ *   part, for this scan only: ADR 0084, Accepted by the owner 2026-11-19.
  * - **No frame outlives the scanner** (ADR 0033 D-4, as the side camera): a
  *   camera this scanner turned on is turned off when it closes, when a code is
  *   read and when the screen goes away — one the rider already had on is
@@ -44,9 +55,10 @@ export const CARD_SCAN_TEXT = {
   caption:
     'What this device’s camera sees. Hold the card’s code inside it. Nothing here is kept, and it ' +
     'goes away once the code is read or the scanner is closed.',
-  'no-consent':
-    'Scanning uses this device’s camera, which you have not agreed to yet. Agree to it on the ' +
-    'Camera screen and come back, or paste the code instead.',
+  /** The yes to `consent.ts` §`SCAN_CONSENT_STATEMENT`, asked in place (#2856). */
+  agree: 'Use the camera',
+  /** The no: nothing is recorded and no camera is asked for. */
+  decline: 'Not now',
   camera:
     'This device’s camera could not be used, so the card cannot be scanned. Paste the card in ' +
     'the box instead.',
@@ -100,6 +112,9 @@ export function CardScanner({
   readonly every?: ((tick: () => void, milliseconds: number) => () => void) | undefined;
 }): JSX.Element {
   const [scanning, setScanning] = useState(false);
+  /** The scan's own agreement is being asked, in place of the start button (#2856). */
+  const [asking, setAsking] = useState(false);
+  const askId = useId();
   const [problem, setProblem] = useState<string | undefined>(undefined);
   /** Whether THIS scanner turned the camera on, so it gives it back — and only then. */
   const turnedOn = useRef(false);
@@ -111,7 +126,8 @@ export function CardScanner({
   /** Whether a scan is on, read where a render's value would be stale: the camera's listener. */
   const looking = useRef(false);
   const startButton = useRef<HTMLButtonElement>(null);
-  const wasScanning = useRef(false);
+  /** Whether the start button was replaced, by the question or by the scan. */
+  const wasAway = useRef(false);
 
   /** Give the camera back as this scanner found it: off, or facing the way it was. */
   const giveBack = useCallback(() => {
@@ -157,14 +173,16 @@ export function CardScanner({
     };
   }, [giveBack]);
 
-  // The close button replaced the start button, and goes when the scan does:
-  // focus comes back to the control that started it (WCAG 2.2 SC 2.4.3).
+  // The close button replaced the start button, and goes when the scan does,
+  // as the question's two answers do when one is pressed: focus comes back to
+  // the control that started it (WCAG 2.2 SC 2.4.3).
   useEffect(() => {
-    if (wasScanning.current && !scanning) startButton.current?.focus();
-    wasScanning.current = scanning;
-  }, [scanning]);
+    const away = scanning || asking;
+    if (wasAway.current && !away) startButton.current?.focus();
+    wasAway.current = away;
+  }, [scanning, asking]);
 
-  const start = useCallback(() => {
+  const open = useCallback(() => {
     if (starting.current) return;
     setProblem(undefined);
     // A camera the rider already had on is given back facing the way it was:
@@ -172,7 +190,8 @@ export function CardScanner({
     const before = controller.state();
     const facing = before.live ? before.facing : undefined;
     starting.current = true;
-    void controller.turnOn(SCAN_FACING).then((failed) => {
+    // `'scan'`: what the scan's own agreement admits, and all it admits.
+    void controller.turnOn(SCAN_FACING, 'scan').then((failed) => {
       if (failed === undefined) {
         starting.current = false;
         turnedOn.current = true;
@@ -194,10 +213,32 @@ export function CardScanner({
         looking.current = true;
         setScanning(true);
       } else {
-        setProblem(failed === 'no-consent' ? CARD_SCAN_TEXT['no-consent'] : CARD_SCAN_TEXT.camera);
+        setProblem(CARD_SCAN_TEXT.camera);
       }
     });
   }, [controller, giveBack]);
+
+  // #2856: a rider who has agreed to neither the camera nor a scan is asked
+  // here, before anything is asked of the camera. One who has is not.
+  const start = useCallback(() => {
+    const agreed = controller.state();
+    if (agreed.consent.local || agreed.scanAgreed) {
+      open();
+      return;
+    }
+    setProblem(undefined);
+    setAsking(true);
+  }, [controller, open]);
+
+  const agree = useCallback(() => {
+    controller.agreeToScan();
+    setAsking(false);
+    open();
+  }, [controller, open]);
+
+  const decline = useCallback(() => {
+    setAsking(false);
+  }, []);
 
   usePairingScan(
     controller,
@@ -227,6 +268,25 @@ export function CardScanner({
             {CARD_SCAN_TEXT.close}
           </Button>
         </>
+      ) : asking ? (
+        <div className="oyl-card-scan__ask">
+          <p id={askId}>{SCAN_CONSENT_STATEMENT}</p>
+          {/* It replaced the button pressed, so it takes the focus, and a
+          screen reader hears the two sentences as what it is the yes to. */}
+          <Button
+            variant={primary ? 'primary' : 'secondary'}
+            {...(primary ? { className: CONNECT_CHOICE_CLASS } : {})}
+            disabled={disabled}
+            onClick={agree}
+            describedBy={askId}
+            focusOnMount
+          >
+            {CARD_SCAN_TEXT.agree}
+          </Button>
+          <Button variant="tertiary" onClick={decline}>
+            {CARD_SCAN_TEXT.decline}
+          </Button>
+        </div>
       ) : (
         <Button
           variant={primary ? 'primary' : 'secondary'}

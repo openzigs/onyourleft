@@ -10,7 +10,7 @@
  */
 
 import type { TileId } from '@onyourleft/map-features';
-import { residentialBlockTile } from '@onyourleft/map-features/testing';
+import { residentialBlockTile, roadFieldsTile } from '@onyourleft/map-features/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -231,6 +231,32 @@ describe('R-1: what is asked for is a function of the rider’s block alone', ()
     for (const held of area.held()) expect(held.features.buildings.length).toBeGreaterThan(0);
     // The archive's header and metadata are asked for once per ride, not per block.
     expect(opened).toHaveLength(1);
+  });
+
+  it('keeps each tile’s own streets, with their road fields, for the street graph (#2896)', async () => {
+    const { archive: answering } = countingArchive();
+    const archive: CorridorArchive = {
+      open: (signal) => answering.open(signal),
+      tile: () => Promise.resolve(roadFieldsTile()),
+    };
+    const area = reader({ archive });
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    for (const held of area.held()) {
+      // One entry a decoded tile, each the block's own tile, in its order.
+      expect(tileKeys(held.streets.map((each) => each.tile))).toStrictEqual(
+        tileKeys(tilesOfBlock(held.block)),
+      );
+      for (const { streets } of held.streets) {
+        expect(streets.length).toBeGreaterThan(0);
+        // The graph's fields, which the joined corridor features do not promise.
+        for (const street of streets) {
+          expect(['with-line', 'against-line', 'no']).toContain(street.oneway);
+          expect(typeof street.isLink).toBe('boolean');
+        }
+      }
+      // The same street objects as the block's joined features, not copies.
+      expect(held.streets.flatMap((each) => each.streets)).toStrictEqual(held.features.streets);
+    }
   });
 });
 

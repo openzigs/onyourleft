@@ -26,7 +26,7 @@
 
 import { documentTheme, watchDocumentTheme } from '../design/theme-selection';
 import type { Theme } from '../design/tokens';
-import type { MapRenderer, MapView, MapViewOptions } from './port';
+import type { MapCreateOptions, MapRenderer, MapView, MapViewOptions } from './port';
 
 /**
  * Create a map in `doc`'s palette, and repaint it in the other one whenever
@@ -43,11 +43,13 @@ export function createThemedMap(
   optionsFor: (theme: Theme) => MapViewOptions,
   explorable = false,
   editable = false,
+  direct?: MapCreateOptions['direct'],
 ): MapView {
   const view = renderer.create(container, {
     ...optionsFor(documentTheme(doc)),
     explorable,
     ...(editable ? { editable } : {}),
+    ...(direct === undefined ? {} : { direct }),
   });
   const stopWatching = watchDocumentTheme(doc, (theme) => {
     view.setStyle(optionsFor(theme));
@@ -72,6 +74,9 @@ export function createThemedMap(
       view.setWaypoints(waypoints);
     },
     centre: () => view.centre(),
+    show: (position) => {
+      view.show(position);
+    },
     listen: (handlers) => {
       view.listen(handlers);
     },

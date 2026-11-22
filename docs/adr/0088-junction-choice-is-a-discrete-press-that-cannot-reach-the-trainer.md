@@ -339,3 +339,27 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [#2964](https://github.com/openzigs/onyourleft/pull/2964) implements it for #2897, and
   [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s taps go through the same path.
   (#2959)
+- **2026-11-20** — **The owner ruled that straight is the way most nearly dead ahead by bearing.** At
+  a junction with three ways on or fewer, a straight press chooses the way with the smallest
+  absolute turn from the rider's heading, not the middle way of three by position: at ways leaving
+  at −90°, −30° and 0°, straight takes 0°, and so does right. Left still takes the furthest-left way
+  and right the furthest-right, so with two ways left and right take the two ends and straight
+  takes the one more nearly ahead. That is D-1.4's default, so a straight press and no press always
+  agree, and a tie is broken as D-1.4 breaks one: the turn counted in whole degrees, then the higher
+  road class, then the right-hand way. With more than three ways on, D-1.3's parenthesis and the
+  earlier amendment of this date are unchanged. Because straight no longer names a position,
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s D-3.1 symbols point each way's
+  actual direction, its turn from the rider's heading, rather than a fixed left, up and right.
+  The ruling is posted on [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
+- **2026-11-20** — **The owner ruled that at three ways on, when straight is an end, that end's
+  press steps inward, so every way shown has a press.** Straight stays the way most nearly dead
+  ahead by bearing, as the amendment above records. At a junction of three ways on, when that way is
+  also the furthest left or the furthest right, the press for that end does not take it a second
+  time: it takes the middle way instead, and the other end's press keeps its end. At ways leaving at
+  −90°, −30° and 0°, left takes −90°, straight 0° and right −30°; at −15°, 40° and 95°, left takes
+  40°, straight −15° and right 95°. With two ways on each way already has a press, so left and right
+  keep the two ends even when straight is one of them. With more than three ways on, D-1.3's
+  parenthesis is unchanged. Nothing in this reaches the trainer: a press still changes only which
+  branch the rolling route appends (D-5.1). The ruling is posted on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)

@@ -38,6 +38,9 @@
     "Ride a route",
     "Ride a saved route in the trainer game.",
     "Choose a route",
+    "Open world",
+    "Ride the real streets from a start you choose, turning where you like.",
+    "Choose a start",
     "Workout",
     "Follow a structured workout on a smart trainer.",
     "Choose a workout",
@@ -1157,6 +1160,20 @@
     "No route with that address is saved on this device.",
     "It may have been deleted."
   ],
+  "open-world empty": [
+    "Open world: choose a start",
+    "Drop a pin, or start where a saved route or a past ride starts.",
+    "Help with Open world: choose a start",
+    "An open-world ride follows the streets from where you start, and the map is read as you ride.",
+    "Your start stays on this device.",
+    "Drop a pin",
+    "Start where a saved route starts",
+    "Saved routes cannot be read in this browser.",
+    "Start where a past ride started",
+    "Past rides cannot be read in this browser.",
+    "Start the ride",
+    "Choose a start: a pin, a saved route or a past ride."
+  ],
   "activity-detail empty": [
     "Ride details",
     "Everything this device holds about one ride.",
@@ -1251,6 +1268,9 @@
     "Ride a route",
     "Ride a saved route in the trainer game.",
     "Choose a route",
+    "Open world",
+    "Ride the real streets from a start you choose, turning where you like.",
+    "Choose a start",
     "Workout",
     "Follow a structured workout on a smart trainer.",
     "Choose a workout",
@@ -3514,6 +3534,20 @@
     "Name of the new route",
     "Save as a new route",
     "Save over “The mill, the ridge and every lane between them the long way round”"
+  ],
+  "open-world populated": [
+    "Open world: choose a start",
+    "Drop a pin, or start where a saved route or a past ride starts.",
+    "Help with Open world: choose a start",
+    "An open-world ride follows the streets from where you start, and the map is read as you ride.",
+    "Your start stays on this device.",
+    "Drop a pin",
+    "Start where a saved route starts",
+    "Saved routes cannot be read in this browser.",
+    "Start where a past ride started",
+    "Past rides cannot be read in this browser.",
+    "Start the ride",
+    "Choose a start: a pin, a saved route or a past ride."
   ],
   "activity-detail populated": [
     "Ride details",

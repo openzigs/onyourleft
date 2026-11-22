@@ -828,7 +828,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         crash-look.ts`' times): `RealisticRiderBelt` blends
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
-                        and the stylised world keeps #2475's roll alone.
+                        and the stylised world keeps #2475's roll, which now
+                        carries the bicycle's rebound too
+                        (`crashRebound`, through `crashedRoll`).
+                        ⚠️ **That share is the BODY's, not the roll's**
+                        (`crashBodyShare`: wholly the clip's from its
+                        `thrown` moment until half way back up; by the
+                        roll's share the rider fell through the top tube),
+                        the clip is played on its OWN times
+                        (`crashClipSeconds`: made on a 0.3 s rise, drawn
+                        across 0.6 s, so `CRASH_SECONDS` is 1.8 and the file
+                        is not re-made), and the bicycle lands with a
+                        rebound (`crashRebound`) that reduced motion never
+                        draws.
                         #2505: write a lying moment with `on_road`, not in the
                         bicycle's `x`/`y`, and name its `elbows`/`knees`; the
                         test reads the drawn body 3 cm clear of every part of
@@ -1110,6 +1122,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `OYL-REALISTIC` line and readout;
                         `realistic-lap-race.browser.spec.ts` holds it
                         (required, not nightly: the stylised world)
+    src/game/open-world/open-world-cannot-reach-trainer.test.ts
+                        ADR 0088 D-5.2 (#2897): the same walk and forbidden
+                        set over the open-world ride's roots, every non-test
+                        module under `game/open-world/` and
+                        `packages/domain/src/route/rolling.ts`, with D-5.2's
+                        three plantings (`gradient.ts`, a seam module, a
+                        trainer-control writer) each a red case; since
+                        #2898 also the HUD's junction prompt
+                        (`hud/JunctionChoicePrompt.tsx`, its words in
+                        `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
+                        which hands it a pad's turns), named as roots, with
+                        the prompt importing `gradient.ts` a red case
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
@@ -1601,7 +1625,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ Its drawn water can still lie over the map's land,
                         so since #2728 `onOpenWater` (the drawn water, not the
                         mask's) drops a mapped footprint over it and draws
-                        nobody on it
+                        nobody on it. Since #2974 a water line of any kind
+                        that runs BESIDE the road is a channel (a `Lake` with
+                        `channel` set, `CHANNEL_SHAPES` by kind, its water
+                        following the road), laid on the frame's drawn ground
+                        where the columns cannot cut it; a ditch or drain is
+                        never bridged (`BRIDGED_WATER_LINE_KINDS`)
+    src/game/mapped-pools.ts
+                        the map's swimming pools and fountains (#2974), round
+                        the camera, as lighter water and a stone coping in the
+                        water's one mesh, marked by shore weight; no draw call
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
@@ -1684,7 +1717,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
                         a mapped park (not a protected area's boundary,
-                        #2657) is still dropped (`insidePark`).
+                        #2657) is still dropped (`insidePark`). ⚠️ **Since
+                        #2696 (proposed) a yard is not a park here**: a
+                        footprint touching a `garden`, `grass`,
+                        `village_green` or `allotments` (`land-class.ts`
+                        §`YARD_KINDS`) is kept; rule 2 drops it only where a
+                        park that is not a yard is within half a mask cell
+                        (§`parkProperNear`).
+                        Since #2976 `grassland` and `heath` are `farmland`, as
+                        `meadow` is: open pasture where the procedural world
+                        drew before, and a building mapped there is kept;
+                        inside a protected area (#2657) each reads as the
+                        area, below it (`OPEN_GROUND_KINDS`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
@@ -1879,11 +1923,52 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`mappedPaintEntry`, linear RGB over the list's
                         ground), which `paintTown` never moves
                         (`-mapped-paint`, `town=painted`);
+                        since #2848 a paved apron before a commercial
+                        footprint's front, laid by `shop-aprons.ts` (below)
+                        once every plan is made (`layAprons`), in the plan's
+                        `apron` role and outline (`-shop-aprons`,
+                        `town=commercial`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/shop-aprons.ts
+                        the paved apron before a mapped shop (#2848, the
+                        owner's ruling of 2026-11-18): for a kept footprint
+                        `building-archetypes.ts` reads as commercial, from
+                        its front wall to the kerb's line (0.1 m outside the
+                        carriageway, as a driveway; in a city centre the back
+                        of #1637's pavement, `streets.ts` §`cityPavementOn`),
+                        only where the kerb is nowhere over 12 m from the
+                        wall and no mapped footway comes within 2 m of that
+                        ground (`APRON`). Columns ≤ 3.6 m along the wall,
+                        each laid whole or not at all — never on a mapped
+                        street but the route's own (`ApronObstacles`, by
+                        `cross-streets.ts`' tolerance and angle), water or
+                        its bank, a park, a wood or bare ground, another
+                        footprint, a porch or a driveway — and the longest
+                        unbroken run is the apron. ⚠️ **Cut
+                        on the lines the ground bends on** (`landform.ts`
+                        §`TERRAIN_COLUMN_OFFSETS`), every vertex 5 cm over
+                        the ground: cut evenly every 2 m instead it stood
+                        up to 9 cm off its lift over the verge's foot.
+                        Plan-time only: the
+                        `apron` role wears the walls' group and the shader
+                        paints it (`CLAD_PAVING`, the driveway's), so no
+                        call, texture or byte; near level only; counted in
+                        the plan's ≤ 640 triangles (an apron that would pass
+                        that is not laid) and so in
+                        `MAPPED_BUILDING_TRIANGLES`. Its outline
+                        (`FootprintPlan.apron`) is cleared as a driveway's
+                        is: no tree, hedge or lot on it. ⚠️ The planner's
+                        `ringsMeet` counts two edges on one line as meeting
+                        wherever they are, so a column's ground is asked
+                        about 5 cm inside its own edges (`columnRing`).
+                        ⚠️ A tile is untrusted: the footways' and streets'
+                        grids take 2 000 000 cell entries a corridor, and
+                        past that no apron is laid at all
+                        (`ApronObstacles.overflowed`)
     src/game/mapped-landmarks.ts
                         the mapped landmarks drawn as themselves (#1794): a
                         church's fit (`churchFits`), its steep nave's
@@ -2048,7 +2133,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
-                        (`people.ts`). No crossing is either
+                        (`people.ts`). No crossing is either. It still
+                        draws nothing: since #2972 `footway-surfaces.ts` does
+    src/game/footway-surfaces.ts
+                        the mapped footways DRAWN (#2972, the owner's ruling
+                        of 2026-11-15) — `footwayNetwork`'s lines as ribbons
+                        on the ground by kind (paved footway, cycleway, park
+                        path, steps in treads), and a zebra wherever a mapped
+                        `crossing` crosses the drawn road. ⚠️ A ribbon is kept
+                        off the carriageway by its own half-width, off the
+                        mapped side roads (`people.ts` §`besideSideRoads`), off
+                        mapped water, and off a drawn village pavement
+                        (#1620's rule, `people.ts` §`onPavement`). Chunked,
+                        grounded the first time a chunk is in reach, ≤
+                        `FOOTWAY_FRAME_TRIANGLES` within `FOOTWAY_DRAW_METRES`
+                        of the camera, nearest first; `SceneFrame.footways`,
+                        drawn in ONE call by `three-renderer.ts`
+                        §`FootwayBelt`, realistic world only, on the ground as
+                        the side roads are. Lever `-footways`, page
+                        `town=footways`
     src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
                         Poly Haven's `trashbag` beside some bins and one
                         `old_tyre` laid flat by a lamp post, placed from the
@@ -2151,7 +2254,36 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier.
+                        ⚠️ **Since #2695 an unpaved way** wherever a mapped
+                        `track` or `bridleway` (`WorldCorridor.paths`) leaves
+                        the route (§`mappedTracks`): gravel or earth, 3 m or
+                        2 m wide, no give-way line, joined as a side road is,
+                        in the same mesh under the same frame bound
+    src/game/nearby-streets.ts
+                        nearby streets (#2973) — the mapped `ground` streets
+                        off the route drawn out to the fog (400 m): a street
+                        that never touches the route with its edge off the
+                        verge, a cross street run on from 23.5 m off the road
+                        (where every stub is still whole, and above it), the
+                        driveways and parking aisles at the service width,
+                        stopping short of a footprint; none on water or an
+                        overpass's road. ⚠️ **Side roads, not a belt of their
+                        own**: `scene.ts` appends the pieces in view to the
+                        frame's `sideRoads`, so `SideRoadBelt` draws them in the
+                        road's material in its ONE call and every clearance
+                        keeps the scenery and the people off them. At most 256
+                        pieces of 32 triangles a frame, chosen again every 40 m.
+                        A footprint on one is dropped `on-street`
+                        (`footprint-buildings.ts` rule 3b). `streetRibbon` names
+                        no route: #2903's open world draws with it.
+                        Lever `-nearby-streets`, page `town=streets`
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m
