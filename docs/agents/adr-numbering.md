@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0093 is [ADR 0093](../adr/0093-the-side-camera-pairs-with-one-scan-remembers-the-pair-and-may-meet-through-the-instance.md)**,
+  taken by [#3010](https://github.com/openzigs/onyourleft/issues/3010) on 2026-11-22 for side-camera
+  pairing with one scan, a remembered pairing and pairing through the rider's instance, **Proposed**
+  for the owner. It supersedes in part ADR 0033 D-1, D-4 and D-8; ADR 0033 gained one dated
+  `## Amendments` pointer. **0092 is claimed** by the open pull request
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864) (#2835), and **0094** by the open pull
+  request [#3017](https://github.com/openzigs/onyourleft/pull/3017) (#3011), which left 0093 to
+  #3010. The next free number is **0095**.
   ⚠️ **0091 is [ADR 0091](../adr/0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)**,
   taken by [#2886](https://github.com/openzigs/onyourleft/issues/2886) on 2026-11-19 for the
   open-world ride's street-graph source, on the owner's ruling Q3 of that day on the epic #2880,
