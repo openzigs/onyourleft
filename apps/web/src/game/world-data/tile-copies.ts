@@ -76,6 +76,16 @@ export function withoutTileCopies(
           if (other === index || seen.has(other) || keeper >= 0) continue;
           seen.add(other);
           if (dropped[other] === 1) continue;
+          // A copy's box is inside the other's: the cheap test, before any vertex is.
+          const [otherMinX, otherMaxX, otherMinZ, otherMaxZ] = boxes[other] as Box;
+          if (
+            minX < otherMinX - TILE_COPY_METRES ||
+            maxX > otherMaxX + TILE_COPY_METRES ||
+            minZ < otherMinZ - TILE_COPY_METRES ||
+            maxZ > otherMaxZ + TILE_COPY_METRES
+          ) {
+            continue;
+          }
           const a = buildings[index] as BuildingFeature;
           const b = buildings[other] as BuildingFeature;
           if (!sameAttributes(a, b) || !isCopyOf(outers[index] as Ring, outers[other] as Ring)) {
