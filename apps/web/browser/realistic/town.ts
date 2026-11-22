@@ -46,6 +46,7 @@ import {
   nearbyStreetsWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
+  shopApronsWithLevers,
   splitRoofsWithLevers,
   startYearWithLevers,
   steeplesWithLevers,
@@ -100,8 +101,8 @@ export function plannedTown(
     // and storey tags, #1791: the mapped building type, #2021: a place of worship's
     // steeple, #2023: an untagged footprint's inferred garage or shed, #2024: its inferred
     // barn, #2026: its inferred shop, #1792: the mapped colours and materials, #1793: a
-    // mapped house's start year, #1794: a place of worship's church, and #1795: a town
-    // hall's and a school's block, unless their lever is off.
+    // mapped house's start year, #1794: a place of worship's church, #1795: a town
+    // hall's and a school's block, and #2848: a shop's apron, unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -119,6 +120,7 @@ export function plannedTown(
       mappedStartYear: startYearWithLevers(leversOff),
       landmarkChurches: landmarkChurchesWithLevers(leversOff),
       landmarkCivic: landmarkCivicWithLevers(leversOff),
+      shopAprons: shopApronsWithLevers(leversOff),
       // #2973: and no footprint on a mapped street drawn off the route, unless that lever is off.
       nearbyStreets: nearbyStreetsWithLevers(leversOff),
     },

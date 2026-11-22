@@ -614,6 +614,35 @@ describe('the realistic page’s `inferred-barns` lever — #2024', () => {
   });
 });
 
+describe('the realistic page’s `shop-aprons` lever — #2848', () => {
+  const street = commercialStreetFixture();
+
+  it('lays an apron before every main-street block on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=commercial').leversOff);
+    const blocks = plans.filter((plan) => plan.buildingArchetype === 'main-street');
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.every((plan) => plan.apron.length > 0 && plan.triangles.apron.length > 0)).toBe(
+      true,
+    );
+  });
+
+  it('plans every footprint with none, and otherwise as the product does, with `levers=-shop-aprons`', () => {
+    const on = plannedTown(street, parseConfig('?town=commercial').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=commercial&levers=-shop-aprons').leversOff,
+    ).plans;
+    expect(off.length).toBe(on.length);
+    off.forEach((plan, index) => {
+      expect(plan.apron).toHaveLength(0);
+      for (const role of FOOTPRINT_ROLES) {
+        if (role === 'apron') expect(plan.triangles[role]).toHaveLength(0);
+        else expect(plan.triangles[role]).toStrictEqual(on[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
 describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
   const street = untaggedStreetFixture();
   const shopsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>

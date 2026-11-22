@@ -324,6 +324,16 @@ export type Layer = (typeof LAYERS)[number];
  *   garage has a driveway, whose ground is cleared, the product plants trees
  *   (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`).
  *
+ * - `shop-aprons` — #2848: the paved apron before each mapped commercial
+ *   footprint's front, from its wall to the kerb, where no footway is mapped
+ *   before it (`shop-aprons.ts`). Off, no plan has one and every plan is as
+ *   before, byte for byte: the shops stand on grass to the road's edge. Read
+ *   at load, as `commercial-archetypes` is. The owner's BY-EYE pair and the
+ *   tablet's cost pair (plan-time only: no call, no byte, no shader term; 32
+ *   triangles a block of `town=commercial`, inside the mapped buildings'
+ *   own); pair it with `town=commercial`, whose main street has one before
+ *   every block. The product always lays them.
+ *
  * - `building-type` — #1791: each mapped footprint's `building_type` and
  *   `landmark` (`building-types.ts`) deciding what it is drawn as, over the
  *   land-use guess — a garage, a shed and a barn as no house, a shop on
@@ -529,6 +539,7 @@ export const LEVERS = [
   'roadside-models',
   'roof-variants',
   'settlement-clearing',
+  'shop-aprons',
   'small-stones',
   'split-roofs',
   'start-year',
@@ -974,6 +985,15 @@ export function archetypePorchesWithLevers(leversOff: readonly Lever[]): boolean
  */
 export function commercialArchetypesWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('commercial-archetypes');
+}
+
+/**
+ * Whether this run lays a paved apron before each mapped shop's front — #2848:
+ * the product always does; `-shop-aprons` plans every footprint with none.
+ * Read at load, as `commercial-archetypes` is.
+ */
+export function shopApronsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('shop-aprons');
 }
 
 /**

@@ -1913,11 +1913,52 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`mappedPaintEntry`, linear RGB over the list's
                         ground), which `paintTown` never moves
                         (`-mapped-paint`, `town=painted`);
+                        since #2848 a paved apron before a commercial
+                        footprint's front, laid by `shop-aprons.ts` (below)
+                        once every plan is made (`layAprons`), in the plan's
+                        `apron` role and outline (`-shop-aprons`,
+                        `town=commercial`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/shop-aprons.ts
+                        the paved apron before a mapped shop (#2848, the
+                        owner's ruling of 2026-11-18): for a kept footprint
+                        `building-archetypes.ts` reads as commercial, from
+                        its front wall to the kerb's line (0.1 m outside the
+                        carriageway, as a driveway; in a city centre the back
+                        of #1637's pavement, `streets.ts` §`cityPavementOn`),
+                        only where the kerb is nowhere over 12 m from the
+                        wall and no mapped footway comes within 2 m of that
+                        ground (`APRON`). Columns ≤ 3.6 m along the wall,
+                        each laid whole or not at all — never on a mapped
+                        street but the route's own (`ApronObstacles`, by
+                        `cross-streets.ts`' tolerance and angle), water or
+                        its bank, a park, a wood or bare ground, another
+                        footprint, a porch or a driveway — and the longest
+                        unbroken run is the apron. ⚠️ **Cut
+                        on the lines the ground bends on** (`landform.ts`
+                        §`TERRAIN_COLUMN_OFFSETS`), every vertex 5 cm over
+                        the ground: cut evenly every 2 m instead it stood
+                        up to 9 cm off its lift over the verge's foot.
+                        Plan-time only: the
+                        `apron` role wears the walls' group and the shader
+                        paints it (`CLAD_PAVING`, the driveway's), so no
+                        call, texture or byte; near level only; counted in
+                        the plan's ≤ 640 triangles (an apron that would pass
+                        that is not laid) and so in
+                        `MAPPED_BUILDING_TRIANGLES`. Its outline
+                        (`FootprintPlan.apron`) is cleared as a driveway's
+                        is: no tree, hedge or lot on it. ⚠️ The planner's
+                        `ringsMeet` counts two edges on one line as meeting
+                        wherever they are, so a column's ground is asked
+                        about 5 cm inside its own edges (`columnRing`).
+                        ⚠️ A tile is untrusted: the footways' and streets'
+                        grids take 2 000 000 cell entries a corridor, and
+                        past that no apron is laid at all
+                        (`ApronObstacles.overflowed`)
     src/game/mapped-landmarks.ts
                         the mapped landmarks drawn as themselves (#1794): a
                         church's fit (`churchFits`), its steep nave's

@@ -220,9 +220,16 @@
  *   so about 24 triangles on a rectangle; dropped from a plan it would put
  *   past {@link FOOTPRINT_MAX_TRIANGLES}.
  *
+ * - **An apron** (#2848, the owner's ruling of 2026-11-18): the ground before
+ *   its front paved from the wall to the kerb, where the kerb is within 12 m
+ *   and no footway is mapped before it — `shop-aprons.ts` says which fronts
+ *   and where; {@link layAprons} lays them once every plan is made, so each
+ *   keeps off every porch and driveway. The driveway's paving
+ *   ({@link CLAD_PAVING}), 5 cm over the drawn ground.
+ *
  * The shop front, the sign and the awning are `shopfront`, which wears the
- * walls and is painted by the shader alone; the cornice is `trim`. None of it
- * is on the far level.
+ * walls and is painted by the shader alone; the cornice is `trim`; the apron
+ * is `apron`, which wears the walls too. None of it is on the far level.
  *
  * ## The front porch (#1589, the owner's ruling of 2026-10-22)
  *
@@ -403,8 +410,13 @@ import {
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import { chainLinkPieces, fencedGrounds, type ChainLinkPiece } from './chain-link';
-import { widthClassOf } from './cross-streets';
+import {
+  JUNCTION_MIN_ANGLE_DEGREES,
+  JUNCTION_TOLERANCE_METRES,
+  widthClassOf,
+} from './cross-streets';
 import type { AnchorKind } from './decorations';
+import { pavementSides } from './footways';
 import {
   FRONT_PORCH,
   fullPorchSpanOf,
@@ -442,8 +454,8 @@ import {
   type LandClass,
   type LandClassMask,
 } from './land-class';
-import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
-import { onOpenWater, waterways } from './waterways';
+import { ROAD_CLEARANCE_METRES, TERRAIN_COLUMN_OFFSETS, terrainHeightAt } from './landform';
+import { inWater, onOpenWater, waterways } from './waterways';
 import {
   CHURCH,
   CHURCH_FEATURES,
@@ -465,6 +477,8 @@ import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
+  drawnRoadPoints,
+  nearestOnDrawnRoad,
   nearestOnRoadSegments,
   roadSegmentsNear,
   squaredToSegment,
@@ -472,6 +486,15 @@ import {
   type DrawnRoadPoints,
 } from './road-grid';
 import { scatterSeed } from './scatter';
+import {
+  APRON,
+  ApronObstacles,
+  apronTriangles,
+  shopApron,
+  type ApronSite,
+  type AlongRoute,
+  type ShopApron,
+} from './shop-aprons';
 import {
   BOUNDARY_PIECE_METRES,
   FIELD_EDGE_LATERAL_METRES,
@@ -482,7 +505,7 @@ import {
   placeLot,
   type MappedTown,
 } from './settlements';
-import { CITY_PAVEMENT_WIDTH_METRES, KERB_LATERAL_METRES } from './streets';
+import { CITY_PAVEMENT_WIDTH_METRES, cityPavementOn, KERB_LATERAL_METRES } from './streets';
 import { slotHash, uniformFrom } from './seeded';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
@@ -525,7 +548,10 @@ export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
  * shop's front, its sign band and its awning, which wear the walls and which
  * the shader paints; a commercial roof's cornice is `trim`. Since #2206: `spire`,
  * a steeple's or a cupola's pyramid, which wears `slate` whatever the roof does
- * (the owner's ruling: a tagged roof material is the nave's only).
+ * (the owner's ruling: a tagged roof material is the nave's only). Since #2848:
+ * `apron`, the paving before a shop's front from its wall to the kerb
+ * (`shop-aprons.ts`), which wears the walls and which the shader paints as it
+ * paints a driveway.
  */
 export type FootprintRole =
   | 'wall'
@@ -542,7 +568,8 @@ export type FootprintRole =
   | 'porch'
   | 'porch-roof'
   | 'porch-trim'
-  | 'spire';
+  | 'spire'
+  | 'apron';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -561,6 +588,8 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'porch-roof',
   'porch-trim',
   'spire',
+  // #2848: last, so it moves no earlier role's place in any walk of them.
+  'apron',
 ];
 
 /**
@@ -848,6 +877,12 @@ export interface FootprintPlan {
    * trees and lots, as the footprint is.
    */
   readonly driveway: Ring;
+  /**
+   * The paved apron before its shop front, from the wall to the kerb, as `x,
+   * z` pairs round it in local metres; empty where it has none — #2848
+   * (`shop-aprons.ts`). Cleared of trees and lots, as a driveway is.
+   */
+  readonly apron: Ring;
   /** How many dormers its roof has — #1588. */
   readonly dormers: number;
   /** Whether it has a shop front and a sign band, an awning, and a cornice — #1590. */
@@ -5444,6 +5479,7 @@ export function footprintPlans(
     }
   }
   const party = partyWallsOf(measured);
+  const fronts: ShopFront[] = [];
   for (const [index, each] of measured.entries()) {
     if (each === undefined) continue;
     counts.kept += 1;
@@ -5478,6 +5514,24 @@ export function footprintPlans(
     plans.push(plan);
     // #1792: a mapped colour is the building's own, which no neighbour moves it off.
     pinned.push(mappedPaint ? pinnedPaintOf(plan, each.building) : NOT_PINNED);
+    // #2848: a shop's front, for its apron once every porch and driveway is placed.
+    if (takesApron(each)) {
+      fronts.push({
+        at: plans.length - 1,
+        each,
+        own: index,
+        party: party.get(index) ?? NO_PARTY_WALLS,
+      });
+    }
+  }
+  // #2848: an apron before each shop's front, off everything the loop above placed; before
+  // the terraced blocks, which keep off them.
+  if (options.shopAprons ?? true) {
+    layAprons(plans, fronts, corridor, land, urban, profile, origin, seed, {
+      grid: others,
+      porches,
+      driveways,
+    });
   }
   // #1637: and a city centre's lots, as terraced blocks, off every one kept.
   // Not footprints of the corridor's, so no verdict counts them.
@@ -5506,6 +5560,206 @@ export function footprintPlans(
     );
   }
   return { plans: paintTown(plans, pinned), verdicts: counts };
+}
+
+/**
+ * A plan's ground as #1550's lots and #1637's terraced blocks keep off it: its
+ * footprint, its driveway (#1588) and its apron (#2848).
+ */
+function groundRingsOf(plan: FootprintPlan): Ring[] {
+  const rings = [plan.footprint];
+  if (plan.driveway.length > 0) rings.push(plan.driveway);
+  if (plan.apron.length > 0) rings.push(plan.apron);
+  return rings;
+}
+
+/** A kept footprint #2848 may lay an apron before: its place in the plans, and what it was measured as. */
+interface ShopFront {
+  /** Its plan's place in the plans. */
+  readonly at: number;
+  readonly each: Measured;
+  /** Its footprint's place in the corridor's buildings, which the footprints' grid knows it by. */
+  readonly own: number;
+  readonly party: readonly PartyWall[];
+}
+
+/**
+ * Whether a measured footprint is one #2848 lays an apron before: what
+ * `building-archetypes.ts` reads as commercial — its use commercial — and no
+ * `building_part`. Every main-street block and strip front is one, and so is
+ * a commercial footprint no cue takes. A mapped type sets the use over the
+ * land's guess ({@link FAMILY_USE}), so a shop mapped (or inferred, #2026) on
+ * any land is one, and a mapped house, garage or shed on commercial land is
+ * not.
+ */
+function takesApron(each: Measured): boolean {
+  return each.use === 'commercial' && !each.part;
+}
+
+/**
+ * An apron's paving — #2848: each piece's corners {@link APRON}'s `lift`
+ * above the drawn ground beneath them, as a driveway's are
+ * ({@link drivewayPaving}), the pieces ending on the lines the ground bends
+ * on (`shop-aprons.ts` §`ShopApron.levels`), painted by the shader
+ * ({@link CLAD_PAVING}). Its `u, v` are metres out from the wall and along
+ * it, so the slabs' joints run from the wall to the kerb.
+ */
+function apronPaving(
+  into: number[],
+  apron: ShopApron,
+  width: number,
+  groundAt: (x: number, z: number) => number,
+): void {
+  const corners = apronTriangles(apron);
+  const face = plainIn([CLAD_PAVING, 0, width, -1]);
+  for (let at = 0; at + 12 <= corners.length; at += 12) {
+    const corner = (which: number): Vec => {
+      const x = corners[at + which * 4] as number;
+      const z = corners[at + which * 4 + 1] as number;
+      return [x, groundAt(x, z) + APRON.lift, z];
+    };
+    const metres = (which: number): Pair => [
+      corners[at + which * 4 + 3] as number,
+      corners[at + which * 4 + 2] as number,
+    ];
+    triangle(
+      into,
+      [corner(0), corner(1), corner(2)],
+      [0, 1, 0],
+      [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT],
+      face,
+      [metres(0), metres(1), metres(2)],
+    );
+  }
+}
+
+/**
+ * Lays #2848's aprons — `shop-aprons.ts` says which fronts get one and where
+ * it lies — into `plans`, each plan that gets one replaced by itself with its
+ * `apron` outline, its `apron` role's triangles and their count.
+ *
+ * ⚠️ **After every plan is made**, so an apron keeps off every porch and
+ * driveway of the corridor, whichever footprint the map lists first. An apron
+ * that would put its plan past {@link FOOTPRINT_MAX_TRIANGLES} is not laid.
+ *
+ * No apron is asked about another: each column runs from the wall straight
+ * to the nearest point of the road, and two such lines never cross, so one
+ * front's ground reaches another's only through that front's own building,
+ * which stops it.
+ */
+function layAprons(
+  plans: FootprintPlan[],
+  fronts: readonly ShopFront[],
+  corridor: WorldCorridor,
+  land: LandClassMask,
+  urban: UrbanClassMap | undefined,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  others: { readonly grid: RingGrid; readonly porches: RingGrid; readonly driveways: RingGrid },
+): void {
+  if (fronts.length === 0) return;
+  const sides = pavementSides(corridor, profile, origin);
+  const ways = waterways(profile, seed, land);
+  const leastCosine = Math.cos((JUNCTION_MIN_ANGLE_DEGREES * Math.PI) / 180);
+  // The route's own street, mapped, as `cross-streets.ts` tells it from a side road: on the
+  // drawn road, and along it.
+  const whole = drawnRoadPoints(profile, origin);
+  const alongRoute: AlongRoute = (x, z, dx, dz) => {
+    const near = nearestOnDrawnRoad(profile, origin, x, z, JUNCTION_TOLERANCE_METRES);
+    if (near === undefined) return false;
+    const last = whole.points.length / 2 - 2;
+    if (last < 0) return false;
+    const segment = Math.max(0, Math.min(last, Math.floor(near.along / whole.step)));
+    const headingX =
+      (whole.points[segment * 2 + 2] as number) - (whole.points[segment * 2] as number);
+    const headingZ =
+      (whole.points[segment * 2 + 3] as number) - (whole.points[segment * 2 + 1] as number);
+    const lengths = Math.hypot(dx, dz) * Math.hypot(headingX, headingZ);
+    // A street of no length, or a road of none, has no heading to be across the other's.
+    if (!(lengths > 0)) return true;
+    return Math.abs(dx * headingX + dz * headingZ) / lengths >= leastCosine;
+  };
+  const obstacles = new ApronObstacles(corridor.paths, corridor.streets, alongRoute);
+  // More footways and streets than the grids take: some went unread, so nothing is paved by them.
+  if (obstacles.overflowed) return;
+  const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+  for (const { at, each, own, party } of fronts) {
+    const { drawn, road, segments } = each;
+    const front = doorEdgeOf(drawn, road, segments, party);
+    if (front === undefined) continue;
+    const points = road.points;
+    const lastSegment = points.length / 2 - 2;
+    const site: ApronSite = {
+      beside(x, z) {
+        if (lastSegment < 0 || !nearestOnRoadSegments(road, segments, x, z, beside)) {
+          return undefined;
+        }
+        const { along, lateral, distance } = beside;
+        if (!(distance > 0)) return undefined;
+        // The nearest point of the centreline, from where along the road it is.
+        const station = along / road.step;
+        const segment = Math.max(0, Math.min(lastSegment, Math.floor(station)));
+        const share = Math.max(0, Math.min(1, station - segment));
+        const ax = points[segment * 2] as number;
+        const az = points[segment * 2 + 1] as number;
+        const nearX = ax + ((points[segment * 2 + 2] as number) - ax) * share;
+        const nearZ = az + ((points[segment * 2 + 3] as number) - az) * share;
+        const reach = Math.hypot(nearX - x, nearZ - z);
+        if (!(reach > 0)) return undefined;
+        // To the kerb's line, or to the back of a city centre's pavement where one is laid.
+        const paved = cityPavementOn(profile, urban, sides, along, lateral >= 0 ? 1 : -1);
+        return {
+          towardX: (nearX - x) / reach,
+          towardZ: (nearZ - z) / reach,
+          distance,
+          kerb: KERB_LATERAL_METRES + (paved ? CITY_PAVEMENT_WIDTH_METRES : APRON.short),
+        };
+      },
+      clear(x, z) {
+        // The classes the mask ranks above built-up land: an apron covers none of them.
+        const here = land.classAt(x, z);
+        if (here === 'bare') return false;
+        if ((here === 'water' || here === 'wood' || here === 'park') && !land.protectedArea(x, z)) {
+          return false;
+        }
+        if (!nearestOnRoadSegments(road, segments, x, z, beside)) return false;
+        // The water the scene draws, and its banks, as a front path keeps off them.
+        if (inWater(ways, profile, beside.along, beside.lateral)) return false;
+        return !obstacles.onStreet(x, z);
+      },
+      free: (ring) =>
+        !others.grid.meets(ring, own) &&
+        !ringsMeet(ring, drawn) &&
+        !others.porches.meets(ring, -1) &&
+        !others.driveways.meets(ring, -1),
+      footwayNear: (ring) => obstacles.footwayNear(ring),
+      // The lines the drawn ground bends on: an apron's pieces end on them.
+      bends: TERRAIN_COLUMN_OFFSETS,
+    };
+    const apron = shopApron({ ...edgeFrameOf(drawn, front.edge), length: front.length }, site);
+    if (apron === undefined) continue;
+    const plan = plans[at] as FootprintPlan;
+    if (plan.triangleCount + apron.triangleCount > FOOTPRINT_MAX_TRIANGLES) continue;
+    const groundAt = (x: number, z: number): number => {
+      nearestOnRoadSegments(road, segments, x, z, beside);
+      return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+    };
+    const paving: number[] = [];
+    apronPaving(paving, apron, front.length, groundAt);
+    // The roles as they are: a porch's are written when first read (#1589), and stay so.
+    const triangles = Object.defineProperties(
+      {},
+      Object.getOwnPropertyDescriptors(plan.triangles),
+    ) as Record<FootprintRole, Float32Array>;
+    triangles.apron = Float32Array.from(paving);
+    plans[at] = {
+      ...plan,
+      apron: apron.ring,
+      triangles,
+      triangleCount: plan.triangleCount + apron.triangleCount,
+    };
+  }
 }
 
 /**
@@ -5575,11 +5829,7 @@ function terracePlans(
   roofing: RoofSplitting,
 ): FootprintPlan[] {
   if (land.bytes === 0) return [];
-  const index = footprintIndexOf(
-    kept.flatMap((plan) =>
-      plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
-    ),
-  );
+  const index = footprintIndexOf(kept.flatMap(groundRingsOf));
   const { plots, span } = lotSpacing(profile);
   const total: number = profile.totalDistance;
   const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
@@ -5895,12 +6145,8 @@ export function mappedTown(
   plans: readonly FootprintPlan[],
   urban?: UrbanClassMap,
 ): MappedTown {
-  // #1588: a lot keeps off a driveway as it does off the house.
-  const index = footprintIndexOf(
-    plans.flatMap((plan) =>
-      plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
-    ),
-  );
+  // #1588: a lot keeps off a driveway as it does off the house. #2848: and off an apron.
+  const index = footprintIndexOf(plans.flatMap(groundRingsOf));
   // #2660: railway land, which is built-up but no place for a house.
   const railways = footprintIndexOf(
     corridor.landUse.flatMap((feature) =>
@@ -6565,6 +6811,13 @@ export interface FootprintPlanOptions {
    * #1791's civic block, as before (`?levers=-landmark-civic`).
    */
   readonly landmarkCivic?: boolean;
+  /**
+   * #2848: a paved apron before a mapped commercial footprint's front, from
+   * its wall to the kerb, where no footway is mapped before it
+   * (`shop-aprons.ts`); `true` by default. Off, no plan has one and every
+   * plan is as before (`?levers=-shop-aprons`).
+   */
+  readonly shopAprons?: boolean;
   /**
    * #2973: rule 3b, every footprint kept off the mapped streets drawn beside
    * the route (`nearby-streets.ts`); `true` by default. Off, none is dropped
@@ -7259,6 +7512,8 @@ function planFootprint(
       'porch-roof': [],
       'porch-trim': [],
       spire: [],
+      // #2848: laid by `layAprons`, once every plan's porch and driveway is placed.
+      apron: [],
     };
     const drew: Extras = {
       garage: false,
@@ -7677,6 +7932,7 @@ function planFootprint(
     },
     garage: drew.garage,
     driveway,
+    apron: NO_RING,
     dormers: drew.dormers,
     shop: {
       front: shop !== undefined,
