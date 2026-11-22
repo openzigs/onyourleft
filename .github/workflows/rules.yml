@@ -7,8 +7,8 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by jobs side by side -- the SHARDS, eight since
-# #2376 -- and one more, `rules`, that does nothing but fail unless every one
+# Since #1285 the work is done by jobs side by side -- the SHARDS, nine since
+# #3019 -- and one more, `rules`, that does nothing but fail unless every one
 # of them succeeded. `main` requires a status check whose context is exactly
 # "Repository rules", and that last job is the one that carries the name: a
 # shard reports under its own context, which `main` does not require, so a red
@@ -19,10 +19,12 @@
 #   checks   the bare-clone script checks, format, lint, typecheck, the build,
 #            every checker and its suite, the instance image, the Capacitor
 #            and third-party-notices gates
-#   tests-1, tests-2
-#            the Vitest suite, divided by Vitest project since #2154: the
-#            `web` project in `tests-1`, every other project and the
-#            accessibility gate in `tests-2`
+#   tests-1 to tests-3
+#            the Vitest suite, divided by Vitest project since #2154 and the
+#            `web` project by path since #3019: `web`'s `src/game/` files
+#            (not its subdirectories) in `tests-1`, every other project and
+#            the accessibility gate in `tests-2`, the rest of `web` in
+#            `tests-3`
 #   browser-1 to browser-5
 #            the pinned Chromium and the browser gate (#63), a fifth each
 #            since #2376 (thirds since #1720, halves since #1362), divided by
@@ -86,7 +88,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # --- Shard 1 of 8: everything that is not Vitest and not a browser ------------
+  # --- Shard 1 of 9: everything that is not Vitest and not a browser ------------
   checks:
     name: Checks
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
@@ -419,7 +421,7 @@ jobs:
       - name: Third-party notices
         run: pnpm run check:notices
 
-  # --- Shards 2 and 3 of 8: everything that is Vitest, in two parts (#2154) -----
+  # --- Shards 2 to 4 of 9: everything that is Vitest, in three parts (#2154, #3019)
   #
   # The accessibility gate and the suite, alone on their runners. Not side by
   # side with anything else: Vitest keeps three of the four CPUs busy and has
@@ -437,18 +439,34 @@ jobs:
   # (also `web`, 64 to 88 s) beside the smaller part. docs/agents/ci.md
   # section 4c "Two Vitest shards -- #2154" has the measurements.
   #
+  # ⚠️ THREE jobs since #3019, and a reviewer who remembers two is reading the
+  # old file. On 2026-11-22 `tests-1`, the whole `web` project, was cancelled
+  # at its 16-minute stop on four runs in about an hour with every file it had
+  # finished green, one of them a merge-queue entry it ejected: every one of
+  # its 870 files ran 1.5 to 1.7 times slower on those runners, not one slow
+  # test. The stop did NOT move. The `web` project is divided by PATH, on the
+  # per-file times of queue run 45024363392: its 240 files directly in
+  # `src/game/` are `tests-1`'s part (`test:required:shard-1`, about 47 % of
+  # the project's time), and every other `web` file, `src/game/`'s
+  # subdirectories included, is `tests-3`'s (`test:required:shard-3`).
+  # `tests-2` is unchanged. A NEW `web` test file lands in one of the two by
+  # where it is, with no edit here, and `check:test-split` fails one in
+  # neither or both. docs/agents/ci.md section 4c "Three Vitest shards --
+  # #3019" has the measurements.
+  #
   # `check:test-split` (in the `checks` shard) is what holds that every test
   # file runs exactly once across this workflow and the nightly one: it asks
   # Vitest what `test:a11y`, `test:required` and `test:uninstrumented` each
   # select and fails a file in none or in two, and since #2154 that the
-  # required run's parts, `test:required:shard-1` and `-2`, are each
-  # `test:required` with a `--project` filter, select at least one file each,
-  # and between them every file it selects exactly once. A NEW Vitest project
+  # required run's parts, `test:required:shard-1` to `-3`, are each
+  # `test:required` with a `--project` filter (and, since #3019, path filters
+  # and excludes), select at least one file each, and between them every file
+  # it selects exactly once. A NEW Vitest project
   # lands in `tests-2` without an edit here: its pattern is `!web`.
   # nightly-split.test.ts fails if a part's command, or the accessibility
-  # gate, leaves these two jobs.
+  # gate, leaves these three jobs.
   tests-1:
-    name: Tests (1 of 2)
+    name: Tests (1 of 3)
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop, and docs/agents/ci.md section 4c "Shards
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
@@ -530,13 +548,14 @@ jobs:
       # runs (in `tests-2` since #2154), so they run once rather than twice.
       #
       # ⚠️ Since #2154 this is the `web` project's part of that run, and the
-      # other projects' part is `tests-2`'s; `pnpm run test:required` is still
-      # the whole run, locally.
+      # other projects' part is `tests-2`'s; since #3019 it is only `web`'s
+      # files directly in `src/game/`, and the rest of `web` is `tests-3`'s.
+      # `pnpm run test:required` is still the whole run, locally.
       - name: Tests
         run: pnpm run test:required:shard-1
 
   tests-2:
-    name: Tests (2 of 2)
+    name: Tests (2 of 3)
     runs-on: ubuntu-latest
     # @see `tests-1`'s stop.
     timeout-minutes: 16
@@ -619,7 +638,49 @@ jobs:
       # a `Tests outside coverage` step here is reading the old file.
       # `check:test-split` still fails a file in no Vitest run.
 
-  # --- Shards 4 to 8 of 8: the browser gate (#63), in five parts (#1362, #1720, #2376)
+  tests-3:
+    name: Tests (3 of 3)
+    runs-on: ubuntu-latest
+    # @see `tests-1`'s stop.
+    timeout-minutes: 16
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in the `checks` shard, which has the
+        # provenance.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Each shard is its own runner, so each prints its own CPU: a shard's
+      # duration means nothing without it (#866, #864).
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      # The toolchain, exactly as in the `checks` shard: .nvmrc, pnpm from the
+      # `packageManager` field through corepack, and a frozen install with no
+      # dependency cache (3 to 5 s, #651).
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every `web` file not directly in `src/game/`, since #3019: @see
+      # `tests-1`'s `Tests` step.
+      - name: Tests
+        run: pnpm run test:required:shard-3
+
+  # --- Shards 5 to 9 of 9: the browser gate (#63), in five parts (#1362, #1720, #2376)
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -1036,7 +1097,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, tests-1, tests-2, browser-1, browser-2, browser-3, browser-4, browser-5]
+    needs: [checks, tests-1, tests-2, tests-3, browser-1, browser-2, browser-3, browser-4, browser-5]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.
