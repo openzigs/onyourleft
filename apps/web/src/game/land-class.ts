@@ -883,6 +883,116 @@ export function insidePark(corridor: WorldCorridor, x: number, z: number): boole
   return false;
 }
 
+/**
+ * The `park` kinds of {@link LAND_CLASS_OF_KIND} that are a yard, a lawn or a
+ * plot rather than a park — #2696, ADR 0054's entry of 2026-11-19 (proposed):
+ * a mapped `garden` (in the archive mostly a house's own), `grass` (a lawn
+ * or a verge), a `village_green` and `allotments`. They stay `park` in the
+ * mask — mown, never fenced, no lot on them — but a mapped footprint that
+ * touches one is not dropped for it (`footprint-buildings.ts` rule 2,
+ * {@link parkProperNear}).
+ */
+export const YARD_KINDS: ReadonlySet<string> = new Set([
+  'garden',
+  'grass',
+  'village_green',
+  'allotments',
+]);
+
+/** The side of a {@link parkProperNear} grid cell, in metres: **100**. */
+const PARK_GRID_METRES = 100;
+
+/** A polygon whose box spans more cells than this is tested from every cell: **4 096**. */
+const PARK_GRID_MAX_CELLS = 4_096;
+
+/** Each corridor's parks that are not yards, by {@link PARK_GRID_METRES} cell. */
+const parkGrids = new WeakMap<
+  WorldCorridor,
+  {
+    readonly cells: ReadonlyMap<number, readonly KindIndexEntry[]>;
+    readonly big: readonly KindIndexEntry[];
+  }
+>();
+
+/** A grid cell's key: columns and rows within ±2²⁰ cells (±104 000 km) are each their own. */
+function parkGridKey(column: number, row: number): number {
+  const range = 2 ** 20;
+  return (row + range) * 2 * range + (column + range);
+}
+
+function parkGridOf(corridor: WorldCorridor): {
+  readonly cells: ReadonlyMap<number, readonly KindIndexEntry[]>;
+  readonly big: readonly KindIndexEntry[];
+} {
+  const known = parkGrids.get(corridor);
+  if (known !== undefined) return known;
+  const cells = new Map<number, KindIndexEntry[]>();
+  const big: KindIndexEntry[] = [];
+  for (const entry of kindIndexOf(corridor)) {
+    if (entry.code !== CODE_PARK || YARD_KINDS.has(entry.feature.kind)) continue;
+    const c0 = Math.floor(entry.minX / PARK_GRID_METRES);
+    const c1 = Math.floor(entry.maxX / PARK_GRID_METRES);
+    const r0 = Math.floor(entry.minZ / PARK_GRID_METRES);
+    const r1 = Math.floor(entry.maxZ / PARK_GRID_METRES);
+    if ((c1 - c0 + 1) * (r1 - r0 + 1) > PARK_GRID_MAX_CELLS) {
+      big.push(entry);
+      continue;
+    }
+    for (let column = c0; column <= c1; column += 1) {
+      for (let row = r0; row <= r1; row += 1) {
+        const key = parkGridKey(column, row);
+        let list = cells.get(key);
+        if (list === undefined) {
+          list = [];
+          cells.set(key, list);
+        }
+        list.push(entry);
+      }
+    }
+  }
+  const grid = { cells, big };
+  parkGrids.set(corridor, grid);
+  return grid;
+}
+
+/** Where {@link parkProperNear} looks: the point, and half a mask cell from it each way diagonally. */
+const PARK_SAMPLES: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [-LAND_CLASS_CELL_METRES / 2, -LAND_CLASS_CELL_METRES / 2],
+  [LAND_CLASS_CELL_METRES / 2, -LAND_CLASS_CELL_METRES / 2],
+  [-LAND_CLASS_CELL_METRES / 2, LAND_CLASS_CELL_METRES / 2],
+  [LAND_CLASS_CELL_METRES / 2, LAND_CLASS_CELL_METRES / 2],
+];
+
+/**
+ * Whether a mapped park that is not a yard ({@link YARD_KINDS}) covers `(x, z)`
+ * or a point half a mask cell from it — #2696: where the mask says `park`,
+ * whether that park is one ADR 0054 D-5.2 keeps buildings off. Half a cell,
+ * because the mask classes a 5 m cell by its centre, which may be that far
+ * from a footprint's vertex. A protected area's boundary (#2657) is not a
+ * park here, as it is not for {@link insidePark}. Read once a footprint at
+ * ride start, through a grid of the corridor's parks, never per frame.
+ */
+export function parkProperNear(corridor: WorldCorridor, x: number, z: number): boolean {
+  const grid = parkGridOf(corridor);
+  for (const [dx, dz] of PARK_SAMPLES) {
+    const px = x + dx;
+    const pz = z + dz;
+    const near = grid.cells.get(
+      parkGridKey(Math.floor(px / PARK_GRID_METRES), Math.floor(pz / PARK_GRID_METRES)),
+    );
+    for (const entry of near ?? []) {
+      if (px < entry.minX || px > entry.maxX || pz < entry.minZ || pz > entry.maxZ) continue;
+      if (insidePolygon(entry.feature, px, pz)) return true;
+    }
+    for (const entry of grid.big) {
+      if (px < entry.minX || px > entry.maxX || pz < entry.minZ || pz > entry.maxZ) continue;
+      if (insidePolygon(entry.feature, px, pz)) return true;
+    }
+  }
+  return false;
+}
+
 function chunkKey(column: number, row: number): number {
   return (row + CHUNK_RANGE) * CHUNK_STRIDE + (column + CHUNK_RANGE);
 }

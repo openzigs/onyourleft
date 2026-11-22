@@ -1146,6 +1146,45 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #2696's fixture: houses on residential land, each with a back corner on a
+ * yard, beside 3 km of level road, for the owner's by-eye frames
+ * (`?town=yards`). **Rectangles from arithmetic, no real place.** On the
+ * right, 30 m to 40 m back, a house every 60 m from 1 000 m whose back
+ * corner stands on a `garden`, `grass`, `village_green` and `allotments`,
+ * then one on a `park`, the control, which is dropped.
+ */
+export function yardsFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  const kinds = ['garden', 'grass', 'village_green', 'allotments', 'park'];
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'yards',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('residential', 950, 1_350, 8, 200),
+        ...kinds.map((kind, index) => land(kind, 1_001 + index * 60, 1_030 + index * 60, 34, 70)),
+      ],
+      buildings: kinds.map((_, index) =>
+        buildingBeside(profile, origin, [rectangleBeside(1_000 + index * 60, 35, 12, 10)]),
+      ),
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
 export const INSIDE_CLEARANCE_METRES = 2;
 
