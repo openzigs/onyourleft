@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0095 is [ADR 0095](../adr/0095-what-a-fit-grade-side-camera-may-report-and-use.md)**,
+  taken by [#3034](https://github.com/openzigs/onyourleft/issues/3034) on 2026-11-22 for what a
+  fit-grade side camera may report and use (1° once measured within ±3°, a published dynamic range
+  beside a reading, the knee's maximum extension, a hosted model on the rider's own key, and never a
+  marker), **Accepted** on the owner's answers of that day on #3034, whose lane note named 0095. It
+  supersedes in part ADR 0045 D-3's rounding, D-9, P5 and D-5's worker bullet, ADR 0030 D-6 and R10
+  on the Fit check section, and ADR 0050 D-1, D-5 and D-7; each gained one dated `## Amendments`
+  pointer. The next free number is **0096**.
   ⚠️ **0094 is [ADR 0094](../adr/0094-a-delivery-crash-stops-the-drawn-rider-and-nothing-reaches-the-trainer.md)**,
   taken by [#3011](https://github.com/openzigs/onyourleft/issues/3011) on 2026-11-22 for a Delivery
   crash that stops the drawn rider on a second distance the trainer never reads, **Accepted** by the owner on
