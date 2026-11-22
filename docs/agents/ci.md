@@ -13,8 +13,8 @@ It has the same authority as the root file. Where the text below says "this file
 ### 4c. What CI runs, and what it deliberately does not
 
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
-shards side by side — `checks`, the Vitest suite in two parts, `tests-1` and `tests-2` (§"Two Vitest
-shards — #2154"; one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
+shards side by side — `checks`, `lint` (since #3019, §"Three Vitest shards — #3019"), the Vitest suite in three parts, `tests-1` to `tests-3` (§"Three Vitest
+shards — #3019"; two since #2154, one `tests` shard until then), and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
 the browser gate in five parts, `browser-1` to `browser-5` (§"Five browser shards — #2376"; three since #1720) — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
@@ -233,6 +233,10 @@ not one speed (the tag is the CPU model, not the VM's share of it), and one job 
 from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or it is noise.**
 
 #### Lint, a project per process — #2272
+
+⚠️ **Since [#3019](https://github.com/openzigs/onyourleft/issues/3019) `lint` and its suite are the
+`lint` shard, not commands in `Checks, concurrently`**, and the readings below are the record of
+when they were (§"Three Vitest shards — #3019" says why).
 
 ⚠️ **`pnpm run lint` is `scripts/lint.sh`, not `eslint .`, and a reviewer who remembers one ESLint
 process is reading the old file.** On 2026-11-06 the merge-queue run for #2236 (run 42263160979)
@@ -2441,17 +2445,15 @@ Against the three-shard gate on the same CPUs that day (§ above): `browser-1` 6
 [42416283406](https://github.com/openzigs/onyourleft/actions/runs/42416283406). Its part still ran
 whole, so its times are in the table.
 
-**This is the table `nightly-split.test.ts` reads**: columns as in §"Three browser shards — #1720",
-a row added here moves every bound, a cell that is not a whole number fails the test, and a shard
-with no column fails it too.
+This was the table `nightly-split.test.ts` reads, columns as in §"Three browser shards — #1720",
+until #3019 added a third Vitest shard: the table it reads is §"Three Vitest shards — #3019"'s now,
+in the same shape with a `tests-3` column, and this one is the record.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
 | 42536504988 attempt 1 | 821 | **EPYC 7763** | 400 | EPYC 9V74 | 495 | **EPYC 7763** | 474 | **EPYC 7763** | 475 | **EPYC 7763** | 404 | EPYC 9V74 | 365 | **EPYC 7763** | 403 | **EPYC 7763** | 406 | 25 | 447 | 376 | 337 | 375 | 377 |
 | attempt 2 | 616 | **EPYC 7763** | 409 | **EPYC 7763** | 600 | Xeon 8573C | 406 | **EPYC 7763** | 471 | **EPYC 7763** | 388 | EPYC 9V74 | 358 | EPYC 9V45 | 291 | EPYC 9V45 | 255 | 23 | 445 | 364 | 335 | 270 | 233 |
 | attempt 3 | 503 | EPYC 9V45 | 288 | EPYC 9V74 | 487 | EPYC 9V74 | 377 | **EPYC 7763** | 487 | EPYC 9V45 | 283 | EPYC 9V45 | 276 | Xeon 8573C | 390 | EPYC 9V74 | 314 | 26 | 463 | 259 | 257 | 360 | 290 |
-<!-- shard-measurements:end -->
 
 **The lists before these, as the record.** Each was measured on this pull request and changed for
 the reason given above: the four shards (run 42520003996 attempt 1: `browser-1` 486 s on the EPYC
@@ -2481,3 +2483,109 @@ each of `browser-1` to `browser-5` reported that case `✘` and went red, `check
 run's log and draw the lists again the same way, divide the file that is the floor (one file is
 one worker: `ride-room.browser.spec.ts`, 448 s at its slowest, is the largest now), or add a sixth
 shard (a script, a job, a column here, the job in `needs:`). Not a longer stop.
+
+#### Three Vitest shards — #3019
+
+⚠️ **The Vitest suite is three jobs since [#3019](https://github.com/openzigs/onyourleft/issues/3019),
+`tests-1` to `tests-3`, and a reviewer who remembers two is reading the old file.** On 2026-11-22
+`tests-1`, then the whole `web` project, was cancelled at its 16-minute stop on four runs in about an
+hour, each still finishing passing files: `main` push run
+[45025284661](https://github.com/openzigs/onyourleft/actions/runs/45025284661), #3017's run
+[45028243993](https://github.com/openzigs/onyourleft/actions/runs/45028243993), merge-queue run
+[45031261166](https://github.com/openzigs/onyourleft/actions/runs/45031261166), which took #2845 out
+of the queue, and an earlier queue entry for #2987. **Not one slow test**: between queue run
+[45024363392](https://github.com/openzigs/onyourleft/actions/runs/45024363392) (its `Tests` step 595 s
+on a Xeon 6975P-C) and run 45031261166, every one of the 870 files both ran was about 1.5 to 1.7 times
+slower (`near-tree-fade.test.ts` 133 s to 212 s, `landform.test.ts` 59 to 85 s, `drawn-line.test.ts`
+49 to 83 s), and the job took 9 to 12 minutes that morning and 15.7 to 16.2 on the last eight runs.
+`tests-2` took 7 to 8 minutes on the same runs. **No stop moved**: each job keeps
+`timeout-minutes: 16`, and no case timeout changed.
+
+**How `web` was divided: by path, as the nightly coverage run already is** (§"Two coverage jobs —
+#2285"). From 45024363392's log, `src/game/` held 789 s of the project's 1 225 s of case time, in 340
+of its 870 files, and the other 530 files carry most of the per-file import and environment cost
+(jsdom views, the instance's ports), so:
+
+| Script | Job | What it adds to `test:required` | Files |
+|---|---|---|--:|
+| `test:required:shard-1` | `tests-1` | `--project web src/game/` | 340 |
+| `test:required:shard-2` | `tests-2`, after the `Accessibility` step | `--project '!web'` | 500 |
+| `test:required:shard-3` | `tests-3` | `--project web --exclude 'src/game/**'` | 531 |
+
+⚠️ **The first division tried was the 240 files directly in `src/game/`**, estimated from case time
+alone at about half the project. On this change's first run (run
+[45037972454](https://github.com/openzigs/onyourleft/actions/runs/45037972454)) its `Tests` step took
+291 s against `tests-3`'s 465 s, whose 631 files spent 403 s of summed import and environment time to
+the 240's 146 s. `src/game/`'s subdirectories (`lap-race`, `delivery`, `hud`, `open-world`,
+`world-data`, `circuits`: 100 files, 177 s of case time there) moved to `tests-1`, and that is the
+division above. That run waited up to 678 s for runners (`Wall` 1 234 s) and is not in the table.
+
+**What holds it.** `check:test-split` rule 5 accepts path filters and `--exclude <glob>` pairs after
+a part's `--project` pairs since this change, and still fails a part with no `--project`, any other
+flag (`--coverage` among them), a part over no file, and a file the required run selects that is in
+no part or in two. It printed `the required run's 1371 are 340 in test:required:shard-1, 500 in
+test:required:shard-2, 531 in test:required:shard-3`, and each job's own run reported 340, 500 and
+531 test files. A NEW `web` test file is in one of the two `web` parts by where it is, and a new
+Vitest project in `tests-2`, with no edit. `nightly-split.test.ts` is unchanged: it holds that each
+part runs in a job of its own with no concurrent step and no browser, that the accessibility gate is
+in exactly one, that `rules` needs every shard, and — from the table below — that each job's stop is
+five minutes clear of its slowest measured run.
+
+**`lint` is a shard of its own since this change too**, because recording these readings showed
+that `checks` was the next job to come within five minutes of its stop. With `lint` inside `Checks,
+concurrently` it took 405 to 446 s of its 720 s stop on this pull request (run 45040053938, 446 s
+on a Xeon 8573C) and 336 to 510 s on `main` and in the merge queue the same day, and `lint` was the
+step's long pole (392 s of 446). `lint` and its runner's suite (`scripts/lint.test.sh`) are now the
+`lint` job, with the `checks` job's 12-minute stop, in `needs:`; `Checks, concurrently` runs the
+other thirty-two commands. Nothing else moved and no stop moved.
+
+**Measured** on this change's own pull request, run
+[45048678852](https://github.com/openzigs/onyourleft/actions/runs/45048678852), attempts 1 to 3, the
+`tests-3` shard red on the one case that reads this table, before it had its `lint` and `tests-3`
+columns; every other case passed but one (below), and each duration is the whole part's. Columns as
+in §"Three browser shards — #1720". **This is the table `nightly-split.test.ts` reads**: a row added
+here moves every bound, a cell that is not a whole number fails the test, and a shard with no column
+fails it too.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `lint` on | lint | `tests-1` on | tests-1 | `tests-2` on | tests-2 | `tests-3` on | tests-3 | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | `browser-4` on | browser-4 | `browser-5` on | browser-5 | Gate starts | browser-1 step | browser-2 step | browser-3 step | browser-4 step | browser-5 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|--:|--:|
+| 45048678852 attempt 1 | 599 | EPYC 9V74 | 239 | EPYC 9V74 | 206 | Xeon 6975P-C | 395 | EPYC 9V74 | 416 | Xeon 6975P-C | 274 | EPYC 9V74 | 407 | **EPYC 7763** | 492 | **EPYC 7763** | 456 | EPYC 9V74 | 518 | Xeon 6975P-C | 269 | 26 | 381 | 464 | 428 | 494 | 239 |
+| attempt 2 | 552 | Xeon 8573C | 257 | Xeon 6975P-C | 203 | EPYC 9V74 | 447 | **EPYC 7763** | 521 | EPYC 9V45 | 293 | EPYC 9V74 | 403 | **EPYC 7763** | 536 | Xeon 6975P-C | 325 | EPYC 9V45 | 439 | **EPYC 7763** | 425 | 28 | 379 | 507 | 304 | 411 | 392 |
+| attempt 3 | 602 | EPYC 9V45 | 230 | **EPYC 7763** | 257 | **EPYC 7763** | 586 | EPYC 9V45 | 344 | **EPYC 7763** | 411 | **EPYC 7763** | 509 | EPYC 9V74 | 406 | **EPYC 7763** | 461 | **EPYC 7763** | 547 | EPYC 9V74 | 310 | 25 | 483 | 380 | 432 | 519 | 285 |
+<!-- shard-measurements:end -->
+
+- **The slowest Vitest job took 586 s, 374 s inside its 960 s stop** (`tests-1` on the EPYC 7763,
+  attempt 3). `tests-1` took 395 to 586 s, `tests-2` 344 to 521 s and `tests-3` 274 to 411 s; the
+  parts' own runs reported 345, 503 and 533 test files (`main` had gained eight since this branch's
+  base, where `check:test-split` counts 340, 500 and 531). `checks` took 230 to 257 s and `lint` 203
+  to 257 s, each at least 463 s inside its 720 s stop.
+- **On run 45040053938, before `lint` moved**, the same three Vitest parts took 390 to 579 s
+  (`tests-1`), 343 to 548 s (`tests-2`) and 385 to 422 s (`tests-3`) over its three unqueued attempts
+  (1, 5 and 6), and 382 to 579 s, 343 to 548 s and 343 to 429 s over all six. ⚠️ Its attempts 2 to 4
+  waited for runners — the longest wait between a job being created and starting was 484 s, 424 s
+  and 709 s, with merge-queue runs for #2996 and #2997 in progress during attempt 4 — so `Wall` was
+  1 009, 927 and 1 148 s and the `Wall` bound (under 900 s) would be red on a queue this repository
+  does not control; they are left out as #2154 left out its queued attempts.
+- `tests-1` is the heaviest part on the EPYC 7763 (574 to 586 s on it), the slower CPU, so it is the
+  column to watch: it holds `near-tree-fade.test.ts` (133 s to 212 s on the 2026-11-22 readings),
+  `landform.test.ts` and `drawn-line.test.ts`, each in one worker whichever job it is in. The `web`
+  project's two parts together are more runner time than its one job was (566 + 393 s of `Tests`
+  steps in attempt 3), because each runner imports and sets up its own files: what was bought is that
+  neither part is the whole project's wall time.
+- ⚠️ **Attempt 3's `tests-1` was red on one case**, `moving-hazards.test.ts` § "every moving hazard
+  is avoidable" › "leaves a clear lane at every speed from the slowest avoidable to the fastest"
+  (5 046 ms against Vitest's 5 s, on the EPYC 7763), which is not this change's: on the two-job
+  layout it took 4 707 to 5 180 ms on the EPYC 7763 on `main` and in the merge queue that day, red at
+  5 180 ms in run 45041215310. [#3036](https://github.com/openzigs/onyourleft/issues/3036) is that
+  case. Its part still ran whole, so its time is in the table.
+- **Two more runners per required run**: ten shard jobs and `rules`, each a standard `ubuntu-latest`
+  runner, free on this public repository (CLAUDE.md §8). On a deep queue a run waits for more
+  runners, which is what the left-out attempts above measured.
+- **No stop moved and nothing left the required check**: every test file still runs in exactly one
+  of `tests-1`, `tests-2`, `tests-3` and the Accessibility step, every command `checks` ran runs in
+  exactly one shard, and `Repository rules` needs every shard under the same name.
+
+⚠️ **When a row of this table brings a Vitest shard within five minutes of its stop**, re-read the
+per-file times from that run's log and move files between the parts by path or project, or add a
+fourth part and job (a script, a job in `needs:`, a column here). Not a longer stop.
