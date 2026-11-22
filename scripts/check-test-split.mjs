@@ -70,13 +70,17 @@
  * 4. Every file the whole suite (`vitest run`) selects is in one of the three.
  * 5. Since #2154 the required run is divided between CI jobs, and each
  *    `test:required:shard-<n>` script is one job's part: `pnpm run
- *    test:required` followed only by `--project <pattern>` pairs, so no part
- *    can keep an exclude the whole run does not, or take coverage. There are
- *    at least two, numbered from 1 with none missing; each selects at least
- *    one file, no file is in two, and every file the required run selects is
- *    in one. A Vitest project added to the workspace lands in whichever part
- *    its name matches — `!web` is every project but `web` — and in none is a
- *    red run here rather than a file CI never runs.
+ *    test:required` followed only by `--project <pattern>` pairs, at least
+ *    one, and — since #3019, which divided the `web` project between two
+ *    jobs — path filters and `--exclude <glob>` pairs, so no part can take
+ *    coverage or pass any other flag. A part's filters and excludes only
+ *    NARROW what it selects from the required run, and the selections below
+ *    are what catch a file they leave out. There are at least two, numbered
+ *    from 1 with none missing; each selects at least one file, no file is in
+ *    two, and every file the required run selects is in one. A Vitest project
+ *    added to the workspace lands in whichever part its name matches — `!web`
+ *    is every project but `web` — and a file in none is a red run here rather
+ *    than a file CI never runs.
  * 6. Since #2285 the nightly coverage run is divided between jobs too, and
  *    `test:coverage:merge` merges what each wrote into one report. Each
  *    `test:coverage:shard-<n>` script is one half: `pnpm run test:coverage`
@@ -275,29 +279,50 @@ const SHARD_LEAD = ['pnpm', 'run', 'test:required'];
 
 /**
  * The parts the required run is divided into between CI jobs — #2154: each
- * `test:required:shard-<n>` script's name and the `--project <pattern>`
- * arguments it adds to `test:required`, in order of `<n>`. Throws on fewer
- * than two, on a gap in the numbering, and on any other shape: a part that
- * is not `test:required` plus a project filter could leave out a file or run
- * one twice in a way the selections below would not show.
+ * `test:required:shard-<n>` script's name and the arguments it adds to
+ * `test:required` — `--project <pattern>` pairs, at least one, and since
+ * #3019 path filters and `--exclude <glob>` pairs — in order of `<n>`. Throws
+ * on fewer than two, on a gap in the numbering, and on any other shape: a
+ * part that passed another flag could take coverage, or select in a way
+ * `vitest list` does not show.
  */
 export function requiredShardsFrom(scripts) {
   return numberedParts(scripts, 'test:required', 'required run', '#2154').map(([name, script]) => {
     const tokens = shellWords(name, script);
     const rest = tokens.slice(SHARD_LEAD.length);
     const shape =
-      `\`${SHARD_LEAD.join(' ')}\` followed only by \`--project <pattern>\` pairs, and at ` +
-      'least one. Change this script and check-test-split.mjs together.';
-    const pairs = rest.length > 0 && rest.length % 2 === 0;
+      `\`${SHARD_LEAD.join(' ')}\` followed only by \`--project <pattern>\` pairs, at least ` +
+      'one, path filters and `--exclude <glob>` pairs. Change this script and ' +
+      'check-test-split.mjs together.';
     if (
       SHARD_LEAD.some((word, i) => tokens[i] !== word) ||
-      !pairs ||
-      rest.some((word, i) => (i % 2 === 0 ? word !== '--project' : word.startsWith('-')))
+      !rest.includes('--project') ||
+      !onlyFiltersAndPairs(rest, ['--project', '--exclude'])
     ) {
       throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
     }
     return [name, rest];
   });
+}
+
+/**
+ * Whether `words` are only path filters and `<flag> <value>` pairs of the
+ * `flags` given, and at least one word (rules 5 and 6).
+ */
+function onlyFiltersAndPairs(words, flags) {
+  let at = 0;
+  let wellFormed = words.length > 0;
+  while (wellFormed && at < words.length) {
+    if (flags.includes(words[at])) {
+      const value = words[at + 1];
+      wellFormed = value !== undefined && !value.startsWith('-');
+      at += 2;
+    } else {
+      wellFormed = !words[at].startsWith('-');
+      at += 1;
+    }
+  }
+  return wellFormed;
 }
 
 /**
@@ -363,22 +388,10 @@ export function coverageShardsFrom(scripts) {
             'merged report. Divide the run with path filters and `--exclude` instead.',
         );
       }
-      const shaped =
+      const wellFormed =
         COVERAGE_SHARD_LEAD.every((word, i) => tokens[i] === word) &&
         tail.every((word, i) => tokens[tokens.length - tail.length + i] === word) &&
-        rest.length > 0;
-      let at = 0;
-      let wellFormed = shaped;
-      while (wellFormed && at < rest.length) {
-        if (rest[at] === '--exclude') {
-          const glob = rest[at + 1];
-          wellFormed = glob !== undefined && !glob.startsWith('-');
-          at += 2;
-        } else {
-          wellFormed = !rest[at].startsWith('-');
-          at += 1;
-        }
-      }
+        onlyFiltersAndPairs(rest, ['--exclude']);
       if (!wellFormed) {
         throw new Error(`\`${name}\` is \`${script}\`; this check expects ${shape}`);
       }
@@ -464,10 +477,13 @@ export function problems({
   // Rule 5 (#2154): the required run's parts, one per CI job.
   partFindings(found, required, shards, {
     empty: 'Its `--project` pattern names no project the required run selects.',
-    twice: 'more than one part of the required run. Their `--project` patterns overlap.',
+    twice:
+      'more than one part of the required run. Their `--project` patterns, filters and ' +
+      'excludes overlap.',
     none: (path) =>
       `${path} is in \`test:required\` and in NONE of its parts, so no CI job runs it. ` +
-      'Its project matches no `test:required:shard-<n>` pattern.',
+      'No `test:required:shard-<n>` selects it: its project matches no pattern, or the ' +
+      'filters and excludes of every part whose pattern it matches leave it out.',
   });
   // Rule 6 (#2285): the coverage run's halves. Its files are the required
   // run's, which the drift check above holds.
