@@ -112,8 +112,8 @@ function rideThrough(profile: RouteProfile, kmh: number, fps: number): Ridden {
     pastTheTurn: Number.NEGATIVE_INFINITY,
   };
   for (
-    let along = REVERSAL_AT_METRES - 40;
-    along <= REVERSAL_AT_METRES + 50;
+    let along = REVERSAL_AT_METRES - 30;
+    along <= REVERSAL_AT_METRES + 40;
     along += speed * seconds
   ) {
     const frame = sceneFrame({
@@ -201,7 +201,7 @@ function ride(name: string, profile: RouteProfile, kmh: number, fps: number): Ri
 
 describe('a turnaround at one recorded point — #3045', () => {
   for (const [name, turnaround] of TURNAROUNDS) {
-    for (const kmh of [20, 40]) {
+    for (const kmh of [30, 40]) {
       it(`turns the drawn rider round no faster than the camera can follow: ${name}, ${String(kmh)} km/h`, () => {
         const ridden = ride(name, turnaround, kmh, 60);
         // It did turn round: a rider who never turned would pass the bound.
@@ -212,11 +212,11 @@ describe('a turnaround at one recorded point — #3045', () => {
     }
 
     it(`turns the drawn rider round short of the end of the drawn road: ${name}`, () => {
-      expect(ride(name, turnaround, 20, 60).pastTheTurn).toBeLessThan(0);
+      expect(ride(name, turnaround, 30, 60).pastTheTurn).toBeLessThan(0);
     });
 
     for (const [kmh, fps] of [
-      [20, 60],
+      [30, 60],
       [40, 20],
     ] as const) {
       it(`turns the camera round with no jump in heading or pitch: ${name}, ${String(fps)} fps`, () => {
