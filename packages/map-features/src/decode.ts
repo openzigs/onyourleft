@@ -594,7 +594,8 @@ function decodeFeature(
     return;
   }
   const kind = attributes.kind;
-  // #2659: a water line is a river, a stream or a canal, or it is not read.
+  // #2659, #2974: a water line is a river, a stream, a canal, a ditch or a
+  // drain, or it is not read.
   const waterLine = layer.name === 'water' && type === GEOMETRY_LINE;
   if (waterLine && !(WATER_LINE_KINDS as readonly (string | null)[]).includes(kind)) return;
   if (kind === null && layer.name !== 'water') return;

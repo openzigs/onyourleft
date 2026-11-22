@@ -829,7 +829,7 @@ export const WATER_LINE_FIXTURE_LINES: readonly {
 ];
 
 /** The kinds of {@link WATER_LINE_FIXTURE_LINES} the decoder keeps, in order. */
-export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
 
 /** {@link WATER_LINE_FIXTURE_LINES} as one `water` layer, beside a lake polygon. */
 export function waterLinesTile(): Uint8Array {

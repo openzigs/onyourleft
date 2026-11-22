@@ -1591,7 +1591,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ Its drawn water can still lie over the map's land,
                         so since #2728 `onOpenWater` (the drawn water, not the
                         mask's) drops a mapped footprint over it and draws
-                        nobody on it
+                        nobody on it. Since #2974 a water line of any kind
+                        that runs BESIDE the road is a channel (a `Lake` with
+                        `channel` set, `CHANNEL_SHAPES` by kind, its water
+                        following the road), laid on the frame's drawn ground
+                        where the columns cannot cut it; a ditch or drain is
+                        never bridged (`BRIDGED_WATER_LINE_KINDS`)
+    src/game/mapped-pools.ts
+                        the map's swimming pools and fountains (#2974), round
+                        the camera, as lighter water and a stone coping in the
+                        water's one mesh, marked by shore weight; no draw call
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building

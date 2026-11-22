@@ -170,9 +170,16 @@ describe('decodeTile on the named fixtures', () => {
     expect(tile.waterLines.map((f) => [f.kind, f.line.length])).toEqual([['stream', 6]]);
   });
 
-  it('water lines — #2659: a river, a stream and a canal, along their lines; never a ditch, a drain or any other kind', () => {
+  it('water lines — #2659, #2974: a river, a stream, a canal, a ditch and a drain, along their lines; never any other kind', () => {
     const tile = decoded(waterLinesTile());
-    expect(tile.waterLines.map((f) => f.kind)).toEqual([...WATER_LINE_FIXTURE_KEPT]);
+    expect(tile.waterLines.map((f) => f.kind)).toEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
+    expect([...WATER_LINE_FIXTURE_KEPT]).toEqual(tile.waterLines.map((f) => f.kind));
     for (const kept of tile.waterLines) {
       const spec = WATER_LINE_FIXTURE_LINES.find((each) => each.kind === kept.kind);
       const got = vertices(kept.line);

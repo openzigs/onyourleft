@@ -86,6 +86,7 @@ import {
   yardsFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
   footwaysFixture,
+  waterFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -605,7 +606,10 @@ async function run(): Promise<void> {
                                               : // #2973: a grid of streets off the route.
                                                 config.town === 'streets'
                                                 ? neighbourhoodFixture(latitude)
-                                                : undefined;
+                                                : // #2974: water beside the road, and pools.
+                                                  config.town === 'water'
+                                                  ? waterFixture(latitude)
+                                                  : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

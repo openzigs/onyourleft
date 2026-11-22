@@ -697,3 +697,21 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   proposed, in force only when the owner rules on #2696 and approves its screenshots and a
   moving-ride tablet frame check**; the PR is not to be merged before that, and this entry is to
   be corrected or struck there if the ruling differs.
+- **2026-11-21** — **PROPOSED, pending the owner's ruling on
+  [#2974](https://github.com/openzigs/onyourleft/issues/2974): the water lines kept include ditches
+  and drains, and a water line running beside the route is drawn.** The 2026-11-15 entry for #2659
+  dropped a `ditch` or a `drain` line at decode, because a road crosses one in a culvert. From this
+  date `packages/map-features` (`schema.ts` §`WATER_LINE_KINDS`) keeps all five of the layer's line
+  kinds, `river`, `stream`, `canal`, `ditch` and `drain`, as the same `WaterLineFeature`: its kind and
+  its line, and nothing else. `schema.ts` §`BRIDGED_WATER_LINE_KINDS` names the three a road is
+  bridged over, so a ditch or a drain still gets no bridge. `apps/web/src/game/waterways.ts`
+  §`mappedChannels` draws a water line of any kind that runs beside the drawn road as a channel, its
+  width, depth and banks by kind. `CORRIDOR_READER_VERSION` goes from 6 to 7, so a row of either
+  build is read again by the other; the packed shape is unchanged, and no Dexie schema changes.
+  D-3.3's sentence reads, from this entry, as the 2026-11-15 entry left it, with *"(river, stream or
+  canal)"* replaced by *"(river, stream, canal, ditch or drain)"*. Swimming pools and fountains are
+  the `water` polygons this ADR already keeps, with their `kind`; nothing new is kept for them, and
+  they are drawn with their own look. What still stands, unchanged: everything the 2026-11-15 entry
+  for #2659 left standing, D-3.5 included. **Status: proposed, in force only when the owner rules on
+  #2974 and approves its screenshots and a moving-ride tablet frame check**; the PR is not to be
+  merged before that, and this entry is to be corrected or struck there if the ruling differs.
