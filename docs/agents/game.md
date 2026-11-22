@@ -2132,11 +2132,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `GameView` asks for. `peopleOnTheRoad` is the browser
                         gate's control. `gait.ts` is the parametric walk and
                         run (the owner's ruling of 2026-10-24: no animation
-                        source); `people-body.ts` cuts the rider's MakeHuman
-                        body to ≤ 2 000 triangles at load and sizes the
-                        animation texture (≤ 1 MiB); `three-renderer.ts`
-                        §`PeopleBelt` bakes and draws them, realistic top rung
-                        only (`QualitySettings.people`), in two calls.
+                        source). ⚠️ Since the owner's request of 2026-11-18
+                        the bodies are MODELS: `public/realistic/people.glb`
+                        and `people_atlas_1024.ktx2`, three people in
+                        MakeHuman's own CC0 clothes
+                        (`tools/realistic/blender/process_people.py`, ADR
+                        0026's amendment of that date), each ≤ 2 000
+                        triangles, the atlas a SHARE of each part's colour
+                        that a person's seeded colours multiply. Still ONE
+                        call for all three: the geometry is numbered corners,
+                        looked up per instance's body in a slot texture
+                        (`people-body.ts`, which also lays out the animation
+                        texture, ≤ 1 MiB with the slots);
+                        `three-renderer.ts` §`PeopleBelt` bakes and draws
+                        them, realistic top rung only
+                        (`QualitySettings.people`), in two calls.
                         `levers=-people` on the owner's page is the tablet's
                         cost pair (validation 0002 Part AJ). ⚠️ The bodies'
                         geometry carries a `normal` attribute the shader never
@@ -2159,8 +2169,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `sceneryCyclists` (a free ride or a workout) AND the
                         rung draws people, never beside a pacer, ghost, room,
                         race or Delivery round. Drawn as instances: the
-                        people's body seated by `RealisticRiderBelt`
-                        §`ridingPose` and baked into the people's texture
+                        people's FIRST body (the rider's own build, so the
+                        rider's skeleton fits it) seated by
+                        `RealisticRiderBelt` §`ridingPose` and baked into
+                        the people's texture
                         (`people-body.ts` §`RIDE_PHASES`), on the riders'
                         bicycle meshes — no call of their own beside people
     src/game/cross-streets.ts
