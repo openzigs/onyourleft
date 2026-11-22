@@ -211,6 +211,12 @@ reads what a **trainer** was handed. Deleting the `sample` call inside `GameView
 gate green — `GameView` still names `createGradientSession` — and turns three of that file's
 assertions red. Neither replaces the other.
 
+⚠️ **The same holds for an open-world ride's junctions** ([#3013](https://github.com/openzigs/onyourleft/issues/3013)).
+`HudPanel`'s `junction` prop shipped with no ride supplying it, so no rider was offered a turn, and
+the gate cannot see an optional prop dropped. `apps/web/src/game/open-world/junction-wiring.test.tsx`
+rides the real `GameView` to a junction and turns by key, tap and pad: dropping the prop turns all
+three of its cases red.
+
 ⚠️ **`apps/web/src/offline/sw.ts` and `worker-core.ts` carry the two newest tags, and they are the
 first pair here that is STRUCTURAL rather than a decision or a defect** ([#406](https://github.com/openzigs/onyourleft/issues/406)). A
 service worker is a **second entry point**: Rollup builds it in its own pass into `dist/sw.js`, and
