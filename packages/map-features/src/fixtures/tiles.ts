@@ -24,8 +24,9 @@ import {
   polygon,
   rectangle,
   type LayerSpec,
+  type TagValue,
 } from '../testing/mvt-encoder';
-import type { CorridorFrame, TileId } from '../types';
+import type { CorridorFrame, StreetRoadFields, TileId } from '../types';
 
 /** The tile every fixture is decoded as. Its digits collide with no limit. */
 export const FIXTURE_TILE: TileId = { z: 15, x: 9371, y: 12538 };
@@ -264,7 +265,7 @@ export function sidewalkTile(): Uint8Array {
 export const STREET_FIXTURE_ROADS: readonly {
   readonly kind: string;
   readonly kindDetail?: string;
-  readonly sink: 'streets' | 'paths' | null;
+  readonly sink: 'streets' | 'paths' | 'rails' | null;
   /** `is_bridge` and `is_tunnel`, where the feature carries them, and the grade a street gets. */
   readonly isBridge?: boolean;
   readonly isTunnel?: boolean;
@@ -324,13 +325,51 @@ export const STREET_FIXTURE_ROADS: readonly {
       [4000, 2900],
     ],
   },
+  // #2660: a railway kept as track, and the details that are not.
   {
     kind: 'rail',
     kindDetail: 'rail',
-    sink: null,
+    sink: 'rails',
     line: [
       [100, 3300],
       [4000, 3300],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'light_rail',
+    sink: 'rails',
+    isBridge: true,
+    grade: 'bridge',
+    line: [
+      [100, 3350],
+      [4000, 3350],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'subway',
+    sink: null,
+    line: [
+      [100, 3400],
+      [4000, 3400],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'tram',
+    sink: null,
+    line: [
+      [100, 3450],
+      [4000, 3450],
+    ],
+  },
+  {
+    kind: 'rail',
+    sink: null,
+    line: [
+      [100, 3500],
+      [4000, 3500],
     ],
   },
   {
@@ -406,6 +445,131 @@ export function streetsTile(): Uint8Array {
         },
         geometry: line([road.line]),
       })),
+    },
+  ]);
+}
+
+/**
+ * The road fields (#2892, ADR 0091 D-2): one straight street a row, each with
+ * the tags it carries besides its kind and the fields it must decode to. Row
+ * `i` runs along tile row `300 + 300·i`, so the streets come back in this
+ * order.
+ */
+export const ROAD_FIELD_FIXTURE_STREETS: readonly {
+  readonly label: string;
+  readonly tags: Readonly<Record<string, TagValue>>;
+  readonly expected: StreetRoadFields;
+}[] = [
+  {
+    label: 'none of the three: every default',
+    tags: { kind: 'minor_road' },
+    expected: { oneway: 'no', access: 'open', isLink: false },
+  },
+  {
+    label: 'oneway yes: along the line',
+    tags: { kind: 'minor_road', oneway: 'yes' },
+    expected: { oneway: 'with-line', access: 'open', isLink: false },
+  },
+  {
+    label: 'oneway -1: against the line',
+    tags: { kind: 'minor_road', oneway: '-1' },
+    expected: { oneway: 'against-line', access: 'open', isLink: false },
+  },
+  {
+    label: 'oneway no',
+    tags: { kind: 'major_road', kind_detail: 'primary', oneway: 'no' },
+    expected: { oneway: 'no', access: 'open', isLink: false },
+  },
+  {
+    label: 'access private',
+    tags: { kind: 'other', kind_detail: 'service', access: 'private' },
+    expected: { oneway: 'no', access: 'private', isLink: false },
+  },
+  {
+    label: 'access no',
+    tags: { kind: 'minor_road', access: 'no' },
+    expected: { oneway: 'no', access: 'no', isLink: false },
+  },
+  {
+    label: 'access destination: open',
+    tags: { kind: 'minor_road', access: 'destination' },
+    expected: { oneway: 'no', access: 'open', isLink: false },
+  },
+  {
+    label: 'access yes: open',
+    tags: { kind: 'minor_road', access: 'yes' },
+    expected: { oneway: 'no', access: 'open', isLink: false },
+  },
+  {
+    label: 'is_link true',
+    tags: { kind: 'major_road', kind_detail: 'primary', is_link: true },
+    expected: { oneway: 'no', access: 'open', isLink: true },
+  },
+  {
+    label: 'is_link false',
+    tags: { kind: 'major_road', kind_detail: 'secondary', is_link: false },
+    expected: { oneway: 'no', access: 'open', isLink: false },
+  },
+  {
+    label: 'all three, on a bridge',
+    tags: {
+      kind: 'major_road',
+      kind_detail: 'trunk',
+      oneway: '-1',
+      access: 'customers',
+      is_link: true,
+      is_bridge: true,
+    },
+    expected: { oneway: 'against-line', access: 'open', isLink: true },
+  },
+];
+
+/**
+ * {@link ROAD_FIELD_FIXTURE_STREETS} as one `roads` layer, every feature
+ * carrying a name, the `pmap:*` fields, an address and an id, so that the walk
+ * over the named fixtures runs with the road fields present (#2892). Two roads
+ * that are not streets — a footway and a railway — carry values the lists do
+ * not name: they are not streets, so nothing of theirs is read or counted.
+ */
+export function roadFieldsTile(): Uint8Array {
+  const poisoned = { ...poisonTags, addr_housenumber: POISON.address };
+  return encodeTile([
+    EARTH,
+    {
+      name: 'roads',
+      features: [
+        ...ROAD_FIELD_FIXTURE_STREETS.map((street, index) => ({
+          id: POISON.id + index,
+          type: 2,
+          tags: { ...poisoned, ...street.tags },
+          geometry: line([
+            [
+              [100, 300 + 300 * index],
+              [4000, 300 + 300 * index],
+            ],
+          ]),
+        })),
+        {
+          type: 2,
+          tags: { ...poisoned, kind: 'path', kind_detail: 'footway', oneway: 'reversible' },
+          geometry: line([
+            [
+              [100, 3800],
+              [4000, 3800],
+            ],
+          ]),
+        },
+        {
+          type: 2,
+          tags: { ...poisoned, kind: 'rail', kind_detail: 'rail', is_link: 'yes', access: 7 },
+          geometry: line([
+            [
+              [100, 3900],
+              [4000, 3900],
+            ],
+          ]),
+        },
+      ],
     },
   ]);
 }
@@ -665,7 +829,7 @@ export const WATER_LINE_FIXTURE_LINES: readonly {
 ];
 
 /** The kinds of {@link WATER_LINE_FIXTURE_LINES} the decoder keeps, in order. */
-export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
 
 /** {@link WATER_LINE_FIXTURE_LINES} as one `water` layer, beside a lake polygon. */
 export function waterLinesTile(): Uint8Array {
@@ -690,7 +854,7 @@ export function waterLinesTile(): Uint8Array {
   ]);
 }
 
-/** The nine named fixtures, for the walks that run over all of them. */
+/** The ten named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
@@ -701,4 +865,5 @@ export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   places: placesTile,
   buildingFields: buildingFieldsTile,
   waterLines: waterLinesTile,
+  roadFields: roadFieldsTile,
 };

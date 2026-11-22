@@ -20,6 +20,7 @@ import {
   footwayTile,
   HOSTILE_BUILDING_FIELD_CASES,
   HOSTILE_FIXTURES,
+  HOSTILE_ROAD_FIELD_CASES,
   KEPT_PLACE,
   LIMIT_NAMES,
   lakeTile,
@@ -32,6 +33,10 @@ import {
   POISON,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
+  ROAD_FIELD_FIXTURE_STREETS,
+  roadFieldCaseTile,
+  roadFieldControlTile,
+  roadFieldsTile,
   SIDEWALK_LINE,
   sidewalkTile,
   STREET_FIXTURE_ROADS,
@@ -54,9 +59,10 @@ import {
   BUILDING_FIELD_NAMES,
   BUILDING_FIELD_RULES,
   NO_BUILDING_FIELDS,
+  NO_ROAD_FIELDS,
   type BuildingFieldName,
 } from './schema';
-import type { BuildingFeature, DecodedTile, DecodeRefusal } from './types';
+import type { BuildingFeature, DecodedTile, DecodeRefusal, StreetRoadFields } from './types';
 
 function decoded(bytes: Uint8Array): DecodedTile {
   const result = decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
@@ -164,9 +170,16 @@ describe('decodeTile on the named fixtures', () => {
     expect(tile.waterLines.map((f) => [f.kind, f.line.length])).toEqual([['stream', 6]]);
   });
 
-  it('water lines — #2659: a river, a stream and a canal, along their lines; never a ditch, a drain or any other kind', () => {
+  it('water lines — #2659, #2974: a river, a stream, a canal, a ditch and a drain, along their lines; never any other kind', () => {
     const tile = decoded(waterLinesTile());
-    expect(tile.waterLines.map((f) => f.kind)).toEqual([...WATER_LINE_FIXTURE_KEPT]);
+    expect(tile.waterLines.map((f) => f.kind)).toEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
+    expect([...WATER_LINE_FIXTURE_KEPT]).toEqual(tile.waterLines.map((f) => f.kind));
     for (const kept of tile.waterLines) {
       const spec = WATER_LINE_FIXTURE_LINES.find((each) => each.kind === kept.kind);
       const got = vertices(kept.line);
@@ -207,11 +220,12 @@ describe('decodeTile on the named fixtures', () => {
     });
   });
 
-  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway', () => {
+  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway; #2660: rail kept as track apart', () => {
     const tile = decoded(streetsTile());
     const sinkOf = (kind: string, detail: string): string | null => {
       if (tile.streets.some((f) => f.kind === kind && f.kindDetail === detail)) return 'streets';
       if (tile.paths.some((f) => f.kind === kind && f.kindDetail === detail)) return 'paths';
+      if (kind === 'rail' && tile.rails.some((f) => f.kindDetail === detail)) return 'rails';
       return null;
     };
     for (const road of STREET_FIXTURE_ROADS) {
@@ -234,6 +248,13 @@ describe('decodeTile on the named fixtures', () => {
         road.kindDetail,
         road.grade ?? 'ground',
       ]);
+    }
+    // #2660: a railway kept as track carries its grade as a street does, and nothing else.
+    expect(tile.rails).toHaveLength(STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails').length);
+    for (const road of STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails')) {
+      const rail = tile.rails.find((f) => f.kindDetail === road.kindDetail);
+      expect([road.kindDetail, rail?.grade]).toEqual([road.kindDetail, road.grade ?? 'ground']);
+      expect(Object.keys(rail ?? {}).sort()).toEqual(['grade', 'kindDetail', 'line']);
     }
     // Along its line, in the corridor frame: the minor road's two ends.
     const minor = tile.streets.find((f) => f.kind === 'minor_road');
@@ -309,6 +330,13 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'populationRank',
         // #2659.
         'waterLines',
+        // #2660.
+        'rails',
+        // #2892: the road fields and their count.
+        'oneway',
+        'access',
+        'isLink',
+        'roadValuesDefaulted',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];
@@ -484,6 +512,78 @@ describe('decodeTile reads the building fields, whitelisted and clamped (#1789)'
       expect(result.paths).toStrictEqual(control.paths);
       expect(result.landUse).toHaveLength(1);
       expect(result.paths).toHaveLength(1);
+    });
+  }
+});
+
+describe('decodeTile reads the road fields the street graph needs (#2892, ADR 0091 D-2)', () => {
+  const roadFieldsOf = (street: StreetRoadFields | undefined): StreetRoadFields => ({
+    oneway: street?.oneway as StreetRoadFields['oneway'],
+    access: street?.access as StreetRoadFields['access'],
+    isLink: street?.isLink as boolean,
+  });
+
+  it('reads oneway, access and is_link on each street to the decoder’s own constant', () => {
+    const tile = decoded(roadFieldsTile());
+    expect(tile.streets.map(roadFieldsOf)).toStrictEqual(
+      ROAD_FIELD_FIXTURE_STREETS.map((street) => street.expected),
+    );
+    // The fields sit beside the street's own: the last row is on a bridge.
+    expect(tile.streets.at(-1)?.grade).toBe('bridge');
+    expect(tile.streets.at(-1)?.kindDetail).toBe('trunk');
+    // The footway and the railway carry values the lists do not name; they
+    // are not streets, so nothing of theirs was counted.
+    expect(tile.paths).toHaveLength(1);
+    expect(tile.roadValuesDefaulted).toBe(0);
+  });
+
+  it('a street that carries none of them gets every default, never undefined', () => {
+    for (const build of [streetsTile, sidewalkTile]) {
+      const tile = decoded(build());
+      expect(tile.streets.length).toBeGreaterThan(0);
+      for (const street of tile.streets) {
+        expect(roadFieldsOf(street)).toStrictEqual(NO_ROAD_FIELDS);
+        expect(Object.keys(street).sort()).toStrictEqual(
+          ['access', 'grade', 'isLink', 'kind', 'kindDetail', 'line', 'oneway'].sort(),
+        );
+      }
+      expect(tile.roadValuesDefaulted).toBe(0);
+    }
+  });
+
+  it('with the road fields present, no name, address, pmap:* field or id survives', () => {
+    const bytes = roadFieldsTile();
+    // Not vacuous: the tile carries the name and the address on every road.
+    const raw = new TextDecoder().decode(bytes);
+    expect(raw).toContain(POISON.name);
+    expect(raw).toContain(`addr_housenumber`);
+    const tile = decoded(bytes);
+    const text = JSON.stringify(tile);
+    for (const poison of [POISON.name, POISON.nameEn, POISON.pmapKind, 'addr_housenumber']) {
+      expect(text).not.toContain(poison);
+    }
+    for (const street of tile.streets) {
+      expect(Object.values(street)).not.toContain(POISON.address);
+      expect(Object.values(street)).not.toContain(POISON.id);
+    }
+  });
+
+  for (const fieldCase of HOSTILE_ROAD_FIELD_CASES) {
+    it(`${fieldCase.name}: the default, counted once, and the tile’s other features unchanged`, () => {
+      const result = decodeTile(roadFieldCaseTile(fieldCase), FIXTURE_TILE, FIXTURE_FRAME);
+      if ('reason' in result) throw new Error(`refused: ${result.reason}`);
+      const control = decoded(roadFieldControlTile());
+      expect(result.streets).toHaveLength(3);
+      expect(roadFieldsOf(result.streets[1])).toStrictEqual(NO_ROAD_FIELDS);
+      expect(result.roadValuesDefaulted).toBe(1);
+      expect([result.streets[0], result.streets[2]]).toStrictEqual(control.streets);
+      expect(roadFieldsOf(result.streets[0])).toStrictEqual({
+        oneway: 'with-line',
+        access: 'private',
+        isLink: true,
+      });
+      expect(result.paths).toStrictEqual(control.paths);
+      expect(control.roadValuesDefaulted).toBe(0);
     });
   }
 });
