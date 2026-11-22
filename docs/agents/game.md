@@ -1507,6 +1507,26 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
+                        the room a race's standings have on a tablet (#2599):
+                        the list is as tall as the whole lines that fit above
+                        the actions panel less the owner's 16 px, and scrolls
+                        under a finger where that is short, opening on the
+                        rider's own line. #2837: hidden (#2600), the actions
+                        panel is its trainer's line, and where standings are
+                        drawn theme.css §"#2837" moves that line to the
+                        stage's bottom edge as the panel closes, so the list
+                        GROWS into the room the controls stood on and gives
+                        it back when a touch returns them. The room is read
+                        off the page — the panel's box as drawn — on an
+                        event of the layout's (a resize, a class or style, the
+                        HUD's `data-oyl-controls`, the end of the panel's own
+                        animation or transition), ⚠️ never on a frame. While
+                        the controls are DRAWN the room is #2599's: they are
+                        held drawn by a notice, a held item (ADR 0075 D-5)
+                        and a finished race (`HudCore.tsx` §`controlsHeld`).
+                        `browser/lap-race-hud.browser.spec.ts` §"#2837" and
+                        `ride-chrome.browser.spec.ts` §"#2837" measure it
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost
@@ -1654,7 +1674,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
                         a mapped park (not a protected area's boundary,
-                        #2657) is still dropped (`insidePark`).
+                        #2657) is still dropped (`insidePark`). ⚠️ **Since
+                        #2696 (proposed) a yard is not a park here**: a
+                        footprint touching a `garden`, `grass`,
+                        `village_green` or `allotments` (`land-class.ts`
+                        §`YARD_KINDS`) is kept; rule 2 drops it only where a
+                        park that is not a yard is within half a mask cell
+                        (§`parkProperNear`).
                         Since #2976 `grassland` and `heath` are `farmland`, as
                         `meadow` is: open pasture where the procedural world
                         drew before, and a building mapped there is kept;
@@ -2023,7 +2049,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
-                        (`people.ts`). No crossing is either
+                        (`people.ts`). No crossing is either. It still
+                        draws nothing: since #2972 `footway-surfaces.ts` does
+    src/game/footway-surfaces.ts
+                        the mapped footways DRAWN (#2972, the owner's ruling
+                        of 2026-11-15) — `footwayNetwork`'s lines as ribbons
+                        on the ground by kind (paved footway, cycleway, park
+                        path, steps in treads), and a zebra wherever a mapped
+                        `crossing` crosses the drawn road. ⚠️ A ribbon is kept
+                        off the carriageway by its own half-width, off the
+                        mapped side roads (`people.ts` §`besideSideRoads`), off
+                        mapped water, and off a drawn village pavement
+                        (#1620's rule, `people.ts` §`onPavement`). Chunked,
+                        grounded the first time a chunk is in reach, ≤
+                        `FOOTWAY_FRAME_TRIANGLES` within `FOOTWAY_DRAW_METRES`
+                        of the camera, nearest first; `SceneFrame.footways`,
+                        drawn in ONE call by `three-renderer.ts`
+                        §`FootwayBelt`, realistic world only, on the ground as
+                        the side roads are. Lever `-footways`, page
+                        `town=footways`
     src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
                         Poly Haven's `trashbag` beside some bins and one
                         `old_tyre` laid flat by a lamp post, placed from the
@@ -2114,7 +2158,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

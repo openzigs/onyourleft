@@ -90,6 +90,13 @@ afterEach(() => {
 const [FIRST] = SHIPPED_LEVELS.list();
 if (FIRST === undefined) throw new Error('the app ships no level');
 
+/** #2367: every level but the last finished, so every level is open to choose. */
+const ALL_OPEN = {
+  finished: SHIPPED_LEVELS.list()
+    .slice(0, -1)
+    .map((level) => level.id),
+};
+
 /** The link that chooses the level `name`, by its text as a screen reader reads it. */
 function chooseLink(
   within: Element | null | undefined,
@@ -114,8 +121,8 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
     ['to a rider with no routes', []],
   ] as const) {
     it(`are listed under their own heading, ${label}, each link named by its level, with no finding`, async () => {
-      // #2363: level 1 finished, so every level is open to choose.
-      writeLevelProgress(localStorage, { finished: [FIRST.id] });
+      // #2363, #2367: every level but the last finished, so every level is open to choose.
+      writeLevelProgress(localStorage, ALL_OPEN);
       await picker(routes);
       const section = document.querySelector('.oyl-game-courses__levels');
       const heading = section?.querySelector('h2');
