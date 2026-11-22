@@ -83,6 +83,7 @@ import {
   parksFixture,
   neighbourhoodFixture,
   railFixture,
+  fieldsFixture,
   tracksFixture,
   yardsFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
@@ -618,7 +619,10 @@ async function run(): Promise<void> {
                                                     : // #2975: the map's shops, cafés and fuel stations.
                                                       config.town === 'pois'
                                                       ? poiStreetFixture(latitude)
-                                                      : undefined;
+                                                      : // #2688: pitches and a playground.
+                                                        config.town === 'fields'
+                                                        ? fieldsFixture(latitude)
+                                                        : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

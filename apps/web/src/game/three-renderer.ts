@@ -585,7 +585,9 @@ import {
   HEADSTONE_PATH_WIDTH_METRES,
   HEADSTONE_PITCH_METRES,
   HEADSTONE_ROW_METRES,
+  PARK_BELT_CAPACITY,
   PARK_DRESSING_CAPACITY,
+  PARK_FIELD_CAPACITY,
   PARK_LOOK_CELLS,
   type ParkDressingInView,
   type ParkGround,
@@ -17232,7 +17234,10 @@ export function parkPieceGeometry(): BufferGeometry {
  * piece, so every other frame — every ride with no corridor, the owner's
  * village and wooded holds — makes no call and submits no triangle for it;
  * hidden on a frame with none. Held to `realistic-budget.ts`
- * §`REALISTIC_PARK_DRESSING_TRIANGLES`.
+ * §`REALISTIC_PARK_DRESSING_TRIANGLES` — and since #2688 its pitches' and
+ * playgrounds' pieces after them (`park-fields.ts`), in the same call, to
+ * §`REALISTIC_PARK_FIELD_TRIANGLES`: the belt holds
+ * `park-dressing.ts` §`PARK_BELT_CAPACITY`.
  */
 export class ParkDressingBelt {
   readonly #mesh: InstancedMesh;
@@ -17241,6 +17246,8 @@ export class ParkDressingBelt {
   readonly #at = new Vector3();
   readonly #size = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  readonly #tilt = new Quaternion();
+  readonly #depthAxis = new Vector3(0, 0, 1);
   readonly #colour = new Color();
   #held: readonly ParkPiece[] | undefined;
 
@@ -17248,10 +17255,10 @@ export class ParkDressingBelt {
     const material = withAtmosphere(
       constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 })),
     );
-    this.#mesh = new InstancedMesh(parkPieceGeometry(), material, PARK_DRESSING_CAPACITY);
+    this.#mesh = new InstancedMesh(parkPieceGeometry(), material, PARK_BELT_CAPACITY);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.instanceColor = new InstancedBufferAttribute(
-      new Float32Array(PARK_DRESSING_CAPACITY * 3),
+      new Float32Array(PARK_BELT_CAPACITY * 3),
       3,
     );
     this.#mesh.instanceColor.setUsage(DynamicDrawUsage);
@@ -17274,11 +17281,14 @@ export class ParkDressingBelt {
   update(pieces: readonly ParkPiece[]): void {
     if (pieces !== this.#held) {
       this.#held = pieces;
-      const count = Math.min(pieces.length, PARK_DRESSING_CAPACITY);
+      const count = Math.min(pieces.length, PARK_BELT_CAPACITY);
       for (let index = 0; index < count; index += 1) {
         const piece = pieces[index] as ParkPiece;
         this.#at.set(piece.x, piece.y + piece.lift, piece.z);
-        this.#turn.setFromAxisAngle(this.#up, piece.yaw);
+        // #2688: a pitch line's tilt about its own depth axis, then its yaw.
+        this.#turn
+          .setFromAxisAngle(this.#up, piece.yaw)
+          .multiply(this.#tilt.setFromAxisAngle(this.#depthAxis, piece.tilt ?? 0));
         this.#size.set(piece.width, piece.height, piece.depth);
         this.#mesh.setMatrixAt(index, this.#matrix.compose(this.#at, this.#turn, this.#size));
         this.#mesh.setColorAt(index, this.#colour.setHex(piece.colour));
@@ -17304,6 +17314,16 @@ export class ParkDressingBelt {
  * and summed into the worst frame by `realistic-budget.test.ts`
  */
 export const PARK_DRESSING_TRIANGLES = PARK_DRESSING_CAPACITY * PARK_PIECE_TRIANGLES;
+
+/**
+ * The belt's pitches and playgrounds at their worst — #2688: every one of
+ * `park-fields.ts` §`PARK_FIELD_CAPACITY`'s slots a box, in the same call.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_PARK_FIELD_TRIANGLES`
+ * by `park-dressing-belt.test.ts`, and summed into the worst frame by
+ * `realistic-budget.test.ts`
+ */
+export const PARK_FIELD_TRIANGLES = PARK_FIELD_CAPACITY * PARK_PIECE_TRIANGLES;
 
 /**
  * The ground's photographic material — #425.

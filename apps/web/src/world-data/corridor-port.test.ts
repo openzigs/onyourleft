@@ -30,6 +30,8 @@ import {
   BUILDING_PART_FIELDS_DECODED,
   buildingFieldsTile,
   lakeTile,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   PLACE_SENTINEL,
   placesTile,
   POI_FIXTURE_BUILDINGS,
@@ -300,7 +302,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(8);
+    expect(CORRIDOR_READER_VERSION).toBe(9);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
@@ -415,7 +417,45 @@ describe('#2975 POI classes: through the real store and back, with no name or po
     expect(state.corridor.buildings.map((building) => building.poi)).toContain('fuel');
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(kept?.readerVersion).toBe(8);
+    expect(kept?.readerVersion).toBe(9);
+  });
+});
+
+describe('#2688 pitches’ sports: a row kept before them read again', () => {
+  it('reads again a row kept at reader version 8, by the build with POI classes and no pitch’s sport, rather than trusting it', async () => {
+    // #2688 lands at reader 9 on top of #2975's 8: a row the version-8 build
+    // kept holds POI classes but no pitch's sport, so this build must not
+    // trust it. The blob is this build's own packed version, so only the
+    // reader version stands between that row and the ride.
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: pitchesTile() })),
+      }),
+    );
+    await keepRow(
+      route,
+      8,
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    expect(new Set(state.corridor.landUse.map((polygon) => polygon.sport))).toStrictEqual(
+      new Set(
+        PITCH_FIXTURE_POLYGONS.map((pitch) => (pitch.kept === null ? undefined : pitch.kept)),
+      ),
+    );
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+    expect(kept?.readerVersion).toBe(9);
   });
 });
 
@@ -501,8 +541,8 @@ describe('#1789 building fields: through the real store and back, and a row with
       route,
       CORRIDOR_READER_VERSION,
       // #2659: 6, since 5 was this reader's own; #2660: 7, since 6 then was;
-      // #2975: 8, since 7 now is.
-      await gzipJson({ v: 8, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      // #2975: 8, since 7 then was; #2688: 9, since 8 now is.
+      await gzipJson({ v: 9, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
     );
     const state = await load(portOver(freshStore(), source, on()), route);
     expect(state.kind).toBe('ready');

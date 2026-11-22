@@ -1056,10 +1056,17 @@ export const REALISTIC_REMOTE_STYLISED_RIDERS = 24;
  * added with #616's counter and holds it here, and its control — every remote
  * rider drawn — must not fit.
  *
+ * **64 726** since #2688 (maintainer decision of 2026-11-21, recorded on #2950
+ * and #2845): #2845's heavier rider and bike and #2688's 800 park-field
+ * triangles together came to 64 720, 494 over 64 226. Both were in combo build
+ * `4439ea908`, and the owner's tablet ride on it on 2026-11-21 held 60 fps
+ * (median frame 16.6 ms), so this was raised by the overage rounded up to the
+ * next 100 rather than either look being trimmed.
+ *
  * @test-facing held by `realistic-budget.test.ts` §"#783" and
  * `game.browser.spec.ts` §"#783"
  */
-export const REALISTIC_REMOTE_TRIANGLES = 64_226;
+export const REALISTIC_REMOTE_TRIANGLES = 64_726;
 
 /**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
@@ -1101,6 +1108,26 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * cases) and `park-dressing-belt.test.ts` (the belt as built)
  */
 export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
+
+/**
+ * The most triangles a frame's pitches and playgrounds may add — #2688:
+ * **800**, `park-fields.ts` §`PARK_FIELD_CAPACITY` (80) boxes — a pitch's
+ * lines, goals, net, hoops or backstop and a playground's structures — at the
+ * park belt's box of 10 triangles, drawn in the same call after the golf and
+ * cemetery pieces. The realistic world's alone, so counted INSIDE
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame.
+ *
+ * ⚠️ **Its own term, because {@link REALISTIC_PARK_DRESSING_TRIANGLES} was
+ * spent at its capacity.** With a room's remote riders in it, the golf and
+ * cemetery pieces left 882 triangles of {@link REALISTIC_REMOTE_TRIANGLES};
+ * this is what fits in them, measured by `realistic-budget.test.ts` (1 280
+ * did not: 398 over). No budget above is raised. The tablet's reading is the
+ * owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, both
+ * cases) and `park-dressing-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,

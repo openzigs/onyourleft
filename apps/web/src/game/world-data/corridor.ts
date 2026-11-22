@@ -37,6 +37,8 @@ import {
   corridorTileCover,
   decodeTile,
   describeRefusal,
+  PITCH_KIND,
+  PITCH_SPORTS,
   RAIL_KIND_DETAILS,
   tileBounds,
   tileBox,
@@ -52,6 +54,7 @@ import {
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
+  type PitchSport,
   type PlaceFeature,
   type RailFeature,
   type StreetFeature,
@@ -95,15 +98,16 @@ export const READ_TIMEOUT_MS = 120_000;
  * record never decoded; **7** since #2974 (ADR 0054's entry of 2026-11-21),
  * which keeps the ditches and drains a version-6 record dropped at decode;
  * **8** since #2975 (ADR 0054's entry of 2026-11-21), which keeps each
- * footprint's POI class a version-7 record never decoded. The port trusts a
- * record only at exactly this version, so a version-7 row is read again here,
- * and a version-8 row met by version-7 code is read again there, never decoded
- * as its own: that is #1789's rollback, and #2659's, #2660's, #2974's and
- * #2975's, and there is no Dexie schema change. #2974 changed no packed field,
- * so the packed version stayed 6 at reader 7; #2975 adds one, so it is 7 at
- * reader 8.
+ * footprint's POI class a version-7 record never decoded; **9** since #2688,
+ * which keeps a pitch's sport a version-8 record never decoded. The port
+ * trusts a record only at exactly this version, so a version-8 row is read
+ * again here, and a version-9 row met by version-8 code is read again there,
+ * never decoded as its own: that is #1789's rollback, and #2659's, #2660's,
+ * #2974's, #2975's and #2688's, and there is no Dexie schema change. #2974
+ * changed no packed field, so the packed version stayed 6 at reader 7; #2975
+ * adds one, so it is 7 at reader 8; #2688 adds another, so it is 8 at reader 9.
  */
-export const CORRIDOR_READER_VERSION = 8;
+export const CORRIDOR_READER_VERSION = 9;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -605,9 +609,9 @@ const PACK_SCALE = 100;
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
  * added the water lines, 6 since #2660 added the railway lines, 7 since #2975
- * added a footprint's POI class.
+ * added a footprint's POI class, 8 since #2688 added a pitch's sport.
  */
-const PACKED_VERSION = 7;
+const PACKED_VERSION = 8;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -682,7 +686,13 @@ function poiOfPacked(packed: unknown): Pick<BuildingFeature, 'poi'> {
 
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
-  readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
+  /** `sp` is a pitch's sport (#2688), absent on every polygon with none. */
+  readonly landUse: readonly {
+    layer: 'landuse' | 'water';
+    kind: string;
+    sp?: PitchSport;
+    rings: number[][];
+  }[];
   readonly buildings: readonly {
     kind: 'building' | 'building_part';
     h: number | null;
@@ -789,6 +799,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
     landUse: features.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
+      ...(f.sport === undefined ? {} : { sp: f.sport }),
       rings: f.rings.map(toInts),
     })),
     buildings: features.buildings.map((f) => {
@@ -860,6 +871,12 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
     landUse: packed.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
+      // #2688: held to the decoder's rule again — a pitch's, and one of its sports.
+      ...(f.layer === 'landuse' &&
+      f.kind === PITCH_KIND &&
+      (PITCH_SPORTS as readonly unknown[]).includes(f.sp)
+        ? { sport: f.sp }
+        : {}),
       rings: f.rings.map(fromInts),
     })),
     buildings: packed.buildings.map((f) => ({

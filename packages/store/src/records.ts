@@ -2011,7 +2011,8 @@ export type WorldCorridorTileState =
  * {@link RouteRecord} (ADR 0012 D-3.1). What it holds, in ADR 0054 D-3.3's one
  * sentence: building footprint polygons with `kind`, `height` and
  * `min_height`, and each one's POI class, a shop, a café or a fuel station
- * (#2975, proposed); land-use polygons with `kind`; water polygons; water lines
+ * (#2975, proposed); land-use polygons with `kind` and, on a pitch, its `sport`
+ * (#2688, proposed); water polygons; water lines
  * with `kind`, a river, a stream, a canal (#2659, proposed), a ditch or a
  * drain (#2974, proposed); footway lines
  * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
