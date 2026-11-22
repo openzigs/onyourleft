@@ -75,7 +75,15 @@ import {
 } from '@onyourleft/domain';
 
 import { drawnLine, type DrawnLine } from '../drawn-line';
+import type { MappedBuildings } from '../mapped-buildings';
+import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
 import type { GameState } from '../simulation';
+import {
+  corridorOrigin,
+  drawProfileIn,
+  localGroundPosition,
+  type CorridorOrigin,
+} from '../terrain';
 import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
 
 /**
@@ -136,6 +144,15 @@ export interface OpenWorldRoadHooks {
    * junction to be planned (`tiles-ahead.ts`).
    */
   readonly ahead?: ((route: RollingRoute, rider: number) => void) | undefined;
+  /**
+   * #2902: the frame the whole ride is drawn in, the session's start: every
+   * view is handed to `terrain.ts` §`drawProfileIn` with it, so a trim behind
+   * the rider moves nothing drawn. Absent, a view is drawn about its own
+   * first point, as before.
+   */
+  readonly frame?: CorridorOrigin | undefined;
+  /** #2902: the mapped buildings planned round the rider, in {@link frame}, once there are any. */
+  readonly buildings?: (() => MappedBuildings | undefined) | undefined;
 }
 
 /** One open-world ride's road, from its start. See the file's header. */
@@ -156,7 +173,60 @@ export class OpenWorldRoad {
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
-    this.#view = { profile: route.view(), origin: route.origin, turned: false };
+    this.#view = { profile: this.#framed(route.view()), origin: route.origin, turned: false };
+  }
+
+  /** `profile`, drawn in the ride's frame where it has one. @see OpenWorldRoadHooks.frame */
+  #framed(profile: RouteProfile): RouteProfile {
+    if (this.#hooks.frame !== undefined) drawProfileIn(profile, this.#hooks.frame);
+    return profile;
+  }
+
+  /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
+  buildings(): MappedBuildings | undefined {
+    return this.#hooks.buildings?.();
+  }
+
+  /** @see branchesAhead */
+  #branches:
+    | { readonly key: string; readonly of: RouteProfile; readonly line: Float32Array | undefined }
+    | undefined;
+
+  /**
+   * The ways on from the next junction that the route does not take, as the
+   * mapped buildings are ranked by them (#2902): each from the junction out to
+   * `realistic-budget.ts` §`MAPPED_RANKED_AHEAD_METRES`, `x, z` pairs in the
+   * view's frame, one way after another with a `NaN` pair between, which
+   * `mapped-buildings.ts` §`rankFrom` measures no segment across. `undefined`
+   * while the next junction is farther ahead than that reach, or there is
+   * none. The same array while the view and the junction stay.
+   */
+  branchesAhead(rider: number): Float32Array | undefined {
+    const junction = Number.isFinite(rider) ? this.route.nextJunctionAfter(rider) : undefined;
+    if (junction === undefined || junction.distance - rider > MAPPED_RANKED_AHEAD_METRES) {
+      return undefined;
+    }
+    const profile = this.#view.profile;
+    const key = `${String(junction.distance)}:${junction.taken}`;
+    if (this.#branches?.key === key && this.#branches.of === profile) return this.#branches.line;
+    const frame = corridorOrigin(profile);
+    const out: number[] = [];
+    for (const way of junction.ways) {
+      if (way.edge.id === junction.taken) continue;
+      if (out.length > 0) out.push(Number.NaN, Number.NaN);
+      let travelled = 0;
+      let last: { readonly x: number; readonly z: number } | undefined;
+      for (const point of way.edge.points) {
+        const here = localGroundPosition(frame, point.position);
+        if (last !== undefined) travelled += Math.hypot(here.x - last.x, here.z - last.z);
+        out.push(here.x, here.z);
+        last = here;
+        if (travelled >= MAPPED_RANKED_AHEAD_METRES) break;
+      }
+    }
+    const line = out.length === 0 ? undefined : Float32Array.from(out);
+    this.#branches = { key, of: profile, line };
+    return line;
   }
 
   /** The view last handed on. */
@@ -188,6 +258,7 @@ export class OpenWorldRoad {
     }
     const profile = route.view();
     if (profile === this.#view.profile) return undefined;
+    this.#framed(profile);
     const turned = route.uTurns !== this.#uTurns;
     this.#uTurns = route.uTurns;
     // #2989: the new view's line is eased in from the path last drawn, from

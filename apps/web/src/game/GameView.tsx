@@ -4546,6 +4546,15 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #2902: an open-world ride's mapped buildings, planned round the
+          // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
+          // and ranked by the ways on from the next junction too.
+          ...(road.follower === undefined
+            ? {}
+            : {
+                mappedBuildings: road.follower.buildings(),
+                mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
+              }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the
           // obstacles meet them; none on a ride with no round, or in a room

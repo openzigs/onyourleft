@@ -109,6 +109,14 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
       (each) => (each as TilePlanRequest).kind === 'plan',
     );
     expect(plans.length).toBeGreaterThan(0);
+    // #2902: once tiles are planned, the buildings round the rider are, and
+    // the road hands them on (the fixture's block has no footprints).
+    expect(road.buildings()).toBeUndefined();
+    road.follow(30);
+    await settle();
+    const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
+    expect(asked).toContain('buildings');
+    expect(road.buildings()?.plans).toStrictEqual([]);
     session.stop();
   });
 
