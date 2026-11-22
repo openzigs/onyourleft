@@ -4416,6 +4416,11 @@ function GameScreen({
             road,
             raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? drawn.riderDistance,
           ),
+          // #2989: an open-world ride's path, a new view's line eased in from
+          // the one drawn before it, so a junction choice moves neither the
+          // drawn rider nor the camera (ADR 0089 C-6). Every other ride's is
+          // its route's own line, which the scene builds.
+          drawnPath: road.follower?.drawnPath(drawn.riderDistance),
           // #237: the bot's odometer, from the state the simulation just
           // advanced. `SceneInput.botDistance` was declared and optional and
           // never supplied, which is why a built, tested and green pacer drew
@@ -4569,6 +4574,8 @@ function GameScreen({
                   revealMetres: round.revealMetres,
                   weather: round.weather,
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
+                  // A car's indicator is lit steadily, not flashing, under reduced motion.
+                  steadyIndicators: reducedMotionRef.current,
                 }),
               };
         // #1902, #1906: a lap race's pick-ups and puddles, on the frame's own corridor.
