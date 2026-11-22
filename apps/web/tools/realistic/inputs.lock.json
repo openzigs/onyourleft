@@ -2094,36 +2094,96 @@
       ]
     },
     {
-      "id": "kenney-car-kit",
+      "id": "ggbot-psx-style-cars",
       "licence": "CC0-1.0",
-      "licencePage": "https://kenney.nl/assets/car-kit",
-      "evidence": "Creative Commons CC0",
-      "read": "2026-11-12",
-      "authors": "Kenney",
+      "licencePage": "https://ggbot.itch.io/psx-style-cars",
+      "evidence": "This game assets is licensed under a CC0 1.0 Universal",
+      "read": "2026-11-19",
+      "authors": "GGBotNet",
       "files": [
         {
-          "path": "kenney-car-kit.zip",
-          "url": "https://kenney.nl/assets/car-kit",
-          "bytes": 4814237,
-          "sha256": "fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4"
+          "path": "PSX_Style_Cars_by_GGBot_(August2023).zip",
+          "url": "https://ggbot.itch.io/psx-style-cars",
+          "bytes": 2610303,
+          "sha256": "db67b0b0fbaa02454a5d000dc9ec1cc53f360e8f41ab44f3fb1c7e8f71e699e4"
         },
         {
-          "path": "Models/GLB format/sedan.glb",
-          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/sedan.glb",
-          "bytes": 172216,
-          "sha256": "b532ea7d2c59f7f6b22b138cf1955218a2c1898f1cea932af4d3fd563c3959b7"
+          "path": "Car 02/Car2.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/Car2.obj",
+          "bytes": 24405,
+          "sha256": "c7134a010b108865281321bf2ee7f9662e4118ba537bebc3b2117bc766c9f0e5"
         },
         {
-          "path": "Models/GLB format/Textures/colormap.png",
-          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/Textures/colormap.png",
-          "bytes": 12371,
-          "sha256": "f3622a03a20c6696065cae9cbe391351be873508af190c2ebd1d420c055787a5"
+          "path": "Car 02/car2.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2.png",
+          "bytes": 17437,
+          "sha256": "b4a4220eff6d0411a774b79446e042aa956defd3ba8ddf3bdef231021f6eac17"
         },
         {
-          "path": "License.txt",
-          "url": "https://kenney.nl/assets/car-kit#License.txt",
-          "bytes": 696,
-          "sha256": "c33b7f6453d134deae7b1b8493717d9ccfa754c25ab97f6de89b88f8fda19b00"
+          "path": "Car 02/car2_black.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2_black.png",
+          "bytes": 15020,
+          "sha256": "49c6c9269d188cdb5a032008fdb1d7c7a55b14c67b59cbe4c2f45e2d81d4d9c8"
+        },
+        {
+          "path": "Car 02/car2_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2_red.png",
+          "bytes": 18404,
+          "sha256": "10a18ee2d8a45acb2589102242c93a4713fd463d8e5e9e2fdf5d8d1c1e34c7b6"
+        },
+        {
+          "path": "Car 03/Car3.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/Car3.obj",
+          "bytes": 37218,
+          "sha256": "7525a0264841b24bd5f04ec6da72b7d833015a55e932cfbd895191ac1d2a4fe0"
+        },
+        {
+          "path": "Car 03/car3.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3.png",
+          "bytes": 16556,
+          "sha256": "467cc5964f6cd39cab646f466b763be2864ea69a3408ec21c301c1d40d6f4ed7"
+        },
+        {
+          "path": "Car 03/car3_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3_red.png",
+          "bytes": 14647,
+          "sha256": "e87ca54e7a8b7ff0d3b071e9fcd5c31abe63cdcb53f4d55374b630ce009bab49"
+        },
+        {
+          "path": "Car 03/car3_yellow.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3_yellow.png",
+          "bytes": 16032,
+          "sha256": "e301bf10edb6672db92fefee48f350b4e3b1c00150763d677a49d26ed2eca456"
+        },
+        {
+          "path": "Car 01/Car.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/Car.obj",
+          "bytes": 37686,
+          "sha256": "88de04afe087cd95c1eef048cb97aa1e1207d337a1c5b0b0a2f9a83579963a83"
+        },
+        {
+          "path": "Car 01/car.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car.png",
+          "bytes": 20640,
+          "sha256": "725782405e7b51fa7fae4881fc3045ab4ef65926b3569838dac086abd57f1153"
+        },
+        {
+          "path": "Car 01/car_blue.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_blue.png",
+          "bytes": 19810,
+          "sha256": "99bb01f86fc7d60dfe1b8c8bb557c66a0418dcf31c61eb124329d7268163c70c"
+        },
+        {
+          "path": "Car 01/car_gray.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_gray.png",
+          "bytes": 17496,
+          "sha256": "ad69d6fb264476cc8217097668ef1e874bc15076ecc8d23238105cb1e9253ea3"
+        },
+        {
+          "path": "Car 01/car_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_red.png",
+          "bytes": 18780,
+          "sha256": "777b1b8d2b845d7d52413ef6ef76d9958cf1e602785a28bf2b9c738aa3b60278"
         }
       ]
     }

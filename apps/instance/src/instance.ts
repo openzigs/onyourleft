@@ -383,25 +383,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   /**
    * #2855: where the setup would have run but the address is the template's
    * example, its paths answer the page that says what to set, and no setup
-   * code is made. This is the loopback port it is served on, or `undefined`.
+   * code is made. Its page is made once the loopback listener is up (below).
    */
-  const refusedSetupPort =
-    exampleOrigin && options.config.moderators.owner === undefined
-      ? server.adminLoopbackPort
-      : undefined;
-  const setupRefused = refusedSetupPort !== undefined;
-  let setup: Setup | undefined =
-    refusedSetupPort === undefined
-      ? undefined
-      : createExampleAddressSetup({ port: refusedSetupPort, name: options.config.name });
-  if (exampleOrigin) {
-    // Said at every such start, with where the page that explains it is, when there is one.
-    logEvent(
-      log,
-      EXAMPLE_ADDRESS_LOG_EVENT,
-      refusedSetupPort === undefined ? {} : { open: setupAddress(refusedSetupPort) },
-    );
-  }
+  const setupRefused =
+    exampleOrigin &&
+    options.config.moderators.owner === undefined &&
+    server.adminLoopbackPort !== undefined;
+  let setup: Setup | undefined;
   /** Whether this start voided a claim code the process before it showed (#2858). */
   let claimCodesVoidedAtStart = false;
   let stopSetup = (): void => undefined;
@@ -614,6 +602,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           },
         )
       : undefined;
+  // #3015: the port the loopback listener holds, read back from it: the operator's
+  // own, or the one the system chose when a test asked for 0. Every page, code and
+  // log line that names the setup's address is told this one.
+  const boundLoopback = adminLoopback?.server.address();
+  const loopbackPort =
+    typeof boundLoopback === 'object' && boundLoopback !== null ? boundLoopback.port : undefined;
+  if (setupRefused && loopbackPort !== undefined) {
+    setup = createExampleAddressSetup({ port: loopbackPort, name: options.config.name });
+  }
+  if (exampleOrigin) {
+    // Said at every such start, with where the page that explains it is, when there is one.
+    logEvent(
+      log,
+      EXAMPLE_ADDRESS_LOG_EVENT,
+      setupRefused && loopbackPort !== undefined ? { open: setupAddress(loopbackPort) } : {},
+    );
+  }
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();
   });
@@ -1089,9 +1094,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           accounts === undefined ? undefined : (athleteId) => accounts.moderation.roleOf(athleteId),
         now,
         name: options.config.name,
-        ...(server.adminLoopbackPort === undefined
-          ? {}
-          : { loopbackPort: server.adminLoopbackPort }),
+        ...(loopbackPort === undefined ? {} : { loopbackPort }),
         addresses: server.adminAddresses,
         // #2650: the Keys page's; the card is drawn on the loopback listener only.
         instanceKeys: keys,
@@ -1117,7 +1120,6 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     }
     // #2784 (ADR 0080 D-1, D-2, D-7): the first-run setup wizard on the
     // loopback listener, with the owner's claim it mints and confirms.
-    const loopbackPort = server.adminLoopbackPort;
     if (setupOn && identity !== undefined && loopbackPort !== undefined && server.origin !== null) {
       const wizard = createSetup({
         store,

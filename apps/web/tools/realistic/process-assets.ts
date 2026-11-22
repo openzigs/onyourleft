@@ -117,7 +117,6 @@ import {
 import {
   alsoWritten,
   assetRecord,
-  DELIVERY_CAR_SOURCE,
   formatRecord,
   GENERATED_TREE_SCRIPT,
   generatedTreeMaps,
@@ -165,15 +164,14 @@ function blender(script: string, args: readonly string[]): string {
   return output;
 }
 
-/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), or the car kit's sedan (#2540). */
+/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), or the car pack's (#2847). */
 function inputFor(output: OutputSpec): string {
   if (output.from.startsWith('makehuman')) return join(RAW, output.from);
-  if (output.recipe.how === 'blender' && output.recipe.script === VEHICLE_SCRIPT) {
-    return join(RAW, output.from, DELIVERY_CAR_SOURCE.model);
-  }
   if (
     output.recipe.how === 'blender' &&
-    (output.recipe.script === TEXTURE_SCRIPT || output.recipe.script === HOUSE_SCRIPT)
+    (output.recipe.script === TEXTURE_SCRIPT ||
+      output.recipe.script === HOUSE_SCRIPT ||
+      output.recipe.script === VEHICLE_SCRIPT)
   ) {
     return join(RAW, output.from);
   }

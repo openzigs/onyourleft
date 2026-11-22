@@ -41,6 +41,11 @@ describe('the realistic page’s Delivery round — #1815', () => {
     expect(new Set(round.markers.map((marker) => marker.kind))).toEqual(
       new Set(['house', 'mailbox', 'no-delivery']),
     );
+    // #2847: each with its place on the round, as a round's obstacles carry,
+    // so the page's cars wear their bodies and paints and not all the first.
+    expect(round.obstacles.map((obstacle) => obstacle.index)).toEqual(
+      Array.from({ length: 20 }, (_, index) => index),
+    );
   });
 
   it('stands each piece on the road ahead of the rider, the first 10 m on and each 2 m after, parcels and markers to its right and obstacles to its left', () => {

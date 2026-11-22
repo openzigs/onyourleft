@@ -37,6 +37,16 @@
  *   P. G. Adamczyk and A. D. Kuo, "Dynamic arm swinging in human walking",
  *   *Proc. R. Soc. B* 276 (2009) 3679–3688 — and a runner carries the elbow
  *   bent near a right angle.
+ * - **A runner's arm carry** — R. N. Hinrichs, "Upper extremity function in
+ *   running. II: Angular momentum considerations", *Int. J. Sport Biomech.* 3
+ *   (1987) 242–263, describes the arms swinging against the legs with the
+ *   hand crossing toward the body's midline in front and the elbow travelling
+ *   mostly BEHIND the trunk. The figures here are this file's own, shaped to
+ *   that description and to the owner's pictures of PR #2844, where both
+ *   forearms were held straight out ahead: the swing is centred 12° behind
+ *   the trunk, the elbow closes as the hand comes up in front and opens as it
+ *   passes the hip, and the upper arm is turned in ({@link LimbAngles.carry})
+ *   so the hand rises toward the breastbone, never across it.
  *
  * Pure, and names no rendering library.
  */
@@ -59,6 +69,11 @@ export interface LimbAngles {
   readonly shoulder: number;
   /** The elbow: positive bends it. Never negative. */
   readonly elbow: number;
+  /**
+   * The upper arm turned about its own length: positive brings the forearm
+   * and hand IN, across the front of the body. Never negative.
+   */
+  readonly carry: number;
 }
 
 /** A whole body's pose at one phase of a gait. */
@@ -82,6 +97,15 @@ function bump(phase: number, centre: number, width: number): number {
 
 const DEGREE = Math.PI / 180;
 
+/** How far a walker's upper arm is turned in, degrees: the palm toward the thigh. */
+const WALK_CARRY_DEGREES = 8;
+
+/** How far behind the trunk a runner's arm swing is centred, degrees. */
+const RUN_ARM_BEHIND_DEGREES = 12;
+
+/** How far a runner's upper arm is turned in at the back of its swing, degrees. */
+const RUN_CARRY_DEGREES = 20;
+
 /** One leg and the arm on its own side, at `phase` of its OWN cycle (0 = its foot's contact). */
 function limb(gait: Gait, phase: number): LimbAngles {
   if (gait === 'walk') {
@@ -100,21 +124,32 @@ function limb(gait: Gait, phase: number): LimbAngles {
       ankle: ankle * DEGREE,
       shoulder: shoulder * DEGREE,
       elbow: elbow * DEGREE,
+      // A hanging arm's palm faces the thigh: a little in, and no more.
+      carry: WALK_CARRY_DEGREES * DEGREE,
     };
   }
   // Novacheck: ~40 % stance; the hip's range ~60°, the knee ~40° in stance and ~100° in swing.
   const hip = 15 + 30 * Math.cos(2 * Math.PI * (phase - 0.85));
   const knee = 12 + 28 * bump(phase, 0.17, 0.07) + 88 * bump(phase, 0.68, 0.11);
   const ankle = 12 * bump(phase, 0.2, 0.08) - 22 * bump(phase, 0.42, 0.06);
-  const shoulder = -0.8 * (hip - 15);
-  // A runner carries the elbow bent near a right angle.
-  const elbow = 85 + 10 * Math.max(0, shoulder / 24);
+  // Against its own leg, as walking, and centred BEHIND the trunk: the elbow
+  // drives back past the hip and the hand comes forward only to the chest.
+  const swing = -0.8 * (hip - 15);
+  const shoulder = swing - RUN_ARM_BEHIND_DEGREES;
+  // How far forward the arm is, −1 at the back of its swing to 1 at the front.
+  const forward = swing / 24;
+  // A runner carries the elbow bent near a right angle: closed a little more
+  // with the hand up in front, opened as it passes the hip.
+  const elbow = 90 + 16 * forward;
+  // Turned in, and further as the hand rises, so it comes up to the breastbone.
+  const carry = RUN_CARRY_DEGREES + 10 * Math.max(0, forward);
   return {
     hip: hip * DEGREE,
     knee: knee * DEGREE,
     ankle: ankle * DEGREE,
     shoulder: shoulder * DEGREE,
     elbow: elbow * DEGREE,
+    carry: carry * DEGREE,
   };
 }
 

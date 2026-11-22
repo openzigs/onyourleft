@@ -57,7 +57,7 @@
  *
  * Pure: no platform API, no clock, no worker. The web app's open-world session
  * (`apps/web/src/game/open-world/session.ts`, #2896) builds it on the main
- * thread, once, at the start; moving it to a worker is owed to #2982.
+ * thread, once, at the start; moving it to a worker is owed to #2990.
  */
 
 import { tileBox } from './cover';

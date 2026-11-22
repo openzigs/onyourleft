@@ -30,6 +30,15 @@ It has the same authority as the root file. Where the text below says "this file
   **0090** for #2886, but the open pull request #2942 wrote 0090 for #2884 that day (its own 0086 was
   taken by #2869), so #2886 took 0091. 0087 to 0089 stay reserved for #2885, #2887 and #2888. The
   number after 0091 is **0092**.
+  ⚠️ **0085 is [ADR 0085](../adr/0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md)**,
+  taken by [#2847](https://github.com/openzigs/onyourleft/issues/2847) on 2026-11-19 for GGBotNet's
+  PSX Style Cars as the realistic world's cars, on the owner's rulings on #2847 of 2026-11-18 and
+  2026-11-19, and **Accepted** on them. It supersedes in part ADR 0049 D-10's In table, and ADR 0049
+  gained one dated `## Amendments` entry pointing here. The ADR number note of 2026-11-19 on #2847
+  gave this lane 0085, skipping 0081, 0083 and 0084, which the open pull requests #2873, #2864 and
+  #2863 had claimed. #2847's pull request #2872 first wrote this ADR as 0081 and was renumbered on
+  review, before merge; a reviewer who remembers 0081 meaning the PSX cars is reading that first
+  draft.
   ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
   taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
   chase camera in an open-world ride, which follows the rolling route through a junction turn and a

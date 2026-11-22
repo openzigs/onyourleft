@@ -1229,14 +1229,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
                         measured 201 356) by the same nightly spec.
-                        ⚠️ **Since #2540 the realistic world's parked car is
-                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
-                        `tools/realistic/blender/process_vehicle.py`), its
-                        wheels and indicators apart and posed per instance in
-                        the same call (`withDeliveryCarPose`, from
-                        `port.ts` §`DeliveryCarMotion`), its roster
-                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
-                        frame 203 998; the stylised world keeps its own car
+                        ⚠️ **Since #2847 (ADR 0085) the realistic world's
+                        parked cars are three of GGBotNet's CC0 PSX Style
+                        Cars** — a saloon, a hatchback and a station wagon
+                        (`public/realistic/cars.glb` and one atlas,
+                        `cars_atlas_256.ktx2`, from
+                        `tools/realistic/blender/process_vehicle.py`; #2540's
+                        Kenney sedan until then), their wheels and indicators
+                        apart and posed per instance in the same call
+                        (`withDeliveryCarPose`, from `port.ts`
+                        §`DeliveryCarMotion`). A car's body is chosen by its
+                        place on the round (`deliveryCarBody`), and every
+                        instance submits all three bodies and collapses two:
+                        the roster `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`
+                        (1 640), the frame 203 263. The atlas's alpha says
+                        which texels wear the instance's paint, and its
+                        coordinate and the body ride in attributes already
+                        bound (14 slots, `DELIVERY_MOST_VERTEX_ATTRIBUTES`);
+                        the stylised world keeps its own car
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
@@ -2205,7 +2215,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         geometry carries a `normal` attribute the shader never
                         reads: without one, three compiles a standard material
                         FLAT_SHADED and every triangle is lit as a facet
-                        (the owner's look of PR #1615)
+                        (the owner's look of PR #1615). ⚠️ A skin TONE is not
+                        an albedo (PR #2844): both people materials give a
+                        region its colour through `PEOPLE_COLOUR_GLSL`, the
+                        skin's through `people-body.ts` §`skinAlbedo` —
+                        handed to the light as it stood, a face in the sun
+                        was bleached pale by the tone map. The atlas's skin
+                        is divided by its photograph's MEDIAN, its trousers
+                        keep no dye, a skirt has no thigh under it and the
+                        fingers are curled in the rest mesh — all in
+                        `process_people.py`; `gait.ts` §`LimbAngles.carry`
+                        turns a runner's arm in
     src/game/scenery-cyclists.ts
                         other cyclists on the road (#2722) — oncoming, slower
                         (caught) and faster (overtaking), a few a ride, more on

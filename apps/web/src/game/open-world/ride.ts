@@ -22,6 +22,7 @@ import type { UnitSystem } from '@onyourleft/store';
 
 import { formatSmallDistance, measurementText } from '../../units/format';
 import type { RidableRoute } from '../StageChooser';
+import type { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
 
 /**
@@ -60,8 +61,12 @@ export type OpenWorldRefusal =
 
 /** What a session's start came to. */
 export type OpenWorldReady =
-  /** The ride may begin: its first view, as the picker's card. */
-  | { readonly kind: 'ready'; readonly route: RidableRoute }
+  /**
+   * The ride may begin: its first view, as the picker's card, and the road
+   * each ride on it follows past that view (#2982): a new one each call, from
+   * the snapped start, so a second ride on the card starts where the first did.
+   */
+  | { readonly kind: 'ready'; readonly route: RidableRoute; readonly road: () => OpenWorldRoad }
   | { readonly kind: 'refused'; readonly refusal: OpenWorldRefusal }
   /** {@link OpenWorldSession.stop} was called first. */
   | { readonly kind: 'stopped' };

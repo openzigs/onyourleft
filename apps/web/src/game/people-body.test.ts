@@ -28,6 +28,7 @@ import {
   PersonRegion,
   RIDE_GAIT_INDEX,
   RIDE_PHASES,
+  SKIN_LUMINANCE,
   SLOT_REGIONS,
   SLOT_WIDTH,
   animationLayout,
@@ -36,17 +37,23 @@ import {
   packNormal,
   peopleTextureBytes,
   regionNamed,
+  skinAlbedo,
   slotRows,
   slotTexel,
   unpackNormal,
   vertexNormals,
   weld,
 } from './people-body';
-import { PEOPLE_NEAR_MAX } from './people';
+import { CLOTHES, PEOPLE_NEAR_MAX, SKIN_TONES } from './people';
 import { REALISTIC_PEOPLE, REALISTIC_RIDER } from './realistic-assets';
 import { REALISTIC_PEOPLE_TRIANGLES, REALISTIC_TEXTURE_PIXELS } from './realistic-budget';
-import { fileKtx2Facts } from './realistic-bytes-testing';
-import { PEOPLE_NORMAL_GLSL, peopleSlotData, peopleSlotGlsl } from './three-renderer';
+import { accessorValues, fileKtx2Facts } from './realistic-bytes-testing';
+import {
+  PEOPLE_COLOUR_GLSL,
+  PEOPLE_NORMAL_GLSL,
+  peopleSlotData,
+  peopleSlotGlsl,
+} from './three-renderer';
 
 /** An IEEE half float's bits as the number they hold — how the GPU reads a texel. */
 function halfFloat(bits: number): number {
@@ -170,6 +177,71 @@ function peopleOf(file: GlbFile): PersonRead[] {
 
 const PEOPLE = peopleOf(readGlb(shipped(REALISTIC_PEOPLE.model)));
 
+/** A vertex of the committed model: where it is, its region, and the bone that moves it most. */
+interface VertexRead {
+  readonly at: readonly [number, number, number];
+  readonly region: string;
+  readonly bone: string;
+}
+
+/** Every vertex of each person, in the people's order, and where each bone's joint is at rest. */
+function verticesOf(file: GlbFile): {
+  readonly vertices: VertexRead[];
+  readonly joint: (bone: string) => [number, number, number];
+}[] {
+  const rigged = file.json as unknown as Rigged;
+  return rigged.nodes
+    .filter((node) => node.mesh !== undefined && node.skin !== undefined)
+    .sort((a, b) => ((a.name ?? '') < (b.name ?? '') ? -1 : 1))
+    .map((node) => {
+      const mesh = rigged.meshes[node.mesh as number];
+      const skin = rigged.skins[node.skin as number];
+      if (mesh === undefined || skin === undefined) throw new Error('a person with no mesh');
+      const bones = skin.joints.map((joint) => rigged.nodes[joint]?.name ?? '');
+      const inverse = accessor(file, skin.inverseBindMatrices);
+      const vertices: VertexRead[] = [];
+      for (const primitive of mesh.primitives) {
+        const read = (name: string) =>
+          accessorValues(file.json, file.binary, primitive.attributes[name] as number).values;
+        const [position, joints, weights] = [read('POSITION'), read('JOINTS_0'), read('WEIGHTS_0')];
+        const region = file.json.materials?.[primitive.material ?? -1]?.name ?? '';
+        for (let vertex = 0; vertex < position.length / 3; vertex += 1) {
+          let most = 0;
+          for (let slot = 1; slot < 4; slot += 1) {
+            if ((weights[vertex * 4 + slot] ?? 0) > (weights[vertex * 4 + most] ?? 0)) most = slot;
+          }
+          vertices.push({
+            at: [
+              position[vertex * 3] ?? 0,
+              position[vertex * 3 + 1] ?? 0,
+              position[vertex * 3 + 2] ?? 0,
+            ],
+            region,
+            bone: bones[joints[vertex * 4 + most] ?? -1] ?? '',
+          });
+        }
+      }
+      return {
+        vertices,
+        // A rest joint is where its inverse bind matrix sends to the origin: −Rᵀt.
+        joint: (bone: string): [number, number, number] => {
+          const m = inverse.slice(bones.indexOf(bone) * 16, bones.indexOf(bone) * 16 + 16);
+          const t = [m[12] ?? 0, m[13] ?? 0, m[14] ?? 0] as const;
+          return [0, 1, 2].map(
+            (row) =>
+              -(
+                (m[row * 4] ?? 0) * t[0] +
+                (m[row * 4 + 1] ?? 0) * t[1] +
+                (m[row * 4 + 2] ?? 0) * t[2]
+              ),
+          ) as [number, number, number];
+        },
+      };
+    });
+}
+
+const BODIES = verticesOf(readGlb(shipped(REALISTIC_PEOPLE.model)));
+
 describe('the people are models — the owner’s request of 2026-11-18', () => {
   it('ships more than one person, each a body of every region, inside a body’s triangles', () => {
     expect(PEOPLE.map((person) => person.name)).toEqual(['person-a', 'person-b', 'person-c']);
@@ -238,6 +310,124 @@ describe('the people are models — the owner’s request of 2026-11-18', () => 
     expect(apart(first)).toBeLessThan(1e-4);
     // The control: another build's joints are somewhere else.
     expect(apart(second)).toBeGreaterThan(0.01);
+  });
+});
+
+describe('the people, polished — the owner’s pictures of PR #2844', () => {
+  it('has no thigh under the skirt to come through its front', () => {
+    const [, woman] = BODIES;
+    if (woman === undefined) throw new Error('nobody');
+    const skirt = woman.vertices.filter((vertex) => vertex.region === 'bottoms');
+    const hem = Math.min(...skirt.map((vertex) => vertex.at[1]));
+    const waist = Math.max(...skirt.map((vertex) => vertex.at[1]));
+    // A skirt: it stops above the knee.
+    expect(hem).toBeGreaterThan(woman.joint('lowerleg01.L')[1]);
+    const leg = woman.vertices.filter(
+      (vertex) => vertex.region === 'skin' && /^(upperleg|lowerleg|pelvis|root)/.test(vertex.bone),
+    );
+    // A centimetre of slack for the collapse that cuts the leg's top ring.
+    const under = leg.filter((vertex) => vertex.at[1] > hem + 0.01 && vertex.at[1] < waist);
+    console.log(
+      `PR #2844: the skirt hangs from ${waist.toFixed(3)} m to ${hem.toFixed(3)} m, over ${String(under.length)} of the leg's ${String(leg.length)} vertices`,
+    );
+    expect(under).toEqual([]);
+    // Non-vacuity: she has legs, and they begin at the hem — not a hand's width below it.
+    expect(leg.length).toBeGreaterThan(40);
+    expect(Math.max(...leg.map((vertex) => vertex.at[1]))).toBeGreaterThan(hem - 0.05);
+    // The control: the men's trousers hide their own legs, by MakeHuman's own list.
+    for (const man of [BODIES[0], BODIES[2]]) {
+      expect(
+        man?.vertices.filter(
+          (vertex) => vertex.region === 'skin' && vertex.bone.startsWith('upperleg'),
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  it('curls every hand: no finger reaches straight out past the wrist', () => {
+    BODIES.forEach((body, person) => {
+      for (const side of ['L', 'R']) {
+        const wrist = body.joint(`wrist.${side}`);
+        const elbow = body.joint(`lowerarm01.${side}`);
+        const forearm = Math.hypot(...wrist.map((value, axis) => value - (elbow[axis] ?? 0)));
+        const hand = body.vertices.filter(
+          (vertex) => vertex.region === 'skin' && vertex.bone === `wrist.${side}`,
+        );
+        expect(hand.length).toBeGreaterThan(8);
+        const reach = Math.max(
+          ...hand.map((vertex) =>
+            Math.hypot(...vertex.at.map((value, axis) => value - (wrist[axis] ?? 0))),
+          ),
+        );
+        console.log(
+          `PR #2844: person ${String(person)} hand ${side} reaches ${(reach / forearm).toFixed(3)} of its forearm past the wrist`,
+        );
+        // A flat hand is three quarters of a forearm long; a relaxed one's
+        // fingertips are curled back to well inside that.
+        expect(reach / forearm).toBeLessThan(0.66);
+        // And it is still a hand, not a stump.
+        expect(reach / forearm).toBeGreaterThan(0.4);
+      }
+    });
+  });
+
+  it('lights skin as skin: no tone as bright as it looks, the light ones deeper in colour, the deep ones their own', () => {
+    const glsl = new GlslProgram(PEOPLE_COLOUR_GLSL);
+    const linear = (byte: number): number => {
+      const c = byte / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const toneOf = (hex: number): [number, number, number] => [
+      linear(hex >> 16),
+      linear((hex >> 8) & 0xff),
+      linear(hex & 0xff),
+    ];
+    const lightOf = (colour: readonly number[]): number =>
+      colour.reduce((sum, value, channel) => sum + value * (SKIN_LUMINANCE[channel] ?? 0), 0);
+    const [lightest, deepest] = [SKIN_TONES[0], SKIN_TONES[SKIN_TONES.length - 1]];
+    if (lightest === undefined || deepest === undefined) throw new Error('no skin tones');
+    for (const hex of SKIN_TONES) {
+      const tone = toneOf(hex);
+      const albedo = skinAlbedo(tone);
+      // The shader's own text gives what the twin gives, from the packed colour.
+      const drawn = glsl.call('oylColourOf', 0, hex, 0, 0, 0, 0) as readonly number[];
+      albedo.forEach((value, channel) => expect(drawn[channel]).toBeCloseTo(value, 9));
+      // Dimmer than the tone by a fifth and more, and still skin: red over green over blue.
+      expect(lightOf(albedo)).toBeLessThan(0.8 * lightOf(tone));
+      expect(lightOf(albedo)).toBeGreaterThan(0.6 * lightOf(tone));
+      expect(albedo[0]).toBeGreaterThan(albedo[1]);
+      expect(albedo[1]).toBeGreaterThan(albedo[2]);
+    }
+    // The lightest tone reflected 62 % as a tone; the realistic rider's skin reflects 36 %.
+    expect(lightOf(toneOf(lightest))).toBeGreaterThan(0.6);
+    expect(lightOf(skinAlbedo(toneOf(lightest)))).toBeLessThan(0.47);
+    // Deeper in colour where the tone map bleaches: the lightest's red over its blue grows by a third…
+    const redOverBlue = (colour: readonly number[]): number => (colour[0] ?? 0) / (colour[2] ?? 1);
+    expect(redOverBlue(skinAlbedo(toneOf(lightest)))).toBeGreaterThan(
+      1.3 * redOverBlue(toneOf(lightest)),
+    );
+    // …and the deepest keeps its own, to a tenth.
+    expect(redOverBlue(skinAlbedo(toneOf(deepest)))).toBeLessThan(
+      1.1 * redOverBlue(toneOf(deepest)),
+    );
+    // A grey is still a grey, and black is black.
+    const grey = skinAlbedo([0.3, 0.3, 0.3]);
+    expect(grey[0]).toBeCloseTo(grey[2], 12);
+    expect(skinAlbedo([0, 0, 0]).every((value) => value >= 0 && value < 1e-3)).toBe(true);
+    // THE CONTROL: only skin is treated so. Every other region is its colour, unpacked.
+    const cloth = CLOTHES[0] ?? 0;
+    for (const region of [1, 2, 3, 4]) {
+      const drawn = glsl.call(
+        'oylColourOf',
+        region,
+        0,
+        cloth,
+        cloth,
+        cloth,
+        cloth,
+      ) as readonly number[];
+      toneOf(cloth).forEach((value, channel) => expect(drawn[channel]).toBeCloseTo(value, 9));
+    }
   });
 });
 
