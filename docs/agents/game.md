@@ -1110,6 +1110,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `OYL-REALISTIC` line and readout;
                         `realistic-lap-race.browser.spec.ts` holds it
                         (required, not nightly: the stylised world)
+    src/game/open-world/open-world-cannot-reach-trainer.test.ts
+                        ADR 0088 D-5.2 (#2897): the same walk and forbidden
+                        set over the open-world ride's roots, every non-test
+                        module under `game/open-world/` and
+                        `packages/domain/src/route/rolling.ts`, with D-5.2's
+                        three plantings (`gradient.ts`, a seam module, a
+                        trainer-control writer) each a red case
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
