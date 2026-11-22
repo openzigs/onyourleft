@@ -19,7 +19,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
 import { countingSource } from '../../world-data/archive-testing';
-import { fixtureStart, openWorldFixtureArchive, START_COLUMN, START_ROW } from './fixture-testing';
+import {
+  fixtureStart,
+  OPEN_WORLD_FIXTURE_STREETS,
+  openWorldFixtureArchive,
+  START_COLUMN,
+  START_ROW,
+} from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
 import { createOpenWorldSession } from './session';
 import { describeTilePlanFailure, tilePlanWorkerCore, type TilePlanRequest } from './tile-planner';
@@ -117,6 +123,11 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
     expect(road.buildings()?.plans).toStrictEqual([]);
+    // #2903: and every held street, for the scene to draw: the fixture's three, in each tile it crosses.
+    // Each tile carries its own cut of a street it crosses, as a route's corridor does.
+    expect(road.streets()?.streets.length).toBeGreaterThanOrEqual(
+      OPEN_WORLD_FIXTURE_STREETS.length,
+    );
     session.stop();
   });
 

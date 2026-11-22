@@ -33,12 +33,13 @@
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
-import type { Box, BuildingFeature, CorridorFrame, StreetFeature } from '@onyourleft/map-features';
+import type { Box, BuildingFeature, CorridorFrame, LandUseFeature } from '@onyourleft/map-features';
 
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, type FootprintPlan } from '../footprint-buildings';
 import { NO_LAND_CLASS } from '../land-class';
 import { MAPPED_BUILDING_REACH_METRES } from '../realistic-budget';
 import type { WorldCorridor } from '../world-data/corridor';
+import { openWorldStreetCorridor } from './street-corridor';
 import type { TileBlockFeatures, TilePlanDetail } from './tile-plan';
 
 /**
@@ -88,12 +89,10 @@ export function planBuildingsNear(
   const reach =
     detail === 'full' ? OPEN_WORLD_BUILDINGS_REACH_METRES : MAPPED_BUILDING_REACH_METRES;
   const near: { readonly building: BuildingFeature; readonly apart: number }[] = [];
-  const boxes: Box[] = [];
   const used = new Set<string>();
   for (const tile of owned) {
     const block = blocks.get(tile.block);
     if (block === undefined) continue;
-    boxes.push(tile.box);
     for (let at = 0; at < tile.source.length; at += 1) {
       const apart = Math.hypot(
         (tile.centroids[at * 2] as number) - request.x,
@@ -111,24 +110,15 @@ export function planBuildingsNear(
     near.length = Math.min(near.length, REDUCED_BUILDINGS_MOST);
   }
   if (near.length === 0) return [];
-  const streets: StreetFeature[] = [];
-  const landUse = [];
-  for (const key of used) {
-    const block = blocks.get(key) as TileBlockFeatures;
-    for (const each of block.tiles) streets.push(...each.streets);
-    landUse.push(...block.landUse);
-  }
-  const covered = (x: number, z: number): boolean =>
-    boxes.some((box) => x >= box.minX && x < box.maxX && z >= box.minZ && z < box.maxZ);
+  const landUse: LandUseFeature[] = [];
+  for (const key of used) landUse.push(...(blocks.get(key) as TileBlockFeatures).landUse);
+  // #2903: every held block's streets and tiles, as the scene's corridor holds
+  // them (`street-corridor.ts`), so rule 3b keeps each footprint off every
+  // street the scene draws, by its class's width.
   const corridor: WorldCorridor = {
-    routeId: 'open-world',
-    origin: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
-    covered,
-    coveredBoxes: boxes,
+    ...openWorldStreetCorridor(frame, blocks.values()),
     landUse,
     buildings: near.map((each) => each.building),
-    paths: [],
-    streets,
   };
   return footprintPlans(
     corridor,

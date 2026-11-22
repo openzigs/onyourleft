@@ -94,7 +94,7 @@ import {
 } from '@onyourleft/map-features';
 
 import { createAreaReader, type HeldBlock } from '../world-data/area';
-import type { CorridorArchive } from '../world-data/corridor';
+import type { CorridorArchive, WorldCorridor } from '../world-data/corridor';
 import {
   graphBuilder,
   StreetMirror,
@@ -111,6 +111,7 @@ import {
 } from './ride';
 import { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
+import { openWorldStreetCorridor } from './street-corridor';
 import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
 import type { TileBlockFeatures } from './tile-plan';
 import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
@@ -424,7 +425,21 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     if (blocks.size === 0 && planner === undefined) return;
     planner ??= (options.tilePlanner ?? createTilePlanner)({ frame, log: options.log });
     planner.hold(blocks);
+    // #2903: the streets of the held blocks, for the scene — a new corridor
+    // only when what is held changed, since the scene keeps what it draws
+    // from one against the corridor object.
+    const same =
+      heldFeatures !== undefined &&
+      heldFeatures.size === blocks.size &&
+      [...blocks].every(([key, features]) => heldFeatures?.get(key) === features);
+    if (!same) {
+      heldFeatures = blocks;
+      streetCorridor = openWorldStreetCorridor(frame, blocks.values());
+    }
   }
+  /** #2903: the held blocks the street corridor was built from, and that corridor. */
+  let heldFeatures: ReadonlyMap<string, TileBlockFeatures> | undefined;
+  let streetCorridor: WorldCorridor | undefined;
   function planAhead(route: RollingRoute, rider: number): void {
     if (planner === undefined || !Number.isFinite(rider)) return;
     const view = route.view();
@@ -558,6 +573,8 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
           // #2902: the whole ride drawn in the start's frame, the tiles' own.
           frame: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
           buildings: () => planner?.buildings,
+          // #2903: every held street, drawn to the fog as road.
+          streets: () => streetCorridor,
         }),
     };
   })();

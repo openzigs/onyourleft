@@ -31,6 +31,7 @@ import { corridorOrigin } from '../terrain';
 import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
 import { OPEN_WORLD_ROUTE_ID, type OpenWorldSessions } from './ride';
 import { OpenWorldRoad } from './road';
+import { openWorldStreetCorridor } from './street-corridor';
 
 const inputs: SceneInput[] = [];
 
@@ -50,6 +51,7 @@ const COLUMNS = [0, 180, 410, 600, 870];
 const ROWS = [0, 230, 400, 650];
 const RIDE_FRAME = { latitude: 40, longitude: -105, elevation: 0 };
 const BUILDINGS = mappedBuildingsOf([]);
+const STREETS = openWorldStreetCorridor(RIDE_FRAME, []);
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -120,7 +122,12 @@ function port(): GamePort {
           profile: route().view(),
           attempts: 0,
         },
-        road: () => new OpenWorldRoad(route(), { frame: RIDE_FRAME, buildings: () => BUILDINGS }),
+        road: () =>
+          new OpenWorldRoad(route(), {
+            frame: RIDE_FRAME,
+            buildings: () => BUILDINGS,
+            streets: () => STREETS,
+          }),
       }),
       stop: () => undefined,
     }),
@@ -161,6 +168,8 @@ describe('an open-world ride hands the scene its planned buildings — #2902', (
     expect(ridden.length).toBeGreaterThan(0);
     for (const input of ridden) {
       expect(input.mappedBuildings).toBe(BUILDINGS);
+      // #2903: and its streets, as the corridor the scene draws them from.
+      expect(input.worldCorridor).toBe(STREETS);
       // The whole ride is drawn in the road's frame, whatever its view.
       expect(corridorOrigin(input.profile)).toBe(RIDE_FRAME);
     }
