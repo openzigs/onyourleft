@@ -54,6 +54,8 @@ export function rideFrame(input: {
   readonly parkDressingOff?: boolean;
   /** #2973's lever, `levers=-nearby-streets`: only the route, its stubs and its overpasses' roads. */
   readonly nearbyStreetsOff?: boolean;
+  /** #2972's lever, `levers=-footways`: the mapped footways, cycleways, park paths, steps and zebras undrawn. */
+  readonly footwaysOff?: boolean;
   /**
    * #1972's `race=worst`: a lap race's bots and the rider's own hit effect,
    * as `scene.ts` §`SceneInput.raceBots` and §`SceneInput.riderHit` take
@@ -105,6 +107,7 @@ export function rideFrame(input: {
     countrysideOff: input.countrysideOff,
     parkDressingOff: input.parkDressingOff,
     nearbyStreetsOff: input.nearbyStreetsOff,
+    footwaysOff: input.footwaysOff,
     ...(input.town === undefined
       ? {}
       : {

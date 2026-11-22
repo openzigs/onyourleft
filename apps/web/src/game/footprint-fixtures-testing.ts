@@ -1094,6 +1094,85 @@ export function parksFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** Where {@link footwaysFixture}'s zebra crossing crosses the road, metres along it. */
+export const FOOTWAYS_FIXTURE_CROSSING = 1_200;
+
+/**
+ * #2972's footways: 3 km of level road. From 950 m to 1 550 m a suburb —
+ * residential land, houses 22 m out both sides, a sidewalk 6 m out on each
+ * side and a cycleway 9.5 m out on the left — with a zebra crossing the road
+ * at {@link FOOTWAYS_FIXTURE_CROSSING} and a footway's crossing of a side
+ * street nowhere near the route (no zebra). From 1 650 m to 2 150 m a park on
+ * the left with a park path along it, a footway across it and a flight of
+ * steps up from the road. Covered throughout; arithmetic, not a real place.
+ */
+export function footwaysFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const house: StreetHouse = { corners: rectangleBeside(0, 0, 12, 8.5), height: 6.5 };
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      const ring = house.corners.map(([a, n]) => [along + a, side * 22 + n] as const);
+      buildings.push(buildingBeside(profile, origin, [ring], house.height));
+    }
+  }
+  const along = (from: number, to: number, lateral: number): (readonly [number, number])[] => {
+    const pairs: (readonly [number, number])[] = [];
+    for (let at = from; at <= to; at += 10) pairs.push([at, lateral]);
+    return pairs;
+  };
+  const path = (kindDetail: string, pairs: readonly (readonly [number, number])[]) => ({
+    kind: 'path',
+    kindDetail,
+    line: ringBeside(profile, origin, pairs),
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'footways',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70),
+        landBeside(profile, origin, 'landuse', 'park', 1_650, 2_150, -200, -8),
+      ],
+      buildings,
+      paths: [
+        path('sidewalk', along(950, 1_550, 6)),
+        path('sidewalk', along(950, 1_550, -6)),
+        path('cycleway', along(950, 1_550, -9.5)),
+        path('crossing', [
+          [FOOTWAYS_FIXTURE_CROSSING, -6],
+          [FOOTWAYS_FIXTURE_CROSSING, 6],
+        ]),
+        // A crossing of a side street 60 m off the route, parallel to it: no zebra.
+        path('crossing', [
+          [1_300, 60],
+          [1_310, 60],
+        ]),
+        path('', along(1_650, 2_150, -40)),
+        path('footway', [
+          [1_700, -12],
+          [1_800, -70],
+          [1_900, -120],
+        ]),
+        path('steps', [
+          [2_000, -10],
+          [2_000, -18],
+        ]),
+      ],
+      streets: [],
+    },
+  };
+}
+
 /**
  * #2973's neighbourhood: a grid of streets the route runs through, for the
  * nearby streets' by-eye pair (`town=streets`, before `levers=-nearby-streets`).
