@@ -70,8 +70,12 @@ const CONSENT_ROW = 'The rider’s recorded hosted consent and the endpoint it n
 const TACTICS_ROW =
   'A lap race’s state, the bot moves a model answered, and the rider’s consent to it';
 
-/** The row ADR 0072 D-1.3 adds beside it (#2712): a pacer state, and the plan, intent and line answered. */
-const PACER_ROW = 'A ride’s pacer state, and the plan, intent and line a model answered for it';
+/**
+ * The row ADR 0072 D-1.3 adds beside it (#2712): a pacer state, and the line
+ * answered. Since #2835 (ADR 0083) the answer is the line alone, and the
+ * warm-up, which carries nothing of the rider's, is born sealed beside it.
+ */
+const PACER_ROW = 'A ride’s pacer state, and the line a model answered for it';
 
 /** The row ADR 0050 D-2 adds to ADR 0047 D-7's table (#1106). */
 const PICTURE_ROW = 'A side-camera picture and the model’s answer about it';
@@ -180,6 +184,7 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/analysis/tactics/end', TACTICS_ROW),
   // The AI pacer (#2712, ADR 0072 D-1.3): the tactics route's twin, born sealed with no plaintext twin.
   only('POST', '/v1/analysis/pacer/decide', PACER_ROW),
+  only('POST', '/v1/analysis/pacer/warm', PACER_ROW),
   // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
   // refused unsealed on an instance with no keys too (`camera/routes.ts`).
   only('POST', '/v1/camera/side-pose', PICTURE_ROW),

@@ -1056,10 +1056,17 @@ export const REALISTIC_REMOTE_STYLISED_RIDERS = 24;
  * added with #616's counter and holds it here, and its control — every remote
  * rider drawn — must not fit.
  *
+ * **64 726** since #2688 (maintainer decision of 2026-11-21, recorded on #2950
+ * and #2845): #2845's heavier rider and bike and #2688's 800 park-field
+ * triangles together came to 64 720, 494 over 64 226. Both were in combo build
+ * `4439ea908`, and the owner's tablet ride on it on 2026-11-21 held 60 fps
+ * (median frame 16.6 ms), so this was raised by the overage rounded up to the
+ * next 100 rather than either look being trimmed.
+ *
  * @test-facing held by `realistic-budget.test.ts` §"#783" and
  * `game.browser.spec.ts` §"#783"
  */
-export const REALISTIC_REMOTE_TRIANGLES = 64_226;
+export const REALISTIC_REMOTE_TRIANGLES = 64_726;
 
 /**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
@@ -1557,6 +1564,25 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * The model ships without normals and the atlas at 1024 px, which is as
  * small as three dressed people were made; the APK carries the same bytes
  * more, and a browser's first download does not move.
+ *
+ * ## The female rider, inside the same 47 MiB — #2839
+ *
+ * #2839 (the owner's request of 2026-11-18) asks for a second rider body
+ * through the pipeline and for its download cost to be stated; this is the
+ * statement. Its branch raised this ceiling from 46 MiB to 47 MiB on its own,
+ * from the same 48 157 070 bytes as the people's models above, and the two
+ * rises met at the same figure. Measured on the committed files: the female
+ * rider's one file (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`) adds
+ * **427 668** and the closed hands 404 more in `rider.glb`, and with
+ * everything else since, the set with its transcoder is **49 051 685**,
+ * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
+ * three — which is what keeps the cost to one GLB rather than 1.5 MB.
+ *
+ * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
+ * and this one has not been ruled on**: the issue asks for the body and its
+ * stated cost, not for a figure. As before, the APK carries the same bytes
+ * more, and a browser's first download does not move: the file is outside
+ * the precache, and a ride fetches it only when it draws a female rider.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the

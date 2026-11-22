@@ -249,7 +249,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
 import {
   AWNING_PAINTS,
@@ -391,7 +391,7 @@ import {
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
   RIDER_BICYCLE_PARTS,
-  RIDER_UPPER_BODY_PARTS,
+  RIDER_UPPER_BODY_PARTS_BY_BODY,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -514,6 +514,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_BODIES,
   REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
@@ -677,6 +678,7 @@ import {
   type RiderFade,
   type RiderFadeLine,
 } from './rider-fade';
+import { riderBodyFor } from './rider-body';
 import {
   directionalFogColour,
   drawnHorizonColour,
@@ -3341,8 +3343,20 @@ export class RiderBelt {
   readonly #bodies: InstancedMesh;
   /** The upper bodies, rolled against the bicycle about the hips — #546. */
   readonly #torsos: InstancedMesh;
+  /**
+   * The female rider's upper body — #2839, `bicycle.ts`
+   * §`RIDER_UPPER_BODY_PARTS_FEMALE`. The same slots as {@link #torsos}: a
+   * rider is drawn in ONE of the two and stood at no size in the other, so
+   * every per-slot channel (kit, tint, fade, steer) is written to both alike
+   * and nothing else here knows which body a slot wears. ⚠️ Not drawn at all
+   * — `visible` false, so no draw call — in a frame with no female rider,
+   * which is every frame before #2839.
+   */
+  readonly #femaleTorsos: InstancedMesh;
   readonly #cranksets: InstancedMesh;
   readonly #limbs: InstancedMesh;
+  /** A matrix that draws nothing: a slot's upper body in the mesh it does not wear. */
+  readonly #nowhere = new Matrix4().makeScale(0, 0, 0);
 
   /**
    * What each occupied slot's legs were last solved *for*: five numbers a slot,
@@ -3411,7 +3425,19 @@ export class RiderBelt {
       riders,
     );
     this.#torsos = riderInstanceChannels(
-      new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
+      new InstancedMesh(
+        mergedParts(RIDER_UPPER_BODY_PARTS_BY_BODY.male),
+        this.#materials.lit,
+        riders,
+      ),
+      riders,
+    );
+    this.#femaleTorsos = riderInstanceChannels(
+      new InstancedMesh(
+        mergedParts(RIDER_UPPER_BODY_PARTS_BY_BODY.female),
+        this.#materials.lit,
+        riders,
+      ),
       riders,
     );
     this.#cranksets = riderInstanceChannels(
@@ -3422,7 +3448,7 @@ export class RiderBelt {
       new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT),
       riders * LEG_BONE_COUNT,
     );
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
       // because three sizes that buffer from `count` at the moment it is first
@@ -3447,6 +3473,11 @@ export class RiderBelt {
       this.#group.add(mesh);
     }
     this.#group.visible = false;
+  }
+
+  /** Every mesh a rider is drawn with, the female upper body included (#2839). */
+  #all(): readonly InstancedMesh[] {
+    return [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets, this.#limbs];
   }
 
   /**
@@ -3494,12 +3525,14 @@ export class RiderBelt {
   get meshes(): {
     readonly bodies: InstancedMesh;
     readonly torsos: InstancedMesh;
+    readonly femaleTorsos: InstancedMesh;
     readonly cranksets: InstancedMesh;
     readonly limbs: InstancedMesh;
   } {
     return {
       bodies: this.#bodies,
       torsos: this.#torsos,
+      femaleTorsos: this.#femaleTorsos,
       cranksets: this.#cranksets,
       limbs: this.#limbs,
     };
@@ -3535,7 +3568,9 @@ export class RiderBelt {
       .sort(
         (a, b) => Number(!CASTS_CONTACT_SHADOW[a.kind]) - Number(!CASTS_CONTACT_SHADOW[b.kind]),
       );
-    const layout = drawn.map((marker) => marker.kind).join(',');
+    // #2839: a slot's body is part of what it holds, so a rider who takes
+    // another's slot in a different body is posed afresh.
+    const layout = drawn.map((marker) => `${marker.kind}/${riderBodyFor(marker.body)}`).join(',');
     if (layout !== this.#layout) {
       this.#layout = layout;
       this.#posed.fill(Number.NaN);
@@ -3543,10 +3578,12 @@ export class RiderBelt {
     let slot = 0;
     let casters = 0;
     let posed = false;
+    let female = 0;
     for (const marker of drawn) {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
+      if (riderBodyFor(marker.body) === 'female') female += 1;
       posed = this.#placeOne(slot, marker) || posed;
       this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
@@ -3555,13 +3592,17 @@ export class RiderBelt {
       }
     }
     this.#casters = casters;
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) {
         mesh.instanceColor.needsUpdate = true;
       }
     }
+    // #2839: one draw call for a body that is on the road, and none for one
+    // that is not — so a field all of one body costs what it did.
+    this.#femaleTorsos.visible = female > 0;
+    this.#torsos.visible = female < slot;
     this.#limbs.count = slot * LEG_BONE_COUNT;
     // ⚠️ **Only when a leg actually moved, which is what makes the skip a
     // saving.** Without the flag the matrices are re-uploaded on every frame of
@@ -3609,10 +3650,7 @@ export class RiderBelt {
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     const material = this.#materials[shading];
-    this.#bodies.material = material;
-    this.#torsos.material = material;
-    this.#cranksets.material = material;
-    this.#limbs.material = material;
+    for (const mesh of this.#all()) mesh.material = material;
   }
 
   /**
@@ -3621,7 +3659,7 @@ export class RiderBelt {
    * and self-shadowing is a second shadow pass over the same four meshes.
    */
   setCasting(on: boolean): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.castShadow = on;
     }
   }
@@ -3633,7 +3671,7 @@ export class RiderBelt {
   }
 
   dispose(): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.geometry.dispose();
       mesh.dispose();
     }
@@ -3674,10 +3712,13 @@ export class RiderBelt {
     // #2494: the bars, and the hands on them, turned by this rider's steer.
     steerInstance(this.#bodies, slot, marker.steer ?? 0);
     steerInstance(this.#torsos, slot, marker.steer ?? 0);
+    steerInstance(this.#femaleTorsos, slot, marker.steer ?? 0);
     // #623: the kit this kind wears, under the tint. Written before the tint,
     // because `writeKit` borrows the same scratch colour.
     const kit = this.#kits[marker.kind];
-    for (const mesh of [this.#bodies, this.#torsos]) writeKit(mesh, slot, kit, this.#tint);
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos]) {
+      writeKit(mesh, slot, kit, this.#tint);
+    }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
       writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
     }
@@ -3692,8 +3733,14 @@ export class RiderBelt {
     this.#local.compose(this.#position, this.#turn, this.#stretch);
     this.#matrix.makeTranslation(0, -UPPER_BODY_PIVOT.y, -UPPER_BODY_PIVOT.z);
     this.#local.multiply(this.#matrix);
-    this.#torsos.setMatrixAt(slot, this.#matrix.multiplyMatrices(this.#rider, this.#local));
+    // #2839: the upper body in the mesh of the body this rider is, and
+    // nothing in the other's.
+    const female = riderBodyFor(marker.body) === 'female';
+    this.#matrix.multiplyMatrices(this.#rider, this.#local);
+    this.#torsos.setMatrixAt(slot, female ? this.#nowhere : this.#matrix);
+    this.#femaleTorsos.setMatrixAt(slot, female ? this.#matrix : this.#nowhere);
     this.#torsos.setColorAt(slot, this.#tint);
+    this.#femaleTorsos.setColorAt(slot, this.#tint);
 
     // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
     // the crankset is *mounted* at the axis and turns about its own origin.
@@ -3747,7 +3794,7 @@ export class RiderBelt {
 
   /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
   #fadeOne(slot: number, faded: number): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets]) {
       fadeInstance(mesh, slot, faded);
     }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
@@ -6899,6 +6946,13 @@ interface RealisticWorld {
    * and, since #623, the helmet and glasses as one mesh beside it.
    */
   readonly body: Object3D;
+  /**
+   * The other rider bodies' models, each once it has been asked for — #2839.
+   * Empty until a frame draws a rider of another body; then one promise a
+   * body, joined by every later ask, and dropped if its load fails.
+   * @see riderBodyOfWorld
+   */
+  readonly otherBodies: Map<RiderBody, Promise<Object3D>>;
   /** The rider's kit, skin and relief — #623. */
   readonly rider: RealisticRiderMaps;
   /** The bicycle's four drawn maps — #624. */
@@ -7916,6 +7970,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       vegetation,
       structures,
       body,
+      otherBodies: new Map(),
       rider: riderTextures,
       bicycle,
       ...(banners === undefined ? {} : { banners }),
@@ -8168,6 +8223,52 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) world.bicycle[map].dispose();
   for (const map of REALISTIC_RIDER_MAP_NAMES) world.rider[map].dispose();
   releaseLoadedScene(world.body);
+  // #2839: and any other body that was loaded for it, once it has arrived.
+  for (const other of world.otherBodies.values()) {
+    void other.then(releaseLoadedScene, () => undefined);
+  }
+  world.otherBodies.clear();
+}
+
+/**
+ * Another rider body's model for a loaded world, fetched the first time a
+ * ride draws a rider of that body and never before — #2839: a ride with no
+ * female rider downloads, parses and holds exactly what it did. Every later
+ * ask joins the one load. The model carries no texture of its own
+ * (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`), so nothing is transcoded;
+ * the loaders are released when it settles, as {@link loadRealisticWorld}
+ * releases them.
+ *
+ * ⚠️ **A load that fails is forgotten, so the next ride asks again**: the
+ * world is module state that outlives a view, and a failure kept here would
+ * draw her as the default rider on every later ride of the visit, silently.
+ * That is {@link loadRealisticWorldOnce}'s rule — the fallback is per ride,
+ * not per visit — and {@link RealisticRiderBelt.place} asks once a ride, so
+ * the ride that saw the failure does not ask on every frame. Until a load lands
+ * the rider is drawn in the default body ({@link RealisticRiderBelt.addBody}),
+ * which is a rider in the wrong shape and not a ride that stops. Offline, the
+ * file comes from the same cache the rest of the realistic set does.
+ *
+ * `loaders` are the product's unless a caller hands its own, as
+ * {@link loadRealisticWorld}'s are.
+ */
+export function riderBodyOfWorld(
+  world: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> },
+  body: RiderBody,
+  loaders: RealisticLoaders = productRealisticLoaders(),
+): Promise<Object3D> {
+  const asked = world.otherBodies.get(body);
+  if (asked !== undefined) return asked;
+  // `started`: the ask is made while a frame is placed, which a loader that
+  // throws rather than rejecting must not stop.
+  const load = started(() => loaders.model(realisticUrl(REALISTIC_RIDER_BODIES[body]))).finally(
+    () => loaders.dispose?.(),
+  );
+  world.otherBodies.set(body, load);
+  load.catch(() => {
+    world.otherBodies.delete(body);
+  });
+  return load;
 }
 
 /** An HDR texture's texels, as `realistic-light.ts` reads them. */
@@ -17349,6 +17450,44 @@ ${blended ? groundBlendShares(bounded) : ''}
 const REALISTIC_ANISOTROPY = 8;
 
 /**
+ * The body a realistic rider is drawn in when they chose none, or chose one
+ * whose model has not loaded — #2839: the rider every athlete was drawn as
+ * before it (`rider-body.ts` §`riderBodyFor`'s own default).
+ */
+const REALISTIC_DEFAULT_BODY: RiderBody = riderBodyFor(undefined);
+
+/** Every body, the default first: the order {@link RealisticRiderBelt} walks its pools in. */
+const REALISTIC_BODY_ORDER: readonly RiderBody[] = [
+  REALISTIC_DEFAULT_BODY,
+  ...(Object.keys(REALISTIC_RIDER_BODIES) as RiderBody[]).filter(
+    (body) => body !== REALISTIC_DEFAULT_BODY,
+  ),
+];
+
+/** The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit */
+const REALISTIC_RIDER_SLOTS = 3 + REALISTIC_REMOTE_RIDERS;
+
+/** And #2722's scenery cyclists' bicycles and helmets, instances of the same meshes. */
+const REALISTIC_RIDER_INSTANCES = REALISTIC_RIDER_SLOTS + SCENERY_CYCLISTS_MAX;
+
+/**
+ * One body's riders in {@link RealisticRiderBelt} — #2839: a skinned clone a
+ * slot, that body's own helmets (built round its own head, so one instanced
+ * mesh a body), and what is read off its rest pose.
+ */
+interface RealisticRiderPool {
+  readonly riders: RealisticRiderSlot[];
+  readonly helmets: InstancedMesh;
+  readonly helmetLocal: Matrix4;
+  readonly handReach: [number, number];
+  readonly handAlong: readonly [Vector3, Vector3];
+  /** The modeller's pass of 2026-11-18: where the ball of each foot is from its ankle. */
+  readonly footBall: readonly [Vector3, Vector3];
+  readonly scale: number;
+  readonly crash: RiderCrashClip;
+}
+
+/**
  * The realistic riders — ADR 0026 D-12 layer 4, #369.
  *
  * ## A real body on a bicycle built from numbers
@@ -17409,22 +17548,43 @@ const REALISTIC_ANISOTROPY = 8;
  */
 export class RealisticRiderBelt {
   readonly #group = new Group();
-  readonly #riders: RealisticRiderSlot[] = [];
+  /**
+   * #2839: everything below that is one BODY's — its skinned riders, its
+   * helmets, where its helmet and hands sit, its scale and its crash clip —
+   * is the body {@link #use} last chose, out of {@link #pools}. Every method
+   * that poses or reads a rider runs on these, so none of them knows there
+   * is more than one body; {@link place} chooses per marker.
+   */
+  #riders: RealisticRiderSlot[] = [];
+  /** A pool of riders for each body that is loaded — #2839. @see addBody */
+  readonly #pools: Partial<Record<RiderBody, RealisticRiderPool>> = {};
+  /** Which body the per-body fields are currently. @see #use */
+  #body: RiderBody = REALISTIC_DEFAULT_BODY;
+  /** The world the other bodies' models are fetched for. @see #want */
+  readonly #otherBodiesOf: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> };
+  /** The bodies {@link #want} has asked for on this ride, landed or not. */
+  readonly #asked = new Set<RiderBody>();
+  /** Whether {@link dispose} has run: a body that lands after it is not added. */
+  #disposed = false;
+  readonly #helmetMaterial: MeshStandardMaterial;
+  readonly #dressed: RealisticRiderMaps;
+  /** A matrix that draws nothing: a slot's helmet in the pool it does not wear. */
+  readonly #nowhere = new Matrix4().makeScale(0, 0, 0);
   readonly #frame: InstancedMesh;
   readonly #rubber: InstancedMesh;
   readonly #metal: InstancedMesh;
   readonly #cranks: InstancedMesh;
-  readonly #helmets: InstancedMesh;
+  #helmets!: InstancedMesh;
   readonly #materials: readonly MeshStandardMaterial[];
   /** The rubber's normal map, for {@link setTread}. */
   readonly #treadMap: Texture;
   /** The body's scale: its rest leg, stretched to `bicycle.ts`'s thigh and shin. */
-  readonly #scale: number;
+  #scale = 1;
   readonly #joints = emptyRiderJoints();
   readonly #tint = new Color();
   readonly #matrix = new Matrix4();
   readonly #local = new Matrix4();
-  readonly #helmetLocal = new Matrix4();
+  #helmetLocal = new Matrix4();
   /**
    * 1 while the kit is drawn in one colour, its own mean — the browser gate's
    * control. @see setKitPattern
@@ -17460,16 +17620,19 @@ export class RealisticRiderBelt {
    * how far that middle is from the wrist, in metres at the body's scale, and
    * `#handAlong` which way, in the wrist bone's own frame. Index 0 is `+X`.
    */
-  readonly #handReach: [number, number] = [0, 0];
-  readonly #handAlong: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  #handReach: [number, number] = [0, 0];
+  #handAlong: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
   /**
    * The modeller's pass of 2026-11-18, the feet as the hands above: where the
    * BALL of each foot is on its sole — under the shoe, most of the way from
    * the heel to the toe ({@link FOOT_BALL_SHARE}) — from its ankle, in the
    * foot bone's own frame, in metres at the body's scale. Measured once off
    * the file's rest pose, as the hands are. Index 0 is `+X`. @see footBall
+   *
+   * #2839: per body, as the hands are — each body's own feet, off its own
+   * rest pose, kept in its pool. @see #use
    */
-  readonly #footBall: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  #footBall: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
   readonly #ballNow = new Vector3();
   /** Each foot as the body stands on it, in world space, before this frame's pose. */
   readonly #footStood: readonly [Quaternion, Quaternion] = [new Quaternion(), new Quaternion()];
@@ -17478,7 +17641,7 @@ export class RealisticRiderBelt {
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
   /** #2493: the body's own fall and get-up, read off the file. @see crashClipOf */
-  readonly #crash: RiderCrashClip;
+  #crash!: RiderCrashClip;
   readonly #crashSample: number[] = [0, 0, 0, 0];
   readonly #crashTurn = new Quaternion();
   readonly #crashAt = new Vector3();
@@ -17500,7 +17663,18 @@ export class RealisticRiderBelt {
   #cyclistSlots = { first: 0, count: 0 };
   #shown = true;
 
-  constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
+  /**
+   * @param world whose other bodies a frame's riders are fetched from
+   *   ({@link riderBodyOfWorld}) — #2839. Not optional, so that no belt a
+   *   ride draws can be built unable to load the rider its athlete chose.
+   */
+  constructor(
+    body: Object3D,
+    maps: RealisticBicycleMaps,
+    dressed: RealisticRiderMaps,
+    world: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> },
+  ) {
+    this.#otherBodiesOf = world;
     // #623: the helmet and glasses are the file's own, coloured per vertex.
     // #2596: faded with the rider who wears it.
     const helmetMaterial = withRiderInstance(
@@ -17509,13 +17683,9 @@ export class RealisticRiderBelt {
       ),
       false,
     );
-    const helmetSource = helmetOf(body);
-    // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
-    const riders = 3 + REALISTIC_REMOTE_RIDERS;
-    // #2722: and the scenery cyclists' bicycles and helmets, instances of the
-    // same meshes — no draw call of their own. Their bodies are the people's.
-    const instances = riders + SCENERY_CYCLISTS_MAX;
-    const bicycle = realisticBicycleMeshes(maps, instances);
+    this.#helmetMaterial = helmetMaterial;
+    this.#dressed = dressed;
+    const bicycle = realisticBicycleMeshes(maps, REALISTIC_RIDER_INSTANCES);
     this.#frame = bicycle.frame;
     this.#rubber = bicycle.rubber;
     this.#metal = bicycle.metal;
@@ -17524,14 +17694,46 @@ export class RealisticRiderBelt {
     const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
     const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
     const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
+    this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks]) {
+      this.#group.add(mesh);
+    }
+    this.addBody(REALISTIC_DEFAULT_BODY, body);
+    this.#group.visible = false;
+  }
+
+  /**
+   * Makes a pool of riders in one body — #2839: the constructor's own for the
+   * default body, and {@link #want}'s for another once its model has
+   * loaded (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`). Until a body
+   * has a pool, a rider who chose it is drawn in the default
+   * ({@link #use}). Every pool wears the same three maps.
+   *
+   * Leaves the default body in use, so {@link silhouette} and
+   * {@link ridingPose} read it whatever was added last.
+   */
+  addBody(which: RiderBody, body: Object3D): void {
+    if (this.#pools[which] !== undefined) return;
+    const dressed = this.#dressed;
+    const helmetMaterial = this.#helmetMaterial;
+    const helmetSource = helmetOf(body);
+    // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
+    const riders = REALISTIC_RIDER_SLOTS;
+    // #2722: and the scenery cyclists' bicycles and helmets, instances of the
+    // same meshes — no draw call of their own. Their bodies are the people's.
+    const instances = REALISTIC_RIDER_INSTANCES;
+    // Fresh per-body state, which the loop below fills exactly as it always did.
+    this.#riders = [];
+    this.#helmetLocal = new Matrix4();
+    this.#handReach = [0, 0];
+    this.#handAlong = [new Vector3(), new Vector3()];
+    this.#footBall = [new Vector3(), new Vector3()];
     this.#helmets = riderInstanceChannels(
       tintable(helmetSource.geometry.clone(), helmetMaterial, instances),
       instances,
     );
-    this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
-    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
-      this.#group.add(mesh);
-    }
+    this.#helmets.count = 0;
+    this.#group.add(this.#helmets);
 
     let scale = 1;
     for (let slot = 0; slot < riders; slot += 1) {
@@ -17613,7 +17815,75 @@ export class RealisticRiderBelt {
     this.#scale = scale;
     // #2493: the crash clip, by bone, in the clones' own bone order.
     this.#crash = crashClipOf(body.animations, (this.#riders[0] as RealisticRiderSlot).ordered);
-    this.#group.visible = false;
+    this.#pools[which] = {
+      riders: this.#riders,
+      helmets: this.#helmets,
+      helmetLocal: this.#helmetLocal,
+      handReach: this.#handReach,
+      handAlong: this.#handAlong,
+      footBall: this.#footBall,
+      scale: this.#scale,
+      crash: this.#crash,
+    };
+    this.#body = which;
+    this.#use(REALISTIC_DEFAULT_BODY);
+  }
+
+  /** Makes `which`'s pool the one every per-body field is — #2839. A body with no pool is the default's. */
+  #use(which: RiderBody): RiderBody {
+    const body = this.#pools[which] === undefined ? REALISTIC_DEFAULT_BODY : which;
+    if (body === this.#body) return body;
+    const pool = this.#pools[body] as RealisticRiderPool;
+    this.#riders = pool.riders;
+    this.#helmets = pool.helmets;
+    this.#helmetLocal = pool.helmetLocal;
+    this.#handReach = pool.handReach;
+    this.#handAlong = pool.handAlong;
+    this.#footBall = pool.footBall;
+    this.#scale = pool.scale;
+    this.#crash = pool.crash;
+    this.#body = body;
+    return body;
+  }
+
+  /** Every loaded body's pool, the default first. */
+  #everyPool(): readonly RealisticRiderPool[] {
+    return REALISTIC_BODY_ORDER.flatMap((body) => {
+      const pool = this.#pools[body];
+      return pool === undefined ? [] : [pool];
+    });
+  }
+
+  /** Whether `body` has a pool yet — #2839. For the tests. */
+  hasBody(body: RiderBody): boolean {
+    return this.#pools[body] !== undefined;
+  }
+
+  /**
+   * Asks for the model of a body a rider on this frame is drawn in and the
+   * belt has no pool for — #2839. The first frame that draws a female rider
+   * starts the one load ({@link riderBodyOfWorld}); she is drawn in the
+   * default body until it lands, and in her own from the frame after.
+   *
+   * ⚠️ **Asked from {@link place}, at the marker it is about to draw**, so
+   * the rule is `place`'s own and cannot drift from it: a marker that is not
+   * a rider, one past the last slot, and a belt that is not shown ask for
+   * nothing. PR #2845's review: it was a second loop over the markers, in
+   * `RealisticDrawing`, that no test could fail and that asked for more.
+   *
+   * Once a ride: a load that failed is not asked for again on every frame,
+   * and the next ride — the next belt — asks again.
+   */
+  #want(body: RiderBody): void {
+    if (this.#asked.has(body)) return;
+    this.#asked.add(body);
+    void riderBodyOfWorld(this.#otherBodiesOf, body).then(
+      (scene) => {
+        if (!this.#disposed) this.addBody(body, scene);
+      },
+      // Drawn in the default body for the rest of this ride. @see riderBodyOfWorld
+      () => undefined,
+    );
   }
 
   addTo(scene: Scene): void {
@@ -17627,7 +17897,10 @@ export class RealisticRiderBelt {
 
   /** Every material the riders wear. For the D-11 assertion. */
   get materials(): readonly Material[] {
-    return [...this.#materials, ...this.#riders.map((rider) => rider.material)];
+    return [
+      ...this.#materials,
+      ...this.#everyPool().flatMap((pool) => pool.riders.map((rider) => rider.material)),
+    ];
   }
 
   /** Whether the realistic riders draw at all — false while the stylised ones do. */
@@ -17647,7 +17920,7 @@ export class RealisticRiderBelt {
 
   /** The helmet and glasses' one instanced mesh. For the tests. */
   get helmets(): InstancedMesh {
-    return this.#helmets;
+    return (this.#pools[REALISTIC_DEFAULT_BODY] as RealisticRiderPool).helmets;
   }
 
   /** The bicycles' frames' one instanced mesh — #2722's read-back. */
@@ -17682,6 +17955,7 @@ export class RealisticRiderBelt {
       rideSeconds: 0,
       crankAngle: Math.PI / 2,
     };
+    this.#use(REALISTIC_DEFAULT_BODY);
     this.#placeOne(0, level);
     const rider = this.#riders[0] as RealisticRiderSlot;
     rider.root.updateMatrixWorld(true);
@@ -17719,8 +17993,11 @@ export class RealisticRiderBelt {
    * #625's browser gate. @see realisticShouldersOf
    */
   shouldersOf(into: { x: number; y: number; z: number }): boolean {
-    const rider = this.#riders[0];
-    if (rider === undefined || !rider.root.visible) return false;
+    // #2839: the rider is slot 0 of whichever body's pool drew them.
+    const rider = this.#everyPool()
+      .map((pool) => pool.riders[0])
+      .find((each) => each?.root.visible === true);
+    if (rider === undefined) return false;
     const left = boneOf(rider.bones, 'upperarm01.L').getWorldPosition(this.#a);
     const right = boneOf(rider.bones, 'upperarm01.R').getWorldPosition(this.#b);
     into.x = (left.x + right.x) / 2;
@@ -17744,14 +18021,29 @@ export class RealisticRiderBelt {
     });
   }
 
-  /** Every rider's body. For the tests. */
+  /** Every rider's body in the default body's pool, by slot. For the tests. */
   get bodies(): readonly SkinnedMesh[] {
-    return this.#riders.map((rider) => rider.body);
+    return this.bodiesOf(REALISTIC_DEFAULT_BODY);
   }
 
-  /** Each body's kit colour, linear, as its shader reads it — #623. For the tests. */
+  /** Every rider's body in one body's pool, by slot; none where it has no pool — #2839. For the tests. */
+  bodiesOf(body: RiderBody): readonly SkinnedMesh[] {
+    return (this.#pools[body]?.riders ?? []).map((rider) => rider.body);
+  }
+
+  /** One body's helmets, or `undefined` where it has no pool — #2839. For the tests. */
+  helmetsOf(body: RiderBody): InstancedMesh | undefined {
+    return this.#pools[body]?.helmets;
+  }
+
+  /** Each slot's kit colour in the default body's pool, linear, as its shader reads it — #623. For the tests. */
   get kitColours(): readonly Color[] {
-    return this.#riders.map((rider) => rider.kit.value);
+    return this.kitColoursOf(REALISTIC_DEFAULT_BODY);
+  }
+
+  /** Each slot's kit colour in one body's pool — #2839. For the tests. */
+  kitColoursOf(body: RiderBody): readonly Color[] {
+    return (this.#pools[body]?.riders ?? []).map((rider) => rider.kit.value);
   }
 
   /** Dresses the rider — and only the rider — in the kit they chose (#623). @see RiderBelt.setRiderKit */
@@ -17780,25 +18072,53 @@ export class RealisticRiderBelt {
     cyclists: readonly SceneryCyclist[] = [],
   ): void {
     if (!this.#shown) return;
+    const pools = this.#everyPool();
     let slot = 0;
+    // #2839: how many riders each body's pool drew this frame.
+    const worn = new Map<RealisticRiderPool, number>();
     for (const marker of markers) {
-      if (slot >= this.#riders.length) break;
+      if (slot >= REALISTIC_RIDER_SLOTS) break;
       if (!Object.hasOwn(RIDER_TINTS, marker.kind)) continue;
+      // #2839: a body with no pool yet is asked for, and drawn as the default until it lands.
+      const chosen = riderBodyFor(marker.body);
+      if (this.#pools[chosen] === undefined) this.#want(chosen);
+      // The slot in the marker's own body's pool, and nothing in any other's.
+      const pool = this.#pools[this.#use(chosen)] as RealisticRiderPool;
       this.#placeOne(slot, marker);
       this.#fadeOne(slot, riderFaded(marker, fade));
+      worn.set(pool, (worn.get(pool) ?? 0) + 1);
+      for (const other of pools) {
+        if (other === pool) continue;
+        (other.riders[slot] as RealisticRiderSlot).root.visible = false;
+        other.helmets.setMatrixAt(slot, this.#nowhere);
+      }
       slot += 1;
     }
-    for (let rest = slot; rest < this.#riders.length; rest += 1) {
-      (this.#riders[rest] as RealisticRiderSlot).root.visible = false;
+    for (const pool of pools) {
+      for (let rest = slot; rest < REALISTIC_RIDER_SLOTS; rest += 1) {
+        (pool.riders[rest] as RealisticRiderSlot).root.visible = false;
+      }
     }
+    // The scenery cyclists ride in the default body's helmets. @see ridingPose
+    this.#use(REALISTIC_DEFAULT_BODY);
     const first = slot;
     for (const cyclist of cyclists.slice(0, SCENERY_CYCLISTS_MAX)) {
       this.#placeCyclist(slot, cyclist);
       slot += 1;
     }
     this.#cyclistSlots = { first, count: slot - first };
-    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks]) {
       mesh.count = slot;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    }
+    for (const pool of pools) {
+      const mesh = pool.helmets;
+      const cyclistsToo = pool === this.#pools[REALISTIC_DEFAULT_BODY];
+      mesh.count = cyclistsToo ? slot : first;
+      // One draw call for a body that is on the road, and none for one that is
+      // not: a field all of one body costs what it did before #2839.
+      mesh.visible = (worn.get(pool) ?? 0) > 0 || (cyclistsToo && slot > first);
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     }
@@ -17828,6 +18148,7 @@ export class RealisticRiderBelt {
       rideSeconds: 0,
       crankAngle,
     };
+    this.#use(REALISTIC_DEFAULT_BODY);
     this.#placeOne(0, seated);
     const rider = this.#riders[0] as RealisticRiderSlot;
     rider.root.updateMatrixWorld(true);
@@ -17872,14 +18193,24 @@ export class RealisticRiderBelt {
   }
 
   dispose(): void {
-    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+    this.#disposed = true;
+    const pools = this.#everyPool();
+    for (const mesh of [
+      this.#frame,
+      this.#rubber,
+      this.#metal,
+      this.#cranks,
+      ...pools.map((pool) => pool.helmets),
+    ]) {
       mesh.geometry.dispose();
       mesh.dispose();
     }
     for (const material of this.#materials) material.dispose();
-    for (const rider of this.#riders) {
-      rider.material.dispose();
-      rider.body.skeleton.dispose();
+    for (const pool of pools) {
+      for (const rider of pool.riders) {
+        rider.material.dispose();
+        rider.body.skeleton.dispose();
+      }
     }
   }
 
@@ -18635,7 +18966,7 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
   const world = realisticWorld;
   return world === undefined
     ? undefined
-    : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+    : new RealisticRiderBelt(world.body, world.bicycle, world.rider, world);
 }
 
 /** #2722: the vertical, a bicycle's own long axis, and no scale, for {@link cyclistMatrix}. */
@@ -20241,12 +20572,13 @@ export function realisticBicycleTriangles(): number {
  */
 export function stylisedRiderTriangles(): number {
   const belt = new RiderBelt();
-  const { bodies, torsos, cranksets, limbs } = belt.meshes;
+  const { bodies, torsos, femaleTorsos, cranksets, limbs } = belt.meshes;
   const count = (geometry: BufferGeometry): number =>
     (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
   const total =
     count(bodies.geometry) +
-    count(torsos.geometry) +
+    // #2839: a rider wears one upper body; the budget prices the heavier.
+    Math.max(count(torsos.geometry), count(femaleTorsos.geometry)) +
     count(cranksets.geometry) +
     count(limbs.geometry) * LEG_BONE_COUNT;
   belt.dispose();
@@ -25130,7 +25462,7 @@ class RealisticDrawing {
       skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
-    this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+    this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider, world);
     this.riders.setRiderKit(riderKit);
     this.silhouette = this.riders.silhouette();
     this.shadows = new RiderSilhouetteBelt(this.silhouette);

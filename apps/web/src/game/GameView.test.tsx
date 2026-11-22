@@ -38,7 +38,8 @@ import {
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
 import { rideBack, RideBackContext, type RideBack } from '../shell/ride-back';
-import type { GameRenderer, SceneFrame } from './port';
+import type { GameRenderer, RiderMarker, SceneFrame } from './port';
+import { pacerBodyFor } from './rider-body';
 import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
 import type { CalendarDay, Season } from './season';
 import {
@@ -71,7 +72,7 @@ import {
   type Kilograms,
   type RoutePoint,
 } from '@onyourleft/domain';
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
@@ -295,6 +296,8 @@ async function startRiding(options: {
   readonly camera?: CameraThrottle;
   /** The rider's local day — #1622. @see GameViewProps.today */
   readonly today?: () => CalendarDay;
+  /** Which rider is drawn — #2839. @see GameViewProps.riderBody */
+  readonly riderBody?: RiderBody;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -309,6 +312,7 @@ async function startRiding(options: {
       now={() => nowMs}
       camera={options.camera}
       today={options.today}
+      riderBody={options.riderBody}
     />,
   );
   await settle();
@@ -1478,6 +1482,7 @@ const NO_RENDERER: GameRenderer = {
 async function rideAtMass(
   riderMass: Kilograms | undefined,
   kitColour?: KitColour,
+  riderBody?: RiderBody,
 ): Promise<SceneFrame[]> {
   // ⚠️ Both runs start from the same clock and an empty frame queue. `nowMs`
   // and `pending` are module state reset per *test*, and this helper is called
@@ -1493,6 +1498,7 @@ async function rideAtMass(
       now={() => nowMs}
       {...(riderMass === undefined ? {} : { riderMass })}
       {...(kitColour === undefined ? {} : { kitColour })}
+      {...(riderBody === undefined ? {} : { riderBody })}
     />,
   );
   await settle();
@@ -1571,6 +1577,53 @@ describe('the ride is in the athlete’s own kit colour (#623)', () => {
 
     expect(kitsHanded.length).toBeGreaterThan(0);
     expect(kitsHanded.every((handed) => handed.chosen === undefined)).toBe(true);
+  });
+});
+
+/**
+ * Which rider is drawn reaches the renderer (#2839) — on the frame's own
+ * markers, which is what both worlds draw from. Deleting `riderBody:
+ * riderBodyRef.current` from `GameView.tsx`'s frame, or the read of the prop
+ * at ride start, turns the first red; `scene.ts` dropping the ghost's turns
+ * the third.
+ */
+describe('the ride draws the rider the athlete chose (#2839)', () => {
+  const ridersOf = (frames: readonly SceneFrame[], kind: string): RiderMarker[] =>
+    frames.flatMap((frame) => frame.markers.filter((marker) => marker.kind === kind));
+
+  it('carries the chosen body on the rider’s marker in every frame', async () => {
+    const frames = await rideAtMass(undefined, undefined, 'female');
+
+    const riders = ridersOf(frames, 'rider');
+    expect(riders.length).toBeGreaterThan(10);
+    expect(riders.every((marker) => marker.body === 'female')).toBe(true);
+  });
+
+  it('carries none for a rider who never chose, which a renderer draws as the default', async () => {
+    const frames = await rideAtMass(undefined);
+
+    const riders = ridersOf(frames, 'rider');
+    expect(riders.length).toBeGreaterThan(10);
+    expect(riders.every((marker) => !('body' in marker))).toBe(true);
+  });
+
+  it('draws the pacer in the body its route seeds, whatever the rider chose', async () => {
+    const frames = await startRiding({ pacer: true, riderBody: 'female' });
+    await pump(10);
+
+    const bots = ridersOf(frames, 'bot');
+    expect(bots.length).toBeGreaterThan(0);
+    const seeded = pacerBodyFor(testRoute().id);
+    expect(bots.every((marker) => marker.body === seeded)).toBe(true);
+  });
+
+  it('draws the rider’s ghost as the rider: it is their own earlier ride', async () => {
+    const frames = await startRiding({ pacer: false, ghost: true, riderBody: 'female' });
+    await pump(10);
+
+    const ghosts = ridersOf(frames, 'ghost');
+    expect(ghosts.length).toBeGreaterThan(0);
+    expect(ghosts.every((marker) => marker.body === 'female')).toBe(true);
   });
 });
 

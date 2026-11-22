@@ -619,9 +619,10 @@ describe('the manifest names its fields rather than spreading the row', () => {
 
   it('carries the sex and year of birth the rider entered — #2432', async () => {
     await seedLibrary(1);
-    await harness.write(async (store) =>
-      store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 }),
-    );
+    await harness.write(async (store) => {
+      await store.setAthleteRider(ATHLETE_A, 'female');
+      await store.setAthleteBirthYear(ATHLETE_A, 1985);
+    });
     const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
 
     expect(athlete['calorieSex']).toBe('female');
@@ -634,6 +635,37 @@ describe('the manifest names its fields rather than spreading the row', () => {
 
     expect(athlete['calorieSex']).toBeUndefined();
     expect(athlete['birthYear']).toBeUndefined();
+  });
+
+  it('carries the rider the athlete chose, beside a calorie sex it never came from — #2839', async () => {
+    // `female` is not the default, which an absent field also draws; and the
+    // calorie sex is the OTHER word, so a manifest that filled one field from
+    // the other is red.
+    await seedLibrary(1);
+    // A row written before the owner's ruling of 2026-11-20, whose two fields
+    // disagree: the export carries each as stored, never one filled from the other.
+    await harness.write(async (store) => {
+      const row = await store.getAthlete(ATHLETE_A);
+      if (row === undefined) throw new Error('no athlete row');
+      await store.putAthlete({ ...row, calorieSex: 'male', birthYear: 1985, riderBody: 'female' });
+    });
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['riderBody']).toBe('female');
+    expect(athlete['calorieSex']).toBe('male');
+  });
+
+  it('carries no rider for an athlete who never chose one, whatever their calorie sex — #2839', async () => {
+    await seedLibrary(1);
+    // A row as #2432 left it: the calorie sex, and no rider chosen.
+    await harness.write(async (store) => {
+      const row = await store.getAthlete(ATHLETE_A);
+      if (row === undefined) throw new Error('no athlete row');
+      await store.putAthlete({ ...row, calorieSex: 'female', birthYear: 1985 });
+    });
+    const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
+
+    expect(athlete['riderBody']).toBeUndefined();
   });
 
   it('carries no kit colour for a rider who never chose one', async () => {

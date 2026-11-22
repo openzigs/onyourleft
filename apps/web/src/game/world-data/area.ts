@@ -27,6 +27,17 @@
  *   held.
  * - {@link AreaReader.stop} abandons a running read and every waiting one.
  *
+ * **A block read in part** — some of its tiles refused or timed out, and at
+ * least one read — is held, and is **read again** (#2990): its failed tiles
+ * alone, at each crossing whose new 3 × 3 still holds it, after that
+ * crossing's delay like any of its requests, at most
+ * {@link MAX_PARTIAL_REREADS} times while it is held. What a re-read brings is
+ * added to the block; what it cannot read stays as it was.
+ *
+ * {@link AreaReaderOptions.onChange} is told each time what is held changes —
+ * a block read, read again or dropped — so the open-world session can grow its
+ * street graph as the ride goes, and drop what is behind.
+ *
  * ⚠️ **What is requested is a function of the rider's block alone** (R-1):
  * a position is turned into its block by {@link blockOf} and nothing else of
  * it is kept. The reader takes no privacy zone (R-3, the owner's Q2) and the
@@ -52,6 +63,7 @@ import {
 
 import {
   corridorError,
+  joinCorridorFeatures,
   readCorridorTiles,
   type ArchiveOpening,
   type CorridorArchive,
@@ -77,6 +89,14 @@ export const MAX_HELD_TILES = MAX_HELD_BLOCKS * 4;
 
 /** The longest a crossing's request waits (ADR 0090 R-8, the owner's Q4 of 2026-11-20). */
 export const CROSSING_DELAY_MAX_MS = 30_000;
+
+/**
+ * How many times a block read in part is read again while it is held: **2**.
+ * *#2990's choice*: a tile refused for its content (`limits.ts`) is refused
+ * again, so the count bounds what such a tile costs; a timeout or a dropped
+ * connection has two more crossings to come back.
+ */
+export const MAX_PARTIAL_REREADS = 2;
 
 /** One block: a z14 tile of the archive's grid. */
 export interface BlockId {
@@ -178,6 +198,8 @@ export interface AreaReaderOptions {
   /** Where failures are said, in `describeCorridorFailure`'s words only. */
   readonly log?: ((line: string) => void) | undefined;
   readonly yieldToIdle?: (() => Promise<void>) | undefined;
+  /** What is held changed: a block was read, read again, or dropped (#2990). */
+  readonly onChange?: (() => void) | undefined;
 }
 
 export interface AreaReader {
@@ -292,15 +314,40 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
           tile: (tile, signal) => (options.archive as CorridorArchive).tile(tile, signal),
         };
 
+  /** How many times each held block has been read again (#2990). */
+  const rereads = new Map<number, number>();
+
+  /** Whether the held block `key` is one read in part that may be read again. */
+  const readAgain = (key: number): boolean => {
+    const block = held.get(key);
+    return (
+      block !== undefined &&
+      block.tiles.some((tile) => tile.state === 'refused') &&
+      (rereads.get(key) ?? 0) < MAX_PARTIAL_REREADS
+    );
+  };
+
   const readOne = async (
     block: BlockId,
     stop: AbortController,
   ): Promise<'read' | 'wrong-schema' | 'none'> => {
     if (archive === undefined) return 'none';
-    const tiles = tilesOfBlock(block);
+    const key = keyOf(block);
+    // A block read in part is read again for its failed tiles alone.
+    const before = held.get(key);
+    if (before !== undefined) rereads.set(key, (rereads.get(key) ?? 0) + 1);
+    const tiles =
+      before === undefined
+        ? tilesOfBlock(block)
+        : tilesOfBlock(block).filter((tile) =>
+            before.tiles.some((t) => t.x === tile.x && t.y === tile.y && t.state === 'refused'),
+          );
     const plan: CorridorPlan = {
       frame: options.frame,
-      tiles: tiles.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' })),
+      tiles:
+        before === undefined
+          ? tiles.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' }))
+          : before.tiles,
       requestable: tiles,
     };
     const read = await readCorridorTiles({
@@ -315,13 +362,25 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     if (read.kind === 'wrong-schema') return 'wrong-schema';
     // A block the rider has left behind while it was read is not kept: its
     // read runs on until a crossing's delay ends, and may finish first.
-    if (read.kind !== 'read' || stopped || !wanted.has(keyOf(block))) return 'none';
-    held.set(keyOf(block), {
-      block,
-      tiles: read.tiles,
-      features: read.features,
-      streets: read.tileStreets,
-    });
+    if (read.kind !== 'read' || stopped || !wanted.has(key)) return 'none';
+    if (before === undefined) {
+      held.set(key, {
+        block,
+        tiles: read.tiles,
+        features: read.features,
+        streets: read.tileStreets,
+      });
+    } else {
+      // Dropped while it was read again: not kept, as any block left behind.
+      if (held.get(key) !== before) return 'none';
+      held.set(key, {
+        block,
+        tiles: read.tiles,
+        features: joinCorridorFeatures(before.features, read.features),
+        streets: [...before.streets, ...read.tileStreets],
+      });
+    }
+    options.onChange?.();
     return 'read';
   };
 
@@ -332,7 +391,7 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
         const block = queue.shift();
         if (block === undefined || stopped) return;
         const key = keyOf(block);
-        if (!wanted.has(key) || held.has(key)) continue;
+        if (!wanted.has(key) || (held.has(key) && !readAgain(key))) continue;
         const stop = new AbortController();
         const forward = (): void => {
           stop.abort();
@@ -365,10 +424,17 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     const around = blocksAround(block);
     centre = keyOf(block);
     wanted = new Set(around.map(keyOf));
-    for (const key of [...held.keys()]) if (!wanted.has(key)) held.delete(key);
+    let dropped = false;
+    for (const key of [...held.keys()]) {
+      if (wanted.has(key)) continue;
+      held.delete(key);
+      rereads.delete(key);
+      dropped = true;
+    }
     for (let i = queue.length - 1; i >= 0; i--) {
       if (!wanted.has(keyOf(queue[i] as BlockId))) queue.splice(i, 1);
     }
+    if (dropped) options.onChange?.();
     return around;
   };
 

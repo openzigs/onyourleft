@@ -151,12 +151,21 @@ export async function consentToTactics(
   });
 }
 
-/** A pacer state of the domain's shape (#2712): the rider 12 m back, in the draft, a rise ahead. */
+/**
+ * A pacer state of the domain's shape (#2712): the rider 12 m back, in the
+ * draft, a rise ahead — so, since #2835, the pacer easing before the climb.
+ */
 export const PACER_INPUT: ModelPacerInput = {
   pacerWPerKg: 2.5,
   plan: 'rolling',
-  intent: 'hold',
+  intent: 'ease',
   secondsInIntent: 10,
+  reason: 'before-climb',
+  byPct: 7,
+  starting: false,
+  riderPlace: 'level',
+  gapS: -1.3,
+  placeForS: 40,
   riderGapM: -12,
   riderWPerKg: 2.4,
   riderInDraft: true,
@@ -172,15 +181,11 @@ export const PACER_INPUT: ModelPacerInput = {
   },
 };
 
-/** A model's valid pacer answer (#2712). */
-export const PACER_ANSWER = JSON.stringify({
-  plan: 'climber',
-  intent: 'ease',
-  say: 'Nice and steady, stay on my wheel.',
-});
+/** A model's valid pacer answer (#2712; a line alone since #2835). */
+export const PACER_ANSWER = JSON.stringify({ say: 'Nice and steady, stay on my wheel.' });
 
-/** Whether an `/api/chat` body asks for a pacer decision: its schema names a plan. */
+/** Whether an `/api/chat` body asks for a pacer's line: its schema names one. */
 export function asksForPacer(body: Readonly<Record<string, unknown>>): boolean {
   const format = body.format as { properties?: Record<string, unknown> } | undefined;
-  return format?.properties?.plan !== undefined;
+  return format?.properties?.say !== undefined;
 }

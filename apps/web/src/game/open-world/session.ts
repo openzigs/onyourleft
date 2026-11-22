@@ -23,7 +23,9 @@
  *
  * Every tile held is added to one `StreetGraph`, with that tile's own streets
  * (`HeldBlock.streets`), in the frame the tiles were decoded in: the start
- * itself, so the start is the frame's origin. The start snaps to the nearest
+ * itself, so the start is the frame's origin. The graph is built in a worker
+ * (`graph-build.ts`, #2990), and the rolling route reads the page's copy of
+ * it, a `StreetMirror`. The start snaps to the nearest
  * point on any edge within {@link OPEN_WORLD_START_REACH_METRES}; none is
  * `no-street`. The snapped street is split there: the ride begins along it
  * towards its `to` end, the street's own vertex order, unless that half is
@@ -31,12 +33,27 @@
  * the route turns round onto it. Heights are flat (0 m) until #2899 reads
  * real ones, so every grade of the first view is 0 %.
  *
+ * ## As the ride goes (#2990)
+ *
+ * Each frame the road tells the reader where the rider is (`road.ts`
+ * §`OpenWorldRoadHooks.at`), so the blocks round them are read as they go
+ * (`area.ts` §`moveTo`). Whenever what the reader holds changes, the tiles it
+ * gained are sent to the worker and the ones it dropped are taken out, so the
+ * graph is the 3 × 3 round the rider, 36 tiles at most. A street that ran off
+ * the map held — where the rolling route turned round, at what was a dead end
+ * only for want of the next block — goes on once that block is in, and the
+ * road takes the way on there (`RollingRoute.reopen`) while the rider is far
+ * enough short of it that no grade sent changes.
+ *
+ * A loop (`from === to`) is offered as two ways, `id` and `id:reverse`, of
+ * one street, so a choice by id can tell them apart (`GraphStreets`).
+ *
  * ## Teardown
  *
  * {@link OpenWorldSession.stop} stops the reader — its running read
- * abandoned, its waiting ones dropped and its held blocks let go — and the
- * start's deadline. The graph is built on the main thread, once, at the start
- * (36 tiles at most, `MAX_HELD_TILES`), so there is no worker to stop yet.
+ * abandoned, its waiting ones dropped and its held blocks let go — the
+ * start's deadline, and the graph's worker. The worker is made with the first
+ * tile to build, so a start stopped before any is read never makes one.
  *
  * ⚠️ **Nothing here logs, stores or sends the start** (ADR 0090, the start
  * "never leaves the device"): what is asked for is the start's blocks, which
@@ -60,13 +77,20 @@ import {
 import {
   describeStreetGraphRefusal,
   METRES_PER_DEGREE_LATITUDE,
-  StreetGraph,
   type CorridorFrame,
   type StreetGraphEdge,
+  type TileId,
 } from '@onyourleft/map-features';
 
-import { createAreaReader, type HeldBlock } from '../world-data/area';
+import { createAreaReader } from '../world-data/area';
 import type { CorridorArchive } from '../world-data/corridor';
+import {
+  graphBuilder,
+  StreetMirror,
+  type GraphBuilder,
+  type GraphNodeEntry,
+  type GraphTile,
+} from './graph-build';
 import {
   OPEN_WORLD_ROUTE_ID,
   OPEN_WORLD_START_REACH_METRES,
@@ -108,6 +132,8 @@ export interface OpenWorldSessionOptions {
   readonly yieldToIdle?: (() => Promise<void>) | undefined;
   /** The start's bound: {@link OPEN_WORLD_START_TIMEOUT_MS} when absent. */
   readonly startTimeoutMs?: number | undefined;
+  /** Where the graph is built: `graph-build.ts` §`graphBuilder`, a worker, when absent. */
+  readonly graphBuilder?: ((frame: CorridorFrame) => GraphBuilder) | undefined;
 }
 
 const defaultSchedule = (run: () => void, ms: number): (() => void) => {
@@ -133,21 +159,15 @@ function pointAt(frame: CorridorFrame, x: number, z: number): RollingPoint {
   return { position: positionAt(frame, x, z), elevation: altitudeMetres(0) };
 }
 
-/** One graph over every tile held, each with its own streets. */
-function streetGraphOf(
-  held: readonly HeldBlock[],
-  frame: CorridorFrame,
-  log: ((line: string) => void) | undefined,
-): StreetGraph {
-  const graph = new StreetGraph(frame);
-  for (const block of held) {
-    for (const { tile, streets } of block.streets) {
-      const refusal = graph.addTile(tile, streets);
-      if (refusal !== null) log?.(describeStreetGraphRefusal(refusal));
-    }
-  }
-  return graph;
+/** What the session reads of the graph: the page's copy of it (`graph-build.ts`). */
+interface StreetLookup {
+  readonly version: number;
+  node(id: number): GraphNodeEntry | undefined;
+  edge(id: number): StreetGraphEdge | undefined;
+  edges(): Iterable<StreetGraphEdge>;
 }
+
+const tileKey = (tile: TileId): string => `${String(tile.x)}/${String(tile.y)}`;
 
 /** Where the start meets a street: the edge, the segment and how far along it. */
 interface Snap {
@@ -162,7 +182,7 @@ interface Snap {
  * The nearest point to the frame's origin — the start — on any edge long
  * enough to be split into a way either side, within the reach; or `undefined`.
  */
-function snapStart(graph: StreetGraph): Snap | undefined {
+function snapStart(graph: StreetLookup): Snap | undefined {
   let best: Snap | undefined;
   let bestDistance = OPEN_WORLD_START_REACH_METRES;
   for (const edge of graph.edges()) {
@@ -188,28 +208,41 @@ function snapStart(graph: StreetGraph): Snap | undefined {
   return best;
 }
 
-/** The rolling route's view of the graph: each edge leaving a node, oriented away from it. */
+/**
+ * The rolling route's view of the graph: each edge leaving a node, oriented
+ * away from it. It reads the graph as it is now, so a street added since the
+ * route last extended is a way on the next time it does (#2990).
+ */
 class GraphStreets implements RollingStreetGraph {
-  readonly #graph: StreetGraph;
+  readonly #graph: StreetLookup;
   readonly #frame: CorridorFrame;
   readonly #fromStart: readonly RollingEdge[];
   readonly #oriented = new Map<string, RollingEdge>();
+  #version: number;
 
-  constructor(graph: StreetGraph, frame: CorridorFrame, fromStart: readonly RollingEdge[]) {
+  constructor(graph: StreetLookup, frame: CorridorFrame, fromStart: readonly RollingEdge[]) {
     this.#graph = graph;
     this.#frame = frame;
     this.#fromStart = fromStart;
+    this.#version = graph.version;
   }
 
   edgesFrom(node: string): readonly RollingEdge[] {
     if (node === START_NODE) return this.#fromStart;
+    // An edge's ends are renamed when the node one was stitched into goes, so
+    // what was oriented before a change to the graph is oriented again after.
+    if (this.#graph.version !== this.#version) {
+      this.#version = this.#graph.version;
+      this.#oriented.clear();
+    }
     const found = this.#graph.node(Number(node));
     if (found === undefined) return [];
     const out: RollingEdge[] = [];
     const loops = new Set<number>();
     for (const id of found.edges) {
-      // A node's edges are held while it is: `StreetGraph.node` lists no other.
-      const edge = this.#graph.edge(id) as StreetGraphEdge;
+      // The mirror is handed a node's edges with it: one missing is skipped, never thrown on.
+      const edge = this.#graph.edge(id);
+      if (edge === undefined) continue;
       let forward = edge.from === found.id;
       // A loop is listed once an end: once each way.
       if (edge.from === found.id && edge.to === found.id) {
@@ -230,8 +263,13 @@ class GraphStreets implements RollingStreetGraph {
       points.push(pointAt(this.#frame, edge.line[i] as number, edge.line[i + 1] as number));
     }
     if (!forward) points.reverse();
+    const street = String(edge.id);
+    // #2990: a loop's two ways leave and reach one node, so only their ids can
+    // tell a choice between them apart; the way back from it is either one.
+    const loop = edge.from === edge.to;
     const oriented: RollingEdge = {
-      id: String(edge.id),
+      id: loop && !forward ? `${street}:reverse` : street,
+      ...(loop ? { street } : {}),
       from: String(forward ? edge.from : edge.to),
       to: String(forward ? edge.to : edge.from),
       points,
@@ -243,10 +281,13 @@ class GraphStreets implements RollingStreetGraph {
 }
 
 /**
- * The rolling route from the snapped start along the default ways, or
+ * The ways from the snapped start, the one the ride begins on first, or
  * `undefined` when no street is within reach.
  */
-function rollingRouteFrom(graph: StreetGraph, frame: CorridorFrame): RollingRoute | undefined {
+function startWays(
+  graph: StreetLookup,
+  frame: CorridorFrame,
+): readonly [RollingEdge, RollingEdge] | undefined {
   const snap = snapStart(graph);
   if (snap === undefined) return undefined;
   const { edge, segment } = snap;
@@ -293,9 +334,21 @@ function rollingRouteFrom(graph: StreetGraph, frame: CorridorFrame): RollingRout
     points: points(forwards ? behind : ahead),
     roadClass,
   };
-  // `first` is at least `ROLLING_LEAST_WAY_METRES` long (the snap takes no
-  // edge shorter than twice that), so the rolling route takes it as a start.
-  return new RollingRoute(new GraphStreets(graph, frame, [first, other]), first);
+  return [first, other];
+}
+
+/**
+ * The rolling route from the snapped start's ways, reading `graph` as it is
+ * each time it extends. The first way is at least `ROLLING_LEAST_WAY_METRES`
+ * long (the snap takes no edge shorter than twice that), so the rolling route
+ * takes it as a start.
+ */
+function rollingRouteFrom(
+  graph: StreetLookup,
+  frame: CorridorFrame,
+  ways: readonly [RollingEdge, RollingEdge],
+): RollingRoute {
+  return new RollingRoute(new GraphStreets(graph, frame, ways), ways[0]);
 }
 
 /** A session on `options.start`: its start is under way when this returns. */
@@ -306,6 +359,14 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     longitude: start.position.longitude,
   };
   const schedule = options.schedule ?? defaultSchedule;
+  const mirror = new StreetMirror();
+  let builder: GraphBuilder | undefined;
+  /** Whether the graph could not be built: the ride rides on what it has. */
+  let graphFailed = false;
+  /** The tiles sent to the graph, by key. */
+  const sent = new Map<string, TileId>();
+  let syncing: Promise<void> = Promise.resolve();
+  let stopped = false;
   const reader = createAreaReader({
     archive: options.archive,
     frame,
@@ -314,8 +375,41 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     schedule,
     log: options.log,
     yieldToIdle: options.yieldToIdle,
+    onChange: () => {
+      void sync();
+    },
   });
-  let stopped = false;
+  /**
+   * What the reader holds now, against what the graph was sent: the tiles
+   * gained go in and the tiles dropped come out, in one change. Resolves when
+   * every change made so far is in the mirror.
+   */
+  function sync(): Promise<void> {
+    if (stopped || graphFailed) return syncing;
+    const now = new Map<string, GraphTile>();
+    for (const block of reader.held()) {
+      for (const each of block.streets) now.set(tileKey(each.tile), each);
+    }
+    const add = [...now].filter(([key]) => !sent.has(key)).map(([, each]) => each);
+    const remove = [...sent].filter(([key]) => !now.has(key)).map(([, tile]) => tile);
+    if (add.length === 0 && remove.length === 0) return syncing;
+    for (const each of add) sent.set(tileKey(each.tile), each.tile);
+    for (const tile of remove) sent.delete(tileKey(tile));
+    builder ??= (options.graphBuilder ?? graphBuilder)(frame);
+    const applied = builder.apply({ add, remove });
+    syncing = syncing.then(async () => {
+      const delta = await applied;
+      if (stopped) return;
+      if (delta === undefined) {
+        graphFailed = true;
+        return;
+      }
+      mirror.apply(delta);
+      // A tile the graph cannot take is refused by `addTile`, never thrown.
+      for (const refusal of delta.refusals) options.log?.(describeStreetGraphRefusal(refusal));
+    });
+    return syncing;
+  }
   let deadline: (() => void) | undefined;
   const endDeadline = (): void => {
     deadline?.();
@@ -345,10 +439,12 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       );
     }
     if (begun.kind !== 'ready' || late) return refused('unavailable');
-    // A tile the graph cannot take is refused by `addTile`, never thrown.
-    const graph = streetGraphOf(reader.held(), frame, options.log);
-    const route = rollingRouteFrom(graph, frame);
-    if (route === undefined) return refused('no-street');
+    await sync();
+    if (stopped) return { kind: 'stopped' };
+    if (graphFailed) return refused('unavailable');
+    const ways = startWays(mirror, frame);
+    if (ways === undefined) return refused('no-street');
+    const route = rollingRouteFrom(mirror, frame, ways);
     return {
       kind: 'ready',
       route: {
@@ -357,10 +453,17 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
         profile: route.view(),
         attempts: 0,
       },
-      // #2982: each ride its own rolling route from the same snapped start, over
-      // the same graph, so its first view is the card's. The snap found a street
-      // once, and the graph has not changed, so it finds the same one again.
-      road: () => new OpenWorldRoad(rollingRouteFrom(graph, frame) as RollingRoute),
+      // #2982: each ride its own rolling route from the same snapped start's
+      // ways, over the graph as it is, so its first view is the card's while
+      // the rider has not moved. #2990: the road tells the reader where the
+      // rider is, and reopens a turn-round once the graph has grown past it.
+      road: () =>
+        new OpenWorldRoad(rollingRouteFrom(mirror, frame, ways), {
+          at: (position) => {
+            reader.moveTo(position);
+          },
+          graphVersion: () => mirror.version,
+        }),
     };
   })();
 
@@ -372,6 +475,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // The reader's start then resolves at once, and the start's deadline
       // is cancelled there, as it is after any start.
       reader.stop();
+      builder?.stop();
     },
   };
 }

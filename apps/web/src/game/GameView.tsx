@@ -37,7 +37,12 @@ import {
   type JSX,
 } from 'react';
 
-import { isCircuitRouteId, isLevelRouteId, type KitColour } from '@onyourleft/store';
+import {
+  isCircuitRouteId,
+  isLevelRouteId,
+  type KitColour,
+  type RiderBody,
+} from '@onyourleft/store';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
@@ -68,6 +73,7 @@ import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
 import { ModelPacer, modelPacerInput, modelPacerTerrain } from './model-pacer';
+import type { PacerDoing } from './pacer-doing';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
@@ -108,6 +114,7 @@ import {
   type GameTrainerPort,
 } from './trainer-port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
+import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
@@ -446,9 +453,10 @@ export interface GamePort {
    */
   riderGhostOffered?(): boolean;
   /**
-   * The AI pacer — #2712, ADR 0072: a model on this device's instance picks
-   * the pacer's plan and intent every few seconds and writes a line of
-   * feedback (`instance/pacer-port.ts`). Absent, or not `offered()`, the
+   * The AI pacer — #2712, ADR 0072; #2835, ADR 0083: every few seconds this
+   * device decides what the pacer does, from the rider's gap and the road,
+   * and a model on its instance writes a line of feedback
+   * (`instance/pacer-port.ts`). Absent, or not `offered()`, the
    * choice is never drawn and nothing is sent: a rider with no instance
    * loses this and nothing else. ⚠️ An optional member threaded through JSX,
    * so a `main.tsx` that stopped supplying it is GREEN in `check:wiring`;
@@ -579,6 +587,14 @@ export interface GameViewProps {
    * opens the game rides in it without a reload.
    */
   readonly kitColour?: KitColour | undefined;
+  /**
+   * Which rider they chose to be drawn as — #2839: the athlete row's
+   * `riderBody`, undefaulted. `undefined` is a rider who has never chosen, and
+   * is drawn as the default by `rider-body.ts` §`riderBodyFor`, which the
+   * renderer calls. A prop from the shell's live value, for
+   * {@link kitColour}'s reason.
+   */
+  readonly riderBody?: RiderBody | undefined;
   /**
    * The trainer this ride may send the road to — #362.
    *
@@ -1441,6 +1457,12 @@ function GameScreen({
   /** Its line on the screen now, or `undefined`. */
   const [pacerSay, setPacerSay] = useState<string | undefined>();
   const pacerSayRef = useRef<string | undefined>(undefined);
+  /**
+   * What it is doing, as its last frame said (`model-pacer.ts` §`pacerDoing`),
+   * for the HUD's pacer power field (#2864, the owner's ruling of 2026-11-20).
+   * A ref: the HUD is drawn from the frame's state, which re-renders it.
+   */
+  const pacerDoingRef = useRef<PacerDoing | undefined>(undefined);
   // #2292: a course chosen on a game's course picker (the Games tab) opens
   // this setup with that game's switch on (`shell/routes.ts`
   // §`hrefForGamePlay`). Read once, on mount, as the route is; the switch is
@@ -1614,6 +1636,12 @@ function GameScreen({
    * built after `start`, because `three` arrives asynchronously.
    */
   const kitColourRef = useRef<KitColour | undefined>(undefined);
+  /**
+   * The body THIS ride's rider is drawn as — #2839. Read when the ride starts
+   * and held for it, as {@link kitColourRef} is; every frame's rider marker
+   * carries it (`scene.ts` §`SceneInput.riderBody`).
+   */
+  const riderBodyRef = useRef<RiderBody | undefined>(undefined);
   /**
    * THIS ride's season — #1622. Read once when a live ride starts, from the
    * rider's day and the route, and handed to the view when the view exists,
@@ -2068,6 +2096,9 @@ function GameScreen({
       if (!value || offer === undefined) return;
       setAiPacerStatus('asking');
       void offer.pacerStatus().then((status) => {
+        // #2835: the AI pacer is on in the ride menu and consented to, so the
+        // model is loaded now and not at "Go". Nothing of the rider's is sent.
+        if (status.kind === 'offered' && status.consented) void offer.warmPacer();
         if (!unmountedRef.current) setAiPacerStatus(status);
       });
     },
@@ -2087,6 +2118,10 @@ function GameScreen({
     if (offer === undefined || typeof status !== 'object' || status.kind !== 'offered') return;
     setAiPacerStatus('asking');
     void offer.consentToPacer(status).then((after) => {
+      // #2835: consent given with the switch on is the same moment.
+      if (aiPacerRef.current.wanted && after.kind === 'offered' && after.consented) {
+        void offer.warmPacer();
+      }
       if (!unmountedRef.current) setAiPacerStatus(after);
     });
   }, [props.port]);
@@ -2468,6 +2503,7 @@ function GameScreen({
     modelPacerRef.current?.director.end();
     modelPacerRef.current = undefined;
     pacerSayRef.current = undefined;
+    pacerDoingRef.current = undefined;
     setPacerSay(undefined);
     // #1042: a ride that was on the stage has ended, by *End ride* or by
     // leaving, and the recording under it (if any) keeps how its race against
@@ -2905,6 +2941,8 @@ function GameScreen({
       // dressed now; a view not yet built is dressed when it is.
       kitColourRef.current = props.kitColour;
       viewRef.current?.setRiderKit(props.kitColour);
+      // #2839: and which rider they are drawn as, held for the ride likewise.
+      riderBodyRef.current = props.riderBody;
       // #1622: the rider's own day, read ONCE here at the start of a live ride
       // and held for it — never a ghost's or a past activity's, which carry no
       // date into this line. Holidays follow the rider's day; nature follows
@@ -3358,6 +3396,7 @@ function GameScreen({
       props.screenLock,
       props.riderMass,
       props.kitColour,
+      props.riderBody,
       props.today,
       props.trainer,
       props.room,
@@ -3780,22 +3819,23 @@ function GameScreen({
       if (simulation.state.soloDraft !== undefined) {
         trainerPortRef.current?.soloDraftStepped?.(simulation.state.soloDraft);
       }
-      // #2712, ADR 0072: the AI pacer — asks on the ride's own clock, never
-      // waits, and puts each applied answer in force on the simulation from
-      // the seconds ridden it arrived at. It moves the pacer and nothing
-      // else: nothing here reaches the gradient below or any trainer write.
+      // #2712, ADR 0072, and #2835, ADR 0083: the AI pacer — the device
+      // decides its intent on the ride's own clock and puts it in force on
+      // the simulation at once, then asks the model for a line and never
+      // waits for it. It moves the pacer and nothing else: nothing here
+      // reaches the gradient below or any trainer write.
       const directed = modelPacerRef.current;
       let pacerArrived: string | undefined;
       if (directed !== undefined) {
         const said = directed.director.frame({
           riddenSeconds: simulation.state.ridden,
-          input: (inForce) =>
-            modelPacerInput({
+          ride: () => ({
+            riderSpeed: simulation.state.ride.speed,
+            seen: modelPacerInput({
               state: simulation.state,
               plan: directed.plan,
               profile: chosen.profile,
               riderMassKilograms: directed.riderMassKilograms,
-              inForce,
               // #2760: what the rider's own sensors say, each left out when
               // it is not live, and a zone only of a threshold they set.
               sensors: {
@@ -3810,6 +3850,7 @@ function GameScreen({
                 thresholdHeartRate: ownThresholdsRef.current.heartRate,
               },
             }),
+          }),
           // ADR 0082: where the pacer is on the road, for the terrain rule.
           terrain: () => modelPacerTerrain(simulation.state, chosen.profile),
           direct: (direction, from) => {
@@ -3817,6 +3858,7 @@ function GameScreen({
           },
         });
         pacerArrived = said.arrived;
+        pacerDoingRef.current = said.doing;
         if (said.showing !== pacerSayRef.current) {
           pacerSayRef.current = said.showing;
           setPacerSay(said.showing);
@@ -3863,14 +3905,12 @@ function GameScreen({
         heartRate: sensors.heartRate,
         units: unitsRef.current,
         shownPower: { view: powerViewRef.current, average: powerAverageRef.current.average },
+        // #2982, #2990: an open-world ride goes nowhere in particular, so its
+        // "to go" is a dash, which `remainingFrom` reads as nothing to say.
+        openEnded: road.follower !== undefined,
       });
       // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
-      // #2982: never on an open-world ride, which goes nowhere in particular:
-      // its view's end is only how far the road is held, which a new view moves.
-      const remaining =
-        road.follower === undefined
-          ? remainingFrom(readings, spokenDistanceUnit(unitsRef.current))
-          : undefined;
+      const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
       // #399: a climb or a descent ahead, from the SAME wrapped position the
       // strip and the plan view use (`climb-ahead.ts` says why that matters).
       const slope = slopeEvent(slopeAnnouncedRef.current, {
@@ -4173,6 +4213,9 @@ function GameScreen({
       }
 
       const origin = corridorOrigin(road.profile);
+      // #2839: the pacer's body, seeded by the route so the same route draws
+      // the same pacer on every ride. @see pacerBodyFor
+      const botBody = pacerBodyFor(chosen.id);
       // ⚠️ **Where to DRAW them, which is not where the newest step left them**
       // — #323. The simulation ticks twenty times a second and this loop runs
       // sixty, so reading the state's own distances here drew each position
@@ -4410,6 +4453,9 @@ function GameScreen({
             ? {}
             : { botDistance: alongView(road, drawn.botDistance) }),
           ghost: ghostRef.current,
+          // #2839: the rider's own body, on their marker and their ghost's.
+          riderBody: riderBodyRef.current,
+          botBody,
           // #245: the rung's scenery budget, so a throttling phone stops
           // *placing* the scenery it is about to stop drawing. @see
           // scatterItemsRef for why this is not read off `quality` here.
@@ -5271,6 +5317,8 @@ function GameScreen({
         profile={rideRoad?.profile ?? chosen.profile}
         announcement={announcement}
         state={rideRoad === undefined ? state : alongRoad(state, rideRoad.origin)}
+        // #2990: and no "to go" or route length on it, which a view's end is not.
+        openEnded={rideRoad?.follower !== undefined}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         // #1111: the RECORDER's moving time — never the simulation's
@@ -5319,6 +5367,11 @@ function GameScreen({
               // #2426: in the draft by the simulation's own `draftEvent` state.
               soloInDraft: state.soloDraft.inDraft,
             })}
+        // #2864, the owner's ruling of 2026-11-20: the AI pacer's power, the
+        // watts its tick rode on the last step, and what it is doing.
+        {...(modelPacerRef.current === undefined
+          ? {}
+          : { aiPacer: { watts: state.bot?.power, doing: pacerDoingRef.current } })}
         // #331: whose ghost this is, and the way to stop racing it — only for
         // another rider's, which the rider chose and may want gone.
         ghostStop={

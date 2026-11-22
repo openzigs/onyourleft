@@ -203,6 +203,31 @@ test.describe('#994 — switches', () => {
     );
   }
 
+  test('Settings asks Female or Male once, and the calorie panel has no sex control (2026-11-20)', async ({
+    page,
+  }) => {
+    // The owner's ruling on #2845: "They should be a single choice." The
+    // populated harness has a store for both panels, so a second control
+    // would be drawn here rather than a "no local store" notice.
+    await open(page, TABLET);
+    await visit(page, 'settings');
+    await expect(
+      page.getByRole('group', { name: 'Are you a female or a male rider?' }),
+    ).toHaveCount(1);
+    await expect(page.getByRole('radio', { name: 'Female' })).toHaveCount(1);
+    await expect(page.getByRole('radio', { name: 'Male', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('option', { name: 'Female' })).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: 'Sex' })).toHaveCount(0);
+    // The calorie panel is there, with its year, and names the choice above.
+    const calories = page.locator('.oyl-calorie-inputs');
+    await expect(calories.getByRole('textbox', { name: 'Year of birth' })).toHaveCount(1);
+    await expect(calories.locator('dt')).toHaveText('Sex');
+    await expect(calories.locator('dd')).toContainText(
+      'Female, the rider you chose under Your rider',
+    );
+    await expect(page.getByRole('radio', { name: 'Female' })).toBeChecked();
+  });
+
   test('every switch on Settings is a 44 × 24 track in a 44 px row', async ({ page }) => {
     await open(page, PHONE);
     await visit(page, 'settings');

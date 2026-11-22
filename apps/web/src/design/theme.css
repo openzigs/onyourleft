@@ -4606,6 +4606,23 @@ a.oyl-button {
 }
 
 /*
+ * #2839, the owner's ruling of 2026-11-20: the calorie panel's *Sex* is a
+ * reading of the rider choice above, not a control, so a term and its value on
+ * one line of their own, with no `dd` indent.
+ */
+.oyl-calorie-inputs__sex {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 0 var(--oyl-space-sm);
+  margin: 0;
+}
+
+.oyl-calorie-inputs__sex dd {
+  margin: 0;
+}
+
+/*
  * #669: the ERG form's own sentence — "This trainer accepts … W to … W in steps
  * of … W" — under its row, 8 px below the controls it describes (the row's own
  * gap) rather than a paragraph's 1rem either side. In a flex container margins
@@ -10323,6 +10340,34 @@ select.oyl-input {
  */
 @media not all and (min-width: 50rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--solo-draft {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
+ * THE AI PACER'S POWER, ON A TABLET ONLY — #2864, the owner's ruling of
+ * 2026-11-20 (*"Show the pacer's power on the ride screen"*).
+ *
+ * A ride with the AI pacer adds one secondary reading, *Pacer power*: its
+ * watts and, under them, what it is doing. On a 1024×600 laptop window that
+ * put the notices under the tier into the route panel
+ * (`ride-notices.browser.spec.ts` §"the AI pacer's line"), measured. ⚠️ #419
+ * asks that what gives way be recorded, so: **away from a tablet the field
+ * gives way, as the solo Draft does** (the section above) — hidden by clip, so
+ * a screen reader still reads it in its place. A tablet, at least 50 rem wide
+ * and 47 rem tall, draws it: measured there by `ride-notices.browser.spec.ts`
+ * §"#2864", with the owner's tablet insets at 1280×800.
+ */
+@media not all and (min-width: 50rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary > .oyl-hud__field--pacer-power {
     position: absolute;
     width: 1px;
     height: 1px;

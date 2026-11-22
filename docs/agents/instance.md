@@ -203,8 +203,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         writes one `tactics-call` log line of figures.
                         Since #2712 (ADR 0072) `POST /v1/analysis/pacer/decide`
                         (`tactics.ts` §`pace`, `pacer-prompt.ts`): the AI
-                        pacer's plan, intent and one screened line, under
-                        the same consent, slot and gates — docs/architecture.md
+                        pacer's one screened line — since #2835 (ADR 0083)
+                        no plan and no intent, which the device decides —
+                        under the same consent, slot and gates, and
+                        `POST /v1/analysis/pacer/warm` (§`warmPacer`), its
+                        warm-up, which takes no slot — docs/architecture.md
                         §"AI-pacer decisions — #2712".
                         Since #1251 `src/analysis/hosted-test.ts` is the
                         test question: `POST /v1/analysis/hosted/test`,

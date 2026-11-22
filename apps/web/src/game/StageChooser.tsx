@@ -90,6 +90,7 @@ import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './deliv
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
+import { isOpenWorldRouteId } from './open-world/route-id';
 import {
   PREVIEW_DEFAULT_WATTS,
   PREVIEW_MAXIMUM_WATTS,
@@ -677,8 +678,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   const chosen = [...props.routes, ...circuits].find((route) => route.id === props.picked) ?? first;
   // #2293: a built-in circuit is raced, and only raced (ADR 0064 D-8.1).
   const onCircuit = circuits.includes(chosen);
-  // A circuit's loadout has no pacer, so the pacer's box cannot refuse its ride.
-  const pacerRefused = !onCircuit && props.choice.problem !== undefined;
+  // #2990: the open-world card is ridden alone (`GameView` §`start`, #2982):
+  // no ghost, pacer, round or race is offered on it, and nor is a preview,
+  // which plays a saved route.
+  const onOpenWorld = isOpenWorldRouteId(chosen.id);
+  // A circuit's loadout has no pacer, so the pacer's box cannot refuse its
+  // ride, and nor can it the open world's.
+  const pacerRefused = !onCircuit && !onOpenWorld && props.choice.problem !== undefined;
   const windRefused = props.air.problem !== undefined;
   const refused = pacerRefused || windRefused;
   const describedBy =
@@ -781,7 +787,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   ].filter((each) => each !== undefined);
   // #2362: a press on a built-in level is always a Delivery round, so no race is offered on one.
   const lapRace =
-    props.lapRace === undefined || onLevel ? undefined : (
+    props.lapRace === undefined || onLevel || onOpenWorld ? undefined : (
       <LapRaceControl offer={props.lapRace} route={chosen} builtIn={onCircuit} idPrefix={ids} />
     );
   return (
@@ -934,17 +940,26 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           the wind. No ghost (a circuit has no attempts), no other rider's
           ghost, no pacer and no round (ADR 0064 D-8.1).
         */}
-        {onCircuit ? null : (
+        {/*
+          #2990: the open-world card's loadout is the position and the wind,
+          and a line saying why there is nothing else, first, where a rider
+          looking for the pacer would look.
+        */}
+        {onOpenWorld ? <p className="tw:mt-0">{OPEN_WORLD_ALONE_TEXT}</p> : null}
+        {onCircuit || onOpenWorld ? null : (
           <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
         )}
-        {!onCircuit && props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
+        {!onCircuit &&
+        !onOpenWorld &&
+        props.riderGhostOffered === true &&
+        props.onRiderGhost !== undefined ? (
           <RiderGhostControl
             withRiderGhost={props.withRiderGhost === true}
             onRiderGhost={props.onRiderGhost}
             problem={props.riderGhostProblem}
           />
         ) : null}
-        {onCircuit ? null : (
+        {onCircuit || onOpenWorld ? null : (
           <PacerControls
             withPacer={props.withPacer}
             onPacer={props.onPacer}
@@ -966,7 +981,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           problem={props.air.problem}
           field={props.air.field}
         />
-        {deliveryOffer === undefined || onCircuit ? null : (
+        {deliveryOffer === undefined || onCircuit || onOpenWorld ? null : (
           <DeliveryControl
             offer={deliveryOffer}
             onLevel={onLevel}
@@ -976,7 +991,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         )}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
-      {props.onPreview === undefined || onCircuit ? null : (
+      {props.onPreview === undefined || onCircuit || onOpenWorld ? null : (
         <PreviewControl
           route={chosen}
           asking={props.asking}
@@ -1804,6 +1819,15 @@ function DeliveryControl(props: {
 }
 
 /**
+ * Why the open-world card offers no ghost, pacer, round or race — #2990, for
+ * the owner's approval. An open-world ride has no saved route for a ghost or a
+ * preview, no road ahead fixed for a pacer's course, no town's houses for a
+ * round, and no loop for a race (`GameView` §`start`, #2982).
+ */
+export const OPEN_WORLD_ALONE_TEXT =
+  'An open-world ride is ridden alone, on streets no route has fixed: there is no ghost, pacer, Delivery round or lap race to ride with, and no preview.';
+
+/**
  * The rider-facing words of #1907's choice, for the owner's approval: the
  * project's own, naming no other game (ADR 0060 D-1.5). "Lap race" is the
  * mode's name (the owner, 2026-10-31); the tiers' names are #1904's.
@@ -2145,14 +2169,14 @@ function AiPacerControls(props: { readonly control: AiPacerControl }): JSX.Eleme
   );
 }
 
-/** The AI pacer's words on the chooser — #2712. Draft wording, for the owner's screenshots. */
+/** The AI pacer's words on the chooser — #2712; the switch and the consented line are the owner's of ADR 0083 R-7. */
 const AI_PACER_TEXT = {
-  switch: 'Let the AI on your instance steer the pacer and cheer you on',
+  switch: 'Let the AI on your server coach you through the pacer',
   asking: 'Asking your instance…',
   unavailable: 'Your instance could not be reached. The pacer rides as usual.',
   notOffered: 'Your instance offers you no AI model now. The pacer rides as usual.',
   consented:
-    'The AI will steer the pacer on this ride. Write-ups on your instance wait until the ride ends.',
+    'The AI will coach you on this ride. Write-ups on your server wait until the ride ends.',
   consent: 'Allow the AI pacer',
   withdraw: 'Withdraw consent',
 } as const;
@@ -2170,7 +2194,8 @@ function aiPacerConsentText(instance: string, modelAddress: string): string {
     `power per kilogram, cadence and heart rate, with how they are trending and their zones ` +
     `if you set thresholds, to the AI model at ${modelAddress}, run by your instance ` +
     `${instance}. No place, no name and nothing of your trainer is sent. ` +
-    `The AI picks how the pacer rides and writes a short line for you; it never sets your ` +
+    // #2835, ADR 0083: the AI no longer picks how the pacer rides, so the consent stops saying so.
+    `The app picks how the pacer rides; the AI writes a short line for you and never sets your ` +
     `trainer. The same consent lets AI bots race you. You can withdraw it here at any time.`
   );
 }

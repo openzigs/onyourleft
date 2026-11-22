@@ -395,6 +395,26 @@ export interface TileStreets {
   readonly streets: readonly DecodedStreetFeature[];
 }
 
+/**
+ * Two reads' features as one, `first`'s before `second`'s in each kind: a
+ * block read again for the tiles it missed keeps what it had and gains what
+ * the second read brought (`area.ts`, #2990). Here because this module packs
+ * and hands over the place points (`places-never-shown.test.ts`).
+ */
+export function joinCorridorFeatures(
+  first: CorridorFeatures,
+  second: CorridorFeatures,
+): CorridorFeatures {
+  return {
+    landUse: [...first.landUse, ...second.landUse],
+    buildings: [...first.buildings, ...second.buildings],
+    paths: [...first.paths, ...second.paths],
+    streets: [...first.streets, ...second.streets],
+    places: [...first.places, ...second.places],
+    waterLines: [...(first.waterLines ?? []), ...(second.waterLines ?? [])],
+  };
+}
+
 /** What {@link readCorridorTiles} came to. */
 export type CorridorRead =
   | {

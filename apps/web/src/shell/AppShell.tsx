@@ -47,7 +47,12 @@ import {
   type MouseEvent,
 } from 'react';
 
-import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
+import {
+  DEFAULT_UNIT_SYSTEM,
+  type KitColour,
+  type RiderBody,
+  type UnitSystem,
+} from '@onyourleft/store';
 import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
@@ -66,6 +71,7 @@ import type { BlocksPort } from '../instance/blocks-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
@@ -578,6 +584,12 @@ export interface AppShellProps {
    */
   readonly athleteKit?: AthleteKitColourPort | undefined;
   /**
+   * The settings screen's write of which rider is drawn (#2839). A port of its
+   * own for the reason `athlete/rider-body-port.ts` gives, optional like every
+   * other port here, and the choice is absent without one, as the kit's is.
+   */
+  readonly athleteRider?: AthleteRiderBodyPort | undefined;
+  /**
    * The settings screen's read and write of the rider's words to mask (#839).
    * Optional like every other port here; without one the panel says there is
    * no store to keep a list in.
@@ -645,6 +657,13 @@ export interface AppShellProps {
    */
   readonly kitColour?: KitColour | undefined;
   /**
+   * Which rider is drawn, read from the athlete row at start-up (#2839). The
+   * initial value only, and undefaulted, for {@link kitColour}'s reason:
+   * `game/rider-body.ts` §`riderBodyFor` is the one place a missing one
+   * becomes the default.
+   */
+  readonly riderBody?: RiderBody | undefined;
+  /**
    * Which units this client starts in, read from the athlete row at start-up.
    *
    * ⚠️ **The initial value only.** The shell owns the live value from here on,
@@ -680,6 +699,9 @@ function viewFor(
   kit: {
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
+    /** #2839: which rider is drawn, live, and its setter — the colour's shape. */
+    readonly body: RiderBody | undefined;
+    readonly onBodyChange: (body: RiderBody | undefined) => void;
   },
   onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
@@ -811,6 +833,8 @@ function viewFor(
           riderMass={riderMass}
           // #623: the live value, for `riderMass`' reason above.
           kitColour={kit.colour}
+          // #2839: the live value likewise.
+          riderBody={kit.body}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
           // #2362: a built-in level's card chosen, for the line under the title.
@@ -906,6 +930,8 @@ function viewFor(
           // #623, the same argument again: the recreated row carries no kit
           // colour, and `undefined` is what the game should then be told.
           onKitColourReset={kit.onChange}
+          // #2839, the same again: a recreated row carries no chosen rider.
+          onRiderBodyReset={kit.onBodyChange}
         />
       );
     case 'settings':
@@ -920,6 +946,9 @@ function viewFor(
           {...(props.athleteKit === undefined ? {} : { kit: props.athleteKit })}
           kitColour={kit.colour}
           onKitColourChange={kit.onChange}
+          {...(props.athleteRider === undefined ? {} : { rider: props.athleteRider })}
+          riderBody={kit.body}
+          onRiderBodyChange={kit.onBodyChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
           maskedWords={props.maskedWords}
@@ -999,6 +1028,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const [riderMass, setRiderMass] = useState<Kilograms | undefined>(props.riderMass);
   // #623. Seeded from the prop and then owned here, undefaulted, like the mass.
   const [kitColour, setKitColour] = useState<KitColour | undefined>(props.kitColour);
+  // #2839. Which rider is drawn: seeded from the prop and owned here likewise.
+  const [riderBody, setRiderBody] = useState<RiderBody | undefined>(props.riderBody);
   /**
    * Whether a ride has the screen — #423.
    *
@@ -1173,6 +1204,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
                 {
                   colour: kitColour,
                   onChange: setKitColour,
+                  body: riderBody,
+                  onBodyChange: setRiderBody,
                 },
                 setLevelChosen,
               )}

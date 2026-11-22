@@ -261,6 +261,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         Since #623 also `kit-colour-port.ts`, the write of the
                         rider's kit colour — a KEY into `game/bicycle.ts`
                         §`KIT_PALETTE`, stored on the athlete row
+                        Since #2839 also `rider-body-port.ts`, the write of
+                        the rider's one Female / Male choice — since the
+                        owner's ruling of 2026-11-20 both the rider drawn
+                        and the calorie estimate's sex (`setAthleteRider`)
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording

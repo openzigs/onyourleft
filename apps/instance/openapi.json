@@ -2256,7 +2256,7 @@
     "/v1/analysis/pacer/decide": {
       "post": {
         "operationId": "decidePacer",
-        "summary": "One decision for your AI pacer (#2712, ADR 0072): `input` is the ride as it stands, exactly `@onyourleft/domain`’s `ModelPacerInput` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (`ahead`, `level` or `behind`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left); no coordinate, no name — at most 2 048 characters. Answers `plan` (`rolling`, `even` or `climber`), `intent` (`hold`, `lift` or `ease`) and `say`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or \"\". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (`POST /v1/analysis/tactics/start` and `end`), the same rate limit and the same model call, with no tools and no reasoning. `tactics_invalid` when the model’s answer was not such a decision, its line did not pass, or its line said the opposite of its intent, `tactics_failed` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.",
+        "summary": "One line from your AI pacer (#2712, ADR 0072; #2835, ADR 0083): `input` is the ride as it stands, exactly `@onyourleft/domain`’s `ModelPacerInput` — the pacer’s W/kg, what it is doing (its intent, by how many percent, and the seconds held), why (`reason`, one of a closed list your device chose it by) and whether the ride has just started, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (`ahead`, `level` or `behind`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left), and since #2835 the gap in seconds, how long you have been where you are, and how the gap, your power, cadence and heart rate have drifted, as numbers; no coordinate, no name — at most 2 048 characters. A state without `reason` (a device from before #2835) is `validation_failed`. Answers `say` and nothing else: one line of feedback of at most 80 characters with no number but a cadence or power target, no metric name and no health wording, or \"\". **No power, ever, and no plan or intent**: your device decides what the pacer does before it asks, so no answer moves the pacer, and nothing of it reaches a trainer. The same consent as AI bots, the same model slot (`POST /v1/analysis/tactics/start` and `end`), the same rate limit and the same model call, with no tools and no reasoning. `tactics_invalid` when the model’s answer was not such a line or its line did not pass, `tactics_failed` when it gave none in time; either costs a line and nothing else.",
         "security": [
           {
             "session": []
@@ -2290,31 +2290,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "The AI pacer’s plan and intent from their closed lists, and its line of feedback: at most 80 characters, screened, or \"\" for none. No other field, and never a power.",
+                  "description": "The AI pacer’s line of feedback: at most 80 characters, screened, or \"\" for none. No other field: never a power, and since #2835 no plan and no intent, which your device decides.",
                   "properties": {
-                    "plan": {
-                      "type": "string",
-                      "enum": [
-                        "rolling",
-                        "even",
-                        "climber"
-                      ]
-                    },
-                    "intent": {
-                      "type": "string",
-                      "enum": [
-                        "hold",
-                        "lift",
-                        "ease"
-                      ]
-                    },
                     "say": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "plan",
-                    "intent",
                     "say"
                   ],
                   "additionalProperties": false
@@ -2365,6 +2347,73 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/pacer/warm": {
+      "post": {
+        "operationId": "warmPacer",
+        "summary": "You turned the AI pacer on (#2835, ADR 0083 D-4): a call of the pacer’s own shape about a fixed ride, with nothing of yours in it, goes out to load the model and have it read the pacer’s words, so the first line of your ride is not a cold load. Answers 202 at once; `warming` is false when a warm-up of yours is already out. **It takes no model slot**: write-ups do not wait for it and nobody’s race is refused for it. `local_unavailable` and `tactics_consent_required` before anything is sent. Counted with your decisions against `rate_limited`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warming": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "warming"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `local_unavailable`, `tactics_consent_required`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
           },
           "503": {
             "$ref": "#/components/responses/unavailable"

@@ -60,6 +60,8 @@
 
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 
+import type { RiderBody } from '@onyourleft/store';
+
 import type { BuildingRole, BuiltKind } from './buildings';
 import type { ScatterKind, StructureKind } from './scatter';
 
@@ -605,6 +607,34 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The FEMALE rider's body — #2839, the owner's ruling of 2026-11-18: the same
+ * pipeline run as {@link REALISTIC_RIDER} at MakeHuman's female build, with
+ * its own helmet, glasses and eyes built round its own head and its own crash
+ * clip, inside the same triangle budget.
+ *
+ * ⚠️ **It ships no maps of its own**: it wears {@link REALISTIC_RIDER_MAPS} at
+ * its own MakeHuman texture coordinates, as the pack's rider does
+ * ({@link REALISTIC_RIDER_PACK}) — every MakeHuman build shares one set of
+ * texture coordinates — so a ride with both bodies holds one set of rider
+ * textures, not two, and the second body costs a download of this one file.
+ *
+ * ⚠️ **Loaded only when a ride draws a female rider** (`three-renderer.ts`
+ * §`loadRealisticWorld`), so a ride with none downloads and holds what it did.
+ */
+export const REALISTIC_RIDER_FEMALE = 'rider_female.glb';
+
+/**
+ * The model each rider body is drawn with in the realistic world — #2839. A
+ * `Record` over `@onyourleft/store`'s `RiderBody`, so a body the store accepts
+ * with no model here is a compile error. `male` is the rider every athlete
+ * was drawn as before #2839, and the default (`rider-body.ts` §`riderBodyFor`).
+ */
+export const REALISTIC_RIDER_BODIES: Readonly<Record<RiderBody, string>> = {
+  female: REALISTIC_RIDER_FEMALE,
+  male: REALISTIC_RIDER,
+};
+
+/**
  * The animation in {@link REALISTIC_RIDER} that is the body's own fall and
  * get-up in a Delivery crash — #2493, made by `tools/realistic/blender/
  * process_rider.py` from `rider_crash.py`'s moments on #2475's timeline, and
@@ -916,6 +946,7 @@ export function realisticFiles(): readonly string[] {
       REALISTIC_STRUCTURE_SURFACES[surface].normal,
     ]),
     REALISTIC_RIDER,
+    REALISTIC_RIDER_FEMALE,
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     REALISTIC_RIDER_PACK.lod,
     REALISTIC_RIDER_PACK.vat,

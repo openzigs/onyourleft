@@ -32,7 +32,14 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
-import type { ActivityId, ActivitySummary, KitColour, UnitSystem } from '@onyourleft/store';
+import {
+  riderChoiceOf,
+  type ActivityId,
+  type ActivitySummary,
+  type KitColour,
+  type RiderBody,
+  type UnitSystem,
+} from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
@@ -179,6 +186,8 @@ export interface TransferViewProps {
    * §`riderKitFor`.
    */
   readonly onKitColourReset?: ((kitColour: KitColour | undefined) => void) | undefined;
+  /** The same for which rider is drawn (#2839): what the recreated row carries. */
+  readonly onRiderBodyReset?: ((riderBody: RiderBody | undefined) => void) | undefined;
 }
 
 export function TransferView({
@@ -186,6 +195,7 @@ export function TransferView({
   onUnitsReset,
   onMassReset,
   onKitColourReset,
+  onRiderBodyReset,
 }: TransferViewProps): JSX.Element {
   /**
    * Bumped whenever the import panel has written to the store.
@@ -276,6 +286,7 @@ export function TransferView({
           {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
           {...(onMassReset === undefined ? {} : { onMassReset })}
           {...(onKitColourReset === undefined ? {} : { onKitColourReset })}
+          {...(onRiderBodyReset === undefined ? {} : { onRiderBodyReset })}
           storeRevision={storeRevision}
           onStoreChanged={() => {
             setStoreRevision((previous) => previous + 1);
@@ -1065,6 +1076,7 @@ function ErasePanel({
   onUnitsReset,
   onMassReset,
   onKitColourReset,
+  onRiderBodyReset,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
@@ -1072,6 +1084,8 @@ function ErasePanel({
   readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
   readonly onMassReset?: ((mass: Kilograms | undefined) => void) | undefined;
   readonly onKitColourReset?: ((kitColour: KitColour | undefined) => void) | undefined;
+  /** The same for which rider is drawn (#2839): what the recreated row carries. */
+  readonly onRiderBodyReset?: ((riderBody: RiderBody | undefined) => void) | undefined;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -1141,6 +1155,9 @@ function ErasePanel({
       onMassReset?.(port.athleteRow.mass);
       // And the kit colour (#623), for the same reason.
       onKitColourReset?.(port.athleteRow.kitColour);
+      // And which rider is drawn (#2839), likewise — the one choice, read by
+      // the rule `main.tsx` reads it by (the owner's ruling of 2026-11-20).
+      onRiderBodyReset?.(riderChoiceOf(port.athleteRow));
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.

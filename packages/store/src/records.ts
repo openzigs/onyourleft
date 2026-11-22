@@ -63,6 +63,7 @@ import type {
   WorkoutId,
 } from './ids';
 import type { KitColour } from './kit-colour';
+import type { RiderBody } from './rider-body';
 import type { NewStreamSet } from './streams';
 import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
@@ -253,6 +254,23 @@ export interface AthleteRecord {
    * the machine drawing it.
    */
   readonly kitColour?: KitColour;
+
+  /**
+   * Which rider the trainer game draws for this athlete (#2839).
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #2839 reads back with
+   * no choice, and the one place that substitutes the default is
+   * `apps/web/src/game/rider-body.ts` §`riderBodyFor`.
+   *
+   * ⚠️ **One half of the rider's one Female / Male choice** (the owner's
+   * ruling of 2026-11-20): `setAthleteRider` writes it and {@link calorieSex}
+   * together. A row written before the ruling may hold one without the other,
+   * so read the choice through `rider-body.ts` §`riderChoiceOf`, never this
+   * field alone. It is on the athlete rather than the device for
+   * {@link kitColour}'s reason.
+   */
+  readonly riderBody?: RiderBody;
 
   /**
    * The rider's own words that are always masked before anything is sent to
@@ -608,14 +626,17 @@ export interface RideFacts {
   /**
    * The AI pacer's decision log for this ride — #2712, ADR 0072 D-5: every
    * ask, oldest first, with the seconds ridden it was asked and answered at
-   * and what became of it, and the pacer-code version it was ridden under
+   * and what became of it — since #2835 (ADR 0083 D-5) each one a decision of
+   * the device's, with the direction ridden, the rule that set it, where the
+   * rider was against the pacer and a word for what became of the line —
+   * and the pacer-code version it was ridden under
    * (`@onyourleft/domain` §`MODEL_PACER_CODE_VERSION`), with the pacer's
    * W/kg, the route, the air and position, and the game ride's start on the
    * recording's clock (#2712's review): the whole of what the pacer did, so
    * the pacer replays from it (§`pacerDirectionAt`). Known only while riding, like
    * {@link workoutFinished}; absent for a ride with no AI pacer.
    *
-   * It holds a plan and an intent from two closed lists and no text: **the
+   * It holds numbers and words from closed lists and no text: **the
    * lines of feedback the rider was shown are not kept.** The instance keeps
    * no copy (ADR 0036 D-3 (c)).
    *

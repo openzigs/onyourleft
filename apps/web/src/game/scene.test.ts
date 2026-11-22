@@ -175,6 +175,69 @@ describe('the frame carries every rider that is in play', () => {
     expect(frame.markers.some((marker) => marker.kind === 'ghost')).toBe(false);
   });
 
+  describe('#2839 — which body each rider is drawn as', () => {
+    const framed = (over: Partial<Parameters<typeof sceneFrame>[0]>) => {
+      const setup = straightRoute();
+      return sceneFrame({
+        profile: setup.profile,
+        origin: corridorOrigin(setup.profile),
+        state: atStartLine(setup.profile),
+        ...over,
+      });
+    };
+    const bodyOf = (frame: ReturnType<typeof sceneFrame>, kind: string): unknown =>
+      frame.markers.find((marker) => marker.kind === kind)?.body;
+
+    it('carries the rider’s own choice on the rider and on their ghost, and the pacer’s on the pacer', () => {
+      const frame = framed({
+        riderBody: 'female',
+        botBody: 'male',
+        botDistance: 120,
+        ghost: GHOST,
+      });
+
+      expect(bodyOf(frame, 'rider')).toBe('female');
+      expect(bodyOf(frame, 'ghost')).toBe('female');
+      expect(bodyOf(frame, 'bot')).toBe('male');
+    });
+
+    it('never lends the rider’s body to the pacer, or the pacer’s to the rider', () => {
+      const frame = framed({ botBody: 'female', botDistance: 120, ghost: GHOST });
+
+      expect(bodyOf(frame, 'bot')).toBe('female');
+      expect(frame.markers.find((marker) => marker.kind === 'rider')).not.toHaveProperty('body');
+      expect(frame.markers.find((marker) => marker.kind === 'ghost')).not.toHaveProperty('body');
+    });
+
+    it('carries each race bot’s and each remote rider’s own body, and none where none was given', () => {
+      const frame = framed({
+        raceBots: [
+          { distanceMetres: 30, speedMetresPerSecond: 8, lateralMetres: 1.75, body: 'female' },
+          { distanceMetres: 40, speedMetresPerSecond: 8, lateralMetres: -1.75, body: 'male' },
+          { distanceMetres: 50, speedMetresPerSecond: 8, lateralMetres: 0 },
+        ],
+        remoteRiders: [
+          { riderId: 1, distanceMetres: 60, speedMetresPerSecond: 8, body: 'female' },
+          { riderId: 2, distanceMetres: 70, speedMetresPerSecond: 8 },
+        ],
+      });
+      const bodies = (kind: string): unknown[] =>
+        frame.markers
+          .filter((marker) => marker.kind === kind)
+          .sort((a, b) => a.z - b.z)
+          .map((marker) => marker.body);
+
+      expect(bodies('bot')).toEqual(['female', 'male', undefined]);
+      expect(bodies('remote')).toEqual(['female', undefined]);
+    });
+
+    it('adds nothing to a frame whose ride chose nobody’s body: every marker is as it was', () => {
+      const frame = framed({ botDistance: 120, ghost: GHOST });
+
+      for (const marker of frame.markers) expect(marker).not.toHaveProperty('body');
+    });
+  });
+
   it('gives every marker a finite position', () => {
     const setup = straightRoute();
     const frame = sceneFrame({
