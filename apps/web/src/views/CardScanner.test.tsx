@@ -25,6 +25,8 @@ import { webCryptoHpkePrimitives } from '@onyourleft/store';
 import { act, type JSX } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { SCAN_CONSENT_STATEMENT } from '../camera/consent';
+import { CAMERA_OFF_AFTER_A_SCAN } from '../camera/notice';
 import { CameraController } from '../camera/session';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 import { pairingCodeModules } from '../camera/side-link-qr';
@@ -169,6 +171,15 @@ function agreed(camera: ScriptedCamera, options: { loadCodeReader?: () => Promis
   });
   controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   return controller;
+}
+
+/** A device nobody has agreed anything on: not the camera, and not a scan (#2856). */
+function fresh(camera: ScriptedCamera): CameraController {
+  return new CameraController({
+    secureWindow: browserSecureWindow(),
+    port: camera.port,
+    schedule: () => () => undefined,
+  });
 }
 
 function text(): string {
@@ -690,19 +701,6 @@ describe('when the camera cannot scan, the paste box is what is left (#2785)', (
     expect(text()).not.toContain(CARD_SCAN_TEXT.stopped);
   });
 
-  it('asks for the camera agreement first, without touching the camera', async () => {
-    const camera = scriptedCamera();
-    const controller = new CameraController({
-      secureWindow: browserSecureWindow(),
-      port: camera.port,
-      schedule: () => () => undefined,
-    });
-    await scanner(controller, ownedTicks());
-    await press(CARD_SCAN_TEXT.start);
-    expect(text()).toContain(CARD_SCAN_TEXT['no-consent']);
-    expect(camera.calls).toEqual([]);
-  });
-
   it('stops, turns the camera off and says so when the code reader will not load', async () => {
     const camera = scriptedCamera();
     const timer = ownedTicks();
@@ -725,5 +723,152 @@ describe('when the camera cannot scan, the paste box is what is left (#2785)', (
     // #2828: the one paste box is open, and is the way in.
     expect(boxes().length).toBe(1);
     expect(text()).toContain(CONNECT_FLOW_TEXT.pasteLabel);
+  });
+});
+
+/**
+ * #2856: a fresh device used to be sent to the Camera screen to agree, six
+ * taps away, with a claim code's ten minutes running. The scan now asks where
+ * it was pressed, for itself alone.
+ */
+describe('a fresh device is asked in place, for the scan alone (#2856)', () => {
+  it('asks where Scan was pressed, in two sentences, without touching the camera or sending the rider away', async () => {
+    const { camera } = cameraShowing();
+    const controller = fresh(camera);
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+
+    expect(text()).toContain(SCAN_CONSENT_STATEMENT);
+    expect(text()).not.toContain('Camera screen and come back');
+    expect(text()).not.toContain(CARD_SCAN_TEXT.looking);
+    // Nothing was asked of the camera, and nothing is agreed, by the press alone.
+    expect(camera.calls).toEqual([]);
+    expect(controller.state().scanAgreed).toBe(false);
+    // The yes replaced the button pressed: it has the focus, and the two
+    // sentences are what a screen reader hears it is the yes to.
+    const yes = button(CARD_SCAN_TEXT.agree);
+    expect(document.activeElement).toBe(yes);
+    const described = yes.getAttribute('aria-describedby');
+    expect(described).not.toBeNull();
+    expect(document.getElementById(described ?? '')?.textContent).toBe(SCAN_CONSENT_STATEMENT);
+    // The scan button itself is not on the screen twice over.
+    expect(() => button(CARD_SCAN_TEXT.start)).toThrow();
+  });
+
+  it('scans after that one agreement: the camera comes on, the code is read, and the camera goes off', async () => {
+    const { camera, show } = cameraShowing();
+    const controller = fresh(camera);
+    const timer = ownedTicks();
+    const scanned: string[] = [];
+    await scanner(controller, timer, scanned);
+    await press(CARD_SCAN_TEXT.start);
+    await press(CARD_SCAN_TEXT.agree);
+
+    expect(text()).toContain(CARD_SCAN_TEXT.looking);
+    expect(text()).not.toContain(SCAN_CONSENT_STATEMENT);
+    expect(camera.liveStreams()).toBe(1);
+    expect(camera.facings).toEqual(['environment']);
+
+    show('oyl-instance:https://instance.example.org#abc abcd-efgh-jkmn-pqrs');
+    await timer.fire();
+    await until(() => scanned.length > 0);
+    expect(scanned).toEqual(['oyl-instance:https://instance.example.org#abc abcd-efgh-jkmn-pqrs']);
+    expect(camera.liveStreams()).toBe(0);
+    // Nothing but the code was read from the camera: the viewfinder played,
+    // one read found the code, and the camera stopped.
+    expect([...camera.calls].sort()).toEqual(
+      ['availability', 'code', 'preview', 'preview-detached', 'request', 'start', 'stop'].sort(),
+    );
+  });
+
+  it('asks once: the next scan on this device opens straight away', async () => {
+    const { camera } = cameraShowing();
+    const controller = fresh(camera);
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    await press(CARD_SCAN_TEXT.agree);
+    await press(CARD_SCAN_TEXT.close);
+    expect(camera.liveStreams()).toBe(0);
+
+    await press(CARD_SCAN_TEXT.start);
+    expect(text()).not.toContain(SCAN_CONSENT_STATEMENT);
+    expect(text()).toContain(CARD_SCAN_TEXT.looking);
+    expect(camera.liveStreams()).toBe(1);
+  });
+
+  it('switches on nothing of the Camera screen’s: its own agreement is still not given', async () => {
+    const { camera } = cameraShowing();
+    const controller = fresh(camera);
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    await press(CARD_SCAN_TEXT.agree);
+    // While the scan's camera is on, the Camera screen's own uses are refused …
+    expect(controller.state().consent).toStrictEqual({ local: false });
+    expect((await controller.captureOne()).problem).toBe('no-consent');
+    await expect(controller.captureSideFrame()).resolves.toBeUndefined();
+    await press(CARD_SCAN_TEXT.close);
+    // … and once it is off, so is turning the camera on from that screen.
+    const before = camera.calls.length;
+    await expect(controller.turnOn()).resolves.toBe('no-consent');
+    expect(camera.calls).toHaveLength(before);
+    expect(camera.calls).not.toContain('capture');
+    expect(camera.calls).not.toContain('side-frame');
+    // What the Camera screen says of this device is true of it: on, to read a code.
+    expect(controller.notice()).toBe(CAMERA_OFF_AFTER_A_SCAN);
+  });
+
+  it('opens nothing on Not now, records nothing, and gives the focus back to Scan', async () => {
+    const { camera } = cameraShowing();
+    const controller = fresh(camera);
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    await press(CARD_SCAN_TEXT.decline);
+
+    expect(camera.calls).toEqual([]);
+    expect(controller.state().scanAgreed).toBe(false);
+    expect(text()).not.toContain(SCAN_CONSENT_STATEMENT);
+    expect(document.activeElement).toBe(button(CARD_SCAN_TEXT.start));
+    // And it is asked again, not assumed, the next time.
+    await press(CARD_SCAN_TEXT.start);
+    expect(text()).toContain(SCAN_CONSENT_STATEMENT);
+  });
+
+  it('does not ask a rider who has already agreed to the camera', async () => {
+    const { camera } = cameraShowing();
+    await scanner(agreed(camera), ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    expect(text()).not.toContain(SCAN_CONSENT_STATEMENT);
+    expect(text()).toContain(CARD_SCAN_TEXT.looking);
+  });
+
+  it('says so, with the paste box left, when the camera will not come on after the agreement', async () => {
+    const camera = scriptedCamera({ permission: 'not-permitted' });
+    const controller = fresh(camera);
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    await press(CARD_SCAN_TEXT.agree);
+    expect(text()).toContain(CARD_SCAN_TEXT.camera);
+    expect(camera.liveStreams()).toBe(0);
+    expect(document.activeElement).toBe(button(CARD_SCAN_TEXT.start));
+  });
+
+  it('asks on the Connect screen too, and one agreement there reads the code into the flow', async () => {
+    const { camera, show } = cameraShowing();
+    const controller = fresh(camera);
+    const scripted = scriptedInstance();
+    mounted = await mount(<InstanceView port={scripted.port} camera={controller} />);
+    await settle();
+    await press(CONNECT_FLOW_TEXT.scan);
+    expect(text()).toContain(SCAN_CONSENT_STATEMENT);
+    expect(camera.calls).toEqual([]);
+    // Paste stays beside the question, as the way that needs no camera.
+    expect(button(CONNECT_FLOW_TEXT.pasteInstead).disabled).toBe(false);
+
+    show(codeWithCard((await cardOf(SERVED_IDENTITY)).card, CODE));
+    await press(CARD_SCAN_TEXT.agree);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    expect(text()).toContain(CONNECT_FLOW_TEXT.question);
+    expect(camera.liveStreams()).toBe(0);
+    expect(controller.state().consent).toStrictEqual({ local: false });
   });
 });

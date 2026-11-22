@@ -12,21 +12,40 @@
  * list, not an assumption.
  */
 
+import {
+  BOT_TACTICS,
+  MODEL_TACTICS_ASK_EVERY_MS,
+  MODEL_TACTICS_CUES,
+  MODEL_TACTICS_REASONS,
+} from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
+import { isProblem, logEvent, REDACTED } from '../log.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
 import { effectiveAnalysisSettings } from './settings.ts';
-import { tacticsLocalOf, type TacticsLocal } from './tactics.ts';
+import {
+  DEFAULT_TACTICS_DECISIONS,
+  tacticsCallFigures,
+  tacticsLocalOf,
+  type TacticsCallLine,
+  type TacticsLocal,
+} from './tactics.ts';
 import {
   ATTACK,
+  CHAT_FIGURES,
   chatServer,
   consentToTactics,
   OFFERED,
   TACTICS_INPUT,
   TEST_TACTICS_MODEL,
 } from './tactics-testing.ts';
-import { TACTICS_SYSTEM, WARM_UP_INPUT } from './tactics-prompt.ts';
+import {
+  TACTICS_PROMPT_VERSION,
+  TACTICS_SYSTEM,
+  tacticsUserContent,
+  WARM_UP_INPUT,
+} from './tactics-prompt.ts';
 import { testConfig } from '../instance-testing.ts';
 import { startOllamaStub, type OllamaStub } from './ollama-stub-testing.ts';
 
@@ -53,8 +72,8 @@ const decide = (w: IdentityInstance, token: string, input: unknown = TACTICS_INP
 const codeOf = (answer: { body: unknown }): unknown =>
   (answer.body as { error?: { code?: unknown } } | null)?.error?.code;
 
-describe('a bot-tactics decision, read back as the app reads it (#2709)', () => {
-  it('answers the moves the model named, after a consent the next status reads back', async () => {
+describe('a bot-tactics decision, read back as the app reads it (#2709; one bot’s since #2836)', () => {
+  it('answers the model’s pick for the bot asked about, after a consent the next status reads back', async () => {
     const server = chatServer(() => ATTACK);
     const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
     const w = world as IdentityInstance;
@@ -81,16 +100,11 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
     const decided = await decide(w, token);
     expect(decided).toEqual({
       status: 200,
-      body: {
-        bots: [
-          { bot: 0, move: 'attack' },
-          { bot: 3, move: 'chase', target: 2 },
-        ],
-      },
+      body: { reason: 'my-terrain', move: 'attack', effort: 'all-out' },
     });
   });
 
-  it('sends Ollama’s own call: no tools, reasoning off, held to the seats’ schema, the race and nothing else', async () => {
+  it('sends Ollama’s own call: no tools, reasoning off, held to the menu’s schema, the ask and nothing else', async () => {
     const server = chatServer(() => ATTACK);
     const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
     const w = world as IdentityInstance;
@@ -108,23 +122,51 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
     expect(body.think).toBe(false);
     expect(body.stream).toBe(false);
     expect(body.model).toBe(TEST_TACTICS_MODEL.model);
-    // #2759, ADR 0076 D-11: capped at what seven bots' longest answer needs, with a margin.
-    expect(body.options).toEqual({ temperature: 0.6, num_predict: 256 });
+    // #2836: one bot's pick is a reason, a move and an effort; capped at twice what that needs.
+    expect(body.options).toEqual({ temperature: 0.6, num_predict: 48 });
     expect(body.messages).toEqual([
       { role: 'system', content: TACTICS_SYSTEM },
-      { role: 'user', content: JSON.stringify(TACTICS_INPUT) },
+      { role: 'user', content: tacticsUserContent(TACTICS_INPUT) },
     ]);
     const format = JSON.stringify(body.format);
-    expect(format).toContain('"enum":[0,1,2,3,4,5,6]');
-    expect(format).not.toMatch(/watt|power/i);
+    expect(format).not.toMatch(/watt|power|target|integer|number/i);
   });
 
-  it('is no decision for an answer with a power in it, not JSON, or past the cap; and no answer is a failure', async () => {
+  it('holds the model to the menu the ask offered, the reason first, and no effort on sitting in (#2836, ADR 0081 D-3, D-4)', async () => {
+    const server = chatServer(() => ATTACK);
+    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
+    const w = world as IdentityInstance;
+    await consentToTactics(w, riders[0]!.token);
+    expect((await decide(w, riders[0]!.token)).status).toBe(200);
+    const body = server.requests[0]?.body as {
+      format: { anyOf: { properties: Record<string, { enum: string[] }>; required: string[] }[] };
+    };
+    const [ridden, effortless] = body.format.anyOf;
+    expect(Object.keys(ridden?.properties ?? {})).toEqual(['reason', 'move', 'effort']);
+    expect(ridden?.properties.move?.enum).toEqual(['follow', 'attack']);
+    expect(Object.keys(effortless?.properties ?? {})).toEqual(['reason', 'move']);
+    expect(effortless?.properties.move?.enum).toEqual(['sit-in']);
+    expect(ridden?.required).toEqual(['reason', 'move']);
+    expect(ridden?.properties.reason?.enum).toEqual([
+      'my-terrain',
+      'cover-move',
+      'counter',
+      'save-legs',
+      'finish-near',
+    ]);
+  });
+
+  it('is no decision for an answer with a power in it, not JSON, past the cap, off the menu or with no reason; and no answer is a failure', async () => {
     const answers = [
-      JSON.stringify({ bots: [{ bot: 0, move: 'attack', watts: 900 }] }),
-      'Bot 0 should attack now.',
-      JSON.stringify({ bots: [{ bot: 0, move: 'attack' }] }).padEnd(9_000, ' '),
-      JSON.stringify({ bots: [{ bot: 9, move: 'attack' }] }),
+      JSON.stringify({ reason: 'my-terrain', move: 'attack', watts: 900 }),
+      'Bot 2 should attack now.',
+      ATTACK.padEnd(9_000, ' '),
+      // One of the seven moves, but not one this ask offered.
+      JSON.stringify({ reason: 'finish-near', move: 'kick' }),
+      JSON.stringify({ move: 'attack' }),
+      JSON.stringify({ reason: 'it felt right', move: 'attack' }),
+      // The answer for a whole field, as it was before #2836.
+      JSON.stringify({ bots: [{ bot: 2, move: 'attack' }] }),
     ];
     let next = 0;
     const server = chatServer(() => answers[next++]);
@@ -137,9 +179,10 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
       expect(decided.status, answer.slice(0, 40)).toBe(502);
       expect(codeOf(decided)).toBe('tactics_invalid');
       // The model's text is not in the answer.
-      expect(JSON.stringify(decided.body)).not.toContain('Bot 0 should');
+      expect(JSON.stringify(decided.body)).not.toContain('Bot 2 should');
+      expect(JSON.stringify(decided.body)).not.toContain('it felt right');
     }
-    // The fifth: the server answers 500.
+    // The last: the server answers 500.
     expect(codeOf(await decide(w, token))).toBe('tactics_failed');
   });
 
@@ -163,66 +206,90 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
   });
 });
 
-describe('the race state and the answer, as the spike builds and reads them (#2709, #2708)', () => {
-  it('asks the model for a target and an effort, with ADR 0073’s input and no attack gate', async () => {
-    const server = chatServer(() => ATTACK);
-    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
-    const w = world as IdentityInstance;
-    await consentToTactics(w, riders[0]!.token);
-    expect((await decide(w, riders[0]!.token)).status).toBe(200);
-    const body = server.requests[0]?.body as {
-      format: {
-        properties: { bots: { items: { anyOf: { properties: Record<string, unknown> }[] } } };
-      };
-      messages: { content: string }[];
-    };
-    // #2759, ADR 0076 D-11: a target only on a follow or a chase.
-    expect(
-      body.format.properties.bots.items.anyOf.map((shape) => Object.keys(shape.properties)),
-    ).toEqual([
-      ['bot', 'move', 'effort'],
-      ['bot', 'move', 'effort', 'target'],
-    ]);
-    for (const field of ['quietS', 'blown', 'style', 'secondsInMove', 'riderGapM']) {
-      expect(body.messages[1]?.content).toContain(`"${field}"`);
-    }
-    // The prompt reads the fields it is guidance about, and no gate.
-    for (const field of ['wbal', 'blown', 'style', 'target', 'effort', 'toLineM']) {
-      expect(body.messages[0]?.content).toContain(`"${field}"`);
-    }
-    // #2759, ADR 0076 D-11: the legs and the count of racers are not sent, so
-    // the prompt names neither, and it asks for a target only where one is read.
-    expect(body.messages[1]?.content).not.toContain('"legs"');
-    expect(body.messages[1]?.content).not.toContain('"field"');
-    expect(body.messages[0]?.content).not.toContain('"legs"');
-    expect(body.messages[0]?.content).toContain(
-      'Only "follow" and "chase" read a "target": leave it out of every other move.',
-    );
-    expect(body.messages[0]?.content).not.toContain('attackOpen');
-    expect(body.messages[1]?.content).not.toContain('attackOpen');
-  });
-
-  it('shows the model the course ahead and says how riders race it (#2794)', async () => {
+describe('what the model reads: `tactics-8` (#2836, ADR 0081 D-4)', () => {
+  it('writes the shared race first, the story so far as a line, and the bot last with its cues and menu', async () => {
     const server = chatServer(() => ATTACK);
     const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
     const w = world as IdentityInstance;
     await consentToTactics(w, riders[0]!.token);
     expect((await decide(w, riders[0]!.token)).status).toBe(200);
     const body = server.requests[0]?.body as { messages: { content: string }[] };
-    const sent = JSON.parse(body.messages[1]?.content ?? '{}') as { course?: unknown };
-    expect(sent.course).toEqual(TACTICS_INPUT.course);
-    for (const field of ['course', 'climb', 'descent', 'inM', 'lengthM', 'avgPct', 'maxPct']) {
-      expect(body.messages[0]?.content).toContain(`"${field}"`);
-    }
-    for (const field of ['lapLeftM', 'lapClimbM', 'finishPct', 'lapsLeft']) {
-      expect(body.messages[0]?.content).toContain(`"${field}"`);
-    }
-    expect(body.messages[0]?.content).toContain(
-      'a climber saves itself before a climb and attacks on it',
+    const lines = (body.messages[1]?.content ?? '').split('\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatch(/^Race: \{"laps":3,"course":\{/);
+    expect(lines[1]).toBe(
+      'Story so far: 130 s raced; 3 laps left; a break of 2 away for 40 s, 60 m clear; a move is on now; the bots are tiring.',
     );
-    expect(body.messages[0]?.content).toContain(
-      'a sprinter sits in and covers moves before a flat finish',
+    expect(lines[2]).toMatch(/^You: \{"bot":2,"style":"climber"/);
+    const race = JSON.parse((lines[0] ?? '').slice('Race: '.length)) as Record<string, unknown>;
+    expect(Object.keys(race)).toEqual(['laps', 'course', 'rider', 'field']);
+    expect(race.course).toEqual(TACTICS_INPUT.course);
+    expect(race.field).toEqual(TACTICS_INPUT.field);
+    const you = JSON.parse((lines[2] ?? '').slice('You: '.length)) as Record<string, unknown>;
+    expect(you).toEqual(TACTICS_INPUT.you);
+    // The seconds since its last move are read before its current move, and the menu last.
+    const keys = Object.keys(you);
+    expect(keys.indexOf('sinceMoveS')).toBeLessThan(keys.indexOf('move'));
+    expect(keys.slice(-2)).toEqual(['cues', 'menu']);
+  });
+
+  it('writes what the model reads in its own key order, whatever order a device sent', async () => {
+    const server = chatServer(() => ATTACK);
+    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
+    const w = world as IdentityInstance;
+    await consentToTactics(w, riders[0]!.token);
+    const backwards = (value: object): Record<string, unknown> =>
+      Object.fromEntries(Object.entries(value).reverse());
+    const shuffled = {
+      ...backwards(TACTICS_INPUT),
+      you: backwards(TACTICS_INPUT.you),
+      rider: backwards(TACTICS_INPUT.rider),
+    };
+    expect((await decide(w, riders[0]!.token, shuffled)).status).toBe(200);
+    const body = server.requests[0]?.body as { messages: { content: string }[] };
+    expect(body.messages[1]?.content).toBe(tacticsUserContent(TACTICS_INPUT));
+  });
+
+  it('states the goal, drops the sentence about sitting in, and gives worked examples of different bots', () => {
+    expect(TACTICS_PROMPT_VERSION).toBe('tactics-8');
+    expect(TACTICS_SYSTEM).toContain('a lively, believable race for the human');
+    expect(TACTICS_SYSTEM).toContain('A race where nothing happens is a failure.');
+    expect(TACTICS_SYSTEM).not.toMatch(/most bots sit in/i);
+    // Each example is a pick the reader takes, for a different style and a different move.
+    const examples = [...TACTICS_SYSTEM.matchAll(/^- An? (\w+),.*?(\{"reason".*\})$/gm)];
+    expect(examples.map((each) => each[1])).toEqual([
+      'climber',
+      'sprinter',
+      'opportunist',
+      'rouleur',
+    ]);
+    const picks = examples.map(
+      (each) => JSON.parse(each[2] ?? '') as { reason: string; move: string },
     );
+    expect(new Set(picks.map((pick) => pick.reason)).size).toBe(4);
+    expect(new Set(picks.map((pick) => pick.move)).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('says what every cue, move, reason and field it is guidance about means, and names no power', () => {
+    for (const word of [...MODEL_TACTICS_CUES, ...BOT_TACTICS, ...MODEL_TACTICS_REASONS]) {
+      expect(TACTICS_SYSTEM, word).toContain(`"${word}"`);
+    }
+    for (const field of [
+      'sinceMoveS',
+      'secondsInMove',
+      'wbal',
+      'style',
+      'menu',
+      'cues',
+      'target',
+    ]) {
+      expect(TACTICS_SYSTEM, field).toContain(`"${field}"`);
+    }
+    for (const field of ['course', 'climb', 'descent', 'finishPct', 'field', 'rider', 'rank']) {
+      expect(TACTICS_SYSTEM, field).toContain(`"${field}"`);
+    }
+    expect(TACTICS_SYSTEM).not.toMatch(/\bwatts?\b|\bpower\b/i);
+    expect(TACTICS_SYSTEM).not.toContain('attackOpen');
   });
 
   it('refuses a course ahead that carries anything but its numbers, before the model sees it (#2794)', async () => {
@@ -238,18 +305,164 @@ describe('the race state and the answer, as the spike builds and reads them (#27
     expect(server.requests).toEqual([]);
   });
 
-  it('reads the answer against the seats of the race it was asked about, not the seven', async () => {
-    // ATTACK names seat 3, a seat of a seven-bot race but not of this two-bot one.
+  it('refuses the race state a device sent before #2836, and a story that carries text, before the model sees either', async () => {
+    const server = chatServer(() => ATTACK);
+    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
+    const w = world as IdentityInstance;
+    const { token } = riders[0]!;
+    await consentToTactics(w, token);
+    const before = { laps: 3, quietS: 40, rider: TACTICS_INPUT.rider, bots: [] };
+    expect(codeOf(await decide(w, token, before))).toBe('validation_failed');
+    const told = {
+      ...TACTICS_INPUT,
+      story: { ...TACTICS_INPUT.story, bunch: 'tiring near Richmond Park' },
+    };
+    const refused = await decide(w, token, told);
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).not.toContain('Richmond');
+    expect(server.requests).toEqual([]);
+  });
+
+  it('reads the answer against the menu of the ask it was sent with, not every move there is', async () => {
+    // ATTACK picks an attack: on TACTICS_INPUT's menu, and not on one that offers a follow alone.
     const server = chatServer(() => ATTACK);
     const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
     const w = world as IdentityInstance;
     await consentToTactics(w, riders[0]!.token);
-    const two = { ...TACTICS_INPUT, bots: TACTICS_INPUT.bots.slice(0, 2) };
-    expect(codeOf(await decide(w, riders[0]!.token, two))).toBe('tactics_invalid');
+    const narrow = {
+      ...TACTICS_INPUT,
+      you: { ...TACTICS_INPUT.you, menu: [{ move: 'follow', target: 1 }, { move: 'sit-in' }] },
+    };
+    expect(codeOf(await decide(w, riders[0]!.token, narrow))).toBe('tactics_invalid');
     expect((await decide(w, riders[0]!.token)).status).toBe(200);
   });
 });
 
+describe('one line a call, in numbers and closed words (#2836, ADR 0081 D-5.2)', () => {
+  it('logs the prompt, the model, how it ended, and the model server’s own figures', async () => {
+    const lines: TacticsCallLine[] = [];
+    const answers: (string | undefined)[] = [
+      ATTACK,
+      'Bot 2 should attack near Box Hill.',
+      undefined,
+    ];
+    let next = 0;
+    const server = chatServer(() => answers[next++]);
+    const { riders } = await tacticsWorld(1, {
+      local: OFFERED,
+      fetch: server.fetch,
+      logCall: (line) => lines.push(line),
+    });
+    const w = world as IdentityInstance;
+    const { token } = riders[0]!;
+    await consentToTactics(w, token);
+    for (let at = 0; at < answers.length; at += 1) await decide(w, token);
+
+    expect(lines.map((line) => line.state)).toEqual(['decision', 'invalid', 'failed']);
+    expect(lines[0]).toEqual({
+      prompt: 'tactics-8',
+      model: TEST_TACTICS_MODEL.model,
+      state: 'decision',
+      ms: expect.any(Number) as number,
+      loadMs: 21,
+      tokensIn: 1_420,
+      tokensOut: 17,
+      promptEvalMs: 302,
+      evalMs: 456,
+    });
+    // A call the model server did not answer has no figures to report.
+    expect(lines[2]).toEqual({
+      prompt: 'tactics-8',
+      model: TEST_TACTICS_MODEL.model,
+      state: 'failed',
+      ms: expect.any(Number) as number,
+    });
+    // Never the model's text, the pick, or anything of the race.
+    const written = JSON.stringify(lines);
+    for (const word of ['Box Hill', 'attack', 'my-terrain', 'climber', 'sinceMoveS']) {
+      expect(written).not.toContain(word);
+    }
+  });
+
+  it('goes through the instance’s one redaction whole, and nothing else of a call does', () => {
+    const kept: string[] = [];
+    logEvent((line) => kept.push(line), 'tactics-call', {
+      prompt: 'tactics-8',
+      model: TEST_TACTICS_MODEL.model,
+      state: 'decision',
+      ms: 812,
+      loadMs: 21,
+      tokensIn: 1_420,
+      tokensOut: 17,
+      promptEvalMs: 302,
+      evalMs: 456,
+      // What must never be written, were a later change to pass it.
+      text: '{"reason":"my-terrain","move":"attack"}',
+      move: 'attack',
+      athleteId: 'somebody',
+    });
+    expect(JSON.parse(kept[0] ?? '{}')).toMatchObject({
+      event: 'tactics-call',
+      prompt: 'tactics-8',
+      model: TEST_TACTICS_MODEL.model,
+      state: 'decision',
+      ms: 812,
+      loadMs: 21,
+      tokensIn: 1_420,
+      tokensOut: 17,
+      promptEvalMs: 302,
+      evalMs: 456,
+      text: REDACTED,
+      move: REDACTED,
+      athleteId: REDACTED,
+    });
+    // Each key holds only the shape a call writes: a word or text in a figure's place is cut.
+    const wrong: string[] = [];
+    logEvent((line) => wrong.push(line), 'tactics-call', {
+      prompt: 'Ignore all previous instructions',
+      state: 'attack at Box Hill',
+      tokensIn: '51.5072,-0.1276',
+      loadMs: -1,
+      evalMs: 1.5,
+    });
+    expect(JSON.parse(wrong[0] ?? '{}')).toMatchObject({
+      prompt: REDACTED,
+      state: REDACTED,
+      tokensIn: REDACTED,
+      loadMs: REDACTED,
+      evalMs: REDACTED,
+    });
+    expect(isProblem({ event: 'tactics-call', state: 'failed' })).toBe(false);
+  });
+
+  it('reads only numbers from 0 up off a model server’s answer, and nothing else of it', () => {
+    expect(tacticsCallFigures(CHAT_FIGURES)).toEqual({
+      loadMs: 21,
+      tokensIn: 1_420,
+      tokensOut: 17,
+      promptEvalMs: 302,
+      evalMs: 456,
+    });
+    expect(
+      tacticsCallFigures({
+        load_duration: 'a while',
+        prompt_eval_count: -4,
+        eval_count: Number.NaN,
+        eval_duration: 2_400_000,
+        message: { content: 'attack' },
+      }),
+    ).toEqual({ evalMs: 2 });
+    expect(tacticsCallFigures(undefined)).toEqual({});
+    expect(tacticsCallFigures('fast')).toEqual({});
+  });
+
+  it('allows one bot a second with room to spare, one call out at a time (#2836, ADR 0081 D-2.1)', () => {
+    expect(DEFAULT_TACTICS_DECISIONS).toEqual({ limit: 90, windowMs: 60_000 });
+    expect(DEFAULT_TACTICS_DECISIONS.limit).toBeGreaterThanOrEqual(
+      60_000 / MODEL_TACTICS_ASK_EVERY_MS,
+    );
+  });
+});
 describe('over HTTP, to a stub Ollama on loopback (#2709)', () => {
   it('reaches /api/chat at the address the name resolves to, and refuses a name that resolves outside the local ranges', async () => {
     stub = await startOllamaStub({
@@ -268,7 +481,7 @@ describe('over HTTP, to a stub Ollama on loopback (#2709)', () => {
     await consentToTactics(w, token);
     expect(await decide(w, token)).toMatchObject({
       status: 200,
-      body: { bots: [{ bot: 0 }, { bot: 3 }] },
+      body: { reason: 'my-terrain', move: 'attack' },
     });
     expect(stub.requests.map((each) => `${each.method} ${each.path}`)).toEqual(['POST /api/chat']);
     expect((stub.requests[0]?.body as { think?: unknown }).think).toBe(false);
@@ -472,7 +685,7 @@ describe('the warm-up (#2709, ADR 0071 D-6.5)', () => {
     expect(body.think).toBe(false);
     expect(body.tools).toBeUndefined();
     expect(body.options.num_predict).toBe(1);
-    expect(body.messages[1]?.content).toBe(JSON.stringify(WARM_UP_INPUT));
+    expect(body.messages[1]?.content).toBe(tacticsUserContent(WARM_UP_INPUT));
     // Of every decision's shape, the course ahead included (#2794).
     expect(Object.keys(WARM_UP_INPUT)).toEqual(Object.keys(TACTICS_INPUT));
     // A second start of the same race warms nothing new while none is out, and refreshes the hold.

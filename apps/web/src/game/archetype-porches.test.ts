@@ -459,7 +459,12 @@ const BEFORE = {
 describe('the lever — #1784', () => {
   it('plans every footprint as before #1784 with `-archetype-porches`', () => {
     // Since #1783 the commercial archetypes are off too: none of these had them.
-    const off = { archetypePorches: false, commercialArchetypes: false } as const;
+    // And since #2848 the shops' aprons.
+    const off = {
+      archetypePorches: false,
+      commercialArchetypes: false,
+      shopAprons: false,
+    } as const;
     expect(planFingerprint(plan(mixed, off))).toBe(BEFORE.dormerVariants.mixed);
     expect(planFingerprint(plan(houses, off))).toBe(BEFORE.dormerVariants.houses);
     const none = {

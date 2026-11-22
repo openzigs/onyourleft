@@ -151,26 +151,58 @@ export function caloriesFromHeartRate(
   sampleInterval: number,
   rider: CalorieRider,
 ): Kilocalories | undefined {
-  const { sex, ageYears, mass } = rider;
-  if (sex === undefined || ageYears === undefined || mass === undefined) {
-    return undefined;
+  const fold = new HeartRateCaloriesFold(sampleInterval, rider);
+  for (const sample of heartRate) fold.add(sample);
+  return fold.energy;
+}
+
+/**
+ * {@link caloriesFromHeartRate}, one sample at a time — #2283: the ride HUD's
+ * estimate, worked out as the recording grows rather than from its first
+ * sample again every second. {@link caloriesFromHeartRate} is this over a
+ * whole channel, so the two cannot disagree.
+ */
+export class HeartRateCaloriesFold {
+  #kilojoules = 0;
+  #readings = 0;
+
+  readonly sampleInterval: number;
+  readonly rider: CalorieRider;
+
+  constructor(sampleInterval: number, rider: CalorieRider) {
+    this.sampleInterval = sampleInterval;
+    this.rider = rider;
   }
-  let kilojoules = 0;
-  let readings = 0;
-  for (const sample of heartRate) {
-    if (sample === undefined) {
-      continue;
+
+  /** The next sample's heart rate, or `undefined` for none. */
+  add(sample: BeatsPerMinute | undefined): void {
+    const { sex, ageYears, mass } = this.rider;
+    if (sample === undefined || sex === undefined || ageYears === undefined || mass === undefined) {
+      return;
     }
-    readings += 1;
+    this.#readings += 1;
     const rate = keytelKilojoulesPerMinute(sample, sex, mass, ageYears);
     if (rate > 0) {
-      kilojoules += (rate * sampleInterval) / 60;
+      this.#kilojoules += (rate * this.sampleInterval) / 60;
     }
   }
-  if (readings === 0) {
-    return undefined;
+
+  /** What {@link caloriesFromHeartRate} gives for the samples added so far. */
+  get energy(): Kilocalories | undefined {
+    const { sex, ageYears, mass } = this.rider;
+    if (sex === undefined || ageYears === undefined || mass === undefined || this.#readings === 0) {
+      return undefined;
+    }
+    return kilocalories((this.#kilojoules * 1000) / JOULES_PER_KILOCALORIE);
   }
-  return kilocalories((kilojoules * 1000) / JOULES_PER_KILOCALORIE);
+
+  /** Another fold that has had the same samples, and goes on alone. */
+  copy(): HeartRateCaloriesFold {
+    const next = new HeartRateCaloriesFold(this.sampleInterval, this.rider);
+    next.#kilojoules = this.#kilojoules;
+    next.#readings = this.#readings;
+    return next;
+  }
 }
 
 /**

@@ -152,11 +152,12 @@ vi.mock('./simulation', async (importOriginal) => {
  * #2710, **AI bots in the shipped path** (ADR 0071 D-8.2, moved from #2616's
  * spike): while `on`, the race is chosen with AI bots and `GameView` is handed
  * a tactics port whose instance offers them, holds the rider's consent, and
- * answers every ask at once with a move for every bot that ADR 0071 D-3.6
- * refused and ADR 0073 D-3 rides: attacks held on and on, flyers and kicks on
- * the first lap, and a chase of the rider and a follow of another bot, which
- * are ridden as bridging or marking. The real race asks, logs and rides each
- * answer under ADR 0073's strategy; the real `stepBotRace` rides the moves. What the race kept with the ride is read
+ * answers every ask at once. Since #2836 (ADR 0081) an ask is about one bot,
+ * and the answer sends it on a move off the menu the device offered it, never
+ * sitting in: attacks held on and on, flyers on the first lap, chases and
+ * follows, which ADR 0071 D-3.6 refused and ADR 0073 D-3 rides. The real race
+ * asks, logs and rides each answer under ADR 0081's strategy; the real
+ * `stepBotRace` rides the moves. What the race kept with the ride is read
  * back off the trainer port's `lapRaceEnded`.
  */
 const modelMode = {
@@ -166,16 +167,6 @@ const modelMode = {
   /** The effort every bot is asked to ride its move at, or none (ADR 0073 D-2.5). */
   effort: undefined as BotEffort | undefined,
 };
-
-/** Moves ADR 0071 D-3.6 refused from the first lap and ADR 0073 D-3 rides, given another bot's seat. */
-const FREE_MOVES: readonly ((other: number) => Readonly<Record<string, unknown>>)[] = [
-  () => ({ move: 'attack' }),
-  () => ({ move: 'flyer' }),
-  () => ({ move: 'attack' }),
-  () => ({ move: 'kick' }),
-  () => ({ move: 'chase', target: 'rider' }),
-  (other) => ({ move: 'follow', target: other }),
-];
 
 const ATTACKING: ModelTacticsPort = {
   tacticsStatus: () =>
@@ -190,16 +181,14 @@ const ATTACKING: ModelTacticsPort = {
   startTacticsRace: () => Promise.resolve({ kind: 'answer', body: { warming: true } }),
   decideTactics: (input) => {
     modelMode.decided += 1;
+    // A move off this bot's menu, a different one from ask to ask, never sitting in (always last).
+    const moves = input.you.menu.slice(0, -1);
     return Promise.resolve({
       kind: 'answer',
       body: {
-        bots: input.bots.map((view, at) => ({
-          bot: view.bot,
-          ...FREE_MOVES[(view.bot + modelMode.decided) % FREE_MOVES.length]!(
-            input.bots[(at + 1) % input.bots.length]?.bot ?? view.bot,
-          ),
-          ...(modelMode.effort === undefined ? {} : { effort: modelMode.effort }),
-        })),
+        reason: 'my-terrain',
+        move: moves[modelMode.decided % moves.length]?.move,
+        ...(modelMode.effort === undefined ? {} : { effort: modelMode.effort }),
       },
     });
   },

@@ -7019,6 +7019,24 @@ select.oyl-input {
 }
 
 /*
+ * The scan's own question (#2856), where *Scan a code* was pressed: its two
+ * sentences, then the yes, then the no, in a column at every width, so the no
+ * is never beside the yes (`cardscan.browser.spec.ts`). The sentences keep a
+ * reading measure.
+ */
+.oyl-card-scan__ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-card-scan__ask > p {
+  margin: 0;
+  max-width: 32rem;
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page
@@ -8915,12 +8933,15 @@ select.oyl-input {
 
    #1810: and so is the throw control's, while the touch lock is on.
 
-   #1901: and the lap race's item control's, likewise. */
+   #1901: and the lap race's item control's, likewise.
+
+   #2898: and the junction prompt's, likewise. */
 .oyl-hud__trainer,
 .oyl-hud__side-camera,
 .oyl-hud__plan-change,
 .oyl-hud__throw-note,
-.oyl-hud__item-note {
+.oyl-hud__item-note,
+.oyl-hud__junction-note {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -8984,6 +9005,112 @@ select.oyl-input {
 .oyl-hud__item .oyl-hud__control[aria-disabled='true'] {
   cursor: not-allowed;
   color: var(--oyl-color-hud-ink-muted);
+}
+
+/* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT, under *Pause* and *End ride*
+   where a round's throws stand: every way on from the next junction as a
+   ride-time control at #94's 72 px floor (set inline from
+   CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own
+   direction, its name, *Default* and *Chosen* in words, and its key and pad
+   hints; over them its title and how far until the choice is final, and the
+   U-turn beside them. The ways wrap, as the throws do,
+   rather than overflow a landscape phone's narrow actions panel. In the
+   HUD's own ink on the panel's opaque surface: no backing of its own.
+   `junction-prompt.browser.spec.ts` measures its targets on a tablet; no ride
+   shows it until #2896, which measures where it lands on the stage. */
+.oyl-hud__junction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oyl-space-sm);
+  margin-block-start: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-prompt {
+  display: grid;
+  justify-items: start;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-note {
+  flex-basis: 100%;
+}
+
+/* Its own width, never `.oyl-hud__control`'s `flex: 1`, which comes later. */
+.oyl-hud__junction > .oyl-hud__junction-u-turn {
+  flex: none;
+}
+
+.oyl-hud__junction-u-turn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-title,
+.oyl-hud__junction-lock {
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-hud__junction-title {
+  font-weight: 700;
+}
+
+.oyl-hud__junction-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-hud__junction-way {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* *Default* and *Chosen* on one line under the way's name, smaller, so a way
+   that is both is no taller than one that is either. */
+.oyl-hud__junction-marks {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* The way chosen says so in words; bold and a heavier edge are the glance's
+   half, never the only signal (SC 1.4.1). */
+.oyl-hud__junction-way--chosen {
+  font-weight: 700;
+  border-width: 3px;
+}
+
+/* Once the choice is final the ways carry `aria-disabled`, never `disabled`,
+   for the item control's reason above: they stay in the tab order and still
+   show which way the ride goes, so their ink is the HUD's full ink. */
+.oyl-hud__junction-way[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.oyl-hud__junction-hints,
+.oyl-hud__junction-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-hint kbd {
+  font-family: inherit;
 }
 
 /*
@@ -14540,17 +14667,69 @@ select.oyl-input {
   }
 }
 
+/* #2837: and in its own place, where in a race the rule below moves it. */
 @keyframes oyl-hud-actions-hold {
   from,
   to {
     clip-path: inset(-100vmax);
+    translate: none;
   }
 }
 
-/* From the panel's own box to the rule's clip, which it ends on. */
+/* From the panel's own box to the rule's clip, which it ends on — and, in a
+   race (#2837, below), from its own place to the stage's bottom edge. */
 @keyframes oyl-hud-actions-close {
   from {
     clip-path: inset(0 0 0 0);
+    translate: none;
+  }
+}
+
+/*
+ * #2837: IN A RACE, THE HIDDEN ACTIONS PANEL IS ITS LINE AT THE STAGE'S
+ * BOTTOM EDGE, AND THE STANDINGS TAKE THE ROOM.
+ *
+ * The owner's tablet race of 2026-11-18, seven bots: *"the position menu
+ * should get bigger when the other one reduces or make it bigger to begin
+ * with. Can only see 3 people."* A race's standings hang over the actions
+ * panel and are as tall as the room above it holds (`standings-room.ts`);
+ * hidden, that panel was clipped to the trainer's line at its TOP, so the
+ * line stood where the panel began and the room under it, where *Pause*,
+ * *End ride* and *Use item* had been, was nobody's.
+ *
+ * So where a race's standings are drawn — a tablet, the media query their
+ * own (§"A RACE'S STANDINGS"); on a phone they are in the document and not on
+ * the stage, and nothing moves — the hidden panel is MOVED down by what the
+ * clip takes off it: the line it keeps is drawn against the stage's bottom
+ * edge, the panel's own bottom, and everything above it is free. The
+ * standings measure the room to the line there and grow into it; a touch
+ * brings the controls back where they were, and the standings give the room
+ * back as they come (`standings-room.ts` §`useStandingsRoom`).
+ *
+ * The move is the closing's: as the clip closes, over `--oyl-motion-medium`,
+ * the panel's top edge comes down to the line and the line rides it, the
+ * bottom edge never moving. Until the fade has run the panel is held in its
+ * own place (the two keyframes above), and a rider who asked for less motion
+ * sees it at the bottom edge at once, as the clip is. With no line to keep it
+ * is clipped to nothing, as on any ride, and the room is the whole panel's.
+ *
+ * ⚠️ **What it does not do, recorded as #419 asks.** While the controls are
+ * DRAWN the room is what it was — on the owner's tablet at the large text,
+ * three lines of eight, the rest under a finger's scroll (#2599) — and they
+ * are held drawn while a notice stands, while the rider holds an item (ADR
+ * 0075 D-5) and once the rider has finished. A ride with no race moves
+ * nothing: its line stays where the panel begins.
+ *
+ * `browser/lap-race-hud.browser.spec.ts` §"#2837" measures it grown, given
+ * back, and — with this rule undone — not grown at all, and holds a phone's
+ * panel in its place; `ride-chrome.browser.spec.ts` §"#2837" holds a ride's
+ * with no race.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud[data-oyl-controls='hidden']:has(> .oyl-hud__standings)
+    .oyl-hud__actions {
+    translate: 0 calc(100% - var(--oyl-hud-actions-kept, 0px));
   }
 }
 

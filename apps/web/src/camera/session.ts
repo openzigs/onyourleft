@@ -32,6 +32,16 @@
  * `session.test.ts` asserts the port was never touched, which is the assertion
  * a disabled-button test cannot make.
  *
+ * ⚠️ **Since #2856 there is a second, narrower agreement, and it opens the
+ * camera for one thing.** {@link CameraController.agreeToScan} admits
+ * `turnOn(facing, 'scan')` — the camera coming on to read a code — and nothing
+ * else: `consent.local` stays `false`, and every method that takes, keeps,
+ * sends or watches a picture checks `consent.local` itself and refuses, with
+ * a camera running or not. So *"a running session IS the consent"* is no
+ * longer true of those methods, and a reviewer who remembers it is reading
+ * the old file: it holds only for {@link CameraController.readPairingCode} and
+ * {@link CameraController.showPreview}, which are what a scan is.
+ *
  * ## What it does not do
  *
  * It keeps nothing. Every frame it takes is dropped as soon as it has been
@@ -60,7 +70,14 @@ import type {
   PreviewSurface,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
-import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
+import {
+  cameraMayOpen,
+  consentDecision,
+  NO_CONSENT,
+  type CameraConsent,
+  type CameraUse,
+  type ConsentAnswers,
+} from './consent';
 import type { AnalysisPort } from './analysis-port';
 import type {
   AnalysisCall,
@@ -69,7 +86,7 @@ import type {
   AnalysisQuestion,
 } from '@onyourleft/analysis';
 import type { FrameKeep } from './keep';
-import { cameraNotice } from './notice';
+import { CAMERA_OFF_AFTER_A_SCAN, cameraNotice } from './notice';
 import {
   nextPresence,
   observePair,
@@ -123,6 +140,16 @@ export interface CameraThrottle {
 export interface CameraState {
   /** What the rider has agreed to. @see consent.ts */
   readonly consent: CameraConsent;
+  /**
+   * Whether the rider agreed to this device's camera reading a code, where
+   * they pressed *Scan a code* — #2856, `consent.ts`
+   * §`SCAN_CONSENT_STATEMENT`.
+   *
+   * ⚠️ **Not a member of {@link consent}, and it never sets `local`.** It
+   * admits `turnOn(facing, 'scan')` and nothing else. Held in memory as
+   * `consent` is, so it is asked once each time the app is opened.
+   */
+  readonly scanAgreed: boolean;
   /**
    * Whether a camera is running **right now**.
    *
@@ -433,6 +460,14 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
+  /** @see CameraState.scanAgreed */
+  #scanAgreed = false;
+  /**
+   * Whether the camera has been on to read a code on a device whose rider has
+   * not agreed to the camera itself — #2856. All it changes is a sentence:
+   * {@link notice} stops saying the camera *"has never been on"*.
+   */
+  #onForAScanOnly = false;
   #session: CameraSession | undefined;
   #facing: CameraFacing = 'environment';
   #problem: CameraProblemKind | undefined = 'no-consent';
@@ -488,6 +523,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   state(): CameraState {
     return {
       consent: this.#consent,
+      scanAgreed: this.#scanAgreed,
       live: this.#session?.live ?? false,
       facing: this.#session?.live === true ? this.#facing : undefined,
       problem: this.#problem,
@@ -527,7 +563,26 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
-   * Take the consent back, and stop the camera if it is running.
+   * Record that the rider agreed to this device's camera reading a code —
+   * #2856, `consent.ts` §`SCAN_CONSENT_STATEMENT`, asked where they pressed
+   * *Scan a code* (`views/CardScanner.tsx`).
+   *
+   * ⚠️ **It does not touch {@link CameraState.consent}**, and `#problem` stays
+   * `no-consent`: the Camera screen and the side camera find this device
+   * exactly as they would have, not agreed. What it admits is
+   * `turnOn(facing, 'scan')`.
+   */
+  agreeToScan(): void {
+    if (this.#scanAgreed) {
+      return;
+    }
+    this.#scanAgreed = true;
+    this.#announce();
+  }
+
+  /**
+   * Take the consent back, and stop the camera if it is running. The scan's
+   * narrower agreement goes with it.
    *
    * ⚠️ **The stop is the point, not the flag.** #382: *"Consent is revocable,
    * and revoking it stops capture, asserted by a test that revokes
@@ -537,6 +592,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    */
   revoke(): void {
     this.#consent = NO_CONSENT;
+    this.#scanAgreed = false;
     this.turnOff();
     this.#problem = 'no-consent';
     this.#announce();
@@ -552,10 +608,21 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * about. Opening again goes the whole way through, keep switch included, so
    * nothing the rider set on the old camera carries over unasked.
    *
+   * ⚠️ **`use` is what the camera is coming on FOR, and it decides which
+   * agreement admits it** (#2856, `consent.ts` §`cameraMayOpen`). `'camera'`
+   * unless asked, which only `consent.local` admits — so a caller that says
+   * nothing is refused on a device that agreed to a scan alone. `'scan'` is
+   * for reading a code, and {@link agreeToScan}'s agreement admits it too. It
+   * changes nothing about the camera that comes on: what a scan may NOT do
+   * with it is refused by each method that would do it.
+   *
    * @returns `undefined` when it is running, or the problem when it is not.
    */
-  async turnOn(facing: CameraFacing = 'environment'): Promise<CameraProblemKind | undefined> {
-    if (!this.#consent.local) {
+  async turnOn(
+    facing: CameraFacing = 'environment',
+    use: CameraUse = 'camera',
+  ): Promise<CameraProblemKind | undefined> {
+    if (!cameraMayOpen(use, { consent: this.#consent, scan: this.#scanAgreed })) {
       // ⚠️ Before the port, deliberately — see the file header. Deleting this
       // guard opens a camera on a device nobody agreed on, and
       // `session.test.ts` §"the camera is off by default" catches it by
@@ -589,6 +656,11 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return this.#fail(error instanceof CameraCaptureError ? error.kind : 'unavailable');
     }
     this.#problem = undefined;
+    if (!this.#consent.local) {
+      // #2856: on for a scan and for nothing else, so the Camera screen's
+      // "it has never been on" is no longer true. @see notice
+      this.#onForAScanOnly = true;
+    }
     this.#captured = 0;
     // Reset with `#captured`, because the two are read as one sentence: "N
     // taken since the camera was turned on, M of them on this device".
@@ -628,7 +700,8 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * ⚠️ **Only a camera that is already running**, which is only ever one the
    * rider agreed to and turned on: this never opens a camera and never asks
    * the port for anything else. With no running camera it attaches nothing and
-   * returns a detach that does nothing.
+   * returns a detach that does nothing. A camera on for a scan alone (#2856)
+   * is played too: it is the scanner's viewfinder, and it keeps nothing.
    *
    * ⚠️ The port's method is called lexically here, not in a private helper, for
    * `watchPresence`'s reason — `check:wiring` credits a `#private` body to the
@@ -658,8 +731,9 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * The phone reads the tablet's code this way, and the tablet the phone's.
    * ⚠️ **Only a camera that is already running**, which is only ever one the
    * rider agreed to and turned on, on THIS device — D-4: *"scanning counts as
-   * camera use"*, so the consent flow has already been shown. It never opens a
-   * camera and never asks the port for anything but the one read.
+   * camera use"*, so the consent flow has already been shown, or since #2856
+   * the scan's own narrower agreement has ({@link agreeToScan}). It never opens
+   * a camera and never asks the port for anything but the one read.
    *
    * ⚠️ **The pixels do not outlive this call**: they go to
    * `side-link-qr.ts` §`pairingCodeFromPixels` and are dropped with it — never
@@ -673,8 +747,9 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    */
   async readPairingCode(): Promise<string | undefined | typeof PAIRING_READER_UNAVAILABLE> {
     // No consent check of its own: a session exists only after `turnOn`, which
-    // refuses without consent, and `revoke` ends it — so a running session IS
-    // the consent, and a second check here could never fire.
+    // refuses without an agreement that covers a scan (both do), and `revoke`
+    // ends it — so a running session IS the consent to read a code, and a
+    // second check here could never fire.
     const session = this.#session;
     if (session === undefined || !session.live) {
       return undefined;
@@ -705,17 +780,19 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * pixels and passed through `frame.ts` §`capturedFrame` all the same, which
    * is ADR 0029 D-9's one strip point, unchanged.
    *
-   * ⚠️ **Only a camera that is already running**, for {@link readPairingCode}'s
-   * reason: a running session exists only after `turnOn`, which refuses
-   * without consent. It never opens a camera.
+   * ⚠️ **Only a camera that is already running, and only under
+   * `consent.local`.** It never opens a camera. ⚠️ Since #2856 a running
+   * camera is no longer enough: one that is on to read a code, under the
+   * scan's narrower agreement, takes no picture for the side camera.
    *
-   * @returns the picture, or `undefined` when there is no running camera or the
-   * picture could not be taken. Never rejects, and says nothing about why —
-   * the next picture is a fifth of a second away.
+   * @returns the picture, or `undefined` when there is no running camera, the
+   * rider has not agreed to the camera, or the picture could not be taken.
+   * Never rejects, and says nothing about why — the next picture is a fifth
+   * of a second away.
    */
   async captureSideFrame(): Promise<CapturedFrame | undefined> {
     const session = this.#session;
-    if (session === undefined || !session.live) {
+    if (!this.#consent.local || session === undefined || !session.live) {
       return undefined;
     }
     try {
@@ -911,9 +988,11 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
    * before a session that would then reset it — which would read to a rider as
    * a control that does not work. It is a no-op rather than a throw: a view
    * that renders the switch outside a session is a view bug, not a rider error.
+   * And refused without `consent.local`: a camera on to read a code (#2856)
+   * keeps nothing, and the keep is not armed under it for whatever comes next.
    */
   setKeeping(on: boolean): void {
-    if (this.#session?.live !== true) {
+    if (!this.#consent.local || this.#session?.live !== true) {
       return;
     }
     this.#keep?.setKeeping(on);
@@ -1034,9 +1113,23 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     return presenceAt(this.#presenceTracker, this.#clock());
   }
 
-  /** The words for the current problem, or `null` while there is none. */
+  /**
+   * The words for the current problem, or `null` while there is none.
+   *
+   * ⚠️ **`no-consent` has two sentences since #2856.** The table's says the
+   * camera *"has never been on"*, which stops being true the first time it
+   * reads a code under the scan's own agreement. From then the rider is told
+   * what it was on for (`notice.ts` §`CAMERA_OFF_AFTER_A_SCAN`). The problem
+   * itself is still `no-consent`: the camera's own agreement is still not given.
+   */
   notice(): CameraNotice | null {
-    return this.#problem === undefined ? null : this.#notices(this.#problem);
+    if (this.#problem === undefined) {
+      return null;
+    }
+    if (this.#problem === 'no-consent' && this.#onForAScanOnly) {
+      return CAMERA_OFF_AFTER_A_SCAN;
+    }
+    return this.#notices(this.#problem);
   }
 
   #fail(kind: CameraProblemKind): CameraProblemKind {
