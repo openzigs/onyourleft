@@ -104,6 +104,13 @@ export interface MapView {
   /** Where the middle of the view is now (#2006): the route planner's first waypoint. */
   centre(): GeographicPosition;
   /**
+   * Fly the view to a place (#2889): the open-world picker's chosen route or
+   * ride start. Smooth, unless the device asks for reduced motion, which
+   * MapLibre's camera honours on its own. Zooms in to a street's scale and
+   * never out.
+   */
+  show(position: GeographicPosition): void;
+  /**
    * Hear the pointer on an editable map (#2006). One set of handlers per map;
    * a second call replaces the first.
    */
@@ -166,6 +173,24 @@ export interface MapCreateOptions extends MapViewOptions {
    * a waypoint (`views/RouteBuilderView.tsx`) — so nothing here is a tab stop.
    */
   readonly editable?: boolean;
+  /**
+   * A map moved by hand, by key and by gesture — the open-world start picker
+   * (#2889, the owner's ruling of 2026-11-20). Only meaningful on an
+   * {@link editable} map, and it replaces the buttons {@link explorable}
+   * describes:
+   *
+   * - the canvas takes focus, as an `application` named `label` and described
+   *   by `describedBy`: arrow keys pan it and `+`/`-` zoom it (MapLibre's own
+   *   keyboard handler, rotation off);
+   * - the wheel and a trackpad zoom it, a mouse drag pans it with inertia, a
+   *   double click or double tap zooms in;
+   * - on touch, a pinch zooms and TWO fingers pan, so one finger still scrolls
+   *   the page — MapLibre's cooperative rule for touch, without its rule for
+   *   the wheel;
+   * - a waypoint of kind `pin` is a focusable pin whose arrow keys reach
+   *   {@link MapPointerHandlers.nudgeWaypoint}.
+   */
+  readonly direct?: { readonly label: string; readonly describedBy: string };
 }
 
 /** One waypoint as an editable map draws it (#2006). */
@@ -183,6 +208,12 @@ export interface MapWaypoint {
    * first: it shows "1" too, so start and finish read as one marker (#2102).
    */
   readonly label: string;
+  /**
+   * `pin` (#2889): drawn as a map pin whose tip is the position, with no text
+   * on it. On a {@link MapCreateOptions.direct} map it takes focus, and
+   * {@link label} is its accessible name. Unset, a numbered disc.
+   */
+  readonly kind?: 'pin';
 }
 
 /**
@@ -200,6 +231,11 @@ export interface MapPointerHandlers {
    * (`routing/map-edit.ts` §`nearestLeg`).
    */
   readonly dragLine: (from: GeographicPosition, to: GeographicPosition) => void;
+  /**
+   * An arrow key on a focused pin, on a {@link MapCreateOptions.direct} map
+   * (#2889): the owner moves the waypoint by its own stated step.
+   */
+  readonly nudgeWaypoint?: (id: string, direction: MapPanDirection) => void;
 }
 
 export interface MapRenderer {
