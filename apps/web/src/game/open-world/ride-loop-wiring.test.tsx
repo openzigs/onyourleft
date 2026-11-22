@@ -330,6 +330,58 @@ describe('an open-world ride past its first view — #2982', () => {
   });
 });
 
+describe('an open-world ride hands the recording the streets ridden — #3059', () => {
+  it('tells the recording under the ride where the rider is on every frame, where the scene drew them', async () => {
+    // What the recording was told, with how many frames the scene had drawn by then.
+    const told: { readonly position: GeographicPosition; readonly frame: number }[] = [];
+    const base = trainer([]);
+    const recording = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { paired: true, controllable: true, canSimulate: true, hasControl: true },
+        workout: undefined,
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+      notePosition: (position) => {
+        told.push({ position, frame: inputs.length });
+      },
+    });
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={{
+          ...base,
+          rodeAt: (position) => {
+            recording.rodeAt?.(position);
+          },
+        }}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 60; frames += 1) await pump();
+
+    expect(told.length).toBeGreaterThan(40);
+    // Each is where the scene drew the rider on the frame it was told on: the
+    // street ridden, not the start, nor a point ahead on the view.
+    let compared = 0;
+    for (const { position, frame } of told) {
+      const drawn = inputs[frame];
+      if (drawn === undefined) continue;
+      compared += 1;
+      expect(distanceBetween(position, placeOf(drawn)), `frame ${frame}`).toBeLessThan(0.5);
+    }
+    expect(compared).toBeGreaterThan(40);
+    const first = told[0]?.position as GeographicPosition;
+    const last = told.at(-1)?.position as GeographicPosition;
+    expect(distanceBetween(first, last)).toBeGreaterThan(500);
+  });
+});
+
 /** A previous attempt, ahead of the rider: drawn as a ghost wherever one is loaded. */
 const OWN_GHOST: GhostTrack = buildGhostTrack({
   elapsedSeconds: [0, 60],

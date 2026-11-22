@@ -79,6 +79,7 @@
  */
 
 import type {
+  GeographicPosition,
   LapRaceModelRecord,
   PacerDecisionRecord,
   TimeInZones,
@@ -391,6 +392,18 @@ export interface GameTrainerPort {
    */
   pacerDecided?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
+   * Where the rider is on an open-world ride's street, on every frame —
+   * #3059, the owner's ruling of 2026-11-22: kept by the ride controller
+   * (`notePosition`) as the recording's position, so the saved ride shows
+   * the streets actually ridden in History's map and its exports, private by
+   * default and trimmed by zones where shared (ADR 0004, ADR 0090 R-4). ⚠️ Not
+   * about the trainer, which no position reaches: on this port for
+   * {@link gameRideEnded}'s reason, and named so nothing else in production
+   * calls a method of that name. Optional, as {@link soloDraftStepped} is;
+   * `gameTrainerPortOver` always supplies it.
+   */
+  rodeAt?(position: GeographicPosition): void;
+  /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
    * ride controller's `recordForRoom`). Answers whether a recording is
@@ -698,6 +711,8 @@ interface GameTrainerSource {
   noteSoloDraft?(reading: SoloDraftState): void;
   /** #2712. @see GameTrainerPort.pacerDecided. Optional for a source with no recording. */
   notePacerDecision?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /** #3059. @see GameTrainerPort.rodeAt. Optional for a source with no recording. */
+  notePosition?(position: GeographicPosition): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -871,6 +886,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     pacerDecided: (record, ride) => {
       controller?.notePacerDecision?.(record, ride);
+    },
+    rodeAt: (position) => {
+      controller?.notePosition?.(position);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide

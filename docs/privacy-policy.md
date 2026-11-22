@@ -122,7 +122,7 @@ your own action:
 
 | What | Where it comes from |
 | --- | --- |
-| Rides — time, power, cadence, speed, distance, heart rate, and position where a ride has one | the Bluetooth sensors and trainer you pair, and files you import |
+| Rides — time, power, cadence, speed, distance, heart rate, and position where a ride has one | the Bluetooth sensors and trainer you pair, files you import, and the streets an open-world ride takes on the game's map |
 | Health and fitness data — heart rate, power, cadence | a Bluetooth heart-rate strap, power meter or smart trainer |
 | Routes, segments, efforts and workouts | drawn in the app, or imported from a file you choose |
 | A threshold power and a unit preference | typed by you in Settings |
@@ -175,7 +175,9 @@ tiles off.
 Three things worth being precise about:
 
 - **The app does not read your device's location.** It requests no GPS fix. Positions arrive from
-  files you import and from routes you draw.
+  files you import, from routes you draw, and from an open-world ride, which saves the streets of the
+  game's map you rode as that ride's track: private by default, and trimmed by your privacy zones
+  wherever it is shared, like any other.
 - **The Android location permissions are for Bluetooth, not for you.** Android 11 and earlier would
   not let an app scan for Bluetooth devices at all without a location permission, so the app declares
   `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` bounded at API 30. On Android 12 and later they

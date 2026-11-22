@@ -79,6 +79,7 @@ import {
   type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
+  type GeographicPosition,
   type ThresholdTest,
   type TimeInZones,
   type UnixSeconds,
@@ -1358,6 +1359,17 @@ export interface RideController {
    */
   notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
+   * Where the rider is on an open-world ride's street — #3059, the owner's
+   * ruling of 2026-11-22 that an open-world ride saves its track. Recorded as
+   * the `latitude` and `longitude` channels, at most once a second on the
+   * controller's clock, and only while a ride is recording: the saved ride
+   * then has a position like any recorded track, private by default
+   * (`putActivity`, ADR 0004) and trimmed by the rider's zones wherever it is
+   * shared (`detail/load.ts` §`loadSharedTrack`). Paused, idle or stopped, it
+   * is ignored. Decides no write to the trainer.
+   */
+  notePosition(position: GeographicPosition): void;
+  /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
    * is under it: a recording or paused ride carries on (a paused one stays
@@ -2146,6 +2158,8 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   const detached = new WeakSet<TrainerControl>();
   let clock: UnixSeconds = now();
+  /** The second {@link RideController.notePosition} last recorded a position in (#3059). */
+  let positionSecond: number | undefined;
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
 
@@ -4590,6 +4604,19 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : unixSeconds(Math.max(0, clock - record.arrivedAtS)));
       pacerRide = { ...ride, startedAt };
+    },
+
+    notePosition(position: GeographicPosition): void {
+      // Idle, paused or stopped, the recording engine refuses the reading itself.
+      if (recorder === undefined) return;
+      const at = now();
+      // A frame is about a sixtieth of a second and a slot a whole one: the
+      // first position in each second is the one kept.
+      const second = Math.floor(at);
+      if (second === positionSecond) return;
+      positionSecond = second;
+      recorder.observeReading({ channel: 'latitude', value: position.latitude, at });
+      recorder.observeReading({ channel: 'longitude', value: position.longitude, at });
     },
 
     async recordForRoom(): Promise<boolean> {

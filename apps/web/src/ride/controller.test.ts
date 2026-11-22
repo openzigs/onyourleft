@@ -45,6 +45,7 @@ import {
   unixSeconds,
   watts,
   type CalorieRider,
+  type GeographicPosition,
   type RouteProfile,
   type UnixSeconds,
   type Watts,
@@ -93,6 +94,7 @@ import {
   activityId,
   cameraFrameId,
   lapId,
+  privacyZoneId,
   RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
   workoutId,
@@ -185,6 +187,7 @@ import { lapSplits } from '../game/hud/lap-splits';
 import { CALORIES_KEY, hudReadings } from '../game/hud/fields';
 import { atStartLine } from '../game/simulation';
 import { caloriesValue } from '../detail/CaloriesFact';
+import { loadOwnTrack, loadSharedTrack } from '../detail/load';
 import type { RideTotals } from '../recording/totals';
 import { formatDuration } from '../format';
 import { createGradientSession } from '../game/gradient';
@@ -10643,6 +10646,93 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await rig.controller.confirmStop();
     expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('not-beaten');
     expect(rig.controller.getSnapshot().savedRide?.gameOutcomeDrafted).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('saves an open-world ride’s streets as its track: in History’s map, trimmed by a zone when shared, and in the GPX — #3059', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    if (game.rodeAt === undefined) throw new Error('the game port carries no rodeAt');
+    // Due north from a home, 100 m a second: the distance from home is the
+    // latitude alone, so which points a 250 m zone withholds is stated here.
+    const home = geographicPosition(degreesLatitude(51.5074), degreesLongitude(-0.1278));
+    const north = (metresNorth: number) =>
+      geographicPosition(
+        degreesLatitude(home.latitude + metresNorth / 111_194.93),
+        degreesLongitude(home.longitude),
+      );
+    await rig.controller.pair('trainer');
+    // Before the recording: not kept.
+    game.rodeAt(north(-5_000));
+    await rig.controller.start();
+    const ridden = Array.from({ length: 8 }, (_unused, index) => north(index * 100));
+    for (const position of ridden) {
+      game.rodeAt(position);
+      // A later frame in the same second keeps the first.
+      game.rodeAt(north(-9_000));
+      await ride(rig, 1);
+    }
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    if (saved === undefined) throw new Error('the ride was not saved');
+    // The store keeps a coordinate to about a millimetre, not to the last bit.
+    const expectStreets = (
+      seen: readonly GeographicPosition[] | undefined,
+      streets: readonly GeographicPosition[],
+    ): void => {
+      expect(seen).toHaveLength(streets.length);
+      streets.forEach((street, index) => {
+        expect(seen?.[index]?.latitude).toBeCloseTo(street.latitude, 7);
+        expect(seen?.[index]?.longitude).toBeCloseTo(street.longitude, 7);
+      });
+    };
+
+    const read = await harness.read(async (store) => ({
+      activity: await store.getActivity(ATHLETE_A, saved),
+      own: await loadOwnTrack({ athleteId: ATHLETE_A, store }, saved),
+    }));
+    expect(read.activity?.hasPosition).toBe(true);
+    // ADR 0004: private by default, like any recorded ride.
+    expect(read.activity?.visibility).toBe('private');
+    // History's map: the rider's own track, every street ridden and nothing else.
+    expectStreets(
+      read.own?.segments.flatMap((segment) => segment.points.map((p) => p.position)),
+      ridden,
+    );
+
+    // Shared, a zone round home withholds what lies in it (ADR 0004 B, ADR 0090 R-4).
+    await harness.write(async (store) =>
+      store.putPrivacyZone({
+        id: privacyZoneId('home'),
+        athleteId: ATHLETE_A,
+        centre: home,
+        radius: metres(250),
+        label: 'home',
+        createdAt: unixSeconds(1),
+      }),
+    );
+    const shared = await harness.read(async (store) =>
+      loadSharedTrack({ athleteId: ATHLETE_A, store }, saved),
+    );
+    const kept = shared?.segments.flatMap((segment) => segment.points.map((p) => p.position));
+    expectStreets(kept, ridden.slice(3));
+    expect(shared?.trimmedPoints).toBe(3);
+
+    // The GPX export carries the same streets, a point for each.
+    const gpx = new TextDecoder().decode(
+      (
+        await harness.read(async (store) =>
+          exportActivity({ store, athleteId: ATHLETE_A, activityId: saved, format: 'gpx' }),
+        )
+      ).file.bytes,
+    );
+    const points = [...gpx.matchAll(/<trkpt lat="([-\d.]+)" lon="([-\d.]+)"/gu)];
+    expect(points).toHaveLength(ridden.length);
+    points.forEach((point, index) => {
+      expect(Number(point[1])).toBeCloseTo(ridden[index]!.latitude, 6);
+      expect(Number(point[2])).toBeCloseTo(ridden[index]!.longitude, 6);
+    });
     rig.controller.dispose();
   });
 

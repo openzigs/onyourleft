@@ -61,7 +61,9 @@
  * U-turn's line is drawn at once: the road under the rider changed.
  *
  * Nothing here reads a clock, writes to a trainer or names a place: the
- * position goes to the reader, which keeps only its block (ADR 0090 R-1).
+ * position goes to the reader, which keeps only its block (ADR 0090 R-1),
+ * and is kept as {@link OpenWorldRoad.position} for the ride's recording
+ * (#3059), which saves it on the device like any recorded track.
  */
 
 import {
@@ -142,6 +144,8 @@ export class OpenWorldRoad {
   #drawn: DrawnLine | undefined;
   /** The path being eased from, and the ride distance the ease began at. @see drawnPath */
   #easing: { readonly from: HeldLine; readonly at: number } | undefined;
+  /** Where the rider was at the last {@link follow} that placed them on the road. @see position */
+  #position: GeographicPosition | undefined;
 
   constructor(route: RollingRoute, hooks: OpenWorldRoadHooks = {}) {
     this.route = route;
@@ -154,6 +158,17 @@ export class OpenWorldRoad {
   /** The view last handed on. */
   get view(): OpenWorldRoadView {
     return this.#view;
+  }
+
+  /**
+   * Where the rider is on the street they are riding, as of the last
+   * {@link follow}: the point at their ride distance on the view, the same
+   * one {@link OpenWorldRoadHooks.at} is told. `undefined` before a follow
+   * has placed them. #3059: `GameView` hands it to the recording under the
+   * ride, so the saved ride carries the streets actually ridden.
+   */
+  get position(): GeographicPosition | undefined {
+    return this.#position;
   }
 
   /**
@@ -175,7 +190,10 @@ export class OpenWorldRoad {
       }
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);
-      if (at >= 0 && at <= route.end - route.origin) this.#hooks.at?.(positionAt(route.view(), at));
+      if (at >= 0 && at <= route.end - route.origin) {
+        this.#position = positionAt(route.view(), at);
+        this.#hooks.at?.(this.#position);
+      }
     }
     const profile = route.view();
     if (profile === this.#view.profile) return undefined;
