@@ -3863,14 +3863,12 @@ function GameScreen({
         heartRate: sensors.heartRate,
         units: unitsRef.current,
         shownPower: { view: powerViewRef.current, average: powerAverageRef.current.average },
+        // #2982, #2990: an open-world ride goes nowhere in particular, so its
+        // "to go" is a dash, which `remainingFrom` reads as nothing to say.
+        openEnded: road.follower !== undefined,
       });
       // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
-      // #2982: never on an open-world ride, which goes nowhere in particular:
-      // its view's end is only how far the road is held, which a new view moves.
-      const remaining =
-        road.follower === undefined
-          ? remainingFrom(readings, spokenDistanceUnit(unitsRef.current))
-          : undefined;
+      const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
       // #399: a climb or a descent ahead, from the SAME wrapped position the
       // strip and the plan view use (`climb-ahead.ts` says why that matters).
       const slope = slopeEvent(slopeAnnouncedRef.current, {
@@ -5271,6 +5269,8 @@ function GameScreen({
         profile={rideRoad?.profile ?? chosen.profile}
         announcement={announcement}
         state={rideRoad === undefined ? state : alongRoad(state, rideRoad.origin)}
+        // #2990: and no "to go" or route length on it, which a view's end is not.
+        openEnded={rideRoad?.follower !== undefined}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         // #1111: the RECORDER's moving time — never the simulation's

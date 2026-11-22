@@ -27,6 +27,7 @@ import {
   waysOn,
   type RollingEdge,
   type RollingJunction,
+  type RollingStreetGraph,
 } from './rolling';
 import { graphOf, gridGraph, placeAt, roughGround, streetThrough } from './rolling-testing';
 
@@ -674,5 +675,205 @@ describe('a start street that is not one', () => {
       expect(error).toMatchObject({ code: 'no-distance' });
       expect(String((error as Error).message)).not.toMatch(/40\.|105\.|-105/);
     }
+  });
+});
+
+describe('a dead end that the graph later goes on past — #2990', () => {
+  const ground = (east: number) => 100 + east * 0.04;
+  // A street east from 0 to 800 m, whose far end is the edge of the map held.
+  const first: RollingEdge = {
+    id: 'first',
+    from: 'start',
+    to: 'edge',
+    points: streetThrough(
+      [
+        [0, 0],
+        [800, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+  // The street on from there, once the next block is read.
+  const onward: RollingEdge = {
+    id: 'onward',
+    from: 'edge',
+    to: 'far',
+    points: streetThrough(
+      [
+        [800, 0],
+        [4_000, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+
+  /** A graph whose streets may be added to after the route reads it. */
+  function growing(): { graph: RollingStreetGraph; add: (edge: RollingEdge) => void } {
+    const edges: RollingEdge[] = [first];
+    return {
+      graph: { edgesFrom: (node) => graphOf(edges).edgesFrom(node) },
+      add: (edge) => {
+        edges.push(edge);
+      },
+    };
+  }
+
+  it('takes the way on past a turn-round once the graph has one, changing nothing the rider can have been sent', () => {
+    const { graph, add } = growing();
+    const route = new RollingRoute(graph, first);
+    expect(route.legs[1]?.kind).toBe('turn-round');
+    const rider = 300;
+    route.advance(rider);
+    const before = route.view();
+    add(onward);
+    expect(route.reopen(rider)).toBe(true);
+    const legs = route.legs;
+    expect(legs[1]?.kind).toBe('default');
+    expect(legs[1]?.edge.id).toBe('onward');
+    const view = route.view();
+    expect(view).not.toBe(before);
+    // Ridden on east past the old end, not back west: 1 km past it is 1.8 km
+    // from the start.
+    const end = legs[0]?.end as number;
+    const past = readAt(view, route.origin, end + 1_000).position;
+    expect(distanceBetween(placeAt(0, 0), past)).toBeCloseTo(end + 1_000, 0);
+    // Nothing up to 100 m short of the old end moved, and no grade a rider at
+    // 300 m can have been sent (it reads 80 m ahead) changed.
+    for (const at of samplesIn(0, end - 100)) {
+      expect(readAt(view, route.origin, at).position).toEqual(
+        readAt(before, route.origin, at).position,
+      );
+    }
+    for (const at of samplesIn(0, rider + 80)) {
+      expect(readAt(view, route.origin, at).grade).toBe(readAt(before, route.origin, at).grade);
+    }
+    // Nothing more to take.
+    expect(route.reopen(rider)).toBe(false);
+  });
+
+  it('rides a turn-round within the lock as it is', () => {
+    const { graph, add } = growing();
+    const route = new RollingRoute(graph, first);
+    const end = route.legs[0]?.end as number;
+    const rider = end - JUNCTION_LOCK_METRES;
+    route.advance(rider);
+    const before = route.view();
+    add(onward);
+    expect(route.reopen(Number.NaN)).toBe(false);
+    expect(route.view()).toBe(before);
+    // The turn-round 100 m ahead stays: the rider turns round there and rides
+    // back to the start, a dead end, and back again. The street on is taken
+    // the next time the route reaches the old end, a lap of 1.6 km later.
+    route.reopen(rider);
+    const legs = route.legs;
+    expect(legs[1]?.kind).toBe('turn-round');
+    expect(legs[2]?.kind).toBe('turn-round');
+    expect(legs[3]?.kind).toBe('default');
+    expect(legs[3]?.edge.id).toBe('onward');
+    for (const at of samplesIn(0, end + 700)) {
+      expect(readAt(route.view(), route.origin, at).position).toEqual(
+        readAt(before, route.origin, at).position,
+      );
+    }
+  });
+
+  it('changes nothing at a dead end that still is one', () => {
+    const { graph } = growing();
+    const route = new RollingRoute(graph, first);
+    const before = route.view();
+    expect(route.reopen(0)).toBe(false);
+    expect(route.view()).toBe(before);
+  });
+});
+
+describe("a loop's two ways — #2990", () => {
+  const ground = () => 100;
+  const stem: RollingEdge = {
+    id: 'stem',
+    from: 's',
+    to: 'n',
+    points: streetThrough(
+      [
+        [0, -300],
+        [0, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+  const ring = streetThrough(
+    [
+      [0, 0],
+      [200, 100],
+      [0, 200],
+      [-200, 100],
+      [0, 0],
+    ],
+    ground,
+  );
+  // As the open-world session orients a loop: two ways, two ids, one street.
+  const clockwise: RollingEdge = {
+    id: 'ring',
+    street: 'ring',
+    from: 'n',
+    to: 'n',
+    points: ring,
+    roadClass: 1,
+  };
+  const anticlockwise: RollingEdge = {
+    id: 'ring:reverse',
+    street: 'ring',
+    from: 'n',
+    to: 'n',
+    points: [...ring].reverse(),
+    roadClass: 1,
+  };
+  const graph: RollingStreetGraph = {
+    edgesFrom: (node) =>
+      node === 'n'
+        ? [
+            { ...stem, from: 'n', to: 's', points: [...stem.points].reverse() },
+            clockwise,
+            anticlockwise,
+          ]
+        : node === 's'
+          ? [stem]
+          : [],
+  };
+
+  it('offers both ways round by two ids, and a choice by either takes that way', () => {
+    const route = new RollingRoute(graph, stem);
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(junction.ways.map((way) => way.edge.id).sort()).toEqual(['ring', 'ring:reverse']);
+    for (const [id, east] of [
+      ['ring', 1],
+      ['ring:reverse', -1],
+    ] as const) {
+      expect(['swapped', 'unchanged']).toContain(route.choose(junction.distance, id, 0));
+      const at = readAt(route.view(), route.origin, junction.distance + 150).position;
+      // 150 m round the ring the rider is east of the stem one way, west the other.
+      expect(Math.sign(at.longitude - placeAt(0, 0).longitude)).toBe(east);
+    }
+  });
+
+  it('offers neither way round from the ring itself: both are the way back', () => {
+    const { ways } = waysOn(clockwise, graph.edgesFrom('n'));
+    expect(ways.map((way) => way.edge.id)).toEqual(['stem']);
+  });
+
+  it('keeps the street on a way it turns round, so the way back from there is still the ring', () => {
+    // Up the stem and once round the ring, then a U-turn on the ring: ridden
+    // back to the node, neither way round is a way on from it.
+    const route = new RollingRoute(graph, stem);
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    const rider = junction.distance + 100;
+    route.advance(rider);
+    route.uTurn(rider);
+    const legs = route.legs;
+    const uTurn = legs.findIndex((leg) => leg.kind === 'u-turn');
+    expect(legs[uTurn]?.edge.street).toBe('ring');
+    expect(legs[uTurn + 1]?.edge.id).toBe('stem');
   });
 });

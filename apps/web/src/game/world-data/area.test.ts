@@ -21,6 +21,7 @@ import {
   CROSSING_DELAY_MAX_MS,
   MAX_HELD_BLOCKS,
   MAX_HELD_TILES,
+  MAX_PARTIAL_REREADS,
   tilesOfBlock,
   type AreaPosition,
   type AreaReaderOptions,
@@ -686,5 +687,92 @@ describe('R-6: map tiles off asks for nothing', () => {
   it('with no archive configured, is off and asks for nothing', async () => {
     const area = reader({ archive: undefined });
     expect(await area.start(START)).toStrictEqual({ kind: 'off', why: 'no-archive' });
+  });
+});
+
+describe('a block read in part is read again during the ride — #2990', () => {
+  /** The start block's first tile: the one these archives fail. */
+  const FAILING = tilesOfBlock(blockOf(START) as BlockId)[0] as TileId;
+  const isFailing = (tile: TileId): boolean => tile.x === FAILING.x && tile.y === FAILING.y;
+
+  /** An archive that fails {@link FAILING} the first `failures` times it is asked for. */
+  function failingArchive(failures: number) {
+    const { archive: answering } = countingArchive();
+    const asked: TileId[] = [];
+    let failed = 0;
+    const archive: CorridorArchive = {
+      open: (signal) => answering.open(signal),
+      tile: (tile) => {
+        asked.push(tile);
+        if (isFailing(tile) && failed < failures) {
+          failed += 1;
+          return Promise.reject(new Error('the connection dropped'));
+        }
+        return Promise.resolve(roadFieldsTile());
+      },
+    };
+    return { archive, asked };
+  }
+
+  const startBlock = (area: ReturnType<typeof reader>) =>
+    area
+      .held()
+      .find((held) => blockKeys([held.block])[0] === blockKeys([blockOf(START) as BlockId])[0]);
+
+  it('holds the tiles it read, and reads the failed one alone at the next crossing, then holds all four', async () => {
+    const { archive, asked } = failingArchive(1);
+    let changes = 0;
+    const area = reader({
+      archive,
+      onChange: () => {
+        changes += 1;
+      },
+    });
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    expect(changes).toBe(9);
+    const before = startBlock(area);
+    expect(before?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+    expect(before?.streets).toHaveLength(3);
+    const streetsBefore = before?.features.streets.length ?? 0;
+
+    const asking = asked.length;
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    // The new column's twelve tiles, and the failed tile once more: nothing else.
+    const again = asked.slice(asking).filter(isFailing);
+    expect(again).toHaveLength(1);
+    expect(asked.length - asking).toBe(12 + 1);
+    const after = startBlock(area);
+    expect(after?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+    expect(tileKeys(after?.streets.map((each) => each.tile) ?? []).sort()).toStrictEqual(
+      tileKeys(tilesOfBlock(blockOf(START) as BlockId)).sort(),
+    );
+    // What it read before is kept, and the tile read again is added to it.
+    expect(after?.features.streets.length).toBeGreaterThan(streetsBefore);
+    expect(after?.features.streets.slice(0, streetsBefore)).toStrictEqual(before?.features.streets);
+    // Told: the west column dropped, three blocks read, and the block read again.
+    expect(changes).toBe(9 + 1 + 3 + 1);
+  });
+
+  it('reads it again at most twice while it is held, however many crossings keep it', async () => {
+    const { archive, asked } = failingArchive(Number.POSITIVE_INFINITY);
+    const area = reader({ archive });
+    await area.start(START);
+    for (let crossing = 0; crossing < 6; crossing += 1) {
+      area.moveTo(offset(START, crossing % 2 === 0 ? 2_000 : 0, 0));
+      await area.settled();
+    }
+    expect(asked.filter(isFailing)).toHaveLength(1 + MAX_PARTIAL_REREADS);
+    expect(startBlock(area)?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+  });
+
+  it('asks nothing again for a block every tile of which was read', async () => {
+    const { archive, asked } = failingArchive(0);
+    const area = reader({ archive });
+    await area.start(START);
+    const asking = asked.length;
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    expect(asked.length - asking).toBe(12);
   });
 });

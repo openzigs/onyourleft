@@ -25,16 +25,7 @@ import type { RidableRoute } from '../StageChooser';
 import type { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
 
-/**
- * The open-world ride's card on the picker. Never a saved route's id: those
- * are the store's, and nothing is stored under this one.
- */
-export const OPEN_WORLD_ROUTE_ID = 'open-world';
-
-/** Whether `id` is the open-world ride's card rather than a route, a circuit or a level. */
-export function isOpenWorldRouteId(id: string): boolean {
-  return id === OPEN_WORLD_ROUTE_ID;
-}
+export { OPEN_WORLD_ROUTE_ID, isOpenWorldRouteId } from './route-id';
 
 /**
  * How far from its start an open-world ride looks for a street to begin on:

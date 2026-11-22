@@ -139,8 +139,18 @@ export interface RollingPoint {
 
 /** One street between two nodes of the graph, oriented away from `from`. */
 export interface RollingEdge {
-  /** The street's id, the same whichever way it is ridden. */
+  /**
+   * The way's id: the street's, the same whichever way it is ridden — except a
+   * loop's (`from === to`), whose two ways leave the same node and must be
+   * told apart by a choice (#2990), so they carry two ids and one
+   * {@link street}.
+   */
   readonly id: string;
+  /**
+   * The street the way is, when that is not {@link id}: a loop's two ways
+   * name it. The way back from a node is any way of the street arrived on.
+   */
+  readonly street?: string | undefined;
   readonly from: string;
   readonly to: string;
   /** From `from` to `to`. At least two, and longer than {@link ROLLING_LEAST_WAY_METRES}. */
@@ -230,6 +240,7 @@ function lengthOf(edge: RollingEdge): number {
 function reversed(edge: RollingEdge): RollingEdge {
   return {
     id: edge.id,
+    ...(edge.street === undefined ? {} : { street: edge.street }),
     from: edge.to,
     to: edge.from,
     points: [...edge.points].reverse(),
@@ -266,12 +277,17 @@ function signedTurn(from: DegreesBearing, to: DegreesBearing): number {
   return clockwise <= 180 ? size : -size;
 }
 
+/** The street a way is: its {@link RollingEdge.street}, else its id. */
+function streetOf(edge: RollingEdge): string {
+  return edge.street ?? edge.id;
+}
+
 /**
  * The ways on from the node `arriving` ends at, ordered from the furthest left
  * to the furthest right, with ADR 0088 D-1.4's default.
  *
- * The way back (an edge with `arriving`'s id) is never a way on, and nor is a
- * way shorter than {@link ROLLING_LEAST_WAY_METRES}. **The default** is the way
+ * The way back (a way of the street `arriving` is, by {@link streetOf}) is
+ * never a way on, and nor is a way shorter than {@link ROLLING_LEAST_WAY_METRES}. **The default** is the way
  * with the smallest change of bearing, counted in whole degrees; on a tie, the
  * one of the higher road class; then the right-hand one.
  */
@@ -280,9 +296,12 @@ export function waysOn(
   edges: readonly RollingEdge[],
 ): { readonly ways: readonly RollingWay[]; readonly defaultWay: RollingWay | undefined } {
   const heading = lastBearing(arriving.points);
+  const arrivingStreet = streetOf(arriving);
   const ways: RollingWay[] = [];
   for (const edge of edges) {
-    if (edge.id === arriving.id || !(lengthOf(edge) >= ROLLING_LEAST_WAY_METRES)) continue;
+    if (streetOf(edge) === arrivingStreet || !(lengthOf(edge) >= ROLLING_LEAST_WAY_METRES)) {
+      continue;
+    }
     const leaving = firstBearing(edge.points);
     const turnDegrees =
       heading === undefined || leaving === undefined ? 0 : signedTurn(heading, leaving);
@@ -514,6 +533,33 @@ export class RollingRoute {
     this.#push(reversed(leg.edge), 'u-turn', turn, length - cut);
     this.#uTurns += 1;
     this.#settle(rider);
+  }
+
+  /**
+   * Takes a way on, along the default ways, where the route turned round at a
+   * dead end that is one no longer (#2990): an open-world ride's graph grows as
+   * the map round the rider is read, and a street that ended at the edge of
+   * the map held goes on once the next block is. The first such turn-round
+   * more than {@link JUNCTION_LOCK_METRES} ahead of `rider` is replaced, as
+   * {@link choose} replaces a tail, so no grade the rider can have been sent
+   * changes (ADR 0087 D-6.1); one nearer is ridden as it is. Returns whether
+   * the route changed. A rider distance that is not a finite number changes
+   * nothing: the lock fails closed.
+   */
+  reopen(rider: number): boolean {
+    if (!Number.isFinite(rider)) return false;
+    for (let index = 1; index < this.#legs.length; index += 1) {
+      const leg = this.#legs[index] as Leg;
+      if (leg.kind !== 'turn-round' || leg.start - rider <= JUNCTION_LOCK_METRES) continue;
+      const before = this.#legs[index - 1] as Leg;
+      const { defaultWay } = this.#waysAfter(before);
+      if (defaultWay === undefined) continue;
+      this.#cutAfter(index - 1, before.end);
+      this.#push(defaultWay.edge, 'default', before.end, 0);
+      this.#settle(rider);
+      return true;
+    }
+    return false;
   }
 
   /**

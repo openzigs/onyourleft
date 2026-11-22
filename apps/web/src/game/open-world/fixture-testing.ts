@@ -90,15 +90,43 @@ export function fixturePosition(column: number, row: number): GeographicPosition
   return geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
 }
 
-/** The archive's bytes: the block's four tiles of `streets`, and nothing round them. */
+/** The tiles of the block `east` blocks east of the fixture's: the fixture's own at 0. */
+export function fixtureBlockTiles(east: number): readonly TileId[] {
+  return OPEN_WORLD_FIXTURE_TILES.map((tile) => ({ ...tile, x: tile.x + 2 * east }));
+}
+
+/**
+ * `streets` as `tile` is cut: every vertex's column held to the tile's own
+ * columns and a buffer of 256 either side, as a real tile's geometry is. Only
+ * for streets drawn along a row or a column, which is every street here: a
+ * line along a row is cut where it leaves the buffer, and one along a column
+ * outside it lies in the buffer, which the graph clips away.
+ */
+function cutTo(streets: readonly GraphFixtureStreet[], tile: TileId): GraphFixtureStreet[] {
+  const west = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT - 256;
+  const east = west + FIXTURE_EXTENT + 512;
+  return streets.map((street) => ({
+    ...street,
+    line: street.line.map(([x, y]) => [Math.min(east, Math.max(west, x)), y] as const),
+  }));
+}
+
+/**
+ * The archive's bytes: the block's four tiles of `streets`, and nothing round
+ * them — or, with `blocksEast` (#2990), the tiles of that many blocks east of
+ * it too, so a street drawn on past the block runs on into them.
+ */
 export function openWorldFixtureArchive(
   streets: readonly GraphFixtureStreet[] = OPEN_WORLD_FIXTURE_STREETS,
+  blocksEast = 0,
 ): Promise<Uint8Array> {
+  const tiles: TileId[] = [];
+  for (let east = 0; east <= blocksEast; east += 1) tiles.push(...fixtureBlockTiles(east));
   return buildArchive({
-    tiles: OPEN_WORLD_FIXTURE_TILES.map((tile) => ({
+    tiles: tiles.map((tile) => ({
       x: tile.x,
       y: tile.y,
-      bytes: graphFixtureTile(streets, tile),
+      bytes: graphFixtureTile(blocksEast === 0 ? streets : cutTo(streets, tile), tile),
     })),
   });
 }

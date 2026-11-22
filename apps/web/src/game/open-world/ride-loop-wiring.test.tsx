@@ -21,7 +21,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   RollingRoute,
+  altitudeMetres,
   buildGhostTrack,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  routeProfile,
   distanceBetween,
   gradeAt,
   metres,
@@ -30,16 +35,20 @@ import {
   type GeographicPosition,
   type GhostTrack,
   type RollingEdge,
+  type RoutePoint,
 } from '@onyourleft/domain';
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { drawnLine } from '../drawn-line';
-import { GameView, type GamePort } from '../GameView';
+import { GameView, type GamePort, type RidableRoute } from '../GameView';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
+import { DELIVERY_CHOICE_TEXT, LAP_RACE_CHOICE_TEXT, OPEN_WORLD_ALONE_TEXT } from '../StageChooser';
+import { writeRealisticWorldChoice } from '../world-preference';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../hud/announce-preference';
+import { NO_READING } from '../hud/fields';
 import { slopeAhead, slopeSentence, slopesOf } from '../hud/climb-ahead';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
@@ -348,6 +357,78 @@ async function untilTheCard(): Promise<void> {
   expect(rideButton()?.textContent).toBe('Ride Open world');
 }
 
+/** A saved route beside the open-world card: one with an attempt, so its ghost is offered. */
+const SAVED = {
+  id: 'saved-road',
+  name: 'Saved road',
+  profile: hillyRoute().view(),
+  attempts: 1,
+};
+
+/** The radio of the route card whose label names `name`. */
+function cardRadio(name: string): HTMLInputElement | undefined {
+  return (
+    queryAll<HTMLElement>(mounted?.container ?? document, '.oyl-chooser__card')
+      .find((card) => (card.querySelector('label')?.textContent ?? '').includes(name))
+      ?.querySelector<HTMLInputElement>('input[type="radio"]') ?? undefined
+  );
+}
+
+/** The id the Ride button is described by while the pacer's box refuses (`StageChooser` §`PACER_PROBLEM_ID`). */
+const PACER_PROBLEM = 'oyl-game-pacer-problem';
+
+/** A saved route that closes on itself, 400 m round: a lap race is offered on it (#1907). */
+function squareLoop(): RidableRoute {
+  const corners = [
+    [0, 0],
+    [100, 0],
+    [100, 100],
+    [0, 100],
+  ] as const;
+  const points: RoutePoint[] = [];
+  for (let side = 0; side < 4; side += 1) {
+    const [fromNorth, fromEast] = corners[side] as readonly [number, number];
+    const [toNorth, toEast] = corners[(side + 1) % 4] as readonly [number, number];
+    for (let step = 0; step < 10; step += 1) {
+      const north = fromNorth + ((toNorth - fromNorth) * step) / 10;
+      const east = fromEast + ((toEast - fromEast) * step) / 10;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + north / 111_320),
+          degreesLongitude(-0.12 + east / 69_000),
+        ),
+        elevation: altitudeMetres(30),
+      });
+    }
+  }
+  points.push(points[0] as RoutePoint);
+  return {
+    id: 'saved-loop',
+    name: 'Saved loop',
+    profile: routeProfile(points, { loop: true }),
+    attempts: 0,
+  };
+}
+
+/** #2990: the open-world card offers no ghost, pacer, round, race or preview, and says why. */
+function expectRiddenAloneOffered(): void {
+  const text = mounted?.container.textContent ?? '';
+  expect(text).toContain(OPEN_WORLD_ALONE_TEXT);
+  for (const label of ['pacer', 'Race your own', 'Race another rider', 'Deliver', 'lap race']) {
+    expect(toggle(label), label).toBeUndefined();
+  }
+  const buttons = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button');
+  expect(buttons.filter((button) => /preview/i.test(button.textContent ?? ''))).toEqual([]);
+}
+
+/** The HUD field under `label`, as a rider reads it. */
+function fieldSaying(label: string): string {
+  const row = queryAll(mounted?.container ?? document, '.oyl-hud__field').find(
+    (element) => element.querySelector('.oyl-hud__label')?.textContent === label,
+  );
+  return row?.querySelector('.oyl-hud__value')?.textContent ?? '';
+}
+
 const spoken = (): string =>
   mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
 
@@ -361,7 +442,7 @@ describe('an open-world ride is ridden alone — #2982', () => {
     const courseLines: unknown[] = [];
     mounted = await mount(
       <GameView
-        port={{ ...port(1), loadGhost }}
+        port={{ ...port(1), loadGhost, listRoutes: () => Promise.resolve([SAVED]) }}
         trainer={trainer([], courseLines)}
         renderer={() => Promise.resolve(capturingRenderer())}
         now={() => nowMs}
@@ -369,7 +450,11 @@ describe('an open-world ride is ridden alone — #2982', () => {
       />,
     );
     await untilTheCard();
-    // Everything the picker offers this card that a solo ride on a saved route would ride.
+    // #2990: the card offers none of them, says why, and offers no preview.
+    expectRiddenAloneOffered();
+    // Everything the picker offers a saved route that a solo ride would ride,
+    // switched on there and carried to the open-world card.
+    await clickThrough(cardRadio(SAVED.name));
     await clickThrough(toggle('pacer'));
     const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
@@ -379,6 +464,9 @@ describe('an open-world ride is ridden alone — #2982', () => {
       await Promise.resolve();
     });
     await clickThrough(toggle('Race your own'));
+    await clickThrough(cardRadio('Open world'));
+    expect(rideButton()?.textContent).toBe('Ride Open world');
+    expectRiddenAloneOffered();
     await clickThrough(rideButton());
 
     const firstView = () => inputs[0]?.profile;
@@ -424,6 +512,60 @@ describe('an open-world ride is ridden alone — #2982', () => {
     // No distance to go, which a view's end is not, and no Delivery round.
     expect(heard.filter((sentence) => sentence.includes('to go'))).toEqual([]);
     expect(heard.filter((sentence) => /deliver|house|round/i.test(sentence))).toEqual([]);
+    // #2990: and the HUD shows none either: a dash where the distance to go
+    // would be (the totals strip's is `totals-strip.test.ts`').
+    expect(fieldSaying('To go')).toBe(`${NO_READING} km`);
+  });
+
+  it('offers a lap race, a Delivery round and a refusing pacer on a saved loop, and on the open-world card none of them, its Ride refused by nothing — #2990', async () => {
+    // The realistic world, which a Delivery round is offered with (#1818).
+    writeRealisticWorldChoice(localStorage, true);
+    const loop = squareLoop();
+    mounted = await mount(
+      <GameView
+        port={{ ...port(), listRoutes: () => Promise.resolve([loop]) }}
+        trainer={trainer([])}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(cardRadio(loop.name));
+    expect(rideButton()?.textContent).toBe(`Ride ${loop.name}`);
+    // On the saved loop, each control the open-world card must not offer is offered.
+    expect(toggle(LAP_RACE_CHOICE_TEXT.label), 'the lap race on the loop').toBeDefined();
+    expect(toggle(DELIVERY_CHOICE_TEXT.label), 'the Delivery round on the loop').toBeDefined();
+    // A pacer with no pace refuses the loop's ride, and says why.
+    await clickThrough(toggle('pacer'));
+    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    await act(async () => {
+      setter?.set?.call(intensity, '');
+      intensity?.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+    expect(rideButton()?.getAttribute('aria-describedby') ?? '').toContain(PACER_PROBLEM);
+
+    await clickThrough(cardRadio('Open world'));
+    expect(rideButton()?.textContent).toBe('Ride Open world');
+    expect(toggle(LAP_RACE_CHOICE_TEXT.label), 'the lap race on the open world').toBeUndefined();
+    // Nor the lap race's line saying why a route that is no loop has none: the
+    // card's own sentence says why nothing is offered.
+    expect(
+      queryAll(mounted.container, '.oyl-game__lap-race'),
+      'any lap-race control on the open world',
+    ).toEqual([]);
+    expect(mounted.container.textContent ?? '').not.toContain(LAP_RACE_CHOICE_TEXT.notALoop);
+    expect(mounted.container.textContent ?? '').toContain(OPEN_WORLD_ALONE_TEXT);
+    expect(
+      toggle(DELIVERY_CHOICE_TEXT.label),
+      'the Delivery round on the open world',
+    ).toBeUndefined();
+    // The pacer box the rider left empty cannot refuse a ride that has no pacer.
+    expect(rideButton()?.getAttribute('aria-disabled')).not.toBe('true');
+    expect(rideButton()?.getAttribute('aria-describedby') ?? '').not.toContain(PACER_PROBLEM);
   });
 
   it('races no other rider’s ghost: the press asks for none and rides alone', async () => {
@@ -432,13 +574,23 @@ describe('an open-world ride is ridden alone — #2982', () => {
     );
     mounted = await mount(
       <GameView
-        port={{ ...port(), riderGhostOffered: () => true, loadRiderGhost }}
+        port={{
+          ...port(),
+          riderGhostOffered: () => true,
+          loadRiderGhost,
+          listRoutes: () => Promise.resolve([SAVED]),
+        }}
         renderer={() => Promise.resolve(capturingRenderer())}
         now={() => nowMs}
       />,
     );
     await untilTheCard();
+    expect(toggle('Race another rider')).toBeUndefined();
+    // Asked for on a saved route, and carried to the open-world card.
+    await clickThrough(cardRadio(SAVED.name));
     await clickThrough(toggle('Race another rider'));
+    await clickThrough(cardRadio('Open world'));
+    expect(toggle('Race another rider')).toBeUndefined();
     await clickThrough(rideButton());
     for (let frames = 0; frames < 20; frames += 1) await pump();
 
