@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0091 is [ADR 0091](../adr/0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)**,
+  taken by [#2886](https://github.com/openzigs/onyourleft/issues/2886) on 2026-11-19 for the
+  open-world ride's street-graph source, on the owner's ruling Q3 of that day on the epic #2880,
+  and **Accepted** on 2026-11-20 by the owner on #2951. It extends ADR 0054 D-2.2's `roads` fields for open-world rides only; ADR 0054 gained one
+  dated `## Amendments` entry pointing to it. The owner's lane note of 2026-11-19 on #2881 reserved
+  **0090** for #2886, but the open pull request #2942 wrote 0090 for #2884 that day (its own 0086 was
+  taken by #2869), so #2886 took 0091. 0087 to 0089 stay reserved for #2885, #2887 and #2888. The
+  number after 0091 is **0092**.
   ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
   taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
   chase camera in an open-world ride, which follows the rolling route through a junction turn and a
