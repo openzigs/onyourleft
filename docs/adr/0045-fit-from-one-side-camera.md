@@ -926,3 +926,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   refuses, all within D-4 above. **What still stands**: D-0 items 1 to 3, so no fit check ships;
   and until [#1064](https://github.com/openzigs/onyourleft/issues/1064) builds the message, there is
   no tilt to use, and the trunk reads *"not measured"* by D-4's own rules. (#1122)
+- **2026-11-22** — **Superseded in part by
+  [ADR 0095](0095-what-a-fit-grade-side-camera-may-report-and-use.md)**, on the owner's answers of
+  that day on [#3034](https://github.com/openzigs/onyourleft/issues/3034). **D-3**'s 5° rounding holds
+  until an angle's measured 95 % limits of agreement are within ±3° on the engine that produced it
+  (#3027), and that angle is then rendered to 1°; **D-9** is reversed for this section: a published
+  range measured while pedalling may stand beside the rider's reading of the same measure, in text,
+  never compared; **P5** admits one value, the knee's maximum extension, so D-1's rows for ADR 0030
+  D-3 and R1, D-8's sentence for each angle and D-12's record now count five angles where they say
+  four; and **D-5**'s *"The model
+  stays in the worker"* now has the rider's instance (the default) and an opted-in hosted model on
+  the rider's own key beside it. Markers stay excluded, now as a rule. D-0, the rest of D-2, D-6,
+  D-7, D-8's lists, D-10 and D-12 stand. The body above is not edited. (#3034)

@@ -710,3 +710,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   reaches enforce it ([#1245](https://github.com/openzigs/onyourleft/issues/1245)). The two new
   announcement kinds keep D-7 S1 and S4's shape. **Nothing above is relaxed by this entry**; the
   body is not edited. (#1233)
+- **2026-11-22** — **D-6 and R10 are superseded on the Fit check section only by
+  [ADR 0095](0095-what-a-fit-grade-side-camera-may-report-and-use.md)** D-3, on the owner's answer
+  to Q2 of [#3034](https://github.com/openzigs/onyourleft/issues/3034) that day: a published range
+  measured while pedalling may stand beside the rider's reading of the same measure, in text, with
+  its source in the same sentence and no word, colour or mark placing the reading against it.
+  Everywhere else D-6 and R10 stand, and so does D-6's refusal of the healthcare-professional
+  notification. **D-3** and **R1** are widened by one value, by ADR 0095 D-4 on the owner's answer
+  to Q5: the knee's maximum extension joins the four angles ADR 0045 D-1 superseded them for, on the
+  same surface and with the same caveat; everywhere else they stand as ADR 0045 left them. **R5 and
+  R6 stand, unchanged.** The body above is not edited. (#3034)
