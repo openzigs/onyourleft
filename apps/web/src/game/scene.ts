@@ -120,11 +120,13 @@ import {
 import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
+  levelCrossings,
   mappedJunctions,
   onSideRoad,
   SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
+  withLevelCrossings,
   type SideRoad,
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
@@ -593,7 +595,20 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     (corridor.centre[0] as CorridorPoint).along,
     (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
     riderDistance,
-    junctions ?? [],
+    // #2660: and a level crossing wherever a mapped railway crosses at grade,
+    // drawn with them and kept clear of the scenery as they are.
+    input.worldCorridor === undefined
+      ? []
+      : withLevelCrossings(
+          junctions ?? [],
+          levelCrossings(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+          ),
+        ),
     input.landClass ?? NO_LAND_CLASS,
   );
   // #459, #2661: the streams' bridges and the mapped overpasses and

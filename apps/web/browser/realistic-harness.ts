@@ -81,6 +81,7 @@ import {
   // #1274's industrial estate, school and pitches, which `town=grounds` rides.
   fencedGroundsFixture,
   parksFixture,
+  railFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
   footwaysFixture,
 } from '../src/game/footprint-fixtures-testing';
@@ -589,10 +590,13 @@ async function run(): Promise<void> {
                                       : // #2685: a golf course and cemeteries.
                                         config.town === 'parks'
                                         ? parksFixture(latitude)
-                                        : // #2972: the mapped footways drawn.
-                                          config.town === 'footways'
-                                          ? footwaysFixture(latitude)
-                                          : undefined;
+                                        : // #2660: level crossings.
+                                          config.town === 'rail'
+                                          ? railFixture(latitude)
+                                          : // #2972: the mapped footways drawn.
+                                            config.town === 'footways'
+                                            ? footwaysFixture(latitude)
+                                            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

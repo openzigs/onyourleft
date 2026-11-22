@@ -1173,6 +1173,58 @@ export function footwaysFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #2660's fixture: railways across 3 km of level road, for the owner's
+ * by-eye frames (`?town=rail`). **Lines from arithmetic, no real place.**
+ *
+ * - **1 200 m**: a main line square across the road, at grade, on a strip
+ *   of `railway` land 30 m wide, with houses' `residential` land either side.
+ * - **1 700 m**: a second line at grade, crossing at 60°.
+ * - **2 000 m**: a line on a bridge, the control: no level crossing.
+ */
+export function railFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  /** A straight line across the road at `along`, `angle` degrees from square, 200 m each side. */
+  const across = (along: number, angle: number): Float32Array => {
+    const lean = Math.tan((angle * Math.PI) / 180) * 200;
+    return ringBeside(profile, origin, [
+      [along - lean, -200],
+      [along + lean, 200],
+    ]);
+  };
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'rail',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('railway', 1_185, 1_215, -200, -6),
+        land('railway', 1_185, 1_215, 6, 200),
+        land('residential', 1_000, 1_185, -200, -6),
+        land('residential', 1_215, 1_500, 6, 200),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+      rails: [
+        { kindDetail: 'rail', grade: 'ground', line: across(1_200, 0) },
+        { kindDetail: 'rail', grade: 'ground', line: across(1_700, 30) },
+        { kindDetail: 'rail', grade: 'bridge', line: across(2_000, 0) },
+      ],
+    },
+  };
+}
+
 /** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
 export const INSIDE_CLEARANCE_METRES = 2;
 
