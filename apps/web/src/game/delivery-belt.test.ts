@@ -25,6 +25,7 @@ import {
 import { deliveryInView } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
+  PULL_OUT_RUN_METRES,
   startObstacles,
   type Obstacle,
   type ObstacleKind,
@@ -352,9 +353,10 @@ describe('Delivery’s belt — #1814', () => {
         }),
       );
       const drawn = belt.drawn('obstacles');
+      // Waiting, it stands its run short of its place; four seconds on it has driven up to it.
       expect(drawn.map((each) => [each.kind, each.z])).toEqual([
         ['parked-car', 120],
-        ['car-pulling-out', 160],
+        ['car-pulling-out', obstacleState === waiting ? 160 - PULL_OUT_RUN_METRES : 160],
       ]);
       const [parked, pullingOut] = drawn.map((each) =>
         drawnBy(belt, each.kind as DeliveryObstacleKind),
@@ -791,7 +793,7 @@ describe('Delivery’s belt — #1814', () => {
         const shader = compiled(material);
         expect(shader.vertexShader).toContain('attribute vec4 oylPiece;');
         expect(shader.vertexShader).toContain('attribute vec4 oylObstacle;');
-        expect(shader.vertexShader).toContain('attribute vec2 oylPieceAlso;');
+        expect(shader.vertexShader).toContain('attribute vec4 oylPieceAlso;');
         // #2506: a vertex of the instance's kind, or of the kind it also belongs to.
         const collapse = shader.vertexShader.indexOf(
           'transformed *= max( 1.0 - step( 0.5, abs( oylPiece.x - oylObstacle.w ) ), 1.0 - step( 0.5, abs( oylPieceAlso.x - oylObstacle.w ) ) );',
@@ -1430,7 +1432,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
       for (const shading of ['lit', 'flat'] as const) {
         belt.setShading(shading);
         const shader = compiled(belt.meshOf('markers').material as unknown as Compilable);
-        expect(shader.vertexShader).toContain('attribute vec2 oylPieceAlso;');
+        expect(shader.vertexShader).toContain('attribute vec4 oylPieceAlso;');
         expect(shader.vertexShader).toContain('vOylUntoned = oylPieceAlso.y;');
         const fragment = shader.fragmentShader;
         const mix = fragment.indexOf(

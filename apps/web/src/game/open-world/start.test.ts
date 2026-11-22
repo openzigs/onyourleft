@@ -15,11 +15,15 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
+import { OSM_ATTRIBUTION, PUBLISHED_BASEMAP_URL, readBasemapConfig } from '../../map/basemap';
+
 import {
   describeStartRefusal,
   insideCoverage,
   nudgePin,
   openWorldStart,
+  startCoverage,
+  US_BASEMAP_COVERAGE,
   type OpenWorldStartRefusal,
   type OpenWorldStartSource,
 } from './start';
@@ -64,6 +68,46 @@ describe('openWorldStart — #2889', () => {
     expect(insideCoverage(at(52.9, 173.1))).toBe(true); // Attu
     expect(insideCoverage(at(-33.87, 151.21))).toBe(false); // Sydney
     expect(insideCoverage(at(19.43, -99.13))).toBe(false); // Mexico City
+  });
+});
+
+describe('startCoverage — the build’s own archive, #2985', () => {
+  it('is the US boxes for the published archive, as the build reads it with nothing configured', () => {
+    expect(startCoverage(readBasemapConfig({}))).toBe(US_BASEMAP_COVERAGE);
+    expect(startCoverage({ archiveUrl: PUBLISHED_BASEMAP_URL, attribution: OSM_ATTRIBUTION })).toBe(
+      US_BASEMAP_COVERAGE,
+    );
+  });
+
+  it('is unknown for a self-hoster’s own archive, and with no archive at all', () => {
+    const theirs = readBasemapConfig({
+      VITE_BASEMAP_PMTILES_URL: 'https://tiles.example.org/europe.pmtiles',
+    });
+    expect(startCoverage(theirs)).toBe('unknown');
+    expect(startCoverage(readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: 'none' }))).toBe('unknown');
+  });
+
+  it('refuses no place where the coverage is unknown, and still refuses no position', () => {
+    for (const source of SOURCES) {
+      expect(openWorldStart(LONDON, source, 'unknown')).toEqual({
+        kind: 'start',
+        start: { position: LONDON, source },
+      });
+    }
+    expect(insideCoverage(at(-33.87, 151.21), 'unknown')).toBe(true);
+    expect(openWorldStart(undefined, 'ride', 'unknown')).toEqual({
+      kind: 'refused',
+      refusal: 'no-position',
+    });
+  });
+
+  it('refuses outside the boxes it is handed', () => {
+    const london = [{ west: -1, south: 51, east: 1, north: 52 }];
+    expect(openWorldStart(LONDON, 'pin', london).kind).toBe('start');
+    expect(openWorldStart(DENVER, 'pin', london)).toEqual({
+      kind: 'refused',
+      refusal: 'outside-coverage',
+    });
   });
 });
 

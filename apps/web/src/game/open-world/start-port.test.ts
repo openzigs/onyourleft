@@ -34,6 +34,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createOpenWorldEntry, type OpenWorldEntry } from './entry';
+import { startCoverage, type StartCoverage } from './start';
 import { openWorldStartPort, type OpenWorldStartPort } from './start-port';
 
 let harness: StoreHarness;
@@ -97,9 +98,10 @@ async function withPort<T>(
   owner: AthleteId,
   entry: OpenWorldEntry,
   work: (port: OpenWorldStartPort) => Promise<T>,
+  coverage?: StartCoverage,
 ): Promise<T> {
   return harness.read(async (store) =>
-    work(openWorldStartPort({ store, owner, entry, opened: () => undefined })),
+    work(openWorldStartPort({ store, owner, entry, opened: () => undefined, coverage })),
   );
 }
 
@@ -172,6 +174,35 @@ describe('each source reads back through the session’s entry — #2889', () =>
       port.listRouteStarts(),
     );
     expect(listed?.start).toEqual({ kind: 'refused', refusal: 'outside-coverage' });
+  });
+
+  it('starts a route and a ride outside the US on a self-hoster’s own archive — #2985', async () => {
+    // `routeFor`'s default is London, and so is this ride.
+    await seedRoute(harness, ATHLETE_A);
+    await seedTrackedRide(ATHLETE_A, 'ride-london', 'Thames path', 51.5, -0.12);
+    const coverage = startCoverage({
+      archiveUrl: 'https://tiles.example.org/europe.pmtiles',
+      attribution: 'OpenStreetMap',
+    });
+    const [route] = await withPort(
+      ATHLETE_A,
+      createOpenWorldEntry(),
+      (port) => port.listRouteStarts(),
+      coverage,
+    );
+    expect(route?.start.kind).toBe('start');
+    const entry = createOpenWorldEntry();
+    await withPort(
+      ATHLETE_A,
+      entry,
+      async (port) => {
+        const outcome = await port.rideStart('ride-london');
+        if (outcome.kind !== 'start') throw new Error(`refused: ${outcome.refusal}`);
+        port.begin(outcome.start);
+      },
+      coverage,
+    );
+    expect(entry.take()?.position.latitude).toBeCloseTo(51.5002, 4);
   });
 
   it('opens the ride after handing the start over, and not before', () => {

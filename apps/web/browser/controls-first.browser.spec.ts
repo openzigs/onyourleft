@@ -1579,7 +1579,7 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
 
       const cluster = page.getByRole('group', { name: 'Map controls' });
       await cluster.getByRole('button', { name: 'Put the pin at the map’s centre' }).click();
-      const pin = page.getByRole('button', { name: 'The start pin' });
+      const pin = page.getByRole('application', { name: 'The start pin' });
       await expect(pin).toHaveCount(1);
 
       const drawn = await pin.evaluate((element) => {
@@ -1749,7 +1749,7 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
     }) => {
       const canvas = await openPicker(page, landscape);
       const before = await dropAt(page, canvas, 120, 60);
-      const pin = page.getByRole('button', { name: 'The start pin' });
+      const pin = page.getByRole('application', { name: 'The start pin' });
       await pin.focus();
       await expect(pin).toBeFocused();
       await page.keyboard.press('ArrowUp');
@@ -1762,6 +1762,51 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
       expect(Math.abs(after.y - before.y), 'the map moved under the pin').toBeLessThan(10);
       expect(after.y, 'the pin went south').toBeLessThanOrEqual(before.y + 0.5);
       await expect(pin).toBeFocused();
+    });
+
+    test('the pin is an application named for a screen reader, and leaves Alt+arrow alone (#2985)', async ({
+      page,
+    }) => {
+      const canvas = await openPicker(page, landscape);
+      const before = await dropAt(page, canvas, 120, 60);
+      const pin = page.getByRole('application', { name: 'The start pin' });
+      await expect(pin).toHaveAttribute('aria-roledescription', 'pin');
+      await pin.focus();
+      const said = page.locator('section[aria-labelledby="oyl-open-world-pin"] [role="status"]');
+      await expect(said).toHaveText('Pin dropped.');
+      for (const modifier of ['Alt', 'Control', 'Meta']) {
+        await page.keyboard.press(`${modifier}+ArrowUp`);
+      }
+      const after = await settledPin(page);
+      console.log(`[#2985] Alt+ArrowUp: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      await expect(said, 'a modified arrow nudged the pin').toHaveText('Pin dropped.');
+    });
+
+    test('a double click drops the pin once and says so once (#2985)', async ({ page }) => {
+      const canvas = await openPicker(page, landscape);
+      // Every node the pin's live region is handed: one per drop it says.
+      await page.evaluate(() => {
+        const region = document.querySelector(
+          'section[aria-labelledby="oyl-open-world-pin"] [role="status"]',
+        );
+        if (region === null) throw new Error('no live region for the pin');
+        const seen: string[] = [];
+        (globalThis as unknown as { pinSaid: string[] }).pinSaid = seen;
+        new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of record.addedNodes) seen.push(node.textContent ?? '');
+          }
+        }).observe(region, { childList: true, subtree: true });
+      });
+      const at = { x: canvas.x + canvas.width / 2 + 120, y: canvas.y + canvas.height / 2 + 60 };
+      await page.mouse.dblclick(at.x, at.y);
+      await expect(page.locator('main .oyl-map__waypoint--pin')).toHaveCount(1);
+      await settledPin(page);
+      const said = await page.evaluate(
+        () => (globalThis as unknown as { pinSaid: string[] }).pinSaid,
+      );
+      console.log(`[#2985] double click said ${JSON.stringify(said)}`);
+      expect(said, 'the double click dropped the pin twice').toEqual(['Pin dropped.']);
     });
   });
 
@@ -1819,17 +1864,51 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
       };
     }
 
-    test('one finger is left to the page: it does not pan the map', async ({ page }) => {
+    /**
+     * How far the page has scrolled: the document and every box the map sits
+     * in, so the reading does not depend on which of them the shell scrolls.
+     */
+    async function pageScrolled(page: Page): Promise<number> {
+      return page.evaluate(() => {
+        let total = globalThis.scrollY;
+        let box = document.querySelector('main .oyl-map')?.parentElement ?? null;
+        while (box !== null) {
+          total += box.scrollTop;
+          box = box.parentElement;
+        }
+        return total;
+      });
+    }
+
+    test('one finger is left to the page: it scrolls the page and does not pan the map', async ({
+      page,
+    }) => {
       const { centre, before } = await pinnedPicker(page);
+      // From the top, so the page has room to scroll down under the swipe.
+      await page.evaluate(() => {
+        globalThis.scrollTo(0, 0);
+        let box = document.querySelector('main .oyl-map')?.parentElement ?? null;
+        while (box !== null) {
+          box.scrollTop = 0;
+          box = box.parentElement;
+        }
+      });
+      const top = await pageScrolled(page);
+      // A finger drawn up the map: the page should scroll down by about as much.
       await touch(
         page,
-        [{ x: centre.x - 60, y: centre.y - 60 }],
-        [{ x: centre.x - 200, y: centre.y - 60 }],
+        [{ x: centre.x - 60, y: centre.y + 80 }],
+        [{ x: centre.x - 60, y: centre.y - 120 }],
       );
       await page.waitForTimeout(800);
       const after = await settledPin(page);
-      console.log(`[#2889] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      const scrolled = (await pageScrolled(page)) - top;
+      console.log(
+        `[#2889] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}, ` +
+          `page scrolled ${scrolled.toFixed(1)} px`,
+      );
       expect(apart(after, before), 'one finger panned the map').toBeLessThan(3);
+      expect(scrolled, 'one finger did not scroll the page').toBeGreaterThan(50);
     });
 
     test('two fingers pan the map', async ({ page }) => {

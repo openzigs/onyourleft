@@ -22,7 +22,9 @@ PEOPLE below:
 
 1. Parse `base.obj` and apply MakeHuman's macro targets for the person's
    BUILD, by MakeHuman's own arithmetic. The helper vertices move with the
-   body, so the joints and every garment's fit do too.
+   body, so the joints and every garment's fit do too. Then CURL EACH FINGER
+   (FINGER_CURL): the skeleton below keeps none, and a hand left as the base
+   mesh holds it is flat and spread.
 2. Build the joints from `default.mhskel`, reduced to KEEP -- the rider's own
    set, by the same names, which is what `three-renderer.ts` section
    PeopleBelt poses a walk, a run and a ride with -- and merge the weights of
@@ -32,7 +34,8 @@ PEOPLE below:
    which is MakeHuman's proxy fit (`shared/proxy.py` at the pinned commit).
    A fitted vertex takes its skin weights from the same three, by the same
    weights. The base vertices a garment says it hides (`delete_verts`) are
-   dropped from the body, so no skin shows through a seam.
+   dropped from the body, so no skin shows through a seam -- and so is the
+   thigh under a skirt (SKIRT_TUCK), which MakeHuman's list leaves in.
 4. Split what is left into PARTS -- the head and neck, the limbs, the top,
    the bottoms, the shoes, the hair and the eyes (the base mesh's own eye
    helpers, drawn dark) -- and give each its REGION, the five
@@ -44,13 +47,16 @@ PEOPLE below:
    weighted so the head keeps its face and a trouser leg gives its triangles
    up first (PART_WEIGHT), and join them into one mesh a person.
 6. THE ATLAS: one picture for everybody. Each part's photograph is cropped to
-   what its faces use, box-filtered down to its tile, and DIVIDED by its own
-   mean colour: what is kept is the fabric's weave, the face's features and
+   what its faces use, box-filtered down to its tile, and DIVIDED by a colour
+   of its own: what is kept is the fabric's weave, the face's features and
    the hair's strands, as a share of the part's colour, so each person on a
    street still wears their own seeded colours (`people.ts` section
    personLook) -- the renderer multiplies the two. A texel holds half the
-   share, so one twice as bright as its part's mean is white. Hair keeps its
-   photograph's own opacity; every other texel is opaque.
+   share, so one twice as bright as its part's colour is white. Hair keeps
+   its photograph's own opacity; every other texel is opaque. That colour is
+   the tile's mean, but for the skin (SKIN_TILES, SKIN_SHINE) and the bottoms
+   (PLAIN_CLOTH), and a garment's outline and painted shadow are not read
+   (EDGE_TRIM, SHADOW_SHARE) -- the owner's pictures of PR #2844.
 7. Export one skinned GLB, each person a mesh under their own skeleton with a
    primitive a region, named by the region.
 
@@ -192,6 +198,69 @@ PAINT_OVER = {
 # How far past a picture's edge a texture coordinate may reach and be held to
 # the edge; further is refused.
 UV_SLACK = 0.01
+# THE SKIN's tiles -- the face's and the limbs' -- are each divided by their
+# photograph's TYPICAL skin: the median, a channel at a time, of the texels the
+# tile's faces cover. Each used to be divided by its MEAN, and a mean is
+# dragged down by the little that is dark and red -- the lips, the nostrils,
+# the mouth's inside, which shares the limbs' tile -- in green and blue most of
+# all: plain skin then held 1.13 of a person's red, 1.25 of their green and
+# 1.34 of their blue on a cheek, and 1.06, 1.2 and 1.2 over the limbs, which is
+# the pale, grey, waxy skin and the white hands the owner saw on PR #2844. At
+# the median, plain skin is the person's own colour, on the face and the hands
+# alike. (One median for both tiles drew the woman's legs red: her photograph's
+# limbs are a fifth darker in green and blue than its face.)
+SKIN_TILES = ("head", "limbs")
+# THE BOTTOMS keep their photograph's light and shade and none of its dye:
+# every pair of trousers here is one photograph of faded blue denim, whose
+# cream fades are, as a share of its mean blue, a strong orange -- skin-coloured
+# blotches on a brown pair. Their share is the luminance's, over the median's,
+# raised to this: a fade twice as bright as the cloth is 1.3 of its colour.
+PLAIN_CLOTH = ("bottoms",)
+CLOTH_SOFTEN = 0.4
+LUMINANCE = np.array([0.2126, 0.7152, 0.0722])
+# A garment's photograph draws a dark or a pale line round each of its pieces,
+# and a decimated seam reaches it. This many texels in from the edge of what a
+# tile's faces cover are not read: they, and the margin round them, take the
+# cloth's colour just inside.
+EDGE_TRIM = {"top": 3, "bottoms": 3, "shoes": 2}
+# Nor is a garment's PAINTED SHADOW read: `male_casualsuit05`'s photograph is
+# black inside the jacket's front and its collar, which a jacket cut to a few
+# hundred triangles wears on its chest as a blotch. A texel under this share of
+# the cloth's typical light, in a patch that survives this many texels taken
+# off its edge (a stripe and a seam do not), takes the cloth beside it, spread
+# this far.
+SHADOW_SHARE = 0.3
+SHADOW_TEXELS = 2
+SHADOW_REACH = 24
+# A SKIN photograph was lit when it was taken: its cheeks, nose and forehead
+# are up to a third brighter than its plain skin in blue and a tenth in red --
+# a pale, cool shine painted on, which the renderer's own light then lit again.
+# Where a channel is over the skin's typical, its excess is raised to this.
+# What is under -- the lips, the brows' shade, the nostrils -- is kept whole.
+SKIN_SHINE = 0.35
+# UNDER A SKIRT there is no leg: a face of the thigh with ANY vertex above the
+# hem by more than this, in MakeHuman's decimetres, is dropped. A skirt hangs
+# from both thighs' weights, so its front stays between them while the leading
+# thigh swings 30 degrees through it -- at every stride (the owner's pictures of
+# PR #2844). What is not there cannot come through. "Any", not "every": the
+# faces that straddle the hem were still a tooth of skin on the skirt's front.
+# The leg therefore begins within a face (under 2 cm) below the hem, under
+# cloth drawn on both sides.
+SKIRT_TUCK = 0.0
+UNDER_SKIRT_BONES = ("upperleg", "lowerleg", "pelvis", "root")
+# THE HANDS. The skeleton keeps no finger (KEEP is the rider's), so a hand is
+# drawn as the base mesh holds it: flat, the fingers straight and spread. Each
+# finger is therefore curled HERE, in the rest mesh, by MakeHuman's own finger
+# bones and weights, before those bones are dropped: degrees at the knuckle,
+# the middle joint and the last, a relaxed hand's -- more toward the little
+# finger -- with the thumb barely turned in.
+FINGER_CURL = {
+    "finger1": (6.0, 10.0, 14.0),
+    "finger2": (24.0, 40.0, 24.0),
+    "finger3": (30.0, 46.0, 26.0),
+    "finger4": (36.0, 52.0, 28.0),
+    "finger5": (40.0, 56.0, 30.0),
+}
 
 
 def mh(path):
@@ -384,6 +453,90 @@ for bone_name, pairs in json.load(open(mh("default_weights.mhw")))["weights"].it
         table = VERTEX_WEIGHTS.setdefault(vertex, {})
         table[target] = table.get(target, 0.0) + weight
 
+# The finger bones' own weights, before they are merged away: [(vertex, weight)].
+FINGER_WEIGHTS = {
+    bone_name: pairs
+    for bone_name, pairs in json.load(open(mh("default_weights.mhw")))["weights"].items()
+    if bone_name.split("-")[0] in FINGER_CURL
+}
+BODY_VERTICES = {vertex for group, face in BASE_FACES if group == "body" for vertex, _ in face}
+
+
+def turn_about(origin, axis, degrees):
+    """The 4 by 4 matrix of a turn about `axis` through `origin` (Rodrigues)."""
+    angle = np.radians(degrees)
+    x, y, z = axis / np.linalg.norm(axis)
+    skew = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
+    turn = np.eye(3) + np.sin(angle) * skew + (1 - np.cos(angle)) * (skew @ skew)
+    matrix = np.eye(4)
+    matrix[:3, :3] = turn
+    matrix[:3, 3] = origin - turn @ origin
+    return matrix
+
+
+def curled_hands(points):
+    """`points` with every finger curled by FINGER_CURL, and how many vertices that moved."""
+
+    def joint_of(name):
+        return np.mean([points[i] for i in SKELETON["joints"][name]], axis=0)
+
+    moved = np.zeros_like(points)
+    touched = set()
+    for side in ("L", "R"):
+        wrist = joint_of(BONES[f"wrist.{side}"]["head"])
+        index = joint_of(BONES[f"finger2-1.{side}"]["head"])
+        little = joint_of(BONES[f"finger5-1.{side}"]["head"])
+        # Out of the palm: the rest pose holds both palms toward the ground.
+        palm = np.cross(index - wrist, little - wrist)
+        if palm[1] > 0:
+            palm = -palm
+        for finger, curl in FINGER_CURL.items():
+            matrix = np.eye(4)
+            for at, degrees in enumerate(curl):
+                bone = BONES[f"{finger}-{at + 1}.{side}"]
+                head, tail = joint_of(bone["head"]), joint_of(bone["tail"])
+                # About the axis that turns the finger's own length toward the palm.
+                matrix = matrix @ turn_about(head, np.cross(tail - head, palm), degrees)
+                for vertex, weight in FINGER_WEIGHTS[f"{finger}-{at + 1}.{side}"]:
+                    if vertex not in BODY_VERTICES:
+                        continue
+                    place = np.append(points[vertex], 1.0)
+                    moved[vertex] += weight * ((matrix @ place)[:3] - points[vertex])
+                    touched.add(vertex)
+    return points + moved, len(touched)
+
+
+def shrunk(mask, texels):
+    """`mask` less `texels` in from its edge."""
+    return ~grown(~mask, texels)
+
+
+def spread(values, known, texels):
+    """`values` with each texel not `known` given the mean of its known neighbours, `texels` times over."""
+    values = values.copy()
+    known = known.copy()
+    for _ in range(texels):
+        total = np.zeros_like(values)
+        count = np.zeros(known.shape)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            there = np.roll(known, (dy, dx), axis=(0, 1))
+            # `np.roll` wraps: a tile's edge has no neighbour beyond it.
+            if dy == 1:
+                there[0, :] = False
+            elif dy == -1:
+                there[-1, :] = False
+            elif dx == 1:
+                there[:, 0] = False
+            else:
+                there[:, -1] = False
+            total += np.where(there[:, :, None], np.roll(values, (dy, dx), axis=(0, 1)), 0.0)
+            count += there
+        fresh = ~known & (count > 0)
+        values[fresh] = total[fresh] / count[fresh][:, None]
+        known |= fresh
+    return values, known
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
 MATERIALS = {}
@@ -393,7 +546,13 @@ for region in ("skin", "top", "bottoms", "shoes", "hair"):
 atlas = np.zeros((ATLAS, ATLAS, 4), dtype=np.float64)
 atlas[:, :, :3] = 0.5
 atlas[:, :, 3] = 1.0
-report = {"targetTriangles": TARGET_TRIS, "atlasPixels": ATLAS, "people": []}
+report = {
+    "targetTriangles": TARGET_TRIS,
+    "atlasPixels": ATLAS,
+    "people": [],
+    "underSkirtFacesDropped": 0,
+    "fingerVerticesCurled": 0,
+}
 exported = []
 
 
@@ -467,8 +626,13 @@ for row, person in enumerate(PEOPLE):
                 points[int(index)] += value * np.array([float(dx), float(dy), float(dz)])
         applied.append([name, round(value, 6)])
 
+    # The joints are the UNCURLED body's: the first person's must stay the rider's own.
+    straight = points.copy()
+    points, curled = curled_hands(points)
+    report["fingerVerticesCurled"] += curled
+
     def joint(name):
-        return sum((to_blender(points[i]) for i in SKELETON["joints"][name]), Vector()) / len(
+        return sum((to_blender(straight[i]) for i in SKELETON["joints"][name]), Vector()) / len(
             SKELETON["joints"][name]
         )
 
@@ -531,6 +695,11 @@ for row, person in enumerate(PEOPLE):
         return min(heights) < knees or (np.mean(heights) < hips and max(heights) - min(heights) > SKIRT_DROP)
 
     low = {piece for piece, members in pieces.items() if is_low(members)}
+    # A SKIRT is bottoms that stop above the knee: (hem, waist), or nothing.
+    skirt = None
+    hanging = [clothes_points[v][1] for piece in low for v in pieces[piece]]
+    if hanging and min(hanging) >= knees:
+        skirt = (min(hanging), max(hanging))
     whole = garments.pop("top")
     for part, wanted in (("top", False), ("bottoms", True)):
         faces = [face for face in clothes_faces if (find(face[0][0]) in low) == wanted]
@@ -548,6 +717,15 @@ for row, person in enumerate(PEOPLE):
     body = {"head": [], "limbs": [], "eyes": []}
     for group, face in BASE_FACES:
         if any(vertex in hidden for vertex, _ in face):
+            continue
+        if (
+            group == "body"
+            and skirt is not None
+            and any(skirt[0] + SKIRT_TUCK < points[vertex][1] for vertex, _ in face)
+            and all(points[vertex][1] < skirt[1] for vertex, _ in face)
+            and all(dominant(vertex).startswith(UNDER_SKIRT_BONES) for vertex, _ in face)
+        ):
+            report["underSkirtFacesDropped"] += 1
             continue
         if group != "body":
             body["eyes"].append(face)
@@ -692,11 +870,32 @@ for row, person in enumerate(PEOPLE):
                 covered |= triangle_mask(corners[0], corners[at], corners[at + 1], side)
         if not covered.any():
             raise RuntimeError(f"{person['name']}/{name}: its faces cover no texel")
-        # The tile's mean colour, over what its faces cover, by opacity.
-        weight = covered * opacity
-        mean = (colour * weight[:, :, None]).sum(axis=(0, 1)) / weight.sum()
-        share = np.clip(colour / mean / 2, 0, 1)
+        light = colour @ LUMINANCE
+        # A garment's painted shadow: darker than SHADOW_SHARE of the cloth,
+        # and a patch wider than a stripe or a seam.
+        shadow = np.zeros((side, side), dtype=bool)
+        if name in EDGE_TRIM:
+            dark = light < SHADOW_SHARE * np.median(light[covered])
+            shadow = grown(shrunk(dark, SHADOW_TEXELS), SHADOW_TEXELS + 1) & dark
+        if name in SKIN_TILES:
+            mean = np.median(colour[covered], axis=0)
+            ratio = colour / mean
+            # The photograph's own shine, where a channel is over the skin's, kept in part.
+            share = np.clip(np.where(ratio > 1, ratio**SKIN_SHINE, ratio) / 2, 0, 1)
+        elif name in PLAIN_CLOTH:
+            typical = float(np.median(light[covered & ~shadow]))
+            mean = np.array([typical] * 3)
+            share = np.repeat(np.clip((light / typical) ** CLOTH_SOFTEN / 2, 0, 1)[:, :, None], 3, axis=2)
+        else:
+            # The tile's mean colour, over what its faces cover, by opacity.
+            weight = covered * opacity * ~shadow
+            mean = (colour * weight[:, :, None]).sum(axis=(0, 1)) / weight.sum()
+            share = np.clip(colour / mean / 2, 0, 1)
         kept = grown(covered, COVER_MARGIN)
+        if name in EDGE_TRIM:
+            # Neither the line round each piece nor a painted shadow is read:
+            # the cloth beside it is spread over it, and over the margin.
+            share, _ = spread(share, shrunk(covered, EDGE_TRIM[name]) & ~shadow, SHADOW_REACH)
         # Outside, and under hair that is cut away, the mean: no stray
         # picture, and no dark fringe in a mip level.
         share[~kept] = 0.5

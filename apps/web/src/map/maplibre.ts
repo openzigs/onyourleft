@@ -105,6 +105,7 @@ import type {
   MapZoomDirection,
 } from './port';
 import { createProtocolRegistry } from './protocol';
+import { preventOneFingerPan } from './touch-pan';
 import type { TrackBounds, TrackFeature } from './track';
 
 /**
@@ -364,6 +365,10 @@ function editing(
 
   map.on('click', (event) => {
     if (onMarker(event)) return;
+    // On a direct map a double click zooms in (`DIRECT`), so its second click
+    // is the zoom's and not a second drop of the pin (#2985). The planner's
+    // two quick taps stay two waypoints (#2006).
+    if (direct && event.originalEvent.detail > 1) return;
     handlers?.tap(positionOf(event.lngLat));
   });
 
@@ -441,13 +446,20 @@ function editing(
           if (direct) {
             // The pin is a control on this map (#2889): focusable, named, and
             // moved by its arrow keys, which stop here so the map under it
-            // does not pan as well.
+            // does not pan as well. An `application`, as the canvas is, so a
+            // screen reader in browse mode passes the arrow keys through to
+            // it; a `button` would have them read the page instead, and
+            // promise an Enter that does nothing (#2985).
             element.removeAttribute('aria-hidden');
-            element.setAttribute('role', 'button');
+            element.setAttribute('role', 'application');
+            element.setAttribute('aria-roledescription', 'pin');
             element.setAttribute('tabindex', '0');
             element.setAttribute('aria-label', waypoint.label);
             const id = waypoint.id;
             element.addEventListener('keydown', (event) => {
+              // Alt, Ctrl and Meta with an arrow are the browser's and the
+              // screen reader's own keys, not a nudge (#2985).
+              if (event.altKey || event.ctrlKey || event.metaKey) return;
               const direction = PIN_KEYS[event.key];
               if (direction === undefined) return;
               event.preventDefault();
@@ -513,7 +525,8 @@ const renderer: MapRenderer = {
       // behind a modifier key, which is the half the owner did not want.
       // `browser/controls-first.browser.spec.ts` §"#2889" drags with one
       // finger and with two.
-      map.dragPan._touchPan._shouldBePrevented = (touches: number): boolean => touches < 2;
+      // `touch-pan.ts` replaces a private member, and only while it is one.
+      preventOneFingerPan(map.dragPan._touchPan);
     } else {
       map.getCanvas().setAttribute('aria-hidden', 'true');
       // MapLibre makes an interactive map's canvas a tab stop. See the module note.

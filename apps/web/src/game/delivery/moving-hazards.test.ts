@@ -30,6 +30,7 @@ import { parseLevelFile } from './levels/level-file';
 import {
   AVOIDABLE_FASTEST_METRES_PER_SECOND,
   AVOIDABLE_SLOWEST_METRES_PER_SECOND,
+  carPullingOut,
   clearOfParkedCars,
   CRASH_SCORE_DELTA,
   FEWER_OBSTACLES_KEEP_ONE_IN,
@@ -40,13 +41,19 @@ import {
   OBSTACLE_KINDS,
   obstacleAcross,
   obstacleAlong,
+  obstacleFootprint,
   PARKED_CAR_CLEARANCE_METRES,
   parkedCarStands,
   placeObstacles,
+  PULL_OUT_RUN_METRES,
+  PULL_OUT_SECONDS,
+  PULL_OUT_STEER_READY_SECONDS,
+  RIDER_AHEAD_METRES,
   RIDER_BEHIND_METRES,
   RIDER_HALF_WIDTH_METRES,
   startObstacles,
   stepObstacles,
+  type LaneObstacle,
   type Obstacle,
   type ObstacleKind,
 } from './obstacles';
@@ -271,10 +278,13 @@ describe('every moving hazard is avoidable — #2364, ADR 0065 D-10.8', () => {
       expect(along).toBeLessThan(car.along + 5);
     }
     const reach = OBSTACLE_KINDS['car-pulling-out'].halfWidth + RIDER_HALF_WIDTH_METRES;
-    expect(clearOfParkedCars([car], state, { along, lane, offset: lateral })).toStrictEqual({
-      lane,
-      offset: parkedCarStands('right') - reach - PARKED_CAR_CLEARANCE_METRES,
-    });
+    const moved = clearOfParkedCars([car], state, { along, lane, offset: lateral });
+    expect(moved?.lane).toBe(lane);
+    // To the nanometre: worked from the car's corners, its sums run in another order.
+    expect(moved?.offset).toBeCloseTo(
+      parkedCarStands('right') - reach - PARKED_CAR_CLEARANCE_METRES,
+      9,
+    );
   });
 
   it('costs a crash its one point and nothing else', () => {
@@ -473,3 +483,334 @@ describe('no moving hazard enters a lane a standing obstacle blocks — #2364', 
     expect(swept).toBeGreaterThan(1_000);
   });
 });
+
+/**
+ * A car pulling out DRIVES out. Until this it crossed its way sideways,
+ * facing along the road with its wheels still: the owner, on the tablet,
+ * "just slid sideways onto the road with a strange animation".
+ */
+describe('a car pulling out drives out, forward and across together', () => {
+  const WAIT = 1.5;
+  const cars: readonly LaneObstacle[] = (['left', 'right'] as const).map((from) => ({
+    kind: 'car-pulling-out',
+    along: 500,
+    from,
+    startAfter: WAIT,
+    to: parkedCarStands(from),
+    rides: 0,
+  }));
+  const CAR = OBSTACLE_KINDS['car-pulling-out'];
+  /** Every tick from when it is set going until a second after it is out. */
+  const TICKS = Array.from(
+    { length: Math.round((WAIT + PULL_OUT_SECONDS + 1) / DELIVERY_TICK_SECONDS) + 1 },
+    (_, tick) => tick * DELIVERY_TICK_SECONDS,
+  );
+
+  it.each(cars)(
+    'waits off the kerb a run short of its place, and stops in its lane, straight ($from)',
+    (car) => {
+      const waiting = carPullingOut(car, 0);
+      expect(waiting.along).toBeCloseTo(car.along - PULL_OUT_RUN_METRES, 9);
+      // Its whole width clear of the carriageway, parallel to the road, standing.
+      expect(Math.abs(waiting.across) - CAR.halfWidth).toBeGreaterThanOrEqual(
+        CARRIAGEWAY_HALF_WIDTH_METRES - 1e-9,
+      );
+      expect(Math.sign(waiting.across)).toBe(car.from === 'left' ? -1 : 1);
+      expect(waiting).toMatchObject({ heading: 0, speed: 0, travelled: 0, braking: 0 });
+      // Still there the moment before it sets off.
+      expect(carPullingOut(car, WAIT).along).toBeCloseTo(waiting.along, 9);
+      const out = carPullingOut(car, WAIT + PULL_OUT_SECONDS);
+      expect(out.along).toBeCloseTo(car.along, 9);
+      expect(out.across).toBeCloseTo(car.to, 9);
+      expect(out.heading).toBeCloseTo(0, 9);
+      expect(out.speed).toBeCloseTo(0, 9);
+      expect(out.braking).toBe(0);
+      expect(out.travelled).toBeCloseTo(PULL_OUT_RUN_METRES, 9);
+      // Its wheels straight as it stands, and a second later.
+      expect(out.steer).toBeCloseTo(0, 6);
+      expect(carPullingOut(car, WAIT + PULL_OUT_SECONDS + 1).steer).toBeCloseTo(0, 6);
+      // And what meets the rider is that place.
+      expect(obstacleAlong(car, WAIT + PULL_OUT_SECONDS)).toBe(out.along);
+      expect(obstacleAcross(car, WAIT + PULL_OUT_SECONDS)).toBe(out.across);
+      expect(obstacleAlong(car, 0)).toBe(waiting.along);
+      expect(obstacleAcross(car, 0)).toBe(waiting.across);
+    },
+  );
+
+  it.each(cars)('never moves across the road without moving further along it ($from)', (car) => {
+    let moved = 0;
+    for (let at = 1; at < TICKS.length; at += 1) {
+      const before = carPullingOut(car, TICKS[at - 1] as number);
+      const now = carPullingOut(car, TICKS[at] as number);
+      const across = Math.abs(now.across - before.across);
+      const along = now.along - before.along;
+      expect(along).toBeGreaterThanOrEqual(0);
+      // Toward the road, never back.
+      expect(Math.abs(now.across)).toBeLessThanOrEqual(Math.abs(before.across) + 1e-12);
+      if (across < 1e-9) continue;
+      moved += 1;
+      // At most 21 degrees off the road: tan 21 = 0.384.
+      expect(across / along).toBeLessThan(0.384);
+    }
+    // Not vacuous: it was moving for the whole of its way out.
+    expect(moved).toBeGreaterThanOrEqual(Math.round(PULL_OUT_SECONDS / DELIVERY_TICK_SECONDS) - 2);
+  });
+
+  it.each(cars)(
+    'points its nose the way it is going, and steers into the road and back out ($from)',
+    (car) => {
+      const towardRight = car.from === 'left' ? 1 : -1;
+      let turned = 0;
+      for (let at = 1; at < TICKS.length; at += 1) {
+        const before = carPullingOut(car, (TICKS[at] as number) - 1e-4);
+        const after = carPullingOut(car, (TICKS[at] as number) + 1e-4);
+        const now = carPullingOut(car, TICKS[at] as number);
+        if (after.along - before.along < 1e-7) continue;
+        const going = Math.atan2(after.across - before.across, after.along - before.along);
+        expect(now.heading).toBeCloseTo(going, 3);
+        turned = Math.max(turned, towardRight * now.heading);
+        // Under a road car's full lock (`three-renderer.ts` MOST_STEER_RADIANS, 0.6).
+        expect(Math.abs(now.steer)).toBeLessThan(0.6);
+      }
+      expect(turned).toBeGreaterThan((15 * Math.PI) / 180);
+      expect(turned).toBeLessThan((21 * Math.PI) / 180);
+      // A steer to the car's own left is positive: from the left kerb it turns right first.
+      const first = carPullingOut(car, WAIT + 0.2 * PULL_OUT_SECONDS);
+      const last = carPullingOut(car, WAIT + 0.8 * PULL_OUT_SECONDS);
+      expect(Math.sign(first.steer)).toBe(-towardRight);
+      expect(Math.sign(last.steer)).toBe(towardRight);
+      expect(Math.abs(first.steer)).toBeGreaterThan(0.15);
+      // Braking only on the second half of its way, and its speed a car's nosing out.
+      expect(first.braking).toBe(0);
+      expect(last.braking).toBeGreaterThan(0.5);
+      const fastest = Math.max(...TICKS.map((seconds) => carPullingOut(car, seconds).speed));
+      expect(fastest).toBeGreaterThan(3);
+      expect(fastest).toBeLessThan(4.5);
+    },
+  );
+
+  it('turns its front wheels toward the road before it moves, and not while it only waits', () => {
+    const car = cars[0] as LaneObstacle;
+    expect(carPullingOut(car, 0).steer).toBe(0);
+    expect(carPullingOut(car, WAIT - PULL_OUT_STEER_READY_SECONDS).steer).toBeCloseTo(0, 9);
+    const half = carPullingOut(car, WAIT - PULL_OUT_STEER_READY_SECONDS / 2).steer;
+    const ready = carPullingOut(car, WAIT).steer;
+    const moving = carPullingOut(car, WAIT + 1e-6).steer;
+    expect(Math.abs(ready)).toBeGreaterThan(0.3);
+    expect(half).toBeCloseTo(ready / 2, 6);
+    // No jump as it sets off.
+    expect(moving).toBeCloseTo(ready, 4);
+  });
+
+  it('turns its wheels in over all the time it has when it sets off sooner than that', () => {
+    const soon = { ...(cars[0] as LaneObstacle), startAfter: PULL_OUT_STEER_READY_SECONDS / 4 };
+    // Straight the moment it is set going, as the view draws it until then.
+    expect(carPullingOut(soon, 0).steer).toBeCloseTo(0, 9);
+    const ready = carPullingOut(soon, soon.startAfter).steer;
+    expect(Math.abs(ready)).toBeGreaterThan(0.3);
+    expect(carPullingOut(soon, soon.startAfter / 2).steer).toBeCloseTo(ready / 2, 6);
+    // Set going and off at once: there is no time to turn them in.
+    const now = { ...soon, startAfter: 0 };
+    expect(carPullingOut(now, 0).steer).toBeCloseTo(ready, 9);
+  });
+
+  /** The car's four corners as it is drawn, worked here from its middle and heading. */
+  function drawnCorners(at: {
+    readonly along: number;
+    readonly across: number;
+    readonly heading: number;
+  }): readonly Point[] {
+    return (
+      [
+        [1, 1],
+        [1, -1],
+        [-1, -1],
+        [-1, 1],
+      ] as const
+    ).map(([forward, side]) => [
+      at.along +
+        forward * CAR.halfLength * Math.cos(at.heading) -
+        side * CAR.halfWidth * Math.sin(at.heading),
+      at.across +
+        forward * CAR.halfLength * Math.sin(at.heading) +
+        side * CAR.halfWidth * Math.cos(at.heading),
+    ]);
+  }
+
+  /** A box along the road's four corners, in order round it. */
+  function boxCorners(back: number, front: number, low: number, high: number): readonly Point[] {
+    return [
+      [back, low],
+      [front, low],
+      [front, high],
+      [back, high],
+    ];
+  }
+
+  /** The step's verdict for a still rider `along`, `lateral`, at `seconds` after it was set going. */
+  function stepMeets(car: LaneObstacle, seconds: number, along: number, lateral: number): boolean {
+    const tick = Math.round(seconds / DELIVERY_TICK_SECONDS);
+    const state = { tick: tick - 1, startedAt: [0], crashed: [false] };
+    const step = stepObstacles(state, {
+      rider: { along, lateral, speed: 0 },
+      obstacles: [car],
+    });
+    return step.crashes.length > 0;
+  }
+
+  it('meets a rider where the drawn turned car is, and only there', () => {
+    const car = { ...(cars[0] as LaneObstacle), startAfter: 0 };
+    // Half way out, turned its most.
+    const seconds =
+      Math.round(PULL_OUT_SECONDS / 2 / DELIVERY_TICK_SECONDS) * DELIVERY_TICK_SECONDS;
+    const at = carPullingOut(car, seconds);
+    expect(at.heading).toBeGreaterThan((20 * Math.PI) / 180);
+    const corners = drawnCorners(at);
+    // What meets the rider is the drawn car: its place and its heading.
+    expect(obstacleFootprint(car, seconds)).toStrictEqual({
+      along: at.along,
+      across: at.across,
+      heading: at.heading,
+      halfLength: CAR.halfLength,
+      halfWidth: CAR.halfWidth,
+    });
+    // A rider whose near side is between the roster box's road side and the
+    // turned nose's: beside the nose, where a box along the road would not reach.
+    const nose = at.across + CAR.halfWidth + RIDER_HALF_WIDTH_METRES + 0.3;
+    expect(stepMeets(car, seconds, at.along + CAR.halfLength, nose)).toBe(true);
+    // A rider beside the tail on the road side, whom a box grown to hold the
+    // whole turned car would have reached, clears it.
+    const front = at.along - 0.5;
+    const tailSide = Math.max(
+      ...corners.filter(([along]) => along <= front).map(([, across]) => across),
+      // The road-side long edge, where it crosses the rider's front.
+      (corners[3] as Point)[1] + (front - (corners[3] as Point)[0]) * Math.tan(at.heading),
+    );
+    const grownHigh = Math.max(...corners.map(([, across]) => across));
+    const tail = tailSide + RIDER_HALF_WIDTH_METRES + 0.05;
+    expect(tail - RIDER_HALF_WIDTH_METRES).toBeLessThan(grownHigh - 0.3);
+    expect(stepMeets(car, seconds, front - RIDER_AHEAD_METRES, tail)).toBe(false);
+    // Everywhere around it, the step agrees with the drawn car's own outline.
+    let met = 0;
+    let missed = 0;
+    const disagree: string[] = [];
+    for (let along = at.along - 4.03; along < at.along + 4; along += 0.13) {
+      for (let lateral = at.across - 2.51; lateral < at.across + 2.5; lateral += 0.07) {
+        const drawn = outlinesMeet(
+          corners,
+          boxCorners(
+            along - RIDER_BEHIND_METRES,
+            along + RIDER_AHEAD_METRES,
+            lateral - RIDER_HALF_WIDTH_METRES,
+            lateral + RIDER_HALF_WIDTH_METRES,
+          ),
+        );
+        if (stepMeets(car, seconds, along, lateral) !== drawn) {
+          disagree.push(`${along.toFixed(2)} along, ${lateral.toFixed(2)} across`);
+        }
+        if (drawn) met += 1;
+        else missed += 1;
+      }
+    }
+    expect(disagree).toStrictEqual([]);
+    expect(met).toBeGreaterThan(200);
+    expect(missed).toBeGreaterThan(200);
+    // Straight, before it sets off: the roster's own box, as any other kind's.
+    expect(obstacleFootprint(car, 0)).toMatchObject({
+      heading: 0,
+      halfLength: CAR.halfLength,
+      halfWidth: CAR.halfWidth,
+    });
+    const dog: Obstacle = { kind: 'dog', along: 500, from: 'left', startAfter: 0 };
+    expect(obstacleFootprint(dog, 1)).toStrictEqual({
+      along: obstacleAlong(dog, 1),
+      across: obstacleAcross(dog, 1),
+      heading: 0,
+      halfLength: OBSTACLE_KINDS.dog.halfLength,
+      halfWidth: OBSTACLE_KINDS.dog.halfWidth,
+    });
+  });
+
+  /** A rider at `along` drawn at `offset` stands its clearance off the drawn car, to the millimetre. */
+  function expectHeldAtClearance(
+    at: Parameters<typeof drawnCorners>[0],
+    along: number,
+    offset: number,
+  ): void {
+    const rider = (spare: number): readonly Point[] =>
+      boxCorners(
+        along - RIDER_BEHIND_METRES,
+        along + RIDER_AHEAD_METRES,
+        offset - RIDER_HALF_WIDTH_METRES - spare,
+        offset + RIDER_HALF_WIDTH_METRES + spare,
+      );
+    expect(outlinesMeet(drawnCorners(at), rider(PARKED_CAR_CLEARANCE_METRES - 1e-3))).toBe(false);
+    expect(outlinesMeet(drawnCorners(at), rider(PARKED_CAR_CLEARANCE_METRES + 1e-3))).toBe(true);
+  }
+
+  it('holds a rider who rode into the turned car its clearance off the drawn car', () => {
+    const car = { ...(cars[0] as LaneObstacle), startAfter: 0 };
+    const tick = Math.round(PULL_OUT_SECONDS / 2 / DELIVERY_TICK_SECONDS);
+    const at = carPullingOut(car, tick * DELIVERY_TICK_SECONDS);
+    const corners = drawnCorners(at);
+    const lane = 0;
+    const state = { tick, startedAt: [0], crashed: [true] };
+    // Beside its nose, and beside its tail.
+    for (const along of [at.along + 1.5, at.along - 1.5]) {
+      const moved = clearOfParkedCars([car], state, { along, lane, offset: at.across });
+      expect(moved?.lane).toBe(lane);
+      const offset = moved?.offset as number;
+      expectHeldAtClearance(at, along, offset);
+      // On the road side of it.
+      expect(offset).toBeGreaterThan(Math.max(...corners.map(([, across]) => across)) - 0.6);
+      // And held there: steering back toward the car by a little, still held.
+      expect(clearOfParkedCars([car], state, { along, lane, offset: offset - 0.05 })).toEqual(
+        moved,
+      );
+    }
+  });
+
+  it('holds a rider who rode into it clear of where it has driven to, not of where it will stop', () => {
+    const car = { ...(cars[1] as LaneObstacle), startAfter: 0 };
+    const tick = Math.round(2.4 / DELIVERY_TICK_SECONDS);
+    const seconds = tick * DELIVERY_TICK_SECONDS;
+    const at = carPullingOut(car, seconds);
+    // Still two car lengths' worth short of its place: the rider there is not beside its place.
+    expect(car.along - at.along).toBeGreaterThan(1);
+    const lane = LANE_OFFSETS_METRES.length - 1;
+    const state = { tick, startedAt: [0], crashed: [true] };
+    const along = at.along - CAR.halfLength - RIDER_BEHIND_METRES + 0.4;
+    expect(along + 1.2).toBeLessThan(car.along - CAR.halfLength);
+    const moved = clearOfParkedCars([car], state, { along, lane, offset: at.across });
+    expect(moved?.lane).toBe(lane);
+    expectHeldAtClearance(at, along, moved?.offset as number);
+  });
+});
+
+/** A point on the road, `[along, across]`, metres. */
+type Point = readonly [number, number];
+
+/**
+ * Whether two convex outlines, each in order round it, overlap by more than a
+ * touch: a corner of one strictly inside the other, or two sides crossing.
+ * The test's own working, not `obstacles.ts`', so the step is checked against
+ * the outline and not against itself. The sweeps avoid exact touches.
+ */
+function outlinesMeet(a: readonly Point[], b: readonly Point[]): boolean {
+  const cross = (o: Point, p: Point, q: Point): number =>
+    (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const inside = (point: Point, outline: readonly Point[]): boolean => {
+    const sides = outline.map((corner, index) =>
+      Math.sign(cross(corner, outline[(index + 1) % outline.length] as Point, point)),
+    );
+    return sides.every((side) => side === sides[0] && side !== 0);
+  };
+  if (a.some((point) => inside(point, b)) || b.some((point) => inside(point, a))) return true;
+  return a.some((p, i) => {
+    const q = a[(i + 1) % a.length] as Point;
+    return b.some((r, j) => {
+      const t = b[(j + 1) % b.length] as Point;
+      return cross(p, q, r) * cross(p, q, t) < 0 && cross(r, t, p) * cross(r, t, q) < 0;
+    });
+  });
+}

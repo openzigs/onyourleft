@@ -107,9 +107,12 @@ export function deliveryAhead(
       ...piece(index, 6, 0),
       kind: MARKER_KINDS[index % MARKER_KINDS.length] as DeliveryMarkerKind,
     })),
+    // #2847: each with its place on the round, as a round's obstacles carry
+    // one, so the cars among them wear their bodies and paints, not all the first.
     obstacles: each.map((index) => ({
       ...piece(index, -1.5, 0),
       kind: KINDS[index % KINDS.length] as DeliveryObstacleKind,
+      index,
     })),
   };
 }
