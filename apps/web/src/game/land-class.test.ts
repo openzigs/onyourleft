@@ -193,13 +193,16 @@ describe('the kind table', () => {
     expect(landClassOfKind('landuse', 'scrub')).toBe('wood');
     expect(landClassOfKind('landuse', 'cemetery')).toBe('park');
     expect(landClassOfKind('landuse', 'meadow')).toBe('farmland');
+    // #2976: natural grass and heather are open ground, as a meadow is.
+    expect(landClassOfKind('landuse', 'grassland')).toBe('farmland');
+    expect(landClassOfKind('landuse', 'heath')).toBe('farmland');
     expect(landClassOfKind('landuse', 'wetland')).toBe('water');
     expect(landClassOfKind('landuse', 'beach')).toBe('bare');
     expect(landClassOfKind('landuse', 'aerodrome')).toBe('bare');
     expect(landClassOfKind('landuse', 'a kind nobody wrote down')).toBe('other');
     // A `water` feature is water, whatever its kind says.
     expect(landClassOfKind('water', 'residential')).toBe('water');
-    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(41);
+    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(43);
   });
 
   it('does not find Object’s own properties for a hostile kind', () => {

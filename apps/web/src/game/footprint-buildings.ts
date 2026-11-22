@@ -24,7 +24,10 @@
  * 1. **Kind.** `building` and `building_part`; a `building_part` with a
  *    `min_height` stands on that height and has no plinth.
  * 2. **Land** (#1546): any of the centroid and the footprint's vertices on a
- *    mapped wood, water or park, and it is dropped — `on-excluded-land`. A
+ *    mapped wood, water or park, and it is dropped — `on-excluded-land`.
+ *    #2696 (proposed): a park that is a yard — `land-class.ts`
+ *    §`YARD_KINDS`, a garden, a lawn, a village green, allotments — is not
+ *    one here, so a house touching its own mapped garden is built. A
  *    building inside a mapped park is dropped deliberately: the owner's rule
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
  *    not taken. #2657: a protected area's boundary (`land-class.ts`
@@ -42,6 +45,13 @@
  *    dropped — `on-road`. The `settlements.ts` §`footprintClearance` measure,
  *    generalised to a polygon: on a hairpin a footprint beside one leg may
  *    reach the other, which is #468's defect.
+ *    **3b. The streets** (#2973): any edge within `nearby-streets.ts`
+ *    §`NEARBY_STREET_STRUCTURE_MARGIN_METRES` of a mapped street drawn
+ *    beside the route (`nearby-streets.ts` §`onNearbyStreet`, its class's
+ *    half-width and the margin), and it is dropped — `on-street`. D-5.4's
+ *    rule held against every street drawn, not only the ridden one. A
+ *    driveway or a parking aisle stops short of a footprint instead, so a
+ *    house at the end of its drive is kept.
  * 4. **The ground**: the plinth runs from the lowest drawn ground under the
  *    footprint (`landform.ts` §`terrainHeightAt` at every vertex and the
  *    centroid, the surface the renderer's ground is built from) less
@@ -425,7 +435,13 @@ import {
 } from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
-import { insidePark, kindAt, type LandClass, type LandClassMask } from './land-class';
+import {
+  insidePark,
+  kindAt,
+  parkProperNear,
+  type LandClass,
+  type LandClassMask,
+} from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { onOpenWater, waterways } from './waterways';
 import {
@@ -438,6 +454,13 @@ import {
   spireApexOf,
   spireIsMapped,
 } from './mapped-landmarks';
+import {
+  NEARBY_STREET_STRUCTURE_MARGIN_METRES,
+  nearbyStreets,
+  NO_NEARBY_STREETS,
+  onNearbyStreet,
+  type NearbyStreets,
+} from './nearby-streets';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
@@ -467,7 +490,7 @@ import type { WorldCorridor } from './world-data/corridor';
 
 /** What became of a footprint: planned, or the rule that dropped it. */
 export type FootprintVerdict =
-  'kept' | 'on-excluded-land' | 'on-road' | 'too-steep' | 'too-small' | 'too-large';
+  'kept' | 'on-excluded-land' | 'on-road' | 'on-street' | 'too-steep' | 'too-small' | 'too-large';
 
 /**
  * Every verdict, in the rules' order.
@@ -479,6 +502,7 @@ export const FOOTPRINT_VERDICTS: readonly FootprintVerdict[] = [
   'kept',
   'on-excluded-land',
   'on-road',
+  'on-street',
   'too-steep',
   'too-small',
   'too-large',
@@ -5322,6 +5346,9 @@ export function footprintPlans(
   options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
   const seed = scatterSeed(profile);
+  // #2973: the streets drawn beside the route, unless `-nearby-streets` is off.
+  const streets =
+    options.nearbyStreets === false ? NO_NEARBY_STREETS : nearbyStreets(corridor, profile, origin);
   // #1790: each footprint's mapped roof and storeys, unless `-mapped-roof-shape` is off.
   const mapped = options.mappedRoofShape ?? true;
   // #1792: and its mapped colours and materials, unless `-mapped-paint` is off.
@@ -5330,6 +5357,7 @@ export function footprintPlans(
     kept: 0,
     'on-excluded-land': 0,
     'on-road': 0,
+    'on-street': 0,
     'too-steep': 0,
     'too-small': 0,
     'too-large': 0,
@@ -5369,6 +5397,7 @@ export function footprintPlans(
           origin,
           seed,
           maxVertices,
+          streets,
           tagged,
           mapped,
           false,
@@ -5399,6 +5428,7 @@ export function footprintPlans(
       origin,
       seed,
       maxVertices,
+      streets,
       tagged,
       mapped,
       false,
@@ -5461,6 +5491,7 @@ export function footprintPlans(
         origin,
         seed,
         maxVertices,
+        streets,
         plans,
         {
           grid: others,
@@ -5538,6 +5569,7 @@ function terracePlans(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
+  streets: NearbyStreets,
   kept: readonly FootprintPlan[],
   others: PlanNeighbours,
   roofing: RoofSplitting,
@@ -5614,6 +5646,7 @@ function terracePlans(
         origin,
         seed,
         maxVertices,
+        streets,
         others.tagged,
         // Its fields are all `null`: a terrace block reads no tag.
         false,
@@ -6189,6 +6222,8 @@ function measureFootprint(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
+  // #2973: the streets drawn beside the route, which rule 3b keeps it off.
+  streets: NearbyStreets,
   tagged: TaggedNeighbours | undefined,
   // #1790: whether its mapped `building:levels` is read (`-mapped-roof-shape` off).
   mapped: boolean,
@@ -6207,10 +6242,13 @@ function measureFootprint(
   // protected area's boundary (a national forest round a whole town) is not
   // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
   // #2754: a beach inside a park is a beach, and still inside the park.
+  // #2696 (ADR 0054's entry of 2026-11-19, proposed): a park that is a yard
+  // — a garden, a lawn, a village green, allotments — drops no footprint.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
     if (here === 'bare') return insidePark(corridor, x, z);
-    return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
+    if (here === 'park') return !land.protectedArea(x, z) && parkProperNear(corridor, x, z);
+    return (here === 'wood' || here === 'water') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
   for (let i = 0; i + 1 < outer.length; i += 2) {
@@ -6233,6 +6271,8 @@ function measureFootprint(
   if (nearSegments.length > 0 && ringToRoad(drawn, road, nearSegments) < ROAD_CLEARANCE_METRES) {
     return 'on-road';
   }
+  // 3b. #2973: and every mapped street drawn beside it.
+  if (onNearbyStreet(streets, drawn, NEARBY_STREET_STRUCTURE_MARGIN_METRES)) return 'on-street';
 
   // 4. The ground, beside the stretch of road each point is nearest. The
   // nearest stretch to any vertex is within the centroid's distance and twice
@@ -6525,6 +6565,13 @@ export interface FootprintPlanOptions {
    * #1791's civic block, as before (`?levers=-landmark-civic`).
    */
   readonly landmarkCivic?: boolean;
+  /**
+   * #2973: rule 3b, every footprint kept off the mapped streets drawn beside
+   * the route (`nearby-streets.ts`); `true` by default. Off, none is dropped
+   * for one, every plan as before (`?levers=-nearby-streets`, which draws no
+   * nearby street either).
+   */
+  readonly nearbyStreets?: boolean;
 }
 
 /**

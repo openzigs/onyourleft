@@ -11,7 +11,7 @@
  * simulation steps them, holding one lane at one steady speed.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,18 +63,47 @@ const FIXTURE = parseLevelFile(
   ),
   'fixture-level',
 );
+/**
+ * #2367: every shipped level's own densities that place a moving hazard, read
+ * for their parameters only (ADR 0065 D-6.4, D-7.5) and placed over the
+ * fixture's span, so each sweep below runs over every shipped level's mix.
+ */
+const LEVEL_DATA = fileURLToPath(new URL('./levels/data/', import.meta.url));
+const SHIPPED_HAZARDS = readdirSync(LEVEL_DATA)
+  .filter((name) => name.endsWith('.json'))
+  .map(
+    (name) =>
+      parseLevelFile(JSON.parse(readFileSync(join(LEVEL_DATA, name), 'utf8')), name.slice(0, -5))
+        .round.hazardsPerKilometre,
+  )
+  .filter((hazards) => hazards.moving > 0);
+const mixOf = (hazardsPerKilometre: { static: number; moving: number }) =>
+  levelObstacleMix({ hazardsPerKilometre }, FIXTURE.lengthMetres);
 const MIXES = [
   { static: 2, moving: 2 },
   { static: 1, moving: 4 },
   { static: 0, moving: 3 },
-].map((hazardsPerKilometre) => levelObstacleMix({ hazardsPerKilometre }, FIXTURE.lengthMetres));
+].map(mixOf);
+const SHIPPED_MIXES = SHIPPED_HAZARDS.map(mixOf);
 const SPAN = { from: 0, to: FIXTURE.lengthMetres };
 const SEEDS = Array.from({ length: 24 }, (_, index) => (index * 2_654_435_761) >>> 0);
+/**
+ * #2367: a shipped level's mix at a sixth of the seeds. Each sweep below reads
+ * one hazard at a time, so a mix adds only its own placements. The clear-lane
+ * sweep, on the Mac, Node 26: 731 ms on main, 1 636 ms with `--coverage`; at
+ * all 24 seeds 1 193 ms without coverage; at 8, 886 ms and 2 177 ms with it;
+ * at these 4, 782 ms and 1 897 ms (#1688: make a case cheaper, never give it
+ * longer).
+ */
+const SHIPPED_SEEDS = SEEDS.slice(0, 4);
 
-/** Every placement the sweeps read: each mix at each seed, steering, on the normal setting. */
-const PLACEMENTS: readonly (readonly Obstacle[])[] = MIXES.flatMap((mix) =>
-  SEEDS.map((seed) => placeObstacles(SPAN, seed, 'normal', true, mix)),
-);
+/** Every placement the sweeps read: each mix at each of its seeds, steering, on the normal setting. */
+const PLACEMENTS: readonly (readonly Obstacle[])[] = [
+  ...MIXES.flatMap((mix) => SEEDS.map((seed) => placeObstacles(SPAN, seed, 'normal', true, mix))),
+  ...SHIPPED_MIXES.flatMap((mix) =>
+    SHIPPED_SEEDS.map((seed) => placeObstacles(SPAN, seed, 'normal', true, mix)),
+  ),
+];
 
 const isMoving = (obstacle: Obstacle): boolean => MOVING_HAZARD_KINDS.includes(obstacle.kind);
 
@@ -144,6 +173,8 @@ function rideAlone(hazard: Obstacle, speed: number, lateral: number): boolean {
 
 describe('the moving hazards are placed on a level — #2364', () => {
   it('places every kind, from both kerbs, only where the level asks for them', () => {
+    // #2367: levels 3 to 6 each ask for moving hazards, and each is swept.
+    expect(SHIPPED_HAZARDS.length).toBeGreaterThanOrEqual(4);
     const moving = PLACEMENTS.flat().filter(isMoving);
     expect(new Set(moving.map((hazard) => hazard.kind))).toStrictEqual(
       new Set(MOVING_HAZARD_KINDS),
@@ -172,7 +203,7 @@ describe('the moving hazards are placed on a level — #2364', () => {
   });
 
   it('keeps the assist’s “fewer” to one in FEWER_OBSTACLES_KEEP_ONE_IN, each where it was, and “none” to none', () => {
-    for (const mix of MIXES) {
+    for (const mix of [...MIXES, ...SHIPPED_MIXES]) {
       for (const seed of SEEDS) {
         const normal = placeObstacles(SPAN, seed, 'normal', true, mix);
         const fewer = placeObstacles(SPAN, seed, 'fewer', true, mix);

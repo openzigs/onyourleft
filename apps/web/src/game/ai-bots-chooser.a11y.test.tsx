@@ -131,9 +131,10 @@ function instance(status: TacticsStatus): Instance {
       decideTactics: (input) => {
         double.calls.push('decide');
         double.decided.push(input);
+        // #2836: one bot's pick, off the menu it was offered.
         return Promise.resolve({
           kind: 'answer',
-          body: { bots: input.bots.map((view) => ({ bot: view.bot, move: 'attack' })) },
+          body: { reason: 'my-terrain', move: input.you.menu[0]?.move },
         });
       },
       endTacticsRace: () => {
