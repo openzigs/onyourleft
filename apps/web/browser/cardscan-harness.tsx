@@ -58,6 +58,13 @@ const errors: string[] = [];
 /** `?blank`: the camera sees a wall with no code on it, so the scan goes on looking. */
 const BLANK = new URLSearchParams(location.search).has('blank');
 
+/**
+ * `?fresh`: a device nobody has agreed anything on — #2856. Without it the
+ * rider has agreed to the camera on the Camera screen, as every spec written
+ * before #2856 assumes; with it the scan asks its own agreement in place.
+ */
+const FRESH = new URLSearchParams(location.search).has('fresh');
+
 async function loadFixture(): Promise<HTMLImageElement> {
   const image = new Image();
   image.src = CARD_QR_FIXTURE;
@@ -104,7 +111,7 @@ async function run(): Promise<void> {
     secureContext: true,
   });
   const camera = new CameraController({ port, secureWindow: browserSecureWindow() });
-  camera.agree({ acknowledgedBystanders: true, allowLocal: true });
+  if (!FRESH) camera.agree({ acknowledgedBystanders: true, allowLocal: true });
 
   const host = document.getElementById('cardscan-main');
   if (host === null) throw new Error('no #cardscan-main');

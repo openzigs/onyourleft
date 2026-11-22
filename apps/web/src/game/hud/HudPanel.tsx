@@ -88,6 +88,7 @@ import type { RaceStandingsView } from '../room-ride';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
+import type { JunctionInput } from './JunctionChoicePrompt';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import { deviceStorage } from './announce-preference';
 import { HIDES_ATTRIBUTE } from './controls-reveal';
@@ -390,6 +391,17 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
   readonly controller?: ControllerPort | undefined;
   /** A Delivery round's lane, as a controller's handlebar angle asks for one — #1827. */
   readonly lanes?: LaneInputPort | undefined;
+  /**
+   * An open-world ride's junctions — #2898, ADR 0088 D-3 and D-3.1: the
+   * prompt for the next junction as the rider stands now, and where a press
+   * goes. With it the HUD shows `JunctionChoicePrompt` in its actions panel,
+   * inside the touch lock and exempt from none of it, listens for the turn
+   * keys, and hands a pad's turn buttons to the same press
+   * (`GamepadIntents.tsx`). `undefined` on every other ride. ⚠️ No ride hands
+   * it in yet: the open-world ride session (#2896) will, so this is an
+   * optional prop nobody supplies (`wiring-gate.md` §Limits) until then.
+   */
+  readonly junction?: JunctionInput | undefined;
 }
 
 /**

@@ -39,6 +39,7 @@ import type { Billboard } from './billboards';
 import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
+import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
@@ -478,6 +479,16 @@ export interface SceneFrame {
    * rung's `structureItems`: a street is one mesh, not items.
    */
   readonly streets: readonly VillageStreet[];
+  /**
+   * The corridor's mapped footways in view — #2972 (`footway-surfaces.ts`):
+   * each footway, cycleway, park path and flight of steps a ribbon on the
+   * ground, off the carriageway, the side roads, the water and a village's
+   * pavements (#1620), and a zebra where a mapped crossing crosses the road;
+   * the same objects every frame while the same are in reach, drawn by one
+   * mesh in the realistic world (`three-renderer.ts` §`FootwayBelt`). Empty
+   * with no corridor, which only the realistic world is given (ADR 0054 D-6).
+   */
+  readonly footways: readonly FootwayPiece[];
   /**
    * The people in view — #1541 (`people.ts`): on the village streets'
    * pavements and front paths and the corridor's mapped footways, never on

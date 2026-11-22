@@ -75,7 +75,9 @@ import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
 import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
-import { matchHash } from './shell/routes';
+import { hrefFor, matchHash, routeById } from './shell/routes';
+import { createOpenWorldEntry } from './game/open-world/entry';
+import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
@@ -678,6 +680,28 @@ function buildMatchPort(): MatchPort {
  * another athlete's anything. `ActivityStore` satisfies it structurally, like
  * the five ports above.
  */
+/**
+ * The open-world ride's way in — #2889. ONE for the tab: the picker hands the
+ * start to it and the open-world session (#2896) takes it, in memory only.
+ */
+const openWorldEntry = createOpenWorldEntry();
+
+/**
+ * Where an open-world ride starts — #2889: the local athlete's own routes and
+ * rides (`start-port.ts` scopes every read on the owner), and the entry the
+ * start is handed to before the trainer game opens.
+ */
+function buildOpenWorldStartPort(): OpenWorldStartPort {
+  return openWorldStartPort({
+    store: localStore(),
+    owner: LOCAL_ATHLETE,
+    entry: openWorldEntry,
+    opened: () => {
+      globalThis.location.hash = hrefFor(routeById('game'));
+    },
+  });
+}
+
 function buildRoutePort(corridors: WorldCorridorPort): RoutePort {
   // #1539: a saved route's corridor is read after the save, never before it.
   return { store: readingCorridorOnSave(localStore(), corridors), athleteId: LOCAL_ATHLETE };
@@ -1991,6 +2015,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           segments={buildSegmentPort()}
           match={buildMatchPort()}
           routes={buildRoutePort(worldCorridorPort)}
+          openWorld={buildOpenWorldStartPort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
           boards={buildLeaderboardPort()}

@@ -63,7 +63,8 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { mixedTownFixture } from './footprint-fixtures-testing';
+import { footwaysFixture, mixedTownFixture } from './footprint-fixtures-testing';
+import { footwayTriangles } from './footway-surfaces';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
@@ -3907,4 +3908,54 @@ describe('the litter and the chain-link, loaded by the product’s own loader �
       drawing.dispose();
     }
   }, 120_000);
+});
+
+describe('the footways, drawn by a view on the loaded world — #2972', () => {
+  /** The world loaded once, in a hook, for #1688's reason (see the feet on the pedals). */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  it('draws the frame’s footways and zebra in the realistic world, in one mesh, and none in the stylised', async () => {
+    const town = footwaysFixture();
+    const land = landClassMask(town.corridor);
+    const start = atStartLine(town.profile);
+    // Built by the same module graph as the renderer `loadedOn` imported fresh.
+    const scene = await import('./scene');
+    const framed = (): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: town.profile,
+        origin: town.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_250) } },
+        worldCorridor: town.corridor,
+        landClass: land,
+      });
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      const frame = framed();
+      const triangles = footwayTriangles(frame.footways);
+      expect(triangles).toBeGreaterThan(100);
+      realistic.render(framed());
+      const mesh = renderer.footwayMeshOf(realistic);
+      expect(mesh?.visible).toBe(true);
+      expect((mesh?.geometry.index?.count ?? 0) / 3).toBe(triangles);
+      stylised.render(framed());
+      expect(renderer.footwayMeshOf(stylised)?.visible ?? false).toBe(false);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
+    }
+  });
 });
