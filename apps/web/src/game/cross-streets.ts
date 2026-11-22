@@ -1306,10 +1306,11 @@ export function sideRoadsAt(
     }
   };
   for (const junction of mapped) consider(junction);
-  const { sites, span } = siteSpacing(profile);
+  // #3055: counted in ride distance on an open-world view. @see siteSpacing
+  const { sites, span, shift } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
-  const first = Math.floor((fromMetres - reach) / span);
-  const lastSite = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
+  const first = Math.floor((fromMetres - reach + shift) / span);
+  const lastSite = Math.min(Math.floor((toMetres + reach + shift) / span), first + sites + 1);
   let known = villages.get(profile);
   if (known === undefined) {
     known = new Map();
