@@ -1,9 +1,9 @@
 # ADR 0093: The side camera pairs with one scan, remembers the pair, and may meet through the rider's instance — superseding in part ADR 0033 D-1, D-4 and D-8
 
-- **Status**: **Proposed**, 2026-11-22, for the owner to accept or overturn. §"The owner's questions"
-  at the end asks nine questions, each with a recommendation. Until the owner accepts this ADR,
-  [ADR 0033](0033-side-camera-link.md) governs the side-camera link as written, and nothing here is
-  built
+- **Status**: **Accepted**, 2026-11-22, by the owner on its pull request
+  [#3018](https://github.com/openzigs/onyourleft/pull/3018), asked one question at a time, with
+  every recommendation of §"The owner's questions" taken: Q7 a four-digit check, Q8 the D-4
+  sentence as drafted, Q9 `OYLSIDE2` with one-scan's implementation. Proposed 2026-11-22
 - **Date**: 2026-11-22
 - **Deciders**: **the owner**, on every product question. The owner asked for this ADR on
   [#3010](https://github.com/openzigs/onyourleft/issues/3010) on 2026-11-21, after a tablet session,

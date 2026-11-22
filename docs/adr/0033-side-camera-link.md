@@ -864,8 +864,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [ADR 0084](0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md),
   for a scan of the instance's code only; this ADR's own pairing scans are unchanged. (#2856)
 - **2026-11-22** — **A pointer only: D-1's two codes, D-4's *"nothing is remembered"*, D-8's *"no
-  pairing"* and §Context's pairing-lifetime row are proposed to be superseded in part by
+  pairing"* and §Context's pairing-lifetime row are superseded in part by
   [ADR 0093](0093-the-side-camera-pairs-with-one-scan-remembers-the-pair-and-may-meet-through-the-instance.md)**
   (#3010): one scan when both ends are the Android app, a remembered pairing, and pairing through the
-  rider's instance when there is one. ⚠️ ADR 0093 is **Proposed** on this date: until the owner
-  accepts it, this entry is a pointer and this ADR governs. The body above is not edited.
+  rider's instance when there is one. ADR 0093 was **Accepted** by the owner on this date on
+  [#3018](https://github.com/openzigs/onyourleft/pull/3018). This entry is a pointer; the body above is not edited.
