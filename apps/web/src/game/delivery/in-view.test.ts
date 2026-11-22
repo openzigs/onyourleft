@@ -311,6 +311,86 @@ describe('a Delivery frame’s pieces — #1814', () => {
     );
   });
 
+  it('draws a car pulling out driving out: its nose the way it goes, its wheels rolling and steered, its road-side indicator on', () => {
+    const cars: readonly Obstacle[] = [
+      {
+        kind: 'car-pulling-out',
+        along: RIDER + 40,
+        from: 'left',
+        startAfter: 0.5,
+        to: -2.4,
+        rides: 0,
+      },
+      {
+        kind: 'car-pulling-out',
+        along: RIDER + 55,
+        from: 'right',
+        startAfter: 0.5,
+        to: 2.4,
+        rides: 0,
+      },
+    ];
+    const at = (tick: number | undefined, over: Partial<DeliveryDrawInput> = {}) =>
+      deliveryInView(
+        input({
+          obstacles: cars,
+          obstacleState:
+            tick === undefined
+              ? startObstacles(cars)
+              : { tick, startedAt: [0, 0], crashed: [false, false] },
+          ...over,
+        }),
+      ).obstacles;
+    // Not set going: waiting, parallel to the road, the indicator lit steadily.
+    for (const [index, piece] of at(undefined).entries()) {
+      expect(piece.yaw).toBeCloseTo(0, 9);
+      expect(piece.car).toStrictEqual({
+        travelledMetres: 0,
+        speedMetresPerSecond: 0,
+        steerRadians: 0,
+        braking: 0,
+        indicator: index === 0 ? 'right' : 'left',
+      });
+    }
+    let last = at(0);
+    let driven = 0;
+    for (let tick = 1; tick <= 100; tick += 1) {
+      const now = at(tick);
+      for (const [index, piece] of now.entries()) {
+        const before = last[index];
+        if (before === undefined || piece.car === undefined) throw new Error('a car has no motion');
+        // It flashes from when it was set going.
+        expect(piece.car.indicatorSeconds).toBeCloseTo(tick * DELIVERY_TICK_SECONDS, 9);
+        const step = Math.hypot(piece.x - before.x, piece.z - before.z);
+        expect(piece.car.travelledMetres).toBeGreaterThanOrEqual(before.car?.travelledMetres ?? 0);
+        if (step < 0.02) continue;
+        driven += 1;
+        // Its own +z faces its yaw (`port.ts`): it moves nose first, within 3 degrees.
+        const going = Math.atan2(piece.x - before.x, piece.z - before.z);
+        expect(Math.abs(going - piece.yaw)).toBeLessThan(0.05);
+        expect(piece.car.speedMetresPerSecond).toBeGreaterThan(0.3);
+      }
+      last = now;
+    }
+    expect(driven).toBeGreaterThan(90);
+    // Out: in its lane, straight, standing, having rolled its whole way.
+    const [left, right] = at(100);
+    expect(left?.x).toBeCloseTo(2.4, 6);
+    expect(right?.x).toBeCloseTo(-2.4, 6);
+    expect(left?.z).toBeCloseTo(RIDER + 40, 6);
+    expect(left?.car?.travelledMetres).toBeCloseTo(8, 6);
+    expect(left?.car?.speedMetresPerSecond).toBeCloseTo(0, 6);
+    // Part way: turned toward the road, the two kerbs' cars opposite ways.
+    const [turning, other] = at(40);
+    expect(turning?.yaw).toBeLessThan(-0.2);
+    expect(other?.yaw).toBeGreaterThan(0.2);
+    // Under reduced motion the indicator is lit steadily: no clock to flash on.
+    for (const piece of at(40, { steadyIndicators: true })) {
+      expect(piece.car?.indicator).toBeDefined();
+      expect(piece.car).not.toHaveProperty('indicatorSeconds');
+    }
+  });
+
   it('draws each moving hazard where it is, facing the way it goes, a car pulling out as its own kind — #2364, #2506', () => {
     const hazards: readonly Obstacle[] = [
       { kind: 'dog', along: RIDER + 50, from: 'left', startAfter: 0 },

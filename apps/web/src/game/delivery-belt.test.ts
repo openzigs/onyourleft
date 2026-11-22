@@ -25,6 +25,7 @@ import {
 import { deliveryInView } from './delivery/in-view';
 import {
   OBSTACLE_KINDS,
+  PULL_OUT_RUN_METRES,
   startObstacles,
   type Obstacle,
   type ObstacleKind,
@@ -352,9 +353,10 @@ describe('Delivery’s belt — #1814', () => {
         }),
       );
       const drawn = belt.drawn('obstacles');
+      // Waiting, it stands its run short of its place; four seconds on it has driven up to it.
       expect(drawn.map((each) => [each.kind, each.z])).toEqual([
         ['parked-car', 120],
-        ['car-pulling-out', 160],
+        ['car-pulling-out', obstacleState === waiting ? 160 - PULL_OUT_RUN_METRES : 160],
       ]);
       const [parked, pullingOut] = drawn.map((each) =>
         drawnBy(belt, each.kind as DeliveryObstacleKind),

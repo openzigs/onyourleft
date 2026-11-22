@@ -4550,6 +4550,8 @@ function GameScreen({
                   revealMetres: round.revealMetres,
                   weather: round.weather,
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
+                  // A car's indicator is lit steadily, not flashing, under reduced motion.
+                  steadyIndicators: reducedMotionRef.current,
                 }),
               };
         // #1902, #1906: a lap race's pick-ups and puddles, on the frame's own corridor.
