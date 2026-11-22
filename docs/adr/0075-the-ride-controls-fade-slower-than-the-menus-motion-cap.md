@@ -117,3 +117,22 @@ lap race the whole actions panel stays drawn (Pause and End ride with Use item),
   run, ADR 0041 D-3's reason would apply after all. Today a control takes a press at every point of
   its fade, and a jsdom test (`HudPanel.controls-hide.test.tsx`) presses each one as soon as it is
   shown.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-18** — D-3's closing also carries the panel down, where a race's standings are drawn
+  ([#2837](https://github.com/openzigs/onyourleft/issues/2837), on the owner's report of that day
+  from the tablet: *"the position menu should get bigger when the other one reduces … Can only see
+  3 people"*). D-3 clips the hidden actions panel to the trainer's line and leaves the line where
+  the panel begins, so the room under it was nobody's. On a tablet, in a ride whose HUD draws a
+  race's standings, the panel is now also moved down by what the clip takes off it, so the line is
+  drawn at the stage's bottom edge and the standings grow into the room above it
+  (`theme.css` §"#2837", `standings-room.ts`). **No duration and no token is added**: the move is
+  part of the same closing, over `--oyl-motion-medium`, after the fade has run, and the panel keeps
+  its own place for as long as its controls are fading. D-1, D-2, D-4 and D-5 are unchanged: under
+  `prefers-reduced-motion: reduce` and `update: slow` there is no closing and the line is at the
+  bottom edge at once. A ride with no standings moves nothing, and nor does a phone, whose stage draws none. *The author's choice*, for the
+  owner to look at with #2837's screenshots; `lap-race-hud.browser.spec.ts` §"#2837" samples the
+  move and fails on the panel leaving its place before the fade has run.

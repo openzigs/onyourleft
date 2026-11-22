@@ -212,33 +212,66 @@ export function timeInZones(
   samples: readonly (number | undefined)[],
   sampleInterval: Seconds,
 ): TimeInZones {
-  const perZone = new Array<number>(zones.length).fill(0);
-  let covered = 0;
+  const fold = new TimeInZonesFold(zones, sampleInterval);
+  for (const sample of samples) fold.add(sample);
+  return fold.time;
+}
 
-  for (const sample of samples) {
+/**
+ * {@link timeInZones}, one sample at a time — #2283: the ride HUD's time in
+ * each zone, counted as the recording grows rather than from its first sample
+ * again every second. {@link timeInZones} is this over a whole channel, so the
+ * two cannot disagree.
+ */
+export class TimeInZonesFold {
+  #perZone: number[];
+  #covered = 0;
+
+  readonly zones: readonly Zone[];
+  readonly sampleInterval: Seconds;
+
+  constructor(zones: readonly Zone[], sampleInterval: Seconds) {
+    this.zones = zones;
+    this.sampleInterval = sampleInterval;
+    this.#perZone = new Array<number>(zones.length).fill(0);
+  }
+
+  /** The next sample's reading, or `undefined` for none. */
+  add(sample: number | undefined): void {
     if (sample === undefined) {
-      continue;
+      return;
     }
-    const zone = zoneOf(zones, sample);
+    const zone = zoneOf(this.zones, sample);
     if (zone === undefined) {
       // A reading no zone claims — negative, or not finite. Excluded rather
       // than forced into zone one, on the same reasoning as a gap: it is not a
       // measurement of an intensity.
-      continue;
+      return;
     }
     const slot = zone.index - 1;
     // `?? 0` is unreachable — `perZone` was filled to `zones.length` and
     // `zone.index` is 1-based within it — but the index signature does not know
     // that, and a non-null assertion would hide a real bug if the invariant
     // ever broke. The test that walks every zone is what proves it holds.
-    perZone[slot] = (perZone[slot] ?? 0) + sampleInterval;
-    covered += sampleInterval;
+    this.#perZone[slot] = (this.#perZone[slot] ?? 0) + this.sampleInterval;
+    this.#covered += this.sampleInterval;
   }
 
-  return {
-    perZone: perZone.map((total) => seconds(total)),
-    covered: seconds(covered),
-  };
+  /** What {@link timeInZones} gives for the samples added so far. */
+  get time(): TimeInZones {
+    return {
+      perZone: this.#perZone.map((total) => seconds(total)),
+      covered: seconds(this.#covered),
+    };
+  }
+
+  /** Another fold that has had the same samples, and goes on alone. */
+  copy(): TimeInZonesFold {
+    const next = new TimeInZonesFold(this.zones, this.sampleInterval);
+    next.#perZone = [...this.#perZone];
+    next.#covered = this.#covered;
+    return next;
+  }
 }
 
 /** The threshold defaults a new athlete starts from. @see AthleteRecord */

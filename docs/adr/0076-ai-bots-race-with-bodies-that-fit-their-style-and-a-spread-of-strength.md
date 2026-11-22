@@ -424,3 +424,17 @@ connection kept open.
   for being easy, the spread or the scale is wrong.
 - **A model answer reaches a trainer write**, or **a blown bot rides over CP**: ADR 0073 D-2 has
   failed, and the build is wrong, not the rule.
+
+## Amendments
+
+- **2026-11-18** — **Once [ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted, D-11's figures for the call are superseded by
+  it.** The device asks about one bot at a time, no more often than once a second, where D-11 had
+  one call for the field every 4 s; the answer is capped at 48 tokens, where D-11 had 256; and the
+  trimmed race state is what an ask for one bot is made from, no longer what is sent. **The 8 s
+  late limit and the 10 s hold are unchanged**, the hold now for each bot. D-1 to D-10 are
+  unchanged. Read ADR 0081 for the rule. This entry only points there; nothing else in this ADR
+  changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)

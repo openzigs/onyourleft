@@ -275,6 +275,7 @@ import {
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
+  throwSideOn,
   type DeliveryRide,
 } from './delivery/ride-round';
 import { sidewaysSpeedOf, steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
@@ -283,7 +284,7 @@ import { dampedSway } from './lane-change-lean';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
-import { throwSideFor, type ThrowSide } from './delivery/throw';
+import type { ThrowSide } from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
 import type { ItemInputPort } from './lap-race/item-input-port';
 import {
@@ -2134,11 +2135,8 @@ function GameScreen({
     throwParcel: (intent) => {
       const ride = deliveryRef.current;
       if (ride === undefined || !loopRunningRef.current) return;
-      const side = throwSideFor(intent, {
-        targets: ride.throwTargets,
-        round: ride.round,
-        along: ride.along,
-      });
+      // #2931: on a level, a house is behind once the level's own window closes.
+      const side = throwSideOn(ride, intent);
       if (side !== undefined) throwAskedRef.current = side;
     },
   });
