@@ -6,6 +6,7 @@ import type { RealisticShape } from '../../src/game/three-renderer';
 import {
   BridgeBelt,
   ContactShadowBelt,
+  FootwayBelt,
   GroundBlobBelt,
   HorizonRing,
   RealisticStructureBelts,
@@ -108,6 +109,8 @@ function viewLikeScene(): {
   const primitives = new ScatterBelt(new Map(), { skip: REALISTIC_PRIMITIVE_SKIP, physical: true });
   primitives.addTo(into);
   new GroundBlobBelt().addTo(into);
+  // #2972: the mapped footways and zebras, realistic only.
+  new FootwayBelt().addTo(into);
   return { scene, road, catcher, stylised, vegetation, primitives };
 }
 
@@ -141,8 +144,8 @@ describe('the realistic page’s layer switch — #616', () => {
       expect(census.objects[layer], layer).toBeGreaterThan(0);
     }
     // The horizon, the ground and — #2699 — the ground's overpass
-    // embankments, and the road the view adds itself.
-    expect(census.objects.surfaces).toBe(4);
+    // embankments, the road the view adds itself, and — #2972 — the footways.
+    expect(census.objects.surfaces).toBe(5);
   });
 
   it('hides a switched-off layer on a drawn frame, and nothing else', () => {
