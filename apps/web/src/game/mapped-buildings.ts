@@ -30,6 +30,9 @@
  *   own drawn reach of a driveway either.
  * - {@link clearOfDriveways}: no wall, hedge, fence, signpost or building
  *   across a driveway, or within 0.5 m of it — #2428.
+ * - Since #2848 a shop's apron (`shop-aprons.ts`, `FootprintPlan.apron`) is
+ *   paved ground as a driveway is: both clearings above hold for it, and the
+ *   near level draws it ({@link NEAR_ROLES}).
  *
  * ⚠️ **The clearing takes every planned footprint, not only the drawn ones.**
  * The drawn set changes at a refill, and a wood that came back when a house
@@ -180,7 +183,8 @@ export function mappedBuildingsOf(
     const { footprint: outline, centroid, driveway } = plan;
     let radius = 0;
     // #1588: a driveway's ground is the building's too, so its reach takes it in.
-    for (const ring of [outline, driveway]) {
+    // #2848: and an apron's.
+    for (const ring of [outline, driveway, plan.apron]) {
       for (let at = 0; at + 1 < ring.length; at += 2) {
         radius = Math.max(
           radius,
@@ -234,7 +238,8 @@ export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'plinth', 'roof', 's
 
 /**
  * The roles a building's near level draws: all of them, #1581's chimney and
- * trim, #1588's dormers and driveway, #1589's porch and #1590's shop fronts among them.
+ * trim, #1588's dormers and driveway, #1589's porch, #1590's shop fronts and
+ * #2848's apron among them.
  */
 export const NEAR_ROLES: readonly FootprintRole[] = [
   'wall',
@@ -253,15 +258,18 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
   'porch-trim',
   // #2206: last, so it follows the roof's run in the slate slot and moves no earlier one.
   'spire',
+  // #2848: after every other, so it moves no earlier role's place in the walls' run.
+  'apron',
 ];
 
 /**
  * The surface a role wears: the roof and, since #1588, a dormer's roof the
  * plan's roof surface (`footprint-buildings.ts` §`ROOF_ROLES`), and
  * everything else — walls, plinth, parapet, door, since #1581 chimney and
- * trim, and since #1588 a dormer's front and cheeks and the driveway — its
- * wall surface. A driveway wears the wall's group only to cost no draw call:
- * the shader paints it, and no photograph shows.
+ * trim, since #1588 a dormer's front and cheeks and the driveway, and since
+ * #2848 a shop's apron — its wall surface. A driveway and an apron wear the
+ * wall's group only to cost no draw call: the shader paints them, and no
+ * photograph shows.
  *
  * ⚠️ **The door, the trim and the plinth wear the wall's photograph**, where a
  * procedural house's wear timber (`realistic-assets.ts`
@@ -643,8 +651,9 @@ export const DRIVEWAY_MARGIN_METRES = 1;
 /**
  * Whether `(x, z)` stands on a mapped building's ground: inside a planned
  * footprint, or within #1534's {@link SETTLEMENT_MARGIN_METRES} of one, or
- * since #1588 on its driveway or within `drivewayMargin` of it —
- * {@link DRIVEWAY_MARGIN_METRES} unless the caller says more.
+ * since #1588 on its driveway — since #2848 on its apron too — or within
+ * `drivewayMargin` of it, {@link DRIVEWAY_MARGIN_METRES} unless the caller
+ * says more.
  *
  * Where `drivewayMargin` is wider than {@link SETTLEMENT_MARGIN_METRES} —
  * a broadleaf at the top of its scale reaches 6.06 m (`scene.ts`
@@ -679,6 +688,11 @@ export function onMappedGround(
         if (plan.driveway.length > 0) {
           if (insideRing(plan.driveway, x, z)) return true;
           if (squaredToRing(plan.driveway, x, z) <= drivewayMargin ** 2) return true;
+        }
+        // #2848: a shop's apron is paved ground as a driveway is.
+        if (plan.apron.length > 0) {
+          if (insideRing(plan.apron, x, z)) return true;
+          if (squaredToRing(plan.apron, x, z) <= drivewayMargin ** 2) return true;
         }
       }
     }
@@ -719,9 +733,10 @@ export function clearOfMappedBuildings(
 
 /**
  * Whether a structure's footprint standing at `at` comes within `margin` of
- * any mapped building's driveway — #2428: its footprint sampled as
- * `cross-streets.ts` §`onSideRoad` samples it, each sample measured against
- * the driveway's outline, which is its drawn paving in plan.
+ * any mapped building's driveway — #2428 — or, since #2848, its apron: its
+ * footprint sampled as `cross-streets.ts` §`onSideRoad` samples it, each
+ * sample measured against the paving's outline, which is its drawn paving in
+ * plan.
  *
  * Only the cells the footprint's reach touches are looked up, and only a
  * plan within that reach of its centroid is sampled at all, so a frame's few
@@ -746,17 +761,20 @@ export function onDriveway(
       if (list === undefined) continue;
       for (const index of list) {
         const plan = buildings.plans[index] as FootprintPlan;
-        if (plan.driveway.length === 0) continue;
+        if (plan.driveway.length === 0 && plan.apron.length === 0) continue;
         const near = (buildings.radii[index] as number) + reach;
         const dx = at.x - plan.centroid.x;
         const dz = at.z - plan.centroid.z;
         if (dx * dx + dz * dz > near * near) continue;
         samples ??= footprintSamples(at, footprint);
-        for (let p = 0; p + 1 < samples.length; p += 2) {
-          const x = samples[p] as number;
-          const z = samples[p + 1] as number;
-          if (insideRing(plan.driveway, x, z)) return true;
-          if (squaredToRing(plan.driveway, x, z) < margin * margin) return true;
+        // #2848: an apron's outline as a driveway's. An empty ring holds no point and has no edge.
+        for (const paving of [plan.driveway, plan.apron]) {
+          for (let p = 0; p + 1 < samples.length; p += 2) {
+            const x = samples[p] as number;
+            const z = samples[p + 1] as number;
+            if (insideRing(paving, x, z)) return true;
+            if (squaredToRing(paving, x, z) < margin * margin) return true;
+          }
         }
       }
     }

@@ -33,6 +33,7 @@ import {
   HOSTILE_FIXTURES,
   lakeTile,
   placesTile,
+  poisTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   PITCH_FIXTURE_POLYGONS,
@@ -559,8 +560,9 @@ describe('packing', () => {
       true,
       false,
     ]);
-    // 5 since #2659 added the water lines, 6 since #2660 the railway lines, 7 since #2688 a pitch's sport.
-    expect(packed.v).toBe(7);
+    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines,
+    // 7 since #2975 added the POI class, 8 since #2688 a pitch's sport.
+    expect(packed.v).toBe(8);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -593,10 +595,53 @@ describe('packing', () => {
     ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
   });
 
-  it('keeps the water lines through the store, and only the decoder’s kinds (#2659)', async () => {
+  it('keeps each footprint’s POI class through the store, and only the decoder’s three (#2975)', async () => {
+    const decoded = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    const classes = decoded.buildings.map((building) => building.poi);
+    expect(classes).toContain('fuel');
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: decoded.buildings,
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+    expect(back.buildings.map((building) => building.poi)).toStrictEqual(classes);
+    // A footprint with none packs no `p` and reads back with no key.
+    const packed = packedCorridorFeatures({
+      landUse: [],
+      buildings: decoded.buildings,
+      paths: [],
+      streets: [],
+      places: [],
+    });
+    expect(packed.buildings.map((building) => building.p)).toStrictEqual(classes);
+    expect(back.buildings.filter((building) => 'poi' in building)).toHaveLength(
+      classes.filter((poi) => poi !== undefined).length,
+    );
+    // A blob edited on the device cannot put another string into the plan.
+    const edited = corridorFeaturesOfPacked({
+      ...packed,
+      buildings: [
+        { kind: 'building', h: null, mh: null, p: 'zz_not_a_class', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'toString', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'cafe', rings: [] },
+      ],
+    });
+    expect(edited.buildings.map((building) => building.poi)).toStrictEqual([
+      undefined,
+      undefined,
+      'cafe',
+    ]);
+  });
+
+  it('keeps the water lines through the store, and only the decoder’s kinds (#2659, #2974)', async () => {
     const decoded = decodeTile(waterLinesTile(), FIXTURE_TILE, FIXTURE_FRAME);
     if ('reason' in decoded) throw new Error(decoded.reason);
-    expect(decoded.waterLines.length).toBe(3);
+    expect(decoded.waterLines.length).toBe(5);
     const back = await unpackCorridorFeatures(
       await packCorridorFeatures({
         landUse: [],
@@ -607,7 +652,13 @@ describe('packing', () => {
         waterLines: decoded.waterLines,
       }),
     );
-    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual(['river', 'stream', 'canal']);
+    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
     back.waterLines?.forEach((line, index) => {
       const want = decoded.waterLines[index]?.line as Float32Array;
       expect(line.line.length).toBe(want.length);
@@ -620,10 +671,11 @@ describe('packing', () => {
       ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
       waterLines: [
         { kind: 'stream', line: [0, 0, 100, 100] },
-        { kind: 'ditch' as 'stream', line: [0, 0, 100, 100] },
+        { kind: 'ditch', line: [0, 0, 100, 100] },
+        { kind: 'riverbank' as 'stream', line: [0, 0, 100, 100] },
       ],
     });
-    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream']);
+    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream', 'ditch']);
     // A corridor with none packs no `waterLines` at all, as it did at version 4.
     const none = packedCorridorFeatures({
       landUse: [],

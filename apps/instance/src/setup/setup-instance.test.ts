@@ -39,7 +39,7 @@ import type { Caller } from '../auth/identity.ts';
 import type { RemotePath } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
-import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
+import { testConfig } from '../instance-testing.ts';
 import {
   backupLoop,
   instanceKey,
@@ -91,7 +91,12 @@ interface World {
   settings: Settings;
   readonly path: string;
   readonly secrets: string;
-  readonly port: number;
+  /**
+   * The loopback listener's port, read back from it after each start: it
+   * binds 0, so the system names it and no other test file can hold it first
+   * (#3015). A start with no loopback listener leaves the last one.
+   */
+  port: number;
   readonly lines: string[];
   /** Every page body any browser was answered with. */
   readonly pages: string[];
@@ -111,6 +116,9 @@ interface World {
   remotePath: RemotePath | null;
 }
 
+/** The port a listener the system chose one for holds. */
+const portOf = (listener: { readonly url: string }): number => Number(new URL(listener.url).port);
+
 async function world(
   options: Settings & { readonly ollama?: readonly string[]; readonly resolve?: Resolver } = {},
 ): Promise<World> {
@@ -123,7 +131,7 @@ async function world(
     settings: options,
     path,
     secrets,
-    port: await freeLoopbackPort(),
+    port: 0,
     lines: [],
     pages: [],
     instance: undefined as unknown as StartedInstance,
@@ -154,7 +162,8 @@ async function start(
       tunnelReadyUrl: at.settings.tunnelReadyUrl,
       roomWorkers: '1',
       adminPages: options.adminPages === true ? 'on' : 'off',
-      adminLoopbackPort: String(at.port),
+      // Any port, for the config to have one; the listener is asked for 0 below (#3015).
+      adminLoopbackPort: '1',
     },
     1,
   );
@@ -168,6 +177,7 @@ async function start(
     }),
     server: {
       ...read.config,
+      adminLoopbackPort: 0,
       blobsPath: join(at.path, '..', 'blobs'),
       ...(options.noSecret === true ? {} : { secretKey: new Uint8Array(32).fill(9) }),
     },
@@ -181,6 +191,7 @@ async function start(
     ...(at.resolve === undefined ? {} : { resolve: at.resolve }),
     ...(at.clock === undefined ? {} : { now: () => at.clock ?? Date.now() }),
   });
+  if (running.adminLoopback !== undefined) at.port = portOf(running.adminLoopback);
   await running.opened;
   await running.keysMaintained;
   return running;
@@ -219,8 +230,6 @@ function send(
     outgoing.end(body);
   });
 }
-
-const portOf = (instance: StartedInstance): number => Number(new URL(instance.url).port);
 
 /** The owner's browser on the server machine: its cookie, and the token its last page carried. */
 class Browser {
@@ -956,6 +965,12 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     await restart(at, { ownerKey: owner.publicKey, adminPages: true });
     expect(at.instance.adminLoopback).toBeDefined();
     await expectAllNotFound(at.port);
+    // #3015: the admin pages are told the port the listener holds, not the 0 it was asked for.
+    expect((await register(at, owner)).status).toBe(200);
+    const signIn = await send(at.port, 'GET', '/admin/sign-in', {
+      host: `localhost:${String(at.port)}`,
+    });
+    expect(signIn.status).toBe(200);
   });
 
   it('holds every POST to the loopback origin and the session’s token, and every page to a session; another host is told the address', async () => {

@@ -42,12 +42,15 @@ import {
   RAIL_KIND_DETAILS,
   tileBounds,
   tileBox,
+  POI_CLASSES,
   WATER_LINE_KINDS,
   type Box,
   type BuildingFeature,
   type BuildingFieldName,
   type BuildingFields,
   type CorridorFrame,
+  type DecodedStreetFeature,
+  type DecodedTile,
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
@@ -92,14 +95,19 @@ export const READ_TIMEOUT_MS = 120_000;
  * building fields a version-3 record never decoded; **5** since #2659 (ADR
  * 0054's entry of 2026-11-15), which keeps the water lines a version-4 record
  * never decoded; **6** since #2660, which keeps the railway lines a version-5
- * record never decoded. The port trusts a record only at exactly this
- * version, so a version-5 row is read again here, and a version-6 row met by
- * version-5 code is read again there, never decoded as its own: that is
- * #1789's rollback, and #2659's and #2660's, and there is no Dexie schema
- * change; **7** since #2688, which keeps a pitch's sport a version-6 record
- * never decoded.
+ * record never decoded; **7** since #2974 (ADR 0054's entry of 2026-11-21),
+ * which keeps the ditches and drains a version-6 record dropped at decode;
+ * **8** since #2975 (ADR 0054's entry of 2026-11-21), which keeps each
+ * footprint's POI class a version-7 record never decoded; **9** since #2688,
+ * which keeps a pitch's sport a version-8 record never decoded. The port
+ * trusts a record only at exactly this version, so a version-8 row is read
+ * again here, and a version-9 row met by version-8 code is read again there,
+ * never decoded as its own: that is #1789's rollback, and #2659's, #2660's,
+ * #2974's, #2975's and #2688's, and there is no Dexie schema change. #2974
+ * changed no packed field, so the packed version stayed 6 at reader 7; #2975
+ * adds one, so it is 7 at reader 8; #2688 adds another, so it is 8 at reader 9.
  */
-export const CORRIDOR_READER_VERSION = 7;
+export const CORRIDOR_READER_VERSION = 9;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -375,6 +383,18 @@ export interface CorridorFeatures {
   readonly rails?: readonly RailFeature[];
 }
 
+/**
+ * One decoded tile's streets, with their road fields — #2896: the open-world
+ * street graph is built a tile at a time (`StreetGraph.addTile`), and clips
+ * each tile's streets to that tile's own box, so it needs them per tile and
+ * not joined as {@link CorridorFeatures.streets} are. The same objects as
+ * those, so holding both costs the arrays and nothing more.
+ */
+export interface TileStreets {
+  readonly tile: TileId;
+  readonly streets: readonly DecodedStreetFeature[];
+}
+
 /** What {@link readCorridorTiles} came to. */
 export type CorridorRead =
   | {
@@ -382,6 +402,8 @@ export type CorridorRead =
       readonly identity: string;
       readonly tiles: readonly CorridorTile[];
       readonly features: CorridorFeatures;
+      /** Every decoded tile's streets, in the plan's order (#2896). */
+      readonly tileStreets: readonly TileStreets[];
     }
   | { readonly kind: 'wrong-schema' }
   /** The archive could not be opened, or not one tile came back: nothing to keep. */
@@ -467,7 +489,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     // queue's order at the end, so the features' order is the plan's and not
     // the order the tiles happened to arrive in. Two reads of one archive then
     // pack to the same bytes, which the demo's bake is checked against.
-    const decodedTiles: (CorridorFeatures | undefined)[] = [];
+    const decodedTiles: (DecodedTile | undefined)[] = [];
     let done = 0;
     let arrived = 0;
     const of = queue.length;
@@ -542,11 +564,16 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       const state = states.get(key(tile));
       return state === undefined ? tile : { x: tile.x, y: tile.y, state };
     });
+    const tileStreets: TileStreets[] = [];
+    for (const decoded of decodedTiles) {
+      if (decoded !== undefined) tileStreets.push({ tile: decoded.tile, streets: decoded.streets });
+    }
     return {
       kind: 'read',
       identity: opening.identity,
       tiles,
       features: { landUse, buildings, paths, streets, places, waterLines, rails },
+      tileStreets,
     };
   } finally {
     whole.done();
@@ -561,10 +588,10 @@ const PACK_SCALE = 100;
 /**
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
- * added the water lines, 6 since #2660 added the railway lines, 7 since #2688
- * added a pitch's sport.
+ * added the water lines, 6 since #2660 added the railway lines, 7 since #2975
+ * added a footprint's POI class, 8 since #2688 added a pitch's sport.
  */
-const PACKED_VERSION = 7;
+const PACKED_VERSION = 8;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -627,6 +654,16 @@ function buildingFieldsOfPacked(
   return out as unknown as BuildingFields;
 }
 
+/**
+ * #2975: a footprint's POI class from its packed `p`, as the decoder's own
+ * constant, or nothing — so a blob edited on the device cannot put another
+ * string into the plan.
+ */
+function poiOfPacked(packed: unknown): Pick<BuildingFeature, 'poi'> {
+  const poi = POI_CLASSES.find((each) => each === packed);
+  return poi === undefined ? {} : { poi };
+}
+
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
   /** `sp` is a pitch's sport (#2688), absent on every polygon with none. */
@@ -642,6 +679,11 @@ interface PackedFeatures {
     mh: number | null;
     /** #1789: the building fields that are not `null`, by their packed names. */
     b?: Readonly<Record<string, string | number>>;
+    /**
+     * #2975: its POI class. Absent where it has none, as `b` is, so a corridor
+     * read where no POI is matched packs as it did at version 6 but for its `v`.
+     */
+    p?: string;
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
@@ -747,6 +789,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
         h: f.heightMetres,
         mh: f.minHeightMetres,
         ...(fields === undefined ? {} : { b: fields }),
+        ...(f.poi === undefined ? {} : { p: f.poi }),
         rings: f.rings.map(toInts),
       };
     }),
@@ -821,6 +864,8 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       heightMetres: f.h,
       minHeightMetres: f.mh,
       ...buildingFieldsOfPacked(f.b),
+      // #2975: held to the decoder's own classes again, as a building field is.
+      ...poiOfPacked(f.p),
       rings: f.rings.map(fromInts),
     })),
     paths: packed.paths.map((f) => ({

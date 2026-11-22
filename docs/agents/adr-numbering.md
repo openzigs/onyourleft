@@ -12,6 +12,40 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0094 is [ADR 0094](../adr/0094-a-delivery-crash-stops-the-drawn-rider-and-nothing-reaches-the-trainer.md)**,
+  taken by [#3011](https://github.com/openzigs/onyourleft/issues/3011) on 2026-11-22 for a Delivery
+  crash that stops the drawn rider on a second distance the trainer never reads, **Accepted** by the owner on
+  2026-11-22 on [#3017](https://github.com/openzigs/onyourleft/pull/3017), on the owner's request of the 2026-11-21 tablet session. It supersedes in part ADR 0059 D-2.4 and ADR 0065
+  D-11's second sentence, for Delivery rounds only; each gained one dated `## Amendments` entry
+  pointing to it. **0092 is claimed** by the open pull request
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864), which adds `docs/adr/0092-…`, and
+  **0093 is ADR 0093** ([#3010](https://github.com/openzigs/onyourleft/issues/3010), accepted on #3018), whose ADR lane
+  started beside this one that day (the lower issue number takes the lower number, agreed on both
+  issues). The next free number is **0095**.
+  ⚠️ **0093 is [ADR 0093](../adr/0093-the-side-camera-pairs-with-one-scan-remembers-the-pair-and-may-meet-through-the-instance.md)**,
+  taken by [#3010](https://github.com/openzigs/onyourleft/issues/3010) on 2026-11-22 for side-camera
+  pairing with one scan, a remembered pairing and pairing through the rider's instance, **Accepted**
+  by the owner on 2026-11-22 on [#3018](https://github.com/openzigs/onyourleft/pull/3018). It supersedes in part ADR 0033 D-1, D-4 and D-8; ADR 0033 gained one dated
+  `## Amendments` pointer. **0092 is claimed** by the open pull request
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864) (#2835), and **0094** is ADR 0094 (#3011, accepted on
+  [#3017](https://github.com/openzigs/onyourleft/pull/3017)), which left 0093 to #3010. The next free number is **0095**.
+  ⚠️ **0091 is [ADR 0091](../adr/0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)**,
+  taken by [#2886](https://github.com/openzigs/onyourleft/issues/2886) on 2026-11-19 for the
+  open-world ride's street-graph source, on the owner's ruling Q3 of that day on the epic #2880,
+  and **Accepted** on 2026-11-20 by the owner on #2951. It extends ADR 0054 D-2.2's `roads` fields for open-world rides only; ADR 0054 gained one
+  dated `## Amendments` entry pointing to it. The owner's lane note of 2026-11-19 on #2881 reserved
+  **0090** for #2886, but the open pull request #2942 wrote 0090 for #2884 that day (its own 0086 was
+  taken by #2869), so #2886 took 0091. 0087 to 0089 stay reserved for #2885, #2887 and #2888. The
+  number after 0091 is **0092**.
+  ⚠️ **0085 is [ADR 0085](../adr/0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md)**,
+  taken by [#2847](https://github.com/openzigs/onyourleft/issues/2847) on 2026-11-19 for GGBotNet's
+  PSX Style Cars as the realistic world's cars, on the owner's rulings on #2847 of 2026-11-18 and
+  2026-11-19, and **Accepted** on them. It supersedes in part ADR 0049 D-10's In table, and ADR 0049
+  gained one dated `## Amendments` entry pointing here. The ADR number note of 2026-11-19 on #2847
+  gave this lane 0085, skipping 0081, 0083 and 0084, which the open pull requests #2873, #2864 and
+  #2863 had claimed. #2847's pull request #2872 first wrote this ADR as 0081 and was renumbered on
+  review, before merge; a reviewer who remembers 0081 meaning the PSX cars is reading that first
+  draft.
   ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
   taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
   chase camera in an open-world ride, which follows the rolling route through a junction turn and a

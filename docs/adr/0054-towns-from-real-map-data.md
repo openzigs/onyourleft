@@ -697,6 +697,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   proposed, in force only when the owner rules on #2696 and approves its screenshots and a
   moving-ride tablet frame check**; the PR is not to be merged before that, and this entry is to
   be corrected or struck there if the ruling differs.
+- **2026-11-19** — **The open-world ride's street graph reads three more `roads` fields: see
+  [ADR 0091](0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)**
+  ([#2886](https://github.com/openzigs/onyourleft/issues/2886), on the owner's ruling Q3 of that day
+  on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880)). For the open-world ride
+  only, ADR 0091 D-2 extends D-2.2's fields read from `roads` with `oneway` (`yes`, `-1` or none),
+  `access` (only whether it is `no` or `private`) and `is_link`, beside the `kind`, `kind_detail`,
+  `is_bridge` and `is_tunnel` the 2026-10-22 entry records. ADR 0091 is **Accepted**, 2026-11-20, by
+  the owner on its pull request #2951. What still holds, unchanged: no name from any layer is read, no
+  house number, and no OSM identifier; D-2.2 for route corridors; and D-3. This entry is a pointer
+  and changes nothing else here.
 - **2026-11-19** — **PROPOSED, pending the owner's ruling on
   [#2688](https://github.com/openzigs/onyourleft/issues/2688): a pitch's sport is kept in
   `worldCorridors`, and the world draws a pitch's lines and goals and a playground's structures.**
@@ -705,8 +715,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   it only on a `pitch` and only when it is `soccer`, `american_football`, `rugby_union`,
   `rugby_league`, `baseball`, `softball`, `tennis` or `basketball` (`LandUseFeature.sport`); any
   other value, several joined by `;`, or a sport on anything but a pitch is not kept. No name and no
-  OSM identifier. `apps/web/src/game/world-data/corridor.ts` packs it (packed version 7,
-  `CORRIDOR_READER_VERSION` 7, so a row of either build is read again by the other and no Dexie
+  OSM identifier. `apps/web/src/game/world-data/corridor.ts` packs it (packed version 8,
+  `CORRIDOR_READER_VERSION` 9, so a row of either build is read again by the other and no Dexie
   schema changes), and `park-fields.ts` draws, in the park dressing belt's one call and in its own
   budget term (`realistic-budget.ts` §`REALISTIC_PARK_FIELD_TRIANGLES`, 800), a pitch's lines and its
   goals, net, hoops or backstop by sport, and a playground's swing frame, slide and climbing frame.
@@ -718,3 +728,47 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   force only when the owner rules on #2688 and approves its screenshots and a moving-ride tablet
   frame check**; the PR is not to be merged before that, and this entry is to be corrected or
   struck there if the ruling differs.
+- **2026-11-21** — **PROPOSED, pending the owner's ruling on
+  [#2974](https://github.com/openzigs/onyourleft/issues/2974): the water lines kept include ditches
+  and drains, and a water line running beside the route is drawn.** The 2026-11-15 entry for #2659
+  dropped a `ditch` or a `drain` line at decode, because a road crosses one in a culvert. From this
+  date `packages/map-features` (`schema.ts` §`WATER_LINE_KINDS`) keeps all five of the layer's line
+  kinds, `river`, `stream`, `canal`, `ditch` and `drain`, as the same `WaterLineFeature`: its kind and
+  its line, and nothing else. `schema.ts` §`BRIDGED_WATER_LINE_KINDS` names the three a road is
+  bridged over, so a ditch or a drain still gets no bridge. `apps/web/src/game/waterways.ts`
+  §`mappedChannels` draws a water line of any kind that runs beside the drawn road as a channel, its
+  width, depth and banks by kind. `CORRIDOR_READER_VERSION` goes from 6 to 7, so a row of either
+  build is read again by the other; the packed shape is unchanged, and no Dexie schema changes.
+  D-3.3's sentence reads, from this entry, as the 2026-11-15 entry left it, with *"(river, stream or
+  canal)"* replaced by *"(river, stream, canal, ditch or drain)"*. Swimming pools and fountains are
+  the `water` polygons this ADR already keeps, with their `kind`; nothing new is kept for them, and
+  they are drawn with their own look. What still stands, unchanged: everything the 2026-11-15 entry
+  for #2659 left standing, D-3.5 included. **Status: proposed, in force only when the owner rules on
+  #2974 and approves its screenshots and a moving-ride tablet frame check**; the PR is not to be
+  merged before that, and this entry is to be corrected or struck there if the ruling differs.
+- **2026-11-21** — **PROPOSED, pending the owner's approval on
+  [#2975](https://github.com/openzigs/onyourleft/issues/2975): `pois` is read for its `kind`
+  alone, and a footprint keeps the class of the POI it holds.** D-2.2 says *"`pois` and `places`
+  are not read: they carry names"*, and the 2026-10-24 entry kept *"`pois` is not read"*. From
+  this date `packages/map-features` reads the `pois` layer of the z15 tiles D-2.3 already fetches
+  for **its `kind` and its point and nothing else**: the decoder looks up no other key of a POI, so
+  its name, its brand, its `kind_detail` and its id are never decoded. A point whose `kind` is one
+  of `schema.ts` §`POI_CLASS_OF_KIND`'s (sixty shop kinds, eight places to eat or drink, and
+  `fuel`) is matched to the footprint that holds it, or to the nearest within 3 m (a shop, a café)
+  or 30 m (a fuel station's forecourt), `poi-match.ts`; every other point is dropped unread, and
+  **the point itself is never handed out or stored**. What is kept is one of three constants on
+  the footprint, `shop`, `cafe` or `fuel` (`BuildingFeature.poi`), so D-3.3's sentence reads, from
+  this entry, as the 2026-11-15 entries left it, with *"building footprint polygons with `kind`,
+  `height` and `min_height`"* followed by *", and the class of the POI each holds — a shop, a café
+  or a fuel station"*. `apps/web/src/game/world-data/corridor.ts` packs it (packed version 7,
+  `CORRIDOR_READER_VERSION` 8, so a row of either build is read again by the other and no Dexie
+  schema changes), and `footprint-buildings.ts` draws it: a shop front on a shop's or a café's
+  footprint (a café's always with its awning), and an untyped footprint a fuel POI is matched to as
+  the forecourt's open canopy. The world still names no place: the class is a kind of premises,
+  never which one, as D-5.7's landmark flag is. What still stands, unchanged: D-2.1, D-2.3 to D-2.5
+  (no tile is fetched that was not, and one module makes the read), D-3.1 to D-3.6, including that
+  the store never leaves the device (D-3.5;
+  `apps/web/src/transfer/world-corridor-not-exported.test.ts` now packs decoded POI classes too),
+  D-4 and D-5.7. **Status: proposed, in force only when the owner approves #2975's screenshots and
+  a moving-ride tablet frame check**; the PR is not to be merged before that, and this entry is to
+  be corrected or struck there if the ruling differs.

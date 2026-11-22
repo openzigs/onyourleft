@@ -68,6 +68,7 @@ import {
 import { deliveryInView } from '../src/game/delivery/in-view';
 import {
   parkedCarStands,
+  PULL_OUT_RUN_METRES,
   startObstacles,
   type Obstacle,
   type ObstacleKind,
@@ -692,7 +693,8 @@ function pullingOutShowcase(): void {
     { kind: 'parked-car', along: RIDER + 10, stands: parkedCarStands('right') },
     {
       kind: 'car-pulling-out',
-      along: RIDER + 20,
+      // It waits its run short of its place: 20 m ahead, as the picture always showed it.
+      along: RIDER + 20 + PULL_OUT_RUN_METRES,
       from: 'right',
       startAfter: 0,
       to: parkedCarStands('right'),
@@ -961,12 +963,11 @@ function pastCarShowcase(eyeAhead: number, behind: boolean): void {
   });
 }
 
-/** A car of one triangle a part, every role of Kenney's among them — PR #2548. @see programs */
+/** A car of one triangle a part, every role among them — PR #2548; one body of #2847's, at its atlas's middle. @see programs */
 const STAND_IN_CAR: DeliveryCarGeometry = {
   parts: (
     [
       'body',
-      'paint',
       'front-wheel',
       'front-wheel',
       'back-wheel',
@@ -976,14 +977,15 @@ const STAND_IN_CAR: DeliveryCarGeometry = {
     ] as const satisfies readonly DeliveryCarRole[]
   ).map((role, index) => ({
     role,
+    body: 0,
     position: new Float32Array([0, 0.3 * index, 0, 0.5, 0.3 * index, 0, 0, 0.3 * index + 0.3, 0]),
     normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
     colour: new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
-    pivot: [0, 0.3, index < 4 ? 1.3 : -1.3] as const,
+    uv: new Float32Array([0.25, 0.25, 0.3, 0.25, 0.25, 0.3]),
+    pivot: [0, 0.3, index < 3 ? 1.3 : -1.3] as const,
   })),
-  wheelRadius: 0.3,
-  wheelbase: 2.6,
-  triangles: 8,
+  bodies: [{ name: 'saloon', wheelRadius: 0.3, wheelbase: 2.6 }],
+  triangles: 7,
 };
 
 function programs(

@@ -4,10 +4,9 @@
  * **The open-world ride's map, read in fixed-grid blocks as the rider goes** —
  * #2890, ADR 0090 D-2, D-3 and D-5.
  *
- * @unwired #2890 builds the reader and #2896 (the open-world session) is its
- * first caller: until then no ride is an open-world ride, so nothing in the
- * product may make the streamed read, and a route ride must never make it
- * (`area-route-ride.test.ts` holds the importers to an exact list).
+ * Its one caller is the open-world session, `game/open-world/session.ts`
+ * (#2896), and a route ride must never make the read: `area-route-ride.test.ts`
+ * holds the importers to an exact list.
  *
  * A **block** is one z14 tile of the archive's own grid, read as its four z15
  * tiles (ADR 0090 D-2.1). It is fixed to the grid and never to the rider, the
@@ -59,6 +58,7 @@ import {
   type CorridorFeatures,
   type CorridorPlan,
   type CorridorTile,
+  type TileStreets,
 } from './corridor';
 
 /** Blocks along one side of the world: a block is a z14 tile (ADR 0090 D-2.1). */
@@ -67,7 +67,12 @@ const BLOCKS = TILES_AT_Z15 / 2;
 /** The blocks held round the rider: their own and the eight round it (D-2.2). */
 export const MAX_HELD_BLOCKS = 9;
 
-/** The z15 tiles those blocks are: four each. */
+/**
+ * The z15 tiles those blocks are: four each.
+ *
+ * @test-facing `area.test.ts` holds the reader to it over a long ride; the
+ * bound itself is {@link MAX_HELD_BLOCKS}, which the reader keeps.
+ */
 export const MAX_HELD_TILES = MAX_HELD_BLOCKS * 4;
 
 /** The longest a crossing's request waits (ADR 0090 R-8, the owner's Q4 of 2026-11-20). */
@@ -144,6 +149,11 @@ export interface HeldBlock {
   readonly block: BlockId;
   readonly tiles: readonly CorridorTile[];
   readonly features: CorridorFeatures;
+  /**
+   * Each decoded tile's streets with their road fields, for the street graph
+   * (#2896), which is built a tile at a time.
+   */
+  readonly streets: readonly TileStreets[];
 }
 
 /** What {@link AreaReader.start} came to. */
@@ -306,7 +316,12 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     // A block the rider has left behind while it was read is not kept: its
     // read runs on until a crossing's delay ends, and may finish first.
     if (read.kind !== 'read' || stopped || !wanted.has(keyOf(block))) return 'none';
-    held.set(keyOf(block), { block, tiles: read.tiles, features: read.features });
+    held.set(keyOf(block), {
+      block,
+      tiles: read.tiles,
+      features: read.features,
+      streets: read.tileStreets,
+    });
     return 'read';
   };
 

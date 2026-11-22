@@ -14,6 +14,7 @@
 import type {
   BUILDING_TYPES,
   LANDMARKS,
+  PoiClass,
   RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
@@ -93,12 +94,20 @@ export interface BuildingFeature extends PolygonFeature, BuildingFields {
   readonly heightMetres: number | null;
   /** Metres, `null` when the tile carries none. */
   readonly minHeightMetres: number | null;
+  /**
+   * #2975: a shop, a café or a fuel station, where a `pois` point of that
+   * class falls in it or within `schema.ts` §`POI_REACH_METRES` of it — on a
+   * `building` only, never a `building_part`. Absent where none does, and on
+   * a footprint built by hand. The POI's name, brand and point are never
+   * kept: this is all that is.
+   */
+  readonly poi?: PoiClass;
 }
 
 /**
  * A `water` line that is a river, a stream or a canal — #2659, ADR 0054's
- * entry of 2026-11-15. Its `kind` and its line, and nothing else: no name, no
- * id, no `layer`.
+ * entry of 2026-11-15 — or since #2974 a ditch or a drain. Its `kind` and its
+ * line, and nothing else: no name, no id, no `layer`.
  */
 export interface WaterLineFeature {
   readonly kind: (typeof WATER_LINE_KINDS)[number];
@@ -212,7 +221,10 @@ export interface DecodedTile {
   readonly roadValuesDefaulted: number;
   /** #1632: the place points, at most `DecodeLimits.maxPlacesPerTile` of them. */
   readonly places: readonly PlaceFeature[];
-  /** #2659: the rivers, streams and canals, for where they cross the route. */
+  /**
+   * #2659: the rivers, streams and canals, for where they cross the route;
+   * since #2974 the ditches and drains too, for where they run beside it.
+   */
   readonly waterLines: readonly WaterLineFeature[];
   /** #2660: the railway lines, for the level crossings where they cross the route. */
   readonly rails: readonly RailFeature[];

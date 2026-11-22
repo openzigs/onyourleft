@@ -54,6 +54,7 @@ import {
   OTHER_STREET_KIND_DETAILS,
   PLACE_KIND_DETAILS,
   PLACE_KINDS,
+  POI_CLASS_OF_KIND,
   READ_LAYERS,
   RAIL_KIND,
   RAIL_KIND_DETAILS,
@@ -63,6 +64,7 @@ import {
   type BuildingFieldRule,
   type ReadLayer,
 } from './schema';
+import { matchPoisToBuildings, type PoiPoint } from './poi-match';
 import type {
   BuildingFeature,
   BuildingFields,
@@ -118,6 +120,13 @@ import type {
  *
  * `places` is read up to `limits.maxPlacesPerTile` points and no further: the
  * decoder stops there rather than refusing the tile.
+ *
+ * `pois` (#2975, ADR 0054's entry of 2026-11-21) is looked up for `kind`
+ * alone — never a name, a brand, `kind_detail` or an id — and a point whose
+ * kind `schema.ts` §`POI_CLASS_OF_KIND` names is matched to the footprint it
+ * falls in (`poi-match.ts`), up to `limits.maxPoisPerTile` points and no
+ * further. The points themselves are not returned: a footprint's `poi` is all
+ * that is kept of one.
  *
  * The frame is the game's (`projection.ts`), and the output is `Float32Array`:
  * float32 spacing is about 4 mm at 50 km from the origin and about 3 cm at a few
@@ -265,7 +274,7 @@ function decodeChecked(
   if (!sawEarth && !found.has('water')) return { reason: 'wrong-schema' };
 
   // 2. Frame every read layer and count its features: the feature limit is
-  // held for all five before any feature of any of them is decoded.
+  // held for all six before any feature of any of them is decoded.
   const framed: FramedLayer[] = [];
   for (const name of READ_LAYERS) {
     const range = found.get(name);
@@ -289,6 +298,7 @@ function decodeChecked(
   const places: PlaceFeature[] = [];
   const waterLines: WaterLineFeature[] = [];
   const rails: RailFeature[] = [];
+  const pois: PoiPoint[] = [];
   const counts = { roadValuesDefaulted: 0 };
   for (const layer of framed) {
     state.layer = layer.name;
@@ -297,6 +307,8 @@ function decodeChecked(
       // ADR 0055 D-2.5: the decoder stops at the bound, and the rest of the
       // layer is never decoded.
       if (layer.name === 'places' && places.length >= limits.maxPlacesPerTile) break;
+      // #2975: and at its own bound for POIs, never refusing the tile.
+      if (layer.name === 'pois' && pois.length >= limits.maxPoisPerTile) break;
       decodeFeature(
         bytes,
         layer,
@@ -305,7 +317,7 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets, places, waterLines, rails },
+        { landUse, buildings, paths, streets, places, waterLines, rails, pois },
         counts,
       );
     }
@@ -314,7 +326,7 @@ function decodeChecked(
   return {
     tile,
     landUse,
-    buildings,
+    buildings: matchPoisToBuildings(buildings, pois, limits.maxPoiMatchWork),
     paths,
     streets,
     places,
@@ -411,6 +423,8 @@ function frameLayer(
   // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
   // other key of a place - a height, a flag, its name - has a value decoded.
   const isPlaces = name === 'places';
+  // #2975: in `pois`, only `kind` is ever matched - not even `kind_detail`.
+  const isPois = name === 'pois';
   // #1789: the building fields are matched in `buildings` and nowhere else.
   const isBuildings = name === 'buildings';
   // #2688: a pitch's sport is matched in `landuse` and nowhere else.
@@ -434,7 +448,9 @@ function frameLayer(
         values[v++] = range.end;
       } else {
         if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND)) keys.kind = k;
-        else if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND_DETAIL))
+        else if (isPois) {
+          // Nothing else of a POI is looked up.
+        } else if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND_DETAIL))
           keys.kindDetail = k;
         else if (isPlaces) {
           if (bytesEqualAscii(bytes, range.start, range.end, KEY_POPULATION_RANK))
@@ -534,6 +550,7 @@ interface Sinks {
   readonly places: PlaceFeature[];
   readonly waterLines: WaterLineFeature[];
   readonly rails: RailFeature[];
+  readonly pois: PoiPoint[];
 }
 
 /**
@@ -604,8 +621,18 @@ function decodeFeature(
     if (point !== null) sinks.places.push({ ...place, x: point.x, z: point.z });
     return;
   }
+  if (layer.name === 'pois') {
+    // #2975: a kind the classes do not name drops the point unread.
+    const poi = attributes.kind === null ? undefined : POI_CLASS_OF_KIND.get(attributes.kind);
+    if (poi === undefined) return;
+    if (geometry === null) throw new Malformed();
+    const point = decodePoint(bytes, geometry, layer, project);
+    if (point !== null) sinks.pois.push({ poi, x: point.x, z: point.z });
+    return;
+  }
   const kind = attributes.kind;
-  // #2659: a water line is a river, a stream or a canal, or it is not read.
+  // #2659, #2974: a water line is a river, a stream, a canal, a ditch or a
+  // drain, or it is not read.
   const waterLine = layer.name === 'water' && type === GEOMETRY_LINE;
   if (waterLine && !(WATER_LINE_KINDS as readonly (string | null)[]).includes(kind)) return;
   if (kind === null && layer.name !== 'water') return;

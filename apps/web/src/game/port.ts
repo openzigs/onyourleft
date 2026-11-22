@@ -142,11 +142,20 @@ export interface RidingInputs {
 
 /** A crash being drawn on a rider — #2493. @see RiderMarker.crash */
 export interface RiderCrashLook {
-  /** Seconds since the crash, by the frames the loop ran. */
+  /**
+   * Where in the crash clip the body is, in the clip's own seconds
+   * (`delivery/crash-look.ts` §`crashClipSeconds`): the time since the crash
+   * until the rider starts back up, and the clip's rise played across the
+   * drawn one from there.
+   */
   readonly seconds: number;
   /** Which way they fall: the rider's right (`1`) or left (`-1`). */
   readonly side: 1 | -1;
-  /** How far into the crash pose they are: 0 on the bike, 1 on the ground. */
+  /**
+   * How far the BODY is blended toward the clip's pose: 0 the ride's, 1 the
+   * clip's (`delivery/crash-look.ts` §`crashBodyShare`). ⚠️ Not the roll's
+   * share, which {@link RiderMarker.lean} already carries.
+   */
   readonly share: number;
 }
 

@@ -373,7 +373,8 @@ const BEFORE = {
 
 describe('the fallback and the lever — #1783', () => {
   it('plans every footprint as before #1783 with `-commercial-archetypes`', () => {
-    const off = { commercialArchetypes: false } as const;
+    // Since #2848 the shops' aprons are off too: none of these had them.
+    const off = { commercialArchetypes: false, shopAprons: false } as const;
     const offMixed = plan(mixed, off);
     expect(offMixed.every((each) => each.buildingArchetype === 'unknown')).toBe(true);
     expect(planFingerprint(offMixed)).toBe(BEFORE.porches.mixed);

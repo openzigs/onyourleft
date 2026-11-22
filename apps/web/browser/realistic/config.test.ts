@@ -20,12 +20,14 @@ import {
   houseArchetypesWithLevers,
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
+  mappedPoisWithLevers,
   inferredOutbuildingsWithLevers,
   mappedPaintWithLevers,
   landmarkChurchesWithLevers,
   landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
+  shopApronsWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -483,6 +485,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
   });
 
+  it('lays an apron before each mapped shop, as the product does, unless #2848’s lever takes it out', () => {
+    expect(LEVERS).toContain('shop-aprons');
+    expect(shopApronsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(shopApronsWithLevers(LEVERS.filter((lever) => lever !== 'shop-aprons'))).toBe(true);
+    expect(shopApronsWithLevers(parseConfig('?levers=-shop-aprons').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=commercial&levers=-shop-aprons'))).toBe(
+      `?levers=${encodeURIComponent('-shop-aprons')}&town=commercial`,
+    );
+  });
+
   it('draws each footprint as its mapped type says, as the product does, unless #1791’s lever takes it out', () => {
     expect(LEVERS).toContain('building-type');
     expect(buildingTypesWithLevers([])).toBe(true);
@@ -546,6 +559,26 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=untagged&levers=-inferred-commercial'))).toBe(
       `?levers=${encodeURIComponent('-inferred-commercial')}&town=untagged`,
     );
+  });
+
+  it('reads the map’s POIs into its footprints, as the product does, unless #2975’s lever takes them out', () => {
+    expect(LEVERS).toContain('map-pois');
+    expect(mappedPoisWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(mappedPoisWithLevers(LEVERS.filter((lever) => lever !== 'map-pois'))).toBe(true);
+    expect(mappedPoisWithLevers(parseConfig('?levers=-map-pois').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=pois&levers=-map-pois'))).toBe(
+      `?levers=${encodeURIComponent('-map-pois')}&town=pois`,
+    );
+  });
+
+  it('rides the POI street through #2975’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=pois').town).toBe('pois');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'pois'\s*\?\s*poiStreetFixture\(latitude\)/);
   });
 
   it('rides the untagged street through #2023’s fixture, which is where it is wired', () => {
