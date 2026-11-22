@@ -105,7 +105,6 @@ import type {
   MapZoomDirection,
 } from './port';
 import { createProtocolRegistry } from './protocol';
-import { preventOneFingerPan } from './touch-pan';
 import type { TrackBounds, TrackFeature } from './track';
 
 /**
@@ -254,8 +253,12 @@ const EXPLORABLE = {
  * - **The wheel zooms**, as the owner asked. A page scrolled by the wheel
  *   stops while the pointer is over the map; the map is the picker's hero, and
  *   the page scrolls beside and below it.
- * - **Two fingers pan on touch, one finger scrolls the page** — see `create`.
- *   A pinch zooms, a double tap zooms in.
+ * - **One finger drags it on touch**, as the mouse does (#3014: the owner
+ *   found on the tablet that a drag did not move it while it was left to the
+ *   page). A tap still drops the pin, a pinch zooms, a double tap zooms in.
+ *   The page scrolls on the rest of the screen: the map is as tall as the
+ *   screen leaves it under the title, never all of it (`theme.css`
+ *   §`.oyl-map--direct`).
  * - **The keyboard handler is on**: the canvas is focusable on this map, and
  *   arrow keys pan it and `+`/`-` zoom it.
  * - **Rotation, pitch and box zoom stay off**, so north stays up.
@@ -519,14 +522,9 @@ const renderer: MapRenderer = {
       canvas.setAttribute('aria-describedby', direct.describedBy);
       map.keyboard.disableRotation();
       map.touchZoomRotate.disableRotation();
-      // Two fingers pan, and one finger is left to the page. MapLibre's touch
-      // pan asks this of itself before every move; its cooperative-gestures
-      // option would answer the same, and would also hold the wheel back
-      // behind a modifier key, which is the half the owner did not want.
-      // `browser/controls-first.browser.spec.ts` §"#2889" drags with one
-      // finger and with two.
-      // `touch-pan.ts` replaces a private member, and only while it is one.
-      preventOneFingerPan(map.dragPan._touchPan);
+      // MapLibre's own touch pan is left as it is: one finger drags the map
+      // (#3014). `browser/controls-first.browser.spec.ts` §"#2889" drags with
+      // one finger and with two, and taps the pin down after the drag.
     } else {
       map.getCanvas().setAttribute('aria-hidden', 'true');
       // MapLibre makes an interactive map's canvas a tab stop. See the module note.
