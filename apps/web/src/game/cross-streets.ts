@@ -31,6 +31,10 @@
  *   Such a street is drawn, as an overpass or an underpass, by
  *   `overpasses.ts` since #2661 — and since #2699 an overpass's road, in this
  *   file's mesh, kept clear of the scenery as a side road is.
+ * - **Level crossings** ({@link levelCrossings}, #2660): where a mapped
+ *   railway (`WorldCorridor.rails`) crosses the route at grade, found by the
+ *   same rules, each arm a stretch of track. Kept apart from the mapped
+ *   junctions, so a street's consumers never read a track as a street.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -59,6 +63,15 @@
  * (`three-renderer.ts` §`SideRoadBelt`): the photograph, #628's wear and
  * the stylised road's grain, with no texture of its own. A **give-way line**
  * — two broken lines across the arm — stands at its mouth.
+ *
+ * A level crossing's arm (#2660) is drawn the same way in the same mesh, but
+ * as {@link BALLAST} a row every {@link RAIL_STEP_METRES}, with two rails of
+ * {@link RAIL_STEEL} standing {@link RAIL_HEAD_METRES} on it at standard
+ * gauge, each its upright face, carried on across the carriageway to the
+ * route's centreline at {@link RAIL_ON_ROAD_METRES}, and no
+ * give-way line. Its `across` is nought, so #628's wheel tracks and dust are
+ * never on it. ⚠️ **No crossbuck, signal or barrier, and no track that runs
+ * beside the route without crossing it**: those need meshes of their own.
  *
  * An arm stops early where it would run on water (`waterways.ts` §`inWater`),
  * onto another stretch of the route, or off the land that was read.
@@ -151,18 +164,24 @@ export const SIDE_ROAD_SINK_METRES = 0.3;
  */
 export const SIDE_ROAD_END_WIDTH_SHARE = 0.25;
 
-/** A side road's width class, from its mapped `kind` and `kind_detail`. */
-export type WidthClass = 'highway' | 'major' | 'minor' | 'service';
+/**
+ * A side road's width class, from its mapped `kind` and `kind_detail` — and
+ * since #2660 `rail`, a level crossing's track ({@link levelCrossings}),
+ * which no street is.
+ */
+export type WidthClass = 'highway' | 'major' | 'minor' | 'service' | 'rail';
 
 /**
  * How wide each class is drawn, in metres: a highway **9**, a major road the
- * main road's **7**, a minor road **5.5**, a service road or an alley **3.5**.
+ * main road's **7**, a minor road **5.5**, a service road or an alley **3.5**,
+ * and a railway's ballast bed **3.4** (#2660).
  */
 export const SIDE_ROAD_WIDTHS: Readonly<Record<WidthClass, number>> = {
   highway: 9,
   major: ROAD_WIDTH_METRES,
   minor: 5.5,
   service: 3.5,
+  rail: 3.4,
 };
 
 /** The `kind_detail` values that make a minor street a service road. */
@@ -200,11 +219,17 @@ export interface SideRoadArm {
   readonly line: Float32Array;
 }
 
-/** Where a side road or two meet the route. */
+/** Where a side road or two meet the route — or, since #2660, where a railway crosses it. */
 export interface Junction {
   /** The route distance of the junction, on the first lap. */
   readonly along: number;
-  readonly source: 'mapped' | 'village';
+  /**
+   * `'street'` since #2973: no junction at all, but a stretch of a mapped
+   * street off the route (`nearby-streets.ts`), carried as a side road so the
+   * same mesh draws it and the same clearances keep the scenery off it.
+   * `rail` is a level crossing ({@link levelCrossings}): its arms are track, never a street.
+   */
+  readonly source: 'mapped' | 'village' | 'street' | 'rail';
   readonly arms: readonly SideRoadArm[];
 }
 
@@ -335,7 +360,7 @@ function armFrom(
   points: readonly number[],
   start: number,
   step: number,
-  street: StreetFeature,
+  widthClass: WidthClass,
   corridor: WorldCorridor,
   profile: RouteProfile,
   origin: CorridorOrigin,
@@ -411,14 +436,14 @@ function armFrom(
     arm: {
       side,
       angleDegrees,
-      widthClass: widthClassOf(street),
+      widthClass,
       line: Float32Array.from([road.x, road.z, x0, z0, ...outward]),
     },
   };
 }
 
 /** Candidates within {@link JUNCTION_MERGE_METRES} of the first, as junctions, in route order. */
-function grouped(candidates: Candidate[]): Junction[] {
+function grouped(candidates: Candidate[], source: 'mapped' | 'rail'): Junction[] {
   candidates.sort((a, b) => a.along - b.along);
   const junctions: Junction[] = [];
   let group: Candidate[] = [];
@@ -435,7 +460,7 @@ function grouped(candidates: Candidate[]): Junction[] {
     }
     kept.sort((a, b) => a.arm.side - b.arm.side || a.arm.angleDegrees - b.arm.angleDegrees);
     const along = kept.reduce((sum, candidate) => sum + candidate.along, 0) / kept.length;
-    junctions.push({ along, source: 'mapped', arms: kept.map((candidate) => candidate.arm) });
+    junctions.push({ along, source, arms: kept.map((candidate) => candidate.arm) });
     group = [];
   };
   for (const candidate of candidates) {
@@ -480,41 +505,148 @@ export function mappedJunctions(
   for (const street of corridor.streets) {
     if (!meetsAtGrade(street)) continue;
     const points = resampled(street.line, budget);
-    const count = points.length / 2;
-    if (count < 2) continue;
-    const on = new Uint8Array(count);
-    for (let index = 0; index < count; index += 1) {
-      const x = points[index * 2] as number;
-      const z = points[index * 2 + 1] as number;
-      on[index] =
-        corridor.covered(x, z) &&
-        nearestOnDrawnRoad(profile, origin, x, z, JUNCTION_TOLERANCE_METRES) !== undefined
-          ? 1
-          : 0;
-    }
-    for (let index = 0; index < count; index += 1) {
-      if (on[index] !== 1) continue;
-      for (const direction of [1, -1] as const) {
-        const next = index + direction;
-        if (next < 0 || next >= count || on[next] === 1) continue;
-        const arm = armFrom(
-          points,
-          index * 2,
-          direction * 2,
-          street,
-          corridor,
-          profile,
-          origin,
-          seed,
-          land,
-        );
-        if (arm !== undefined) candidates.push(arm);
-      }
-    }
+    armsLeaving(points, widthClassOf(street), corridor, profile, origin, seed, land, candidates);
   }
-  const junctions = grouped(candidates);
+  const junctions = grouped(candidates, 'mapped');
   junctionsFound.set(corridor, { profile, land, junctions });
   return junctions;
+}
+
+/**
+ * Every arm leaving the route along one resampled line, into `candidates`:
+ * wherever an on point is followed by an off one, either way along it.
+ * @see the header
+ */
+function armsLeaving(
+  points: readonly number[],
+  widthClass: WidthClass,
+  corridor: WorldCorridor,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
+  candidates: Candidate[],
+): void {
+  const count = points.length / 2;
+  if (count < 2) return;
+  const on = new Uint8Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const x = points[index * 2] as number;
+    const z = points[index * 2 + 1] as number;
+    on[index] =
+      corridor.covered(x, z) &&
+      nearestOnDrawnRoad(profile, origin, x, z, JUNCTION_TOLERANCE_METRES) !== undefined
+        ? 1
+        : 0;
+  }
+  for (let index = 0; index < count; index += 1) {
+    if (on[index] !== 1) continue;
+    for (const direction of [1, -1] as const) {
+      const next = index + direction;
+      if (next < 0 || next >= count || on[next] === 1) continue;
+      const arm = armFrom(
+        points,
+        index * 2,
+        direction * 2,
+        widthClass,
+        corridor,
+        profile,
+        origin,
+        seed,
+        land,
+      );
+      if (arm !== undefined) candidates.push(arm);
+    }
+  }
+}
+
+// --- Level crossings ------------------------------------------------------
+
+/**
+ * The most metres of railway one corridor resamples: **100 000**, in file
+ * order — {@link STREET_MAX_METRES}' reason, for the railway lines.
+ */
+export const RAIL_MAX_METRES = 100_000;
+
+/** One corridor's level crossings, kept with the profile they were found against. */
+const crossingsFound = new WeakMap<
+  WorldCorridor,
+  { profile: RouteProfile; land: LandClassMask; junctions: readonly Junction[] }
+>();
+
+/**
+ * Every level crossing on the route — #2660: where a mapped railway
+ * (`WorldCorridor.rails`, `@onyourleft/map-features` §`RAIL_KIND_DETAILS`)
+ * crosses the route **at grade**, found exactly as a mapped junction is (the
+ * same tolerance, angle filter, merge and stops), each arm a stretch of track
+ * of width class `rail` and the junction's `source` `rail`. A railway on a
+ * bridge or in a tunnel crosses over or under the route and is none. Kept
+ * apart from {@link mappedJunctions}, so a crossing never merges into a
+ * street's junction beside it and a street's consumers — a pavement's mouth,
+ * the footways' breaks — never read a track as a street.
+ *
+ * Drawn by {@link sideRoadsAt} with the side roads, in their one mesh and
+ * under their frame bound ({@link SIDE_ROADS_PER_FRAME}): ballast, two rails
+ * on it, and the rails carried across the carriageway ({@link armMesh}).
+ * Built once per corridor, the same array after.
+ */
+export function levelCrossings(
+  corridor: WorldCorridor,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask = NO_LAND_CLASS,
+): readonly Junction[] {
+  const cached = crossingsFound.get(corridor);
+  if (cached?.profile === profile && cached.land === land) return cached.junctions;
+  const candidates: Candidate[] = [];
+  const budget = { metres: RAIL_MAX_METRES };
+  for (const rail of corridor.rails ?? []) {
+    if (rail.grade !== 'ground') continue;
+    armsLeaving(
+      resampled(rail.line, budget),
+      'rail',
+      corridor,
+      profile,
+      origin,
+      seed,
+      land,
+      candidates,
+    );
+  }
+  const junctions = grouped(candidates, 'rail');
+  crossingsFound.set(corridor, { profile, land, junctions });
+  return junctions;
+}
+
+/** The mapped junctions and the level crossings, as one list, kept per pair. */
+const bothFound = new WeakMap<
+  readonly Junction[],
+  WeakMap<readonly Junction[], readonly Junction[]>
+>();
+
+/**
+ * {@link mappedJunctions} and {@link levelCrossings} as the one list
+ * {@link sideRoadsAt} reads — #2660. The same array for the same two, so a
+ * frame allocates nothing; either alone where the other is empty.
+ */
+export function withLevelCrossings(
+  junctions: readonly Junction[],
+  crossings: readonly Junction[],
+): readonly Junction[] {
+  if (crossings.length === 0) return junctions;
+  if (junctions.length === 0) return crossings;
+  let byCrossings = bothFound.get(junctions);
+  if (byCrossings === undefined) {
+    byCrossings = new WeakMap();
+    bothFound.set(junctions, byCrossings);
+  }
+  let both = byCrossings.get(crossings);
+  if (both === undefined) {
+    both = [...junctions, ...crossings];
+    byCrossings.set(crossings, both);
+  }
+  return both;
 }
 
 // --- A village's crossroads -----------------------------------------------
@@ -571,6 +703,47 @@ export const TARMAC = linearColour(roadTint(0));
 /** Its give-way line: the main road's paint, which #628's wear reads as paint. */
 const PAINT = linearColour(MARKING_COLOUR);
 
+/**
+ * A level crossing's ballast — #2660: a grey-brown stone, darker than any
+ * road tint's paint, so #628's wear never reads it as paint.
+ */
+export const BALLAST = linearColour(0x6e675e);
+
+/**
+ * A rail's head — #2660: worn steel, as light as it may be while #628's wear
+ * still reads it as carriageway (its luminance under the paint's 0.35).
+ */
+export const RAIL_STEEL = linearColour(0x9a9893);
+
+/** Half the distance between a track's rails, in metres: **0.7175**, standard gauge's 1.435 m halved. */
+export const RAIL_HALF_GAUGE_METRES = 1.435 / 2;
+
+/**
+ * How far a rail's head stands above its ballast, in metres: **0.15**. ⚠️ A
+ * rail is drawn as its upright face, one quad from its foot to its head, not
+ * its 0.07 m top: seen from the saddle at a grazing angle a flat strip that
+ * narrow is under a pixel and breaks into dashes, and the face is ten times
+ * its height on the screen, for the same triangles.
+ */
+export const RAIL_HEAD_METRES = 0.15;
+
+/** How far above what it stands on a rail's foot is, in metres: **0.01**. */
+export const RAIL_FOOT_METRES = 0.01;
+
+/**
+ * How far above the main road a rail across it stands, in metres: **0.05** —
+ * level with the centre line's paint, as a crossing's rails are with the road.
+ * It rises to {@link RAIL_HEAD_METRES} over {@link SIDE_ROAD_RAMP_METRES} from the mouth.
+ */
+export const RAIL_ON_ROAD_METRES = 0.05;
+
+/**
+ * How far apart a level crossing's cross-sections are, in metres: **5** —
+ * coarser than a side road's {@link SIDE_ROAD_STEP_METRES}, so its ballast and
+ * its two rails fit one arm's {@link SIDE_ROAD_TRIANGLES_PER_ARM}.
+ */
+export const RAIL_STEP_METRES = 5;
+
 /** A give-way line's two broken lines: how far out from the first section, in metres, and how deep. */
 const GIVE_WAY_LINES_METRES = [0.4, 0.9] as const;
 const GIVE_WAY_DEPTH_METRES = 0.2;
@@ -590,6 +763,9 @@ const SKIRT_FOOT_METRES = 0.05;
  * highway's give-way line, two lines of ten dashes (40); with one quad (2)
  * for the rounding of the last row. A mapped arm's mouth slid at an acute
  * angle starts its rows further out, which only removes rows.
+ * A level crossing's arm (#2660) is a row every {@link RAIL_STEP_METRES}: 14
+ * quads of ballast (28), the same skirts (16), two rails over them (56), the
+ * rails across the carriageway (4) and the last row's rounding (6) — **110**.
  * `cross-streets.test.ts` builds the heaviest arms and holds them under this.
  */
 export const SIDE_ROAD_TRIANGLES_PER_ARM = 120;
@@ -764,6 +940,12 @@ function armMesh(
   land: LandClassMask,
 ): void {
   const half = SIDE_ROAD_WIDTHS[arm.widthClass] / 2;
+  // #2660: a level crossing's arm is ballast with two rails on it, no paint.
+  const rail = arm.widthClass === 'rail';
+  const surface = rail ? BALLAST : TARMAC;
+  const step = rail ? RAIL_STEP_METRES : SIDE_ROAD_STEP_METRES;
+  // #628's wheel tracks and dust read `across`; a track has neither.
+  const acrossAt = (offset: number): number => (rail ? 0 : offset);
   const length = lineMetres(arm.line);
   const mouth = mouthMetres(profile, origin, arm.line, length);
   const end = Math.min(length, mouth + SIDE_ROAD_METRES);
@@ -799,6 +981,29 @@ function armMesh(
     readonly r: number;
     readonly out: number;
     readonly station: Station;
+    /** #2660: each rail's foot and head, left rail first; empty on a street. */
+    readonly rails: readonly number[];
+  };
+  /**
+   * Each rail's foot and head across a row at `station`, on the ballast
+   * there — the head rising from the road's crossing height at the mouth to
+   * {@link RAIL_HEAD_METRES} over the ramp.
+   */
+  const railsAt = (station: Station, out: number): number[] => {
+    if (!rail) return [];
+    const [ax, az] = acrossOf(station);
+    const head =
+      RAIL_ON_ROAD_METRES +
+      (RAIL_HEAD_METRES - RAIL_ON_ROAD_METRES) * smooth(out / SIDE_ROAD_RAMP_METRES);
+    return [-RAIL_HALF_GAUGE_METRES, RAIL_HALF_GAUGE_METRES].flatMap((offset) => {
+      const x = station.x + ax * offset;
+      const z = station.z + az * offset;
+      const y = heightAt(profile, origin, seed, x, z, out, land).y;
+      return [
+        mesh.vertex(x, y + RAIL_FOOT_METRES, z, RAIL_STEEL, 0),
+        mesh.vertex(x, y + head, z, RAIL_STEEL, 0),
+      ];
+    });
   };
   const rows: Row[] = [];
   const row = (
@@ -817,24 +1022,58 @@ function armMesh(
     const lh = heightAt(profile, origin, seed, lx, lz, out, land);
     const rh = heightAt(profile, origin, seed, rx, rz, out, land);
     return {
-      l: mesh.vertex(lx, lh.y, lz, TARMAC, -halfHere),
-      r: mesh.vertex(rx, rh.y, rz, TARMAC, halfHere),
+      l: mesh.vertex(lx, lh.y, lz, surface, acrossAt(-halfHere)),
+      r: mesh.vertex(rx, rh.y, rz, surface, acrossAt(halfHere)),
       out,
       station,
+      rails: railsAt(station, out),
     };
   };
   rows.push(row(first, 0, left, right));
   let metres = regular;
-  for (; metres <= end + 1e-9; metres += SIDE_ROAD_STEP_METRES) {
+  for (; metres <= end + 1e-9; metres += step) {
     rows.push(row(stationAt(arm.line, metres), metres - mouth));
   }
   // The last row at the stated length exactly, however short its step.
-  if (metres - SIDE_ROAD_STEP_METRES < end - 0.01)
-    rows.push(row(stationAt(arm.line, end), end - mouth));
+  if (metres - step < end - 0.01) rows.push(row(stationAt(arm.line, end), end - mouth));
+  if (rail) {
+    // #2660: the rails carried on across the carriageway, from the route's
+    // centreline (where the arm's line starts) to the mouth's, over the road.
+    const centre = stationAt(arm.line, 0);
+    const [ax, az] = acrossOf(first);
+    const mouthRails = (rows[0] as Row).rails;
+    const road = heightAt(profile, origin, seed, centre.x, centre.z, 0, land).y;
+    const onRoad = [-RAIL_HALF_GAUGE_METRES, RAIL_HALF_GAUGE_METRES].flatMap((offset) => [
+      mesh.vertex(centre.x + ax * offset, road, centre.z + az * offset, RAIL_STEEL, 0),
+      mesh.vertex(
+        centre.x + ax * offset,
+        road + RAIL_ON_ROAD_METRES,
+        centre.z + az * offset,
+        RAIL_STEEL,
+        0,
+      ),
+    ]);
+    for (const at of [0, 2]) {
+      mesh.quad(
+        onRoad[at] as number,
+        mouthRails[at] as number,
+        mouthRails[at + 1] as number,
+        onRoad[at + 1] as number,
+      );
+    }
+  }
   for (let index = 0; index + 1 < rows.length; index += 1) {
     const a = rows[index] as Row;
     const b = rows[index + 1] as Row;
     mesh.quad(a.l, b.l, b.r, a.r);
+    for (let at = 0; at + 1 < a.rails.length; at += 2) {
+      mesh.quad(
+        a.rails[at] as number,
+        b.rails[at] as number,
+        b.rails[at + 1] as number,
+        a.rails[at + 1] as number,
+      );
+    }
     segments.push(a.station.x, a.station.z, b.station.x, b.station.z);
     halfWidths.push(half);
     // A skirt down to the ground each side, where the arm stands above it.
@@ -854,22 +1093,23 @@ function armMesh(
           p[ta * 3] as number,
           footA,
           p[ta * 3 + 2] as number,
-          TARMAC,
-          sign * half,
+          surface,
+          acrossAt(sign * half),
         );
         const fb = mesh.vertex(
           p[tb * 3] as number,
           footB,
           p[tb * 3 + 2] as number,
-          TARMAC,
-          sign * half,
+          surface,
+          acrossAt(sign * half),
         );
         mesh.quad(ta, tb, fb, fa);
       }
     }
   }
   // The give-way line: two broken lines across the arm, just past its mouth.
-  for (const offset of GIVE_WAY_LINES_METRES) {
+  // None at a level crossing (#2660): the track is not a road that gives way.
+  for (const offset of rail ? [] : GIVE_WAY_LINES_METRES) {
     const near = stationAt(arm.line, regular + offset);
     const far = stationAt(arm.line, regular + offset + GIVE_WAY_DEPTH_METRES);
     const [ax, az] = acrossOf(near);

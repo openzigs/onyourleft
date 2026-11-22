@@ -10,7 +10,8 @@
  * `mapped-roof-shape`, since #1791 `building-type`, since #2021 `steeples`,
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
- * `start-year`, since #1794 `landmark-churches` and since #1795 `landmark-civic`.
+ * `start-year`, since #1794 `landmark-churches`, since #1795 `landmark-civic`
+ * and since #2973 `nearby-streets`.
  * Its own module so that a test reads the plans the page draws, and a lever
  * parsed but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -42,6 +43,7 @@ import {
   landmarkChurchesWithLevers,
   landmarkCivicWithLevers,
   mappedPaintWithLevers,
+  nearbyStreetsWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
@@ -117,6 +119,8 @@ export function plannedTown(
       mappedStartYear: startYearWithLevers(leversOff),
       landmarkChurches: landmarkChurchesWithLevers(leversOff),
       landmarkCivic: landmarkCivicWithLevers(leversOff),
+      // #2973: and no footprint on a mapped street drawn off the route, unless that lever is off.
+      nearbyStreets: nearbyStreetsWithLevers(leversOff),
     },
   );
   return { land, plans, urban };

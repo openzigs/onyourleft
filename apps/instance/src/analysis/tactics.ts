@@ -4,12 +4,14 @@
  * **Model-chosen lap-race bot tactics, on the rider's own instance** — #2709,
  * ADR 0071.
  *
- * A device racing "AI bots" sends the race as it stands (`@onyourleft/domain`
- * §`ModelTacticsInput`, built and checked on the device) and gets back one
- * closed-list move per bot it names, or a code — and on any code, or any
- * answer later than its own late limit, the bot rides its seeded tactics
- * (D-7). Nothing here is ever on the trainer's path: the instance has no
- * Bluetooth at all (D-8.1), and the answer names no power (D-3.1).
+ * A device racing "AI bots" sends one bot's ask (`@onyourleft/domain`
+ * §`ModelTacticsInput`, built and checked on the device: the race as it
+ * stands, and the bot with the menu of moves the device offers it; #2836, ADR
+ * 0081) and gets back a reason word and one move from that menu, or a code —
+ * and on any code, or any answer later than its own late limit, the bot rides
+ * its seeded tactics (D-7). Nothing here is ever on the trainer's path: the
+ * instance has no Bluetooth at all (D-8.1), and the answer names no power
+ * (D-3.1).
  *
  * ## Every request, in order (D-5)
  *
@@ -33,10 +35,19 @@
  *    field and capped in length (`@onyourleft/domain` §`readModelTacticsAnswer`):
  *    `tactics_invalid` for an answer that is no decision, `tactics_failed` for
  *    no answer at all. **The model's text is never kept, logged or returned**
- *    (D-3.5): only the moves read out of it.
+ *    (D-3.5): only the pick read out of it.
  *
  * The athlete is always the session's (D-5.6): no field of any request names
  * one. Every route is sealed-only (`tactics-routes.ts`).
+ *
+ * ## One line a call (#2836, ADR 0081 D-5.2)
+ *
+ * Each bot decision writes one `tactics-call` line ({@link TacticsCallLine}):
+ * the prompt's version, the model's name, how it ended, and what the model
+ * server said the call cost — its load time, the tokens in and out, and the
+ * time taken. **Numbers and closed words only**: never the model's text, never
+ * a move, never anything of the race or the rider, and no place.
+ * `log.ts` §`EVENT_KEYS` holds each key to the one shape written here.
  *
  * ## The AI pacer (#2712, ADR 0072)
  *
@@ -60,12 +71,11 @@
  */
 
 import {
-  modelTacticsSeats,
   readModelPacerAnswer,
   readModelPacerInput,
   readModelTacticsAnswer,
   readModelTacticsInput,
-  type ModelTacticsMove,
+  type ModelTacticsPick,
   type PacerIntent,
   type PacerPlan,
 } from '@onyourleft/domain';
@@ -78,7 +88,7 @@ import type { SqlStore } from '../store/sql-store.ts';
 import { askLocal } from './local-server.ts';
 import { pacerRequest } from './pacer-prompt.ts';
 import type { EffectiveAnalysisSettings } from './settings.ts';
-import { tacticsRequest, WARM_UP_INPUT } from './tactics-prompt.ts';
+import { TACTICS_PROMPT_VERSION, tacticsRequest, WARM_UP_INPUT } from './tactics-prompt.ts';
 import type { RaceHold } from './tactics-hold.ts';
 
 /**
@@ -108,17 +118,79 @@ export const TACTICS_WARM_UP_WAIT_MS = 120_000;
 const WARM_UP_TOKENS = 1;
 
 /**
- * How many decisions and starts one athlete may ask a minute: **30**, and one
+ * How many decisions and starts one athlete may ask a minute: **90**, and one
  * decision at a time.
  *
  * ## Provenance — the author's choice
  *
- * Spike 0039 asked every 4 s of race time, which is 15 a minute; twice that is
- * room for a device that asks again after a late answer, and a client in a
- * loop is stopped there. Only the athlete holding the slot reaches the model
- * at all (D-6.3), so this bounds what one race can ask of the operator's box.
+ * Until #2836 it was 30: spike 0039 asked for the whole field every 4 s of
+ * race time, 15 a minute, and 30 was twice that. Since ADR 0081 D-2.1 the
+ * device asks about one bot at a time and no more often than once a second
+ * (`@onyourleft/domain` §`MODEL_TACTICS_ASK_EVERY_MS`), which is 60 a minute
+ * at most; 90 is that and half again, room for a start and for an AI pacer's
+ * decisions, which share this count, and a client in a loop is still stopped
+ * there. **One decision
+ * at a time per athlete is unchanged**, and is what bounds the model's time:
+ * only the athlete holding the slot reaches the model at all (D-6.3), and a
+ * second call of theirs is refused while one is out.
  */
-export const DEFAULT_TACTICS_DECISIONS: RateLimit = { limit: 30, windowMs: 60 * 1000 };
+export const DEFAULT_TACTICS_DECISIONS: RateLimit = { limit: 90, windowMs: 60 * 1000 };
+
+/** How one bot decision ended, for its log line: a closed list. */
+export type TacticsCallState = 'decision' | 'invalid' | 'failed';
+
+/**
+ * One bot decision's log line (#2836, ADR 0081 D-5.2): numbers and closed
+ * words only. The model server's own figures are kept only when it sent them
+ * as numbers; a server that sends none writes a line without them.
+ */
+export interface TacticsCallLine {
+  /** `tactics-prompt.ts` §`TACTICS_PROMPT_VERSION`. */
+  readonly prompt: string;
+  /** The model's name, as the operator set it. */
+  readonly model: string;
+  readonly state: TacticsCallState;
+  /** The whole call as this instance timed it, ms. */
+  readonly ms: number;
+  /** The model server's load time, ms: above nought when it had to load the model. */
+  readonly loadMs?: number;
+  /** Tokens read (the prompt) and written (the answer). */
+  readonly tokensIn?: number;
+  readonly tokensOut?: number;
+  /** The model server's time reading the prompt and writing the answer, ms. */
+  readonly promptEvalMs?: number;
+  readonly evalMs?: number;
+}
+
+/** A model server's figure: a number from 0 up, or nothing. */
+const figure = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+/** Nanoseconds, as Ollama reports a duration, in whole milliseconds. */
+const milliseconds = (nanoseconds: unknown): number | undefined => {
+  const read = figure(nanoseconds);
+  return read === undefined ? undefined : Math.round(read / 1_000_000);
+};
+
+/**
+ * What an `/api/chat` body says the call cost: Ollama's `load_duration`,
+ * `prompt_eval_count`, `eval_count`, `prompt_eval_duration` and
+ * `eval_duration`. Each a number or left out; nothing else of the body is read.
+ */
+export function tacticsCallFigures(
+  body: unknown,
+): Pick<TacticsCallLine, 'loadMs' | 'tokensIn' | 'tokensOut' | 'promptEvalMs' | 'evalMs'> {
+  if (typeof body !== 'object' || body === null) return {};
+  const said = body as Readonly<Record<string, unknown>>;
+  const read = {
+    loadMs: milliseconds(said.load_duration),
+    tokensIn: figure(said.prompt_eval_count),
+    tokensOut: figure(said.eval_count),
+    promptEvalMs: milliseconds(said.prompt_eval_duration),
+    evalMs: milliseconds(said.eval_duration),
+  };
+  return Object.fromEntries(Object.entries(read).filter(([, value]) => value !== undefined));
+}
 
 /** The local model as the settings give it to one athlete now. */
 export interface TacticsLocal {
@@ -168,6 +240,8 @@ export interface TacticsOptions {
   readonly answerWaitMs?: number;
   /** {@link TACTICS_WARM_UP_WAIT_MS} unless a test's. */
   readonly warmUpWaitMs?: number;
+  /** Where each bot decision's line goes (#2836); nowhere unless given. */
+  readonly logCall?: (line: TacticsCallLine) => void;
 }
 
 /** What `GET /v1/analysis/tactics` answers. */
@@ -195,11 +269,11 @@ export interface Tactics {
   withdrawConsent(caller: Caller): Promise<TacticsStatus>;
   /** A model race starts: claim the slot, and load the model. */
   start(caller: Caller): Promise<Outcome<{ readonly warming: boolean }>>;
-  /** One decision on the race the body carries. */
+  /** One bot's decision on the ask the body carries: a reason word and a move from its menu. */
   decide(
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
-  ): Promise<Outcome<{ readonly bots: readonly ModelTacticsMove[] }>>;
+  ): Promise<Outcome<ModelTacticsPick>>;
   /**
    * One AI-pacer decision on the pacer state the body carries (#2712, ADR
    * 0072): the same gates, consent, slot and call as {@link decide}, one
@@ -302,28 +376,34 @@ export function createTactics(options: TacticsOptions): Tactics {
     return { ok: true, model };
   }
 
-  /** One `/api/chat` call: the answer's text, or `undefined` for none. Never throws. */
-  async function ask(
+  /** One `/api/chat` call: the body it answered, or `undefined` for none. Never throws. */
+  async function call(
     model: NonNullable<TacticsLocal['model']>,
     body: Readonly<Record<string, unknown>>,
     waitMs: number,
-  ): Promise<string | undefined> {
+  ): Promise<unknown> {
     if (stopping.signal.aborted) return undefined;
     const signal = AbortSignal.any([stopping.signal, AbortSignal.timeout(Math.max(1, waitMs))]);
     try {
-      const answered = await askLocal(
+      return await askLocal(
         new URL(model.baseUrl.origin),
         '/api/chat',
         { method: 'POST', body },
         server,
         signal,
       );
-      return contentOf(answered);
     } catch {
       // Refused address, unreachable, out of time or stopped: no answer. Its words are dropped.
       return undefined;
     }
   }
+
+  /** One `/api/chat` call: the answer's text, or `undefined` for none. Never throws. */
+  const ask = async (
+    model: NonNullable<TacticsLocal['model']>,
+    body: Readonly<Record<string, unknown>>,
+    waitMs: number,
+  ): Promise<string | undefined> => contentOf(await call(model, body, waitMs));
 
   function warmUp(athleteId: string, model: NonNullable<TacticsLocal['model']>): boolean {
     if (warmingFor.has(athleteId) || stopping.signal.aborted) return false;
@@ -403,19 +483,33 @@ export function createTactics(options: TacticsOptions): Tactics {
       }
       if (hold.claim(caller.athleteId) === 'busy') return { ok: false, code: 'tactics_busy' };
       deciding.add(caller.athleteId);
-      let text: string | undefined;
+      const askedAt = now();
+      let answered: unknown;
       try {
-        text = await ask(gated.model, tacticsRequest(gated.model.model, input.value), answerWaitMs);
+        answered = await call(
+          gated.model,
+          tacticsRequest(gated.model.model, input.value),
+          answerWaitMs,
+        );
       } finally {
         deciding.delete(caller.athleteId);
         // An answer is the race's activity too: one that waited behind a write-up keeps its hold.
         hold.touch(caller.athleteId);
       }
-      if (text === undefined) return { ok: false, code: 'tactics_failed' };
-      const read = readModelTacticsAnswer(text, modelTacticsSeats(input.value));
-      return read.ok
-        ? { ok: true, value: { bots: read.moves } }
-        : { ok: false, code: 'tactics_invalid' };
+      const text = contentOf(answered);
+      // Read against the menu this ask offered, and no other move.
+      const read =
+        text === undefined ? undefined : readModelTacticsAnswer(text, input.value.you.menu);
+      // #2836: one line a call. Figures and closed words; never the text, never the pick.
+      options.logCall?.({
+        prompt: TACTICS_PROMPT_VERSION,
+        model: gated.model.model,
+        state: read === undefined ? 'failed' : read.ok ? 'decision' : 'invalid',
+        ms: Math.max(0, now() - askedAt),
+        ...tacticsCallFigures(answered),
+      });
+      if (read === undefined) return { ok: false, code: 'tactics_failed' };
+      return read.ok ? { ok: true, value: read.pick } : { ok: false, code: 'tactics_invalid' };
     },
 
     async pace(caller, body) {

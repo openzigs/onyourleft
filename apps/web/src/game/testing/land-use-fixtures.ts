@@ -29,9 +29,9 @@ type MappedClass = Exclude<LandClass, 'unknown'>;
 /**
  * Every `landuse` kind spike 0031 counted in a village, town or downtown
  * corridor, and the class it reads as. A kind the table does not name reads
- * as `other` — `grassland` and Protomaps' own `other`. Since #2662
+ * as `other` — Protomaps' own `other`. Since #2662
  * `kindergarten` is built-up, `village_green` park, and `sand`, `platform`,
- * `pier`, `bare_rock` and `beach` bare.
+ * `pier`, `bare_rock` and `beach` bare; since #2976 `grassland` is farmland.
  */
 export const TOWN_LAND_USE_CLASSES: Readonly<Record<string, MappedClass>> = Object.freeze({
   residential: 'built-up',
@@ -58,7 +58,7 @@ export const TOWN_LAND_USE_CLASSES: Readonly<Record<string, MappedClass>> = Obje
   wetland: 'water',
   farmland: 'farmland',
   meadow: 'farmland',
-  grassland: 'other',
+  grassland: 'farmland',
   kindergarten: 'built-up',
   village_green: 'park',
   sand: 'bare',
