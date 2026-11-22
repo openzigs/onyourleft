@@ -199,6 +199,12 @@ export interface PersonLook {
   readonly bottoms: number;
   readonly shoes: number;
   readonly hair: number;
+  /**
+   * Which of the people's bodies they are, as a share in `[0, 1)` — the
+   * renderer turns it into one of however many its model holds
+   * (`three-renderer.ts` §`PeopleBelt`), so nothing here counts them.
+   */
+  readonly build: number;
 }
 
 /** One person, where a frame draws them. */
@@ -243,9 +249,15 @@ export const SKIN_TONES: readonly number[] = [
   0xf1c6a6, 0xe0ac8a, 0xc68863, 0xa86b4a, 0x8a5536, 0x6b3f28, 0x4f2e1e,
 ];
 
-/** Clothes' colours, as sRGB: muted, as a street's are. */
+/**
+ * Clothes' colours, as sRGB: muted, as a street's are. ⚠️ None near the
+ * rider's jersey: the fourth was a green-teal, `0x2f5d50`, 11 chromatic
+ * ΔE*ab from the house kit, and is an olive since the owner's request of
+ * 2026-11-18 — `people.test.ts` holds the whole list 15 away, as
+ * `scenery-cyclists.test.ts` holds the cyclists' jerseys.
+ */
 export const CLOTHES: readonly number[] = [
-  0x2b3a55, 0x4a4a4a, 0x7a2e2e, 0x2f5d50, 0xc9c1b1, 0x1f1f24, 0x8c6a3f, 0x5d6d7e, 0xb04a32,
+  0x2b3a55, 0x4a4a4a, 0x7a2e2e, 0x5b6236, 0xc9c1b1, 0x1f1f24, 0x8c6a3f, 0x5d6d7e, 0xb04a32,
   0x3d5a80, 0xd9d4c7, 0x6b4e71,
 ];
 
@@ -267,6 +279,7 @@ export function personLook(hash: number): PersonLook {
     bottoms: pick(CLOTHES, uniformFrom(hash, 12)),
     shoes: pick(SHOES, uniformFrom(hash, 13)),
     hair: pick(HAIR, uniformFrom(hash, 14)),
+    build: uniformFrom(hash, 15),
   };
 }
 
@@ -605,7 +618,7 @@ export function footwayWalks(
 }
 
 /** A street's pavements as {@link clearOfPavements} reads them: segments, reaches, and their box. */
-interface PavementBands {
+export interface PavementBands {
   /** Every walk's segments, five floats a segment: `ax, az, bx, bz` and the pavement's reach. */
   readonly segments: Float32Array;
   readonly minX: number;
@@ -623,7 +636,7 @@ const bandsOf = new WeakMap<VillageStreet, PavementBands>();
  * the back and, kerbside, only onto the carriageway the rule already keeps
  * people off. Built once a street.
  */
-function pavementBands(street: VillageStreet): PavementBands {
+export function pavementBands(street: VillageStreet): PavementBands {
   const known = bandsOf.get(street);
   if (known !== undefined) return known;
   const segments: number[] = [];
@@ -650,8 +663,8 @@ function pavementBands(street: VillageStreet): PavementBands {
   return bands;
 }
 
-/** Whether `(x, z)` is on any of `bands`' pavements. */
-function onPavement(bands: readonly PavementBands[], x: number, z: number): boolean {
+/** Whether `(x, z)` is on any of `bands`' pavements. Since #2972 also what a footway's drawn surface is cut by. */
+export function onPavement(bands: readonly PavementBands[], x: number, z: number): boolean {
   for (const band of bands) {
     if (x < band.minX || x > band.maxX || z < band.minZ || z > band.maxZ) continue;
     const s = band.segments;

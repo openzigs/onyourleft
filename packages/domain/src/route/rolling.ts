@@ -338,6 +338,7 @@ export class RollingRoute {
   readonly #despiked: number[] = [];
   readonly #grades: number[] = [];
   #view: RouteProfile | undefined;
+  #uTurns = 0;
 
   /**
    * Starts a ride at the first point of `start`, and reaches
@@ -384,6 +385,15 @@ export class RollingRoute {
     return (this.#first + this.#positions.length - 1) * ROLLING_RESOLUTION_METRES;
   }
 
+  /**
+   * How many U-turns {@link uTurn} has made: a caller that hands the grade on
+   * reads it to tell a U-turn, which changes the road under the rider at once
+   * (ADR 0087 D-6.4), from every other change, which does not (#2982).
+   */
+  get uTurns(): number {
+    return this.#uTurns;
+  }
+
   /** The legs held, in ride order. */
   get legs(): readonly RollingLeg[] {
     return this.#legs.map(({ edge, kind, start, end }) => ({ edge, kind, start, end }));
@@ -395,28 +405,56 @@ export class RollingRoute {
    * behind. Neither moves a sample, a height or a grade the rider has passed.
    * A rider distance that is not a finite number changes nothing: no reach
    * past it is ever met, so extending to it would never end.
+   *
+   * ⚠️ **A rider more than a reach past the road held is read as a reach
+   * past its {@link end}** (#2982, from the review of #2962). The route always
+   * reaches {@link ROLLING_AHEAD_METRES} past the last rider it was given, so
+   * a rider that far past its end has jumped further than any ride moves
+   * between two calls; a 1e9 m slip would otherwise sample a billion metres of
+   * street in one call. So one call extends the route by at most twice its
+   * reach, and the next goes on from there.
    */
   advance(rider: number): void {
     if (!Number.isFinite(rider)) return;
-    this.#settle(rider);
+    this.#settle(Math.min(rider, this.end + ROLLING_AHEAD_METRES));
   }
 
   /** Every junction with two or more ways on whose way past it is known, after `rider`. */
   junctionsAfter(rider: number): readonly RollingJunction[] {
     const found: RollingJunction[] = [];
     for (let index = 0; index < this.#legs.length - 1; index += 1) {
-      const leg = this.#legs[index] as Leg;
-      if (leg.end <= rider || !leg.atNode) continue;
-      const { ways, defaultWay } = this.#waysAfter(leg);
-      if (ways.length < 2 || defaultWay === undefined) continue;
-      found.push({
-        distance: leg.end,
-        ways,
-        defaultWay: defaultWay.edge.id,
-        taken: (this.#legs[index + 1] as Leg).edge.id,
-      });
+      const junction = this.#junctionAfterLeg(index, rider);
+      if (junction !== undefined) found.push(junction);
     }
     return found;
+  }
+
+  /**
+   * The first of {@link junctionsAfter}, found without building the others —
+   * #2898: the HUD's junction prompt asks for it every frame, and the 2 km
+   * ahead can hold a dozen junctions, each of which costs a walk of the graph
+   * and a bearing for every way on. The legs are in ride order and each ends
+   * where the next starts, so the first leg that ends past the rider is found
+   * by halving, and the ways on are worked out only for the legs from there
+   * to the first junction.
+   */
+  nextJunctionAfter(rider: number): RollingJunction | undefined {
+    const last = this.#legs.length - 1;
+    // The first index in [0, last) whose leg does not end at or before the
+    // rider: `junctionsAfter`'s own test, negated, so a rider that is not a
+    // number finds what that finds.
+    let low = 0;
+    let high = last;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((this.#legs[middle] as Leg).end <= rider) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < last; index += 1) {
+      const junction = this.#junctionAfterLeg(index, rider);
+      if (junction !== undefined) return junction;
+    }
+    return undefined;
   }
 
   /**
@@ -447,19 +485,34 @@ export class RollingRoute {
    * between two, is what keeps the position at every distance the rider has
    * reached where it was, so ride distance runs on with no jump. The grade
    * ahead changes at once, which the grade path walks (ADR 0087 D-6.4). A
-   * rider distance that is not a finite number turns nothing round.
+   * rider distance that is not a finite number turns nothing round, and nor
+   * does one outside the road held, behind {@link origin} or past
+   * {@link end} (#2982): there is no street there to turn on.
+   *
+   * A second U-turn on the same sample turns the rider back the way they were
+   * going (#2982): the sample is held by the leg the first one cut and the
+   * U-turn leg that starts on it, and it is the U-turn leg, the way the rider
+   * now faces, that is turned. On a sample where one street meets the next at
+   * a node, it is the street ridden in on that is turned, as before.
    */
   uTurn(rider: number): void {
     if (!Number.isFinite(rider)) return;
     const turn = Math.ceil(rider / ROLLING_RESOLUTION_METRES) * ROLLING_RESOLUTION_METRES;
-    // The route always reaches far past the rider, so a leg holds `turn`.
-    const index = this.#legs.findIndex((leg) => leg.start <= turn && turn <= leg.end);
+    if (turn < this.origin || turn > this.end) return;
+    // The road held runs from the origin to the end without a gap, so a leg
+    // holds `turn`. A leg that only starts there holds it for a U-turn made on
+    // this sample, and for no other: elsewhere the leg that ends there does.
+    const holds = (leg: Leg): boolean =>
+      leg.start <= turn && turn <= leg.end && (leg.start < turn || leg.kind === 'u-turn');
+    let index = this.#legs.length - 1;
+    while (index > 0 && !holds(this.#legs[index] as Leg)) index -= 1;
     const leg = this.#legs[index] as Leg;
     const cut = leg.enter + (turn - leg.start);
     this.#legs[index] = { ...leg, end: turn, atNode: false };
     this.#cutAfter(index, turn);
     const length = leg.along[leg.along.length - 1] as number;
     this.#push(reversed(leg.edge), 'u-turn', turn, length - cut);
+    this.#uTurns += 1;
     this.#settle(rider);
   }
 
@@ -484,6 +537,20 @@ export class RollingRoute {
       positions: this.#positions.slice(),
     };
     return this.#view;
+  }
+
+  /** The junction at the end of leg `index`, if it is one after `rider` with two or more ways on. */
+  #junctionAfterLeg(index: number, rider: number): RollingJunction | undefined {
+    const leg = this.#legs[index] as Leg;
+    if (leg.end <= rider || !leg.atNode) return undefined;
+    const { ways, defaultWay } = this.#waysAfter(leg);
+    if (ways.length < 2 || defaultWay === undefined) return undefined;
+    return {
+      distance: leg.end,
+      ways,
+      defaultWay: defaultWay.edge.id,
+      taken: (this.#legs[index + 1] as Leg).edge.id,
+    };
   }
 
   #waysAfter(leg: Leg): ReturnType<typeof waysOn> {

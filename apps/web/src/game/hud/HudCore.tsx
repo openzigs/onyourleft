@@ -90,6 +90,7 @@ import { ClimbCallout } from './ClimbCallout';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
+import { JunctionChoicePrompt } from './JunctionChoicePrompt';
 import { RecentGraph } from './RecentGraph';
 import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
@@ -697,16 +698,32 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             held={props.lapRace === undefined || riderHolds(props.lapRace)}
           />
         )}
+        {/*
+          #2898: an open-world ride's next junction and its U-turn, where the
+          throws stand on a round. Inside this region, so the lock refuses a
+          tap on a way as on Pause: none is exempt (ADR 0088 D-3.1.3), and a
+          key or a pad still chooses.
+        */}
+        {props.junction === undefined || asking ? null : (
+          <JunctionChoicePrompt
+            junction={props.junction}
+            touchLocked={touchLocked}
+            units={props.units}
+          />
+        )}
         {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
         {/* #1821: a gamepad's throws, items and lane changes, to the same ports. Nothing drawn. */}
+        {/* #2898: and an open-world ride's turns, to the junction's press. */}
         {props.throwing === undefined &&
         props.steering === undefined &&
-        props.items === undefined ? null : (
+        props.items === undefined &&
+        props.junction === undefined ? null : (
           <GamepadIntents
             throwing={props.throwing}
             steering={props.steering}
             items={props.items}
+            turning={props.junction?.press}
             onPadInUse={setPadInUse}
             // #2600: a pad's press brings the hidden controls back.
             onPress={reveal}
@@ -925,7 +942,9 @@ function controlsHeld(props: HudCoreProps, asking: boolean): boolean {
     hasContent(props.notices) ||
     props.standingNotice !== undefined ||
     (props.lapRace !== undefined && riderFinished(props.lapRace)) ||
-    (props.items !== undefined && props.lapRace !== undefined && riderHolds(props.lapRace))
+    (props.items !== undefined && props.lapRace !== undefined && riderHolds(props.lapRace)) ||
+    // #2898: a junction's prompt is in the actions panel, which hiding clips.
+    props.junction?.prompt !== undefined
   );
 }
 

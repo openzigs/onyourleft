@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The ride cards — *Free ride*, *Ride a route* and *Workout* — as data and one
+ * The ride cards — *Free ride*, *Ride a route*, *Open world* (#2889) and
+ * *Workout* — as data and one
  * card component, so Home (#939, #1010) and the Ride screen's no-sensor state
  * (#1029) draw the same card from the same words and the same picture.
  *
@@ -48,7 +49,7 @@ export interface RideChoice {
   readonly title: string;
   readonly line: string;
   readonly action: string;
-  readonly to: 'ride' | 'game' | 'workouts';
+  readonly to: 'ride' | 'game' | 'open-world' | 'workouts';
   readonly art: JSX.Element;
 }
 
@@ -77,6 +78,22 @@ export const RIDE_CHOICES: readonly RideChoice[] = [
       <>
         <Sky className="oyl-home__layer" />
         <Hills className="oyl-home__layer" seed={5} />
+        <RoadRibbon className="oyl-home__layer" />
+      </>
+    ),
+  },
+  {
+    // #2889: the open-world ride. ⚠️ "Open world" is a proposed name, waiting
+    // on the owner: *Free ride* above is already a ride with no route.
+    id: 'open-world',
+    title: 'Open world',
+    line: 'Ride the real streets from a start you choose, turning where you like.',
+    action: 'Choose a start',
+    to: 'open-world',
+    art: (
+      <>
+        <Sky className="oyl-home__layer" clouds={false} />
+        <Hills className="oyl-home__layer" seed={9} />
         <RoadRibbon className="oyl-home__layer" />
       </>
     ),

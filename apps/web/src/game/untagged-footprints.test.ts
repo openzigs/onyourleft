@@ -526,11 +526,14 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
         })),
       ],
     });
-    for (const garage of subjectsOf(plannedStreet({}, behind('bridge')), 'garage')) {
+    // #2973: a ground street this near would now be drawn, and rule 3b would drop the
+    // footprints it runs over; this measures the setback rule alone, so rule 3b is off.
+    const setbackOnly = { nearbyStreets: false } as const;
+    for (const garage of subjectsOf(plannedStreet(setbackOnly, behind('bridge')), 'garage')) {
       expect(garage.family).toBe('garage');
     }
     // Control: on the ground, the garage stands nearer it than the house does its street.
-    for (const garage of subjectsOf(plannedStreet({}, behind('ground')), 'garage')) {
+    for (const garage of subjectsOf(plannedStreet(setbackOnly, behind('ground')), 'garage')) {
       expect(garage.family).toBeUndefined();
     }
     // And a street through the garage is a setback of none.
@@ -549,7 +552,7 @@ describe('#2023: the rule, read back through `footprintPlans`', () => {
         })),
       ],
     };
-    for (const garage of subjectsOf(plannedStreet({}, through), 'garage')) {
+    for (const garage of subjectsOf(plannedStreet(setbackOnly, through), 'garage')) {
       expect(garage.family).toBeUndefined();
     }
   });

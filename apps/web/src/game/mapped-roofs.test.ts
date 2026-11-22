@@ -743,13 +743,18 @@ describe('absent tags change nothing — #1790', () => {
   };
 
   it('plans every untagged town as before, storeys and all', () => {
-    expect(planFingerprint(classed(mixedTownFixture()))).toBe(BEFORE.mixed);
-    expect(planFingerprint(classed(houseStreetFixture()))).toBe(BEFORE.houses);
-    expect(planFingerprint(classed(commercialStreetFixture()))).toBe(BEFORE.commercial);
+    // Since #2848 the shops' aprons are off: the plans before #1790 had none.
+    const before = { shopAprons: false } as const;
+    expect(planFingerprint(classed(mixedTownFixture(), before))).toBe(BEFORE.mixed);
+    expect(planFingerprint(classed(houseStreetFixture(), before))).toBe(BEFORE.houses);
+    expect(planFingerprint(classed(commercialStreetFixture(), before))).toBe(BEFORE.commercial);
     const town = mixedTownFixture();
     const land = landClassMask(town.corridor);
     expect(
-      planFingerprint(footprintPlans(town.corridor, land, town.profile, town.origin).plans),
+      planFingerprint(
+        footprintPlans(town.corridor, land, town.profile, town.origin, undefined, undefined, before)
+          .plans,
+      ),
     ).toBe(BEFORE.mixedUnclassed);
   });
 

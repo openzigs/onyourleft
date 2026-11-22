@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The open-world sessions `main.tsx` hands the game, with the session's own
+ * modules loaded when a start is first opened — #2896.
+ *
+ * ⚠️ **Why this module exists**, as `world-data/corridor-lazy.ts` does:
+ * `session.ts` reaches the archive reader (`pmtiles`), the tile decoder and
+ * the street graph (`@onyourleft/map-features`) and the rolling route.
+ * Imported statically by `main.tsx`, all of that would be in the entry chunk
+ * every rider downloads before Home paints, a rider who never rides the open
+ * world included. So `main.tsx` imports this file, which names those modules
+ * only as `import()`s and as types.
+ *
+ * The archive is always `world-data/corridor-source.ts`' own, the one module
+ * with the one request (ADR 0090 D-3), over the basemap `main.tsx` reads.
+ */
+
+import type { BasemapConfig } from '../../map/basemap';
+import type { OpenWorldEntry } from './entry';
+import type { OpenWorldReady, OpenWorldSession, OpenWorldSessions } from './ride';
+import type { OpenWorldStart } from './start';
+
+interface LazyOpenWorldOptions {
+  /** The tab's one way in (`entry.ts`): the picker hands the start to it. */
+  readonly entry: OpenWorldEntry;
+  /** The configured basemap, read when a session opens; `undefined` when none is. */
+  readonly basemap: () => BasemapConfig | undefined;
+  /** The map-tiles switch (ADR 0090 D-7.1), read before every request. */
+  readonly mapTilesOn: () => boolean;
+}
+
+/** What opens one session, once the modules are loaded. */
+type OpenSession = (start: OpenWorldStart) => OpenWorldSession;
+
+const UNAVAILABLE: OpenWorldReady = { kind: 'refused', refusal: 'unavailable' };
+
+/**
+ * {@link OpenWorldSessions} whose session modules are loaded on the first
+ * {@link OpenWorldSessions.open}. A load that fails (a chunk this device
+ * could not fetch) is `unavailable`, and the next open tries again.
+ */
+export function lazyOpenWorldSessions(
+  options: LazyOpenWorldOptions,
+  load: () => Promise<OpenSession> = async () => {
+    // Two plain `await import()` bindings, which `check-wiring.mjs` follows
+    // (§`namespaceBindings`).
+    const session = await import('./session');
+    const source = await import('../../world-data/corridor-source');
+    return (start) => {
+      const config = options.basemap();
+      return session.createOpenWorldSession({
+        start,
+        archive: config === undefined ? undefined : source.corridorArchive(config),
+        mapTilesOn: options.mapTilesOn,
+      });
+    };
+  },
+): OpenWorldSessions {
+  let loaded: Promise<OpenSession> | undefined;
+  return {
+    take: () => options.entry.take(),
+    open: (start) => {
+      let stopped = false;
+      let inner: OpenWorldSession | undefined;
+      loaded ??= load().catch((error: unknown) => {
+        loaded = undefined;
+        throw error;
+      });
+      const ready = loaded.then(
+        (open): Promise<OpenWorldReady> | OpenWorldReady => {
+          // Stopped while the modules loaded: nothing is asked for at all.
+          if (stopped) return { kind: 'stopped' };
+          inner = open(start);
+          return inner.ready;
+        },
+        (): OpenWorldReady => UNAVAILABLE,
+      );
+      return {
+        ready,
+        stop: () => {
+          stopped = true;
+          inner?.stop();
+        },
+      };
+    },
+  };
+}
