@@ -206,8 +206,10 @@ export const AVOIDABLE_SLOWEST_METRES_PER_SECOND = 3;
 
 /**
  * The fast end of the speeds every obstacle must be avoidable within: 12 m/s, 43.2 km/h.
- *
- * @test-facing the other bound of `obstacles.test.ts`' sweep, as above
+ * The other bound of `obstacles.test.ts`' sweep, as above; since #3021 it also
+ * caps the speed a crash's payout draws the rider at (`ride-round.ts`
+ * §`payoutSpeed`, ADR 0094 D-4.3), so the payout never draws them faster than
+ * every hazard is proved avoidable at.
  */
 export const AVOIDABLE_FASTEST_METRES_PER_SECOND = 12;
 
