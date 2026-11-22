@@ -223,8 +223,13 @@ export interface SideRoadArm {
 export interface Junction {
   /** The route distance of the junction, on the first lap. */
   readonly along: number;
-  /** `rail` is a level crossing ({@link levelCrossings}): its arms are track, never a street. */
-  readonly source: 'mapped' | 'village' | 'rail';
+  /**
+   * `'street'` since #2973: no junction at all, but a stretch of a mapped
+   * street off the route (`nearby-streets.ts`), carried as a side road so the
+   * same mesh draws it and the same clearances keep the scenery off it.
+   * `rail` is a level crossing ({@link levelCrossings}): its arms are track, never a street.
+   */
+  readonly source: 'mapped' | 'village' | 'street' | 'rail';
   readonly arms: readonly SideRoadArm[];
 }
 

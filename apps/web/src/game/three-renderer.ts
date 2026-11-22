@@ -556,6 +556,7 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import { NO_FOOTWAYS, type FootwayPiece } from './footway-surfaces';
 import type { Embankment } from './overpasses';
 import {
   GOLF_BUNKERS_PER_GREEN,
@@ -10902,6 +10903,110 @@ function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setAttribute(ROAD_ACROSS_ATTRIBUTE, new BufferAttribute(across, 1));
   geometry.setAttribute(ROAD_REACH_ATTRIBUTE, new BufferAttribute(new Float32Array(vertices), 1));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * Every mapped footway surface and zebra in view — #2972
+ * (`footway-surfaces.ts`): the footways, cycleways, park paths and steps as
+ * ribbons on the ground and the crossings as stripes on the road, coloured a
+ * vertex at a time by kind. **One mesh and one draw call** however many are in
+ * view, and none where a frame holds none; no texture. The realistic world's
+ * alone, because only the realistic world is given a corridor (ADR 0054 D-6).
+ *
+ * Pulled toward the camera in depth (`polygonOffset`), so a ribbon lying a few
+ * centimetres over the ground, and a stripe over the road's marks, never
+ * fights either where the drawn triangles part from the ground's height.
+ *
+ * Rebuilt only when the SET of pieces changes, as {@link PavementBelt} is:
+ * `footway-surfaces.ts` hands every frame the same objects for the same chunks.
+ */
+export class FootwayBelt {
+  readonly #mesh: Mesh;
+  readonly #material: Material;
+  /** The pieces the mesh holds, in the order it holds them. */
+  #held: readonly FootwayPiece[] = [];
+  #shown = true;
+
+  constructor() {
+    this.#material = withAtmosphere(
+      constructed(
+        new MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.92,
+          metalness: 0,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        }),
+      ),
+    );
+    this.#mesh = new Mesh(new BufferGeometry(), this.#material);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** This frame's footways. */
+  update(pieces: readonly FootwayPiece[]): void {
+    const drawn = this.#shown ? pieces : NO_FOOTWAYS;
+    if (!(drawn.length === this.#held.length && drawn.every((p, i) => p === this.#held[i]))) {
+      this.#held = drawn;
+      const geometry = footwayGeometry(drawn);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** Every footway piece as one geometry: positions, linear colours and an up normal. */
+function footwayGeometry(pieces: readonly FootwayPiece[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const piece of pieces) {
+    vertices += piece.positions.length / 3;
+    indices += piece.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const piece of pieces) {
+    positions.set(piece.positions, vertex * 3);
+    colours.set(piece.colours, vertex * 3);
+    for (let each = 0; each < piece.indices.length; each += 1) {
+      index[at + each] = (piece.indices[each] as number) + vertex;
+    }
+    vertex += piece.positions.length / 3;
+    at += piece.indices.length;
+  }
+  for (let up = 1; up < normals.length; up += 3) normals[up] = 1;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setIndex(new BufferAttribute(index, 1));
   geometry.computeBoundingSphere();
   return geometry;
@@ -24437,6 +24542,8 @@ class RealisticDrawing {
   readonly logos: LogoBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
+  /** #2972: the corridor's mapped footways and zebras. */
+  readonly footways = new FootwayBelt();
   /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
   readonly furniture: FurnitureBelt;
   /**
@@ -24652,6 +24759,7 @@ class RealisticDrawing {
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
     this.pavements.addTo(scene);
+    this.footways.addTo(scene);
     this.furniture.addTo(scene);
     this.people.addTo(scene);
     this.decorations.addTo(scene);
@@ -24669,6 +24777,7 @@ class RealisticDrawing {
     this.gantries.setShown(on);
     this.logos.setShown(on);
     this.pavements.setShown(on);
+    this.footways.setShown(on);
     this.furniture.setShown(on);
     this.people.setShown(on);
     this.decorations.setShown(on);
@@ -24857,6 +24966,7 @@ class RealisticDrawing {
     this.gantries.dispose();
     this.logos.dispose();
     this.pavements.dispose();
+    this.footways.dispose();
     this.furniture.dispose();
     this.people.dispose();
     this.decorations.dispose();
@@ -25620,6 +25730,18 @@ export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
  */
 export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
   return view instanceof ThreeGameView ? view.decorationBelt : undefined;
+}
+
+/**
+ * The realistic world's footway mesh — #2972 (`footway-surfaces.ts`) — or
+ * `undefined` for a view with no realistic world.
+ *
+ * @test-facing read by `realistic-textures.test.ts` §"the footways", which
+ * holds what the belt uploaded to the frame's footways; the view draws the belt
+ * itself in `render`
+ */
+export function footwayMeshOf(view: GameView): Mesh | undefined {
+  return view instanceof ThreeGameView ? view.footwayMesh : undefined;
 }
 
 /**
@@ -26518,6 +26640,8 @@ class ThreeGameView implements GameView {
     // #1535: the village streets, in both worlds; the hidden world's draw nothing.
     this.#realistic?.pavements.update(frame.streets);
     this.#pavements.update(frame.streets);
+    // #2972: and the mapped footways and zebras, in the realistic world only.
+    this.#realistic?.footways.update(frame.footways);
     // #1536: and what stands on them, within reach of the camera.
     this.#realistic?.furniture.update(frame.streets, frame.camera);
     this.#furniture.update(frame.streets, frame.camera);
@@ -27089,6 +27213,11 @@ class ThreeGameView implements GameView {
   doorPathsShown(on: boolean): void {
     this.#realistic?.pavements.switchPathsOn(on);
     this.#pavements.switchPathsOn(on);
+  }
+
+  /** @see footwayMeshOf — the realistic world's, whether or not it is the one drawn. */
+  get footwayMesh(): Mesh | undefined {
+    return this.#realistic?.footways.mesh;
   }
 
   /** @see pavementTrianglesOf — the drawn world's. */

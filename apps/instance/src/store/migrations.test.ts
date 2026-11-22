@@ -663,6 +663,57 @@ describe('the migrations (#769)', () => {
     }
   });
 
+  it('narrows 0051’s operator log to refuse an embedded NUL, keeping every entry and its id; undone, it takes one again (#2618)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0050-setup-tailnet-step');
+    const NUL_DETAIL = `'applied=1' || char(0) || 'Any Text At All'`;
+    const before = openDatabase(path);
+    try {
+      before.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+    } finally {
+      before.close();
+    }
+    await withKysely(path, (db) => migrateUpOne(db));
+    const narrowed = openDatabase(path);
+    try {
+      expect(narrowed.prepare('SELECT id, detail FROM operator_log').all()).toEqual([
+        { id: 7, detail: 'applied=1' },
+      ]);
+      expect(() =>
+        narrowed.exec(
+          `INSERT INTO operator_log VALUES (8, 51, 'cli', NULL, 'migrate', ${NUL_DETAIL}, 'done')`,
+        ),
+      ).toThrow(/CHECK constraint failed/);
+      expect(() => narrowed.exec(`DELETE FROM operator_log`)).toThrow(/append-only/);
+      expect(() => narrowed.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(
+        /append-only/,
+      );
+    } finally {
+      narrowed.close();
+    }
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = openDatabase(path);
+    try {
+      undone.exec(
+        `INSERT INTO operator_log VALUES (8, 51, 'cli', NULL, 'migrate', ${NUL_DETAIL}, 'done')`,
+      );
+      expect(undone.prepare('SELECT id FROM operator_log').all()).toEqual([{ id: 7 }, { id: 8 }]);
+    } finally {
+      undone.close();
+    }
+    // With a NUL in the log, `up` is refused and changes nothing.
+    const held = snapshot(path);
+    await expect(withKysely(path, (db) => migrateUpOne(db))).rejects.toThrow(
+      /holds an entry whose detail has an embedded NUL/,
+    );
+    expect(snapshot(path)).toEqual(held);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0050-setup-tailnet-step');
+    });
+  });
+
   it('refuses to undo 0007 while the moderation log holds an entry, and changes nothing (#891)', async () => {
     const path = await freshPath();
     await withKysely(path, (db) => migrateToLatest(db));

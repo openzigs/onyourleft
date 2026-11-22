@@ -15,6 +15,8 @@ import { openDatabase } from './node-sqlite.ts';
 import { openSqlStore } from './open-sql-store.ts';
 import {
   OPERATOR_ACTIONS,
+  OPERATOR_COUNT_LIMITS,
+  OPERATOR_DETAILS,
   OperatorEntryError,
   SCRUB_CHECKPOINT_FAILED,
   type OperatorEntry,
@@ -247,6 +249,57 @@ describe('the operator store function (#2602)', () => {
     ]);
   });
 
+  it('holds each count to its key’s limit, and refuses words that contradict each other (#2618)', async () => {
+    const h = await withAthletes();
+    const fits = async (action: OperatorEntry['action'], detail: string): Promise<boolean> => {
+      try {
+        await h.write((store) =>
+          store.recordOperatorAction({ actor: { source: 'cli' }, action, at: 1 }, () => ({
+            outcome: 'done',
+            detail,
+            value: undefined,
+          })),
+        );
+        return true;
+      } catch (error) {
+        expect(error).toBeInstanceOf(OperatorEntryError);
+        return false;
+      }
+    };
+    // Every count key, at its limit and one past it, under an action that writes it.
+    for (const [key, limit] of Object.entries(OPERATOR_COUNT_LIMITS)) {
+      const action = OPERATOR_ACTIONS.find((each) =>
+        (OPERATOR_DETAILS[each].counts as readonly string[]).includes(key),
+      );
+      if (action === undefined) throw new Error(`no action writes the count ${key}`);
+      expect(await fits(action, `${key}=${String(limit)}`), `${key} at its limit`).toBe(true);
+      expect(await fits(action, `${key}=${String(limit + 1)}`), `${key} past it`).toBe(false);
+    }
+    // The review's probe: nine digits each, under keys `backup` writes.
+    expect(await fits('backup', 'blobs=51507400,removed=127800')).toBe(false);
+    // Words that cannot both be true.
+    for (const [action, detail] of [
+      ['restore', 'blobs=1,keys_rotated,keys_not_rotated'],
+      ['room_open', 'ride,race'],
+      ['room_ended', 'abuse,stuck,race,riders=2'],
+      ['room_ended', 'abuse,group,race,riders=2'],
+      ['analysis_settings_set', 'unchanged,local_url'],
+      ['admin_refused', 'code,csrf,refused=1'],
+      ['registration_mode_set', 'open,closed'],
+    ] as const) {
+      expect(await fits(action, detail), `${action}: ${detail}`).toBe(false);
+    }
+    // What the writers do write together still fits.
+    for (const [action, detail] of [
+      ['restore', 'blobs=1,keys_not_rotated'],
+      ['room_ended', 'abuse,lap_race,riders=12'],
+      ['analysis_settings_set', 'local_url,local_model'],
+      ['backup', 'blobs=1,removed=0,offbox_failed,requested'],
+    ] as const) {
+      expect(await fits(action, detail), `${action}: ${detail}`).toBe(true);
+    }
+  });
+
   it('refuses an action that is not on the closed list, before anything runs', async () => {
     const h = await withAthletes();
     let ran = false;
@@ -378,6 +431,23 @@ describe('the operator log is append-only in the schema (#2602)', () => {
     } finally {
       database.close();
     }
+  });
+
+  it('refuses, in the schema, a detail with an embedded NUL, which `glob` and `length` stop at (#2618, migration 0051)', async () => {
+    const h = await withAthletes();
+    const database = openDatabase(h.path);
+    try {
+      expect(() =>
+        database
+          .prepare(
+            "INSERT INTO operator_log (at, source, actor_athlete_id, action, detail, outcome) VALUES (1, 'cli', NULL, 'migrate', ?, 'done')",
+          )
+          .run('applied=1\u0000Any Text At All'),
+      ).toThrow(/CHECK/);
+    } finally {
+      database.close();
+    }
+    expect(await h.read(wholeLog)).toEqual([]);
   });
 
   it('refuses, in the schema, a detail with a space, a capital, a sign or a point, or past 200 characters', async () => {

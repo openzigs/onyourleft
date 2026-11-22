@@ -656,3 +656,90 @@ for (const viewport of TABLET_VIEWPORTS) {
     });
   }
 }
+
+/*
+ * #2837 — the standings' room is measured on an event of the layout's, never
+ * on a frame. The room hook reads boxes off the page (`standings-room.ts`
+ * §`useStandingsRoom`), which makes the engine lay the page out: on a frame
+ * that would be a forced layout sixty times a second on the tablet. So a
+ * lap race in a room is ridden for two seconds of frames with the auto-hide
+ * on, the HUD rewriting its readings as it goes, and every read of the
+ * standings panel's box is counted — the hook reads it once each time it
+ * measures, and nothing else on the page reads it.
+ *
+ * The control is the mutation recorded in the pull request: with the hook
+ * measuring on every frame, this counts one read a frame and fails.
+ */
+const COUNTED_FRAMES = 120;
+
+/** The most measurements a ride that changes no layout may make in {@link COUNTED_FRAMES} frames. */
+const MOST_MEASUREMENTS = 6;
+
+test('#2837 a moving lap race measures the standings’ room on no frame', async ({ page }) => {
+  const viewport = TABLET_VIEWPORTS.find((each) => each.width === 1280 && each.height === 800);
+  if (viewport === undefined) throw new Error('no 1280×800 tablet');
+  await openRide(page, viewport, '?room=lap-race&controls=hide');
+  const counted = await page.evaluate(async (frames) => {
+    const standings = document.querySelector('.oyl-hud__standings');
+    const hud = document.querySelector('.oyl-hud');
+    if (standings === null || hud === null) throw new Error('no standings on the HUD');
+    // Counted on the panel itself: an own method in front of the prototype's.
+    let measurements = 0;
+    Object.defineProperty(standings, 'getBoundingClientRect', {
+      configurable: true,
+      value: (): DOMRect => {
+        measurements += 1;
+        return Element.prototype.getBoundingClientRect.call(standings);
+      },
+    });
+    let rewrites = 0;
+    const rewritten = new MutationObserver((records) => {
+      rewrites += records.length;
+    });
+    rewritten.observe(hud, { subtree: true, childList: true, characterData: true });
+    let drawn = 0;
+    await new Promise<void>((resolve) => {
+      const frame = (): void => {
+        drawn += 1;
+        if (drawn >= frames) resolve();
+        else requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    rewritten.disconnect();
+    // The same panel to the end: a panel drawn anew would have been counted on nothing.
+    const kept = document.querySelector('.oyl-hud__standings') === standings;
+    return { measurements, rewrites, drawn, kept };
+  }, COUNTED_FRAMES);
+  console.log(
+    `#2837 a moving lap race: ${String(counted.measurements)} measurements of the standings' ` +
+      `room and ${String(counted.rewrites)} HUD rewrites in ${String(counted.drawn)} frames`,
+  );
+  expect(counted.drawn).toBe(COUNTED_FRAMES);
+  expect(counted.kept, 'the standings panel was replaced while it was counted').toBe(true);
+  // The ride moved: the HUD rewrote readings while it was counted.
+  expect(counted.rewrites, 'the HUD rewrote nothing: no ride to count').toBeGreaterThan(10);
+  expect(counted.measurements).toBeLessThanOrEqual(MOST_MEASUREMENTS);
+});
+
+/*
+ * #2837 — and a ride with no race moves nothing: hidden, its actions panel is
+ * clipped to the trainer's line where the panel begins, as #2600 left it. The
+ * move to the stage's bottom edge is a race's alone (`theme.css` §"#2837"),
+ * where the standings have a use for the room.
+ */
+test('#2837 with no race, the hidden actions panel stays where it was drawn', async ({
+  browser,
+}) => {
+  const viewport = TABLET_VIEWPORTS.find((each) => each.width === 1280 && each.height === 800);
+  if (viewport === undefined) throw new Error('no 1280×800 tablet');
+  const page = await ride(browser, viewport, '?controls=hide');
+  const top = (): Promise<number> =>
+    page.locator('.oyl-hud__actions').evaluate((panel) => panel.getBoundingClientRect().top);
+  const drawn = await top();
+  await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+  await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
+  await settled(page);
+  expect(await top()).toBeCloseTo(drawn, 0);
+  await page.context().close();
+});

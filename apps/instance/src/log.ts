@@ -141,7 +141,7 @@ function isRoomId(value: unknown): boolean {
   return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
 }
 
-/** A whole number from nought, as a count is. */
+/** A whole number from 0 up: a count, or a time in whole milliseconds. */
 function isCount(value: unknown): boolean {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
@@ -201,6 +201,24 @@ export const EVENT_KEYS: ReadonlyMap<
     'analysis-model',
     {
       setIn: (value) => value === 'app' || value === 'env' || value === 'none',
+    },
+  ],
+  // #2836 (ADR 0081 D-5.2): one bot-tactics call on the local model — which
+  // prompt, how it ended, and the model server's own figures for it: its load
+  // time, the tokens in and out, and the time reading and writing. The
+  // model's name and the whole call's `ms` are on the shared list. Numbers
+  // and closed words only: never the model's text, a move, or anything of
+  // the race, the rider or a place.
+  [
+    'tactics-call',
+    {
+      prompt: (value) => typeof value === 'string' && /^tactics-[0-9]{1,4}$/.test(value),
+      state: (value) => value === 'decision' || value === 'invalid' || value === 'failed',
+      loadMs: isCount,
+      tokensIn: isCount,
+      tokensOut: isCount,
+      promptEvalMs: isCount,
+      evalMs: isCount,
     },
   ],
   // #2781 (ADR 0080 D-4): which secret came from its file in the secrets

@@ -115,7 +115,12 @@ export class OtherPlayer implements RiderPlayerInUse {
   #lastReadingActive = false;
   /** When the last press was made, or `-Infinity`. */
   #pressedAt = Number.NEGATIVE_INFINITY;
-  #polling = false;
+  /** The poll that is out, until it settles. */
+  #inFlight: Promise<void> | undefined;
+  /** The one poll asked for while {@link #inFlight} was out, to start once it settles. */
+  #again: Promise<void> | undefined;
+  /** How many times {@link watch} was stopped: a poll asked before a stop is not asked after it. */
+  #stops = 0;
   readonly #own: OwnOutput | undefined;
   readonly #readingListeners = new Set<() => void>();
 
@@ -169,15 +174,40 @@ export class OtherPlayer implements RiderPlayerInUse {
     });
     return () => {
       stop();
+      this.#stops += 1;
       // A gap in the readings is not two in a row.
       this.#lastReadingActive = false;
     };
   }
 
-  /** One reading. A reading still in flight is not asked again. */
-  async poll(): Promise<void> {
-    if (this.#polling) return;
-    this.#polling = true;
+  /**
+   * One reading, by a poll that starts no earlier than this call (#2407). One
+   * poll is out at a time: a call while one is in flight is answered by one
+   * more poll once it settles, which every such call shares, and which a stop
+   * of {@link watch} in between cancels (the shell polls no ride route).
+   *
+   * @returns settled once that reading has been taken and told of.
+   */
+  poll(): Promise<void> {
+    if (this.#inFlight === undefined) {
+      const reading = this.#read().finally(() => {
+        this.#inFlight = undefined;
+      });
+      this.#inFlight = reading;
+      return reading;
+    }
+    if (this.#again === undefined) {
+      const stops = this.#stops;
+      const askAgain = (): Promise<void> => {
+        this.#again = undefined;
+        return this.#stops === stops ? this.poll() : Promise.resolve();
+      };
+      this.#again = this.#inFlight.then(askAgain, askAgain);
+    }
+    return this.#again;
+  }
+
+  async #read(): Promise<void> {
     // #2253: our own stream, open at the ask or opened by the answer, would be
     // read as music playing.
     const quietAtAsk = this.#own?.quietToken();
@@ -186,8 +216,6 @@ export class OtherPlayer implements RiderPlayerInUse {
       active = (await this.#port.otherAudioActive()) === true;
     } catch {
       active = false;
-    } finally {
-      this.#polling = false;
     }
     if (
       this.#own !== undefined &&

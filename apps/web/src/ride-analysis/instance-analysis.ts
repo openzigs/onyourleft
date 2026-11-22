@@ -504,7 +504,8 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
         athleteId: owner,
         text: screened,
         templateId: template.id,
-        templateVersion: template.version,
+        // #2932: the version the instance ran; an older instance names none.
+        templateVersion: result.templateVersion ?? template.version,
         source: job.source,
         includedPose: job.includedPose,
         missingSections: [],

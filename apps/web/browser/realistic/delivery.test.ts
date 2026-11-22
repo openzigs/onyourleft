@@ -27,15 +27,19 @@ const frame = rideFrame({
 });
 
 describe('the realistic page’s Delivery round — #1815', () => {
-  it('hands the frame the count the URL asks for, of each piece, every obstacle kind among them', () => {
+  it('hands the frame the count the URL asks for, of each piece, every obstacle and marker kind among them', () => {
     const count = parseConfig('?route=village&delivery=20').delivery ?? 0;
     expect(count).toBe(20);
     const round = deliveryAhead(frame, VILLAGE_HOLD_METRES, count);
     expect(round.parcels).toHaveLength(20);
     expect(round.markers).toHaveLength(20);
     expect(round.obstacles).toHaveLength(20);
+    // #2367: the moving hazards and the tighter targets too, as the hardest level has them.
     expect(new Set(round.obstacles.map((obstacle) => obstacle.kind))).toEqual(
-      new Set(['bin', 'trolley', 'cone', 'parked-car']),
+      new Set(['bin', 'trolley', 'cone', 'parked-car', 'dog', 'car-pulling-out', 'oncoming-rider']),
+    );
+    expect(new Set(round.markers.map((marker) => marker.kind))).toEqual(
+      new Set(['house', 'mailbox', 'no-delivery']),
     );
   });
 

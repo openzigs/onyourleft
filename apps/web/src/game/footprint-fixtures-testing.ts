@@ -1095,6 +1095,216 @@ export function parksFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** Where {@link footwaysFixture}'s zebra crossing crosses the road, metres along it. */
+export const FOOTWAYS_FIXTURE_CROSSING = 1_200;
+
+/**
+ * #2972's footways: 3 km of level road. From 950 m to 1 550 m a suburb —
+ * residential land, houses 22 m out both sides, a sidewalk 6 m out on each
+ * side and a cycleway 9.5 m out on the left — with a zebra crossing the road
+ * at {@link FOOTWAYS_FIXTURE_CROSSING} and a footway's crossing of a side
+ * street nowhere near the route (no zebra). From 1 650 m to 2 150 m a park on
+ * the left with a park path along it, a footway across it and a flight of
+ * steps up from the road. Covered throughout; arithmetic, not a real place.
+ */
+export function footwaysFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const house: StreetHouse = { corners: rectangleBeside(0, 0, 12, 8.5), height: 6.5 };
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_000; along < 1_500; along += 25) {
+    for (const side of [1, -1]) {
+      const ring = house.corners.map(([a, n]) => [along + a, side * 22 + n] as const);
+      buildings.push(buildingBeside(profile, origin, [ring], house.height));
+    }
+  }
+  const along = (from: number, to: number, lateral: number): (readonly [number, number])[] => {
+    const pairs: (readonly [number, number])[] = [];
+    for (let at = from; at <= to; at += 10) pairs.push([at, lateral]);
+    return pairs;
+  };
+  const path = (kindDetail: string, pairs: readonly (readonly [number, number])[]) => ({
+    kind: 'path',
+    kindDetail,
+    line: ringBeside(profile, origin, pairs),
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'footways',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_550, -70, 70),
+        landBeside(profile, origin, 'landuse', 'park', 1_650, 2_150, -200, -8),
+      ],
+      buildings,
+      paths: [
+        path('sidewalk', along(950, 1_550, 6)),
+        path('sidewalk', along(950, 1_550, -6)),
+        path('cycleway', along(950, 1_550, -9.5)),
+        path('crossing', [
+          [FOOTWAYS_FIXTURE_CROSSING, -6],
+          [FOOTWAYS_FIXTURE_CROSSING, 6],
+        ]),
+        // A crossing of a side street 60 m off the route, parallel to it: no zebra.
+        path('crossing', [
+          [1_300, 60],
+          [1_310, 60],
+        ]),
+        path('', along(1_650, 2_150, -40)),
+        path('footway', [
+          [1_700, -12],
+          [1_800, -70],
+          [1_900, -120],
+        ]),
+        path('steps', [
+          [2_000, -10],
+          [2_000, -18],
+        ]),
+      ],
+      streets: [],
+    },
+  };
+}
+
+/**
+ * #2973's neighbourhood: a grid of streets the route runs through, for the
+ * nearby streets' by-eye pair (`town=streets`, before `levers=-nearby-streets`).
+ * 3 km of level road; from {@link NEIGHBOURHOOD_FROM} to
+ * {@link NEIGHBOURHOOD_TO}, on residential land:
+ *
+ * - **Parallel streets** 50, 100 and 150 m out each side, residential, which
+ *   never touch the route;
+ * - **cross streets** every 150 m, 170 m each side, which do: a junction's
+ *   stub, then the street running on from it;
+ * - **houses** of 9 m square, 13 m back from either side of each parallel
+ *   street, every 20 m, with every third one's driveway mapped (a `service`
+ *   road from the street to its door);
+ * - **a parking aisle** on the right at 1 400 m, and one footprint the map
+ *   draws across a parallel street at 1 620 m — which the road wins
+ *   (`on-street`).
+ *
+ * Arithmetic, not a real place.
+ */
+export function neighbourhoodFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const streets: StreetFeature[] = [];
+  const buildings: BuildingFeature[] = [];
+  const laterals = [50, 100, 150];
+  for (const side of [1, -1]) {
+    for (const lateral of laterals) {
+      streets.push(
+        streetBeside(
+          profile,
+          origin,
+          [
+            [NEIGHBOURHOOD_FROM, lateral * side],
+            [NEIGHBOURHOOD_TO, lateral * side],
+          ],
+          'residential',
+        ),
+      );
+      for (let along = NEIGHBOURHOOD_FROM + 15; along < NEIGHBOURHOOD_TO - 10; along += 20) {
+        // Clear of the cross streets' corners.
+        const block = (along - NEIGHBOURHOOD_FROM) % 150;
+        if (block < 12 || block > 138) continue;
+        for (const facing of [1, -1]) {
+          const out = (lateral + facing * 13) * side;
+          // Not on the road's own verge, nor in the next street's houses.
+          if (Math.abs(out) < 30 || Math.abs(out) > 165) continue;
+          buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, out, 9, 9)], 7));
+          if (Math.round(along / 20) % 3 === 0) {
+            streets.push(
+              streetBeside(
+                profile,
+                origin,
+                [
+                  [along, lateral * side],
+                  [along, (lateral + facing * 8.5) * side],
+                ],
+                'service',
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+  for (let along = NEIGHBOURHOOD_FROM; along <= NEIGHBOURHOOD_TO; along += 150) {
+    streets.push(
+      streetBeside(
+        profile,
+        origin,
+        [
+          [along, -170],
+          ...[...laterals].reverse().map((lateral) => [along, -lateral] as const),
+          ...laterals.map((lateral) => [along, lateral] as const),
+          [along, 170],
+        ],
+        'residential',
+      ),
+    );
+  }
+  // A parking aisle, and a footprint the map draws over a street.
+  streets.push(
+    streetBeside(
+      profile,
+      origin,
+      [
+        [1_380, 66],
+        [1_440, 66],
+        [1_440, 84],
+        [1_380, 84],
+      ],
+      'service',
+    ),
+  );
+  buildings.push(buildingBeside(profile, origin, [rectangleBeside(1_620, 100, 12, 12)], 8));
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'neighbourhood',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(
+          profile,
+          origin,
+          'landuse',
+          'residential',
+          NEIGHBOURHOOD_FROM - 50,
+          NEIGHBOURHOOD_TO + 50,
+          -180,
+          180,
+        ),
+      ],
+      buildings,
+      paths: [],
+      streets,
+    },
+  };
+}
+
+/** Where {@link neighbourhoodFixture}'s streets start along its road, metres: **900**. */
+export const NEIGHBOURHOOD_FROM = 900;
+
+/** Where they end: **2 100**. */
+export const NEIGHBOURHOOD_TO = 2_100;
+
 /**
  * #2660's fixture: railways across 3 km of level road, for the owner's
  * by-eye frames (`?town=rail`). **Lines from arithmetic, no real place.**
@@ -1143,6 +1353,45 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
         { kindDetail: 'rail', grade: 'ground', line: across(1_700, 30) },
         { kindDetail: 'rail', grade: 'bridge', line: across(2_000, 0) },
       ],
+    },
+  };
+}
+
+/**
+ * #2696's fixture: houses on residential land, each with a back corner on a
+ * yard, beside 3 km of level road, for the owner's by-eye frames
+ * (`?town=yards`). **Rectangles from arithmetic, no real place.** On the
+ * right, 30 m to 40 m back, a house every 60 m from 1 000 m whose back
+ * corner stands on a `garden`, `grass`, `village_green` and `allotments`,
+ * then one on a `park`, the control, which is dropped.
+ */
+export function yardsFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  const kinds = ['garden', 'grass', 'village_green', 'allotments', 'park'];
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'yards',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('residential', 950, 1_350, 8, 200),
+        ...kinds.map((kind, index) => land(kind, 1_001 + index * 60, 1_030 + index * 60, 34, 70)),
+      ],
+      buildings: kinds.map((_, index) =>
+        buildingBeside(profile, origin, [rectangleBeside(1_000 + index * 60, 35, 12, 10)]),
+      ),
+      paths: [],
+      streets: [],
     },
   };
 }
