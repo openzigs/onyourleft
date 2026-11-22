@@ -23,6 +23,8 @@ import {
   type GeographicPosition,
 } from '@onyourleft/domain';
 
+import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../../map/basemap';
+
 /** Which of the three ways the rider chose the start. */
 export type OpenWorldStartSource = 'pin' | 'route' | 'ride';
 
@@ -34,7 +36,7 @@ export interface OpenWorldStart {
 
 /** Why a place cannot start an open-world ride. */
 export type OpenWorldStartRefusal =
-  /** Outside the map's coverage: the basemap archive holds streets in the US only (ADR 0090 D-7.3). */
+  /** Outside the map's coverage: the published basemap archive holds streets in the US only (ADR 0090 D-7.3). */
   | 'outside-coverage'
   /** There was no position to start from: a ride recorded indoors, or a route with no line. */
   | 'no-position';
@@ -44,7 +46,7 @@ export type OpenWorldStartOutcome =
   | { readonly kind: 'refused'; readonly refusal: OpenWorldStartRefusal };
 
 /** A box of longitude and latitude, west to east and south to north. */
-interface CoverageBox {
+export interface CoverageBox {
   readonly west: number;
   readonly south: number;
   readonly east: number;
@@ -71,10 +73,32 @@ export const US_BASEMAP_COVERAGE: readonly CoverageBox[] = [
   { west: -161, south: 18.5, east: -154, north: 22.5 },
 ];
 
-/** Whether `position` is inside {@link US_BASEMAP_COVERAGE}. */
-export function insideCoverage(position: GeographicPosition): boolean {
+/**
+ * Where a start may stand: the boxes the archive has streets in, or
+ * `'unknown'` when this build cannot say — every place is let through, and the
+ * session's own block reads find whether there is a street (#2896).
+ */
+export type StartCoverage = readonly CoverageBox[] | 'unknown';
+
+/**
+ * The coverage of the archive this build draws its map from (#2985). Only the
+ * published archive's is known here: {@link US_BASEMAP_COVERAGE}. A
+ * self-hoster's own archive (`VITE_BASEMAP_PMTILES_URL`, ADR 0090 D-8) may hold
+ * any part of the world, so its coverage is `'unknown'` and no start is
+ * refused for its place; a build with no archive at all is the same.
+ */
+export function startCoverage(basemap: BasemapConfig | undefined): StartCoverage {
+  return basemap?.archiveUrl === PUBLISHED_BASEMAP_URL ? US_BASEMAP_COVERAGE : 'unknown';
+}
+
+/** Whether `position` is inside `coverage`, {@link US_BASEMAP_COVERAGE} unless another is given. */
+export function insideCoverage(
+  position: GeographicPosition,
+  coverage: StartCoverage = US_BASEMAP_COVERAGE,
+): boolean {
+  if (coverage === 'unknown') return true;
   const { latitude, longitude } = position;
-  return US_BASEMAP_COVERAGE.some(
+  return coverage.some(
     (box) =>
       longitude >= box.west &&
       longitude <= box.east &&
@@ -85,11 +109,14 @@ export function insideCoverage(position: GeographicPosition): boolean {
 
 /**
  * The one way a start is made: from a position and the source it came from,
- * or a refusal. A position that is not a finite place is `no-position`.
+ * or a refusal. A position that is not a finite place is `no-position`, and
+ * one outside `coverage` is `outside-coverage`. `coverage` is the published
+ * archive's unless the caller passes {@link startCoverage} of its own basemap.
  */
 export function openWorldStart(
   position: GeographicPosition | undefined,
   source: OpenWorldStartSource,
+  coverage: StartCoverage = US_BASEMAP_COVERAGE,
 ): OpenWorldStartOutcome {
   if (
     position === undefined ||
@@ -98,7 +125,7 @@ export function openWorldStart(
   ) {
     return { kind: 'refused', refusal: 'no-position' };
   }
-  if (!insideCoverage(position)) return { kind: 'refused', refusal: 'outside-coverage' };
+  if (!insideCoverage(position, coverage)) return { kind: 'refused', refusal: 'outside-coverage' };
   return {
     kind: 'start',
     start: {

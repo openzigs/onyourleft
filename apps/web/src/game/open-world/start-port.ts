@@ -25,7 +25,12 @@ import type {
 } from '@onyourleft/store';
 
 import type { OpenWorldEntry } from './entry';
-import { openWorldStart, type OpenWorldStart, type OpenWorldStartOutcome } from './start';
+import {
+  openWorldStart,
+  type OpenWorldStart,
+  type OpenWorldStartOutcome,
+  type StartCoverage,
+} from './start';
 
 /** How many saved routes the picker lists: the Routes screen's own budget (`routes/store-port.ts`). */
 export const START_ROUTE_LIMIT = 50;
@@ -79,6 +84,11 @@ export interface OpenWorldStartPortOptions {
   readonly entry: OpenWorldEntry;
   /** After the start is handed over: the shell opens the ride. */
   readonly opened: () => void;
+  /**
+   * Where a route's or a ride's start may stand: `start.ts` §`startCoverage`
+   * of the build's basemap (#2985). The published archive's when unset.
+   */
+  readonly coverage?: StartCoverage | undefined;
 }
 
 /** The first sample at which both channels hold a position, or `undefined`. */
@@ -98,14 +108,14 @@ function firstPosition(
 }
 
 export function openWorldStartPort(options: OpenWorldStartPortOptions): OpenWorldStartPort {
-  const { store, owner, entry } = options;
+  const { store, owner, entry, coverage } = options;
   return {
     listRouteStarts: async () => {
       const routes = await store.listRoutes(owner, START_ROUTE_LIMIT);
       return routes.map((route) => ({
         id: route.id,
         name: route.name,
-        start: openWorldStart(route.profile.positions[0], 'route'),
+        start: openWorldStart(route.profile.positions[0], 'route', coverage),
       }));
     },
     listRideStarts: async () => {
@@ -129,9 +139,9 @@ export function openWorldStartPort(options: OpenWorldStartPortOptions): OpenWorl
         store.getStreamChannel(owner, activity, 'longitude'),
       ]);
       if (latitudes === undefined || longitudes === undefined) {
-        return openWorldStart(undefined, 'ride');
+        return openWorldStart(undefined, 'ride', coverage);
       }
-      return openWorldStart(firstPosition(latitudes, longitudes), 'ride');
+      return openWorldStart(firstPosition(latitudes, longitudes), 'ride', coverage);
     },
     begin: (start) => {
       entry.hand(start);
