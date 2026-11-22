@@ -412,6 +412,7 @@ export function joinCorridorFeatures(
     streets: [...first.streets, ...second.streets],
     places: [...first.places, ...second.places],
     waterLines: [...(first.waterLines ?? []), ...(second.waterLines ?? [])],
+    rails: [...(first.rails ?? []), ...(second.rails ?? [])],
   };
 }
 

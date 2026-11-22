@@ -10,7 +10,11 @@
  */
 
 import type { TileId } from '@onyourleft/map-features';
-import { residentialBlockTile, roadFieldsTile } from '@onyourleft/map-features/testing';
+import {
+  residentialBlockTile,
+  roadFieldsTile,
+  streetsTile,
+} from '@onyourleft/map-features/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -695,8 +699,11 @@ describe('a block read in part is read again during the ride — #2990', () => {
   const FAILING = tilesOfBlock(blockOf(START) as BlockId)[0] as TileId;
   const isFailing = (tile: TileId): boolean => tile.x === FAILING.x && tile.y === FAILING.y;
 
-  /** An archive that fails {@link FAILING} the first `failures` times it is asked for. */
-  function failingArchive(failures: number) {
+  /**
+   * An archive that fails {@link FAILING} the first `failures` times it is
+   * asked for, and answers every other ask with `answer`'s tile.
+   */
+  function failingArchive(failures: number, answer: () => Uint8Array = roadFieldsTile) {
     const { archive: answering } = countingArchive();
     const asked: TileId[] = [];
     let failed = 0;
@@ -708,7 +715,7 @@ describe('a block read in part is read again during the ride — #2990', () => {
           failed += 1;
           return Promise.reject(new Error('the connection dropped'));
         }
-        return Promise.resolve(roadFieldsTile());
+        return Promise.resolve(answer());
       },
     };
     return { archive, asked };
@@ -752,6 +759,25 @@ describe('a block read in part is read again during the ride — #2990', () => {
     expect(after?.features.streets.slice(0, streetsBefore)).toStrictEqual(before?.features.streets);
     // Told: the west column dropped, three blocks read, and the block read again.
     expect(changes).toBe(9 + 1 + 3 + 1);
+  });
+
+  it('keeps the railway lines of both reads when the block is read again (#3037)', async () => {
+    // The street fixture carries two railway lines a tile (#2660).
+    const { archive } = failingArchive(1, streetsTile);
+    const area = reader({ archive });
+    await area.start(START);
+    const before = startBlock(area);
+    expect(before?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+    const railsBefore = before?.features.rails ?? [];
+    expect(railsBefore).toHaveLength(3 * 2);
+
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    const after = startBlock(area);
+    expect(after?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+    // The three tiles read first keep theirs, and the tile read again adds its two.
+    expect(after?.features.rails).toHaveLength(4 * 2);
+    expect(after?.features.rails?.slice(0, railsBefore.length)).toStrictEqual(railsBefore);
   });
 
   it('reads it again at most twice while it is held, however many crossings keep it', async () => {
