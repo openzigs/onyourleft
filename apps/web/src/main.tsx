@@ -77,6 +77,7 @@ import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
 import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
 import { hrefFor, matchHash, routeById } from './shell/routes';
 import { createOpenWorldEntry } from './game/open-world/entry';
+import { lazyOpenWorldSessions } from './game/open-world/session-lazy';
 import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
@@ -847,6 +848,15 @@ function buildGamePort(
     // optional member, so dropping this line is green in `check:wiring`;
     // `world-data/corridor-wiring.test.tsx` is what goes red.
     loadWorldCorridor: (route, signal, progress) => corridors.load(route, signal, progress),
+    // #2896: the open-world ride — the start the picker handed to the tab's
+    // one entry, read into its first blocks, graph and rolling route when the
+    // game opens. ⚠️ An optional member, so dropping this line is green in
+    // `check:wiring`; `game/open-world/session-wiring.test.ts` is what goes red.
+    openWorld: lazyOpenWorldSessions({
+      entry: openWorldEntry,
+      basemap: browserBasemapConfig,
+      mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+    }),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
