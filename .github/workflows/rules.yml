@@ -21,10 +21,9 @@
 #            and third-party-notices gates
 #   tests-1 to tests-3
 #            the Vitest suite, divided by Vitest project since #2154 and the
-#            `web` project by path since #3019: `web`'s `src/game/` files
-#            (not its subdirectories) in `tests-1`, every other project and
-#            the accessibility gate in `tests-2`, the rest of `web` in
-#            `tests-3`
+#            `web` project by path since #3019: `web`'s `src/game/` in
+#            `tests-1`, every other project and the accessibility gate in
+#            `tests-2`, the rest of `web` in `tests-3`
 #   browser-1 to browser-5
 #            the pinned Chromium and the browser gate (#63), a fifth each
 #            since #2376 (thirds since #1720, halves since #1362), divided by
@@ -444,15 +443,15 @@ jobs:
   # at its 16-minute stop on four runs in about an hour with every file it had
   # finished green, one of them a merge-queue entry it ejected: every one of
   # its 870 files ran 1.5 to 1.7 times slower on those runners, not one slow
-  # test. The stop did NOT move. The `web` project is divided by PATH, on the
-  # per-file times of queue run 45024363392: its 240 files directly in
-  # `src/game/` are `tests-1`'s part (`test:required:shard-1`, about 47 % of
-  # the project's time), and every other `web` file, `src/game/`'s
-  # subdirectories included, is `tests-3`'s (`test:required:shard-3`).
-  # `tests-2` is unchanged. A NEW `web` test file lands in one of the two by
-  # where it is, with no edit here, and `check:test-split` fails one in
-  # neither or both. docs/agents/ci.md section 4c "Three Vitest shards --
-  # #3019" has the measurements.
+  # test. The stop did NOT move. The `web` project is divided by PATH, as the
+  # nightly coverage run already was (#2285): its 340 files under
+  # `src/game/` are `tests-1`'s part (`test:required:shard-1`) and its other
+  # 531 are `tests-3`'s (`test:required:shard-3`). `tests-2` is unchanged. A
+  # NEW `web` test file lands in one of the two by where it is, with no edit
+  # here, and `check:test-split` fails one in neither or both.
+  # docs/agents/ci.md section 4c "Three Vitest shards -- #3019" has the
+  # measurements, and why the first division tried (only the files directly
+  # in `src/game/`) was not kept.
   #
   # `check:test-split` (in the `checks` shard) is what holds that every test
   # file runs exactly once across this workflow and the nightly one: it asks
@@ -549,7 +548,7 @@ jobs:
       #
       # ⚠️ Since #2154 this is the `web` project's part of that run, and the
       # other projects' part is `tests-2`'s; since #3019 it is only `web`'s
-      # files directly in `src/game/`, and the rest of `web` is `tests-3`'s.
+      # files under `src/game/`, and the rest of `web` is `tests-3`'s.
       # `pnpm run test:required` is still the whole run, locally.
       - name: Tests
         run: pnpm run test:required:shard-1
@@ -675,7 +674,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Every `web` file not directly in `src/game/`, since #3019: @see
+      # Every `web` file not under `src/game/`, since #3019: @see
       # `tests-1`'s `Tests` step.
       - name: Tests
         run: pnpm run test:required:shard-3

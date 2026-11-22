@@ -424,8 +424,8 @@ three_parts() {
   lists coverage-shard-2 apps/web/src/fast.test.ts packages/store/src/store.test.ts
 }
 
-three_parts "pnpm run test:required --project web src/game/ --exclude 'src/game/*/**/*.test.*'" \
-  "pnpm run test:required --project web --exclude 'src/game/*.test.*'"
+three_parts 'pnpm run test:required --project web src/game/' \
+  "pnpm run test:required --project web --exclude 'src/game/**'"
 run_check
 assert_green 'three parts, two of them one project divided by path filters and excludes, pass'
 assert_says 'and say how the required run is divided' "the required run's 3 are 1 in \`test:required:shard-1\`, 1 in \`test:required:shard-2\`, 1 in \`test:required:shard-3\`"
@@ -436,17 +436,17 @@ assert_red 'a part with a path filter and no project filter fails'
 assert_says 'and names the part' '`test:required:shard-1` is'
 
 three_parts 'pnpm run test:required --project web src/game/ --exclude' \
-  "pnpm run test:required --project web --exclude 'src/game/*.test.*'"
+  "pnpm run test:required --project web --exclude 'src/game/**'"
 run_check
 assert_red 'a dangling --exclude in a part of the required run fails'
 
 three_parts "pnpm run test:required --project web src/game/ --exclude --coverage" \
-  "pnpm run test:required --project web --exclude 'src/game/*.test.*'"
+  "pnpm run test:required --project web --exclude 'src/game/**'"
 run_check
 assert_red 'a flag where an exclude glob belongs fails'
 
-three_parts "pnpm run test:required --project web src/game/ --exclude 'src/game/*/**/*.test.*'" \
-  "pnpm run test:required --project web --exclude 'src/game/*.test.*' --coverage"
+three_parts 'pnpm run test:required --project web src/game/' \
+  "pnpm run test:required --project web --exclude 'src/game/**' --coverage"
 run_check
 assert_red 'coverage after a path filter and an exclude fails'
 assert_says 'and names the part' '`test:required:shard-3` is'

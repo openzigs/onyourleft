@@ -177,8 +177,8 @@ pnpm run test:required
 
 # The same run as CI runs it since #2154, in three parts since #3019 (§4c
 # §"Three Vitest shards"): each is `test:required` with a `--project` filter
-# and, for the two halves of `web`, path filters and excludes. The first is
-# `web`'s files directly in `src/game/`, the second every other project, the
+# and, for the two halves of `web`, a path filter or an exclude. The first
+# is `web`'s files under `src/game/`, the second every other project, the
 # third the rest of `web`, one per job. `check:test-split` fails a part that
 # is not that shape, a part over no file, and a file in no part or in two; a
 # NEW Vitest project is in the second part without an edit. Locally
