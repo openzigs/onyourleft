@@ -312,3 +312,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   member but `url`, `env` and `hot`, and a `Worker` or `SharedWorker` built from anything but a
   literal `new URL('…', import.meta.url)`, which is followed into the module it names. The test is
   `apps/web/src/game/delivery/delivery-cannot-reach-trainer.test.ts`. (#1807)
+- **2026-11-22** — **D-2 item 4 and the answer to D-6 item 1 are proposed to be superseded in part,
+  for Delivery rounds, by
+  [ADR 0094](0094-a-delivery-crash-stops-the-drawn-rider-and-nothing-reaches-the-trainer.md)**
+  ([#3011](https://github.com/openzigs/onyourleft/issues/3011)), **Proposed** on that date on the
+  owner's request of the 2026-11-21 tablet session. If the owner accepts it, a crash still costs its
+  points and also stops the drawn rider, who gets back on and rides on, on a second distance that D-6
+  item 1 foresaw: the grade, the trainer's timing and the recording stay on the simulation's
+  odometer. D-2 items 1, 2, 3 and 5 and the amendment above stand unchanged, and ADR 0094 D-5
+  restates item 1 word for word. Until it is accepted, nothing here changes. This entry is a
+  pointer.

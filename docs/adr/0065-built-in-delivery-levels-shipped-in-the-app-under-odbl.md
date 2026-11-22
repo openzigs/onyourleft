@@ -535,3 +535,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   only. Inside the Android shell the set ships in the APK and nothing is downloaded. D-7's fallback
   holds unchanged: if the set cannot be loaded, the ride is in the standard world and the ride
   screen says so. No other decision changes. Recorded by #2362.
+- **2026-11-22** — **D-11's second sentence (*"A crash costs points only … no slow-down of the drawn
+  rider"*) and the answer to D-15 Q4 are proposed to be superseded in part by
+  [ADR 0094](0094-a-delivery-crash-stops-the-drawn-rider-and-nothing-reaches-the-trainer.md)**
+  ([#3011](https://github.com/openzigs/onyourleft/issues/3011)), **Proposed** on that date, which is
+  the superseding ADR *What would make this ADR wrong* names for *"A crash slows the drawn rider"*.
+  If the owner accepts it, a crash on a level, as on a rider's own route, also stops the drawn rider
+  on a distance the trainer never reads. D-11's first sentence, that nothing a level does changes
+  what the trainer is sent or when, and its tests stand unchanged. Until it is accepted, nothing here
+  changes. This entry is a pointer.
