@@ -265,7 +265,7 @@ export function sidewalkTile(): Uint8Array {
 export const STREET_FIXTURE_ROADS: readonly {
   readonly kind: string;
   readonly kindDetail?: string;
-  readonly sink: 'streets' | 'paths' | null;
+  readonly sink: 'streets' | 'paths' | 'rails' | null;
   /** `is_bridge` and `is_tunnel`, where the feature carries them, and the grade a street gets. */
   readonly isBridge?: boolean;
   readonly isTunnel?: boolean;
@@ -325,13 +325,51 @@ export const STREET_FIXTURE_ROADS: readonly {
       [4000, 2900],
     ],
   },
+  // #2660: a railway kept as track, and the details that are not.
   {
     kind: 'rail',
     kindDetail: 'rail',
-    sink: null,
+    sink: 'rails',
     line: [
       [100, 3300],
       [4000, 3300],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'light_rail',
+    sink: 'rails',
+    isBridge: true,
+    grade: 'bridge',
+    line: [
+      [100, 3350],
+      [4000, 3350],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'subway',
+    sink: null,
+    line: [
+      [100, 3400],
+      [4000, 3400],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'tram',
+    sink: null,
+    line: [
+      [100, 3450],
+      [4000, 3450],
+    ],
+  },
+  {
+    kind: 'rail',
+    sink: null,
+    line: [
+      [100, 3500],
+      [4000, 3500],
     ],
   },
   {

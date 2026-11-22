@@ -416,13 +416,26 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-8, D-9 (CI bakes only the synthetic fixture), and D-1 to D-11 otherwise. **Status: proposed, in
   force only when the owner rules on #2659**; the PR is not to be merged before that, and this
   entry is to be corrected or struck there if the ruling differs.
+- **2026-11-19** — **PROPOSED, pending the owner's ruling on
+  [#2660](https://github.com/openzigs/onyourleft/issues/2660): the demo bundle carries railway
+  lines.** The bundle's `features` is `corridor.ts` §`packedCorridorFeatures`, and from #2660 that
+  packs the railway lines [ADR 0054](0054-towns-from-real-map-data.md)'s entry of this date
+  declares, as `rails` (packed version 6): each a `kind_detail`, a grade and a line, with no name,
+  no operator and no OSM id. **A bundle baked from that build publishes them** under ODbL 1.0, as it
+  publishes every other record in it (D-3), and D-4's §4.6 a offer covers them unchanged, because
+  the offer is the bundle file itself. D-2.1's list reads, from #2660, as the 2026-11-15 entry left
+  it, with *"water lines with `kind`"* followed by *"; railway lines with `kind_detail` and
+  grade"*. What still stands, unchanged: D-5 (the bundle is never committed), D-8, D-9 (CI bakes
+  only the synthetic fixture), and D-1 to D-11 otherwise. **Status: proposed, in force only when
+  the owner rules on #2660**; the PR is not to be merged before that, and this entry is to be
+  corrected or struck there if the ruling differs.
 - **2026-11-21** — **PROPOSED, pending the owner's ruling on
   [#2974](https://github.com/openzigs/onyourleft/issues/2974): the demo bundle's water lines include
   ditches and drains.** [ADR 0054](0054-towns-from-real-map-data.md)'s entry of this date keeps a
   water line of `kind` `ditch` or `drain` as well as `river`, `stream` or `canal`, so a bundle baked
   from that build publishes them in `waterLines` under ODbL 1.0, as it publishes the other three
-  (D-3), each a `kind` and a line with no name, no OSM id and no `layer`. The packed version stays 5.
-  The bundle's reader version is 6, and the preset record `apps/web/demo/routes/upstate-climb.bake.json`
+  (D-3), each a `kind` and a line with no name, no OSM id and no `layer`. The packed version stays 6.
+  The bundle's reader version is 7, and the preset record `apps/web/demo/routes/upstate-climb.bake.json`
   is re-recorded for it. D-4's §4.6 a offer covers them unchanged. What still stands, unchanged:
   everything the 2026-11-15 entry for #2659 left standing. **Status: proposed, in force only when
   the owner rules on #2974**; the PR is not to be merged before that, and this entry is to be

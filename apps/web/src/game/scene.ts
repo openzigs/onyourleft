@@ -121,14 +121,18 @@ import {
 import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
+  levelCrossings,
   mappedJunctions,
   onSideRoad,
   SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
+  withLevelCrossings,
   type SideRoad,
 } from './cross-streets';
+import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { nearbyStreets, nearbyStreetsAt } from './nearby-streets';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
@@ -407,6 +411,20 @@ export interface SceneInput {
    */
   readonly parkDressingOff?: boolean | undefined;
   /**
+   * #2973's nearby streets left undrawn: only the route, its junctions'
+   * stubs and its overpasses' roads (`nearby-streets.ts`) — the realistic
+   * page's `-nearby-streets` lever, and nothing else. Optional the safe way
+   * round, for {@link centreline}'s reason.
+   */
+  readonly nearbyStreetsOff?: boolean | undefined;
+  /**
+   * #2972's mapped footways, cycleways, park paths, steps and zebras left
+   * undrawn (`footway-surfaces.ts`) — the realistic page's `-footways` lever,
+   * the tablet's cost pair, and nothing else. Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly footwaysOff?: boolean | undefined;
+  /**
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
    * §`steeredLateralFor`. It takes the racing line's place for the RIDER
@@ -586,7 +604,20 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     (corridor.centre[0] as CorridorPoint).along,
     (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
     riderDistance,
-    junctions ?? [],
+    // #2660: and a level crossing wherever a mapped railway crosses at grade,
+    // drawn with them and kept clear of the scenery as they are.
+    input.worldCorridor === undefined
+      ? []
+      : withLevelCrossings(
+          junctions ?? [],
+          levelCrossings(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+          ),
+        ),
     input.landClass ?? NO_LAND_CLASS,
   );
   // #459, #2661: the streams' bridges and the mapped overpasses and
@@ -596,8 +627,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
   const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
+  // #2973: and the mapped streets that never touch the route, out to the fog —
+  // side roads too, so the same mesh draws them and the scenery keeps off them.
+  const nearby =
+    input.worldCorridor === undefined || input.nearbyStreetsOff === true
+      ? NO_SIDE_ROADS
+      : nearbyStreetsAt(
+          nearbyStreets(input.worldCorridor, input.profile, input.origin),
+          input.profile,
+          input.origin,
+          seed,
+          riderDistance,
+          input.landClass ?? NO_LAND_CLASS,
+        );
   const sideRoads =
-    crossings.roads.length === 0 ? crossSideRoads : [...crossSideRoads, ...crossings.roads];
+    crossings.roads.length === 0 && nearby.length === 0
+      ? crossSideRoads
+      : [...crossSideRoads, ...crossings.roads, ...nearby];
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   // #1535: the village streets along exactly the stretch of road this frame
   // drew, for `scenery`'s reason — and outside the structures' budget,
@@ -669,11 +715,35 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     billboards,
     sideRoads,
     streets,
+    // #2972: the corridor's mapped footways drawn as surfaces round the camera,
+    // off those streets' pavements (#1620), and a zebra where one crosses the road.
+    footways:
+      input.worldCorridor === undefined || input.footwaysOff === true
+        ? NO_FOOTWAYS
+        : footwaysInView(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+            camera.x,
+            camera.z,
+            streets,
+          ),
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     // #2728: each on the ground drawn under them, and nobody on the drawn water.
-    people: people(input, streets, camera, seed, sideRoads, ground),
+    people: people(
+      input,
+      streets,
+      camera,
+      seed,
+      nearby.length === 0
+        ? sideRoads
+        : [...crossSideRoads, ...crossings.roads, ...withinPeopleReach(nearby, camera)],
+      ground,
+    ),
     // #2722: and the other cyclists on the road, kept clear of the rider.
     ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
@@ -697,6 +767,40 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       lineStands(input.profile, input.units ?? 'metric'),
     ),
   };
+}
+
+/** No side roads: a frame with no nearby street. */
+const NO_SIDE_ROADS: readonly SideRoad[] = [];
+
+/**
+ * How far past {@link PEOPLE_FAR_METRES} of the camera a nearby street still
+ * reaches the people, in metres: **64** — `people.ts` §`besideSideRoads` files
+ * a segment in every 32 m cell within its half-width and a margin of it, and
+ * reads only the cell a person stands in, so a segment farther than this
+ * shares a cell with nobody drawn.
+ */
+const PEOPLE_STREET_SLACK_METRES = 64;
+
+/**
+ * The nearby streets within reach of anyone drawn — #2973: `people.ts`
+ * §`besideSideRoads` files every segment it is handed every frame, and a
+ * town's streets out to the fog are thousands; the people are all within
+ * {@link PEOPLE_FAR_METRES} of the camera, so the rest change nobody's place.
+ */
+function withinPeopleReach(
+  roads: readonly SideRoad[],
+  camera: { readonly x: number; readonly z: number },
+): readonly SideRoad[] {
+  const reach = PEOPLE_FAR_METRES + PEOPLE_STREET_SLACK_METRES;
+  return roads.filter((road) => {
+    const s = road.segments;
+    for (let at = 0; at + 1 < s.length; at += 2) {
+      if (Math.hypot((s[at] as number) - camera.x, (s[at + 1] as number) - camera.z) <= reach) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 /**

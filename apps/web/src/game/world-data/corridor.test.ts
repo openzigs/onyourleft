@@ -36,6 +36,8 @@ import {
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   sidewalkTile,
+  STREET_FIXTURE_ROADS,
+  streetsTile,
   waterLinesTile,
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
@@ -57,6 +59,7 @@ import {
   readCorridorTiles,
   tileTouchesZone,
   unpackCorridorFeatures,
+  worldCorridorOf,
   type CorridorArchive,
   type CorridorFailure,
   type CorridorPlan,
@@ -519,6 +522,18 @@ describe('packing', () => {
     });
   });
 
+  it('keeps each tile’s railway lines through the read (#2660)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => streetsTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    const tiles =
+      outcome.features.streets.length /
+      STREET_FIXTURE_ROADS.filter((road) => road.sink === 'streets').length;
+    expect(tiles).toBeGreaterThan(0);
+    // Two railway lines a tile, the fixture's main line and its light rail on a bridge.
+    expect(outcome.features.rails?.length).toBe(tiles * 2);
+  });
+
   it('keeps every building field through the pack, and packs none for a footprint with none (#1789)', async () => {
     const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
     const outcome = await read(plan, memoryArchive(() => buildingFieldsTile()).archive);
@@ -542,8 +557,8 @@ describe('packing', () => {
       true,
       false,
     ]);
-    // 5 since #2659 added the water lines.
-    expect(packed.v).toBe(5);
+    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines.
+    expect(packed.v).toBe(6);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -625,6 +640,83 @@ describe('packing', () => {
     });
     expect('waterLines' in none).toBe(false);
     expect(corridorFeaturesOfPacked(none).waterLines).toStrictEqual([]);
+  });
+
+  it('keeps the railway lines through the store, and only the decoder’s details and grades (#2660)', async () => {
+    const decoded = decodeTile(streetsTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    expect(decoded.rails.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+      ['light_rail', 'bridge'],
+    ]);
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+        rails: decoded.rails,
+      }),
+    );
+    expect(back.rails?.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+      ['light_rail', 'bridge'],
+    ]);
+    back.rails?.forEach((rail, index) => {
+      const want = decoded.rails[index]?.line as Float32Array;
+      expect(rail.line.length).toBe(want.length);
+      rail.line.forEach((value, at) => {
+        expect(Math.abs(value - (want[at] as number))).toBeLessThanOrEqual(0.006);
+      });
+    });
+    // The corridor a ride is handed carries them; one built from features with none carries none.
+    expect(worldCorridorOf('r', { ...FIXTURE_FRAME, elevation: 0 }, [], back).rails).toBe(
+      back.rails,
+    );
+    expect(
+      worldCorridorOf('r', { ...FIXTURE_FRAME, elevation: 0 }, [], {
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }).rails,
+    ).toStrictEqual([]);
+    // A detail the decoder would not keep, edited into a blob, is not read back,
+    // and a grade it would not write is at grade.
+    const edited = corridorFeaturesOfPacked({
+      ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      rails: [
+        { detail: 'rail', g: 'sky' as 'bridge', line: [0, 0, 100, 100] },
+        { detail: 'subway' as 'rail', g: 'ground', line: [0, 0, 100, 100] },
+      ],
+    });
+    expect(edited.rails?.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+    ]);
+    // A corridor with none packs no `rails` at all, as it did at version 5.
+    const none = packedCorridorFeatures({
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+      places: [],
+      rails: [],
+    });
+    expect('rails' in none).toBe(false);
+    expect(corridorFeaturesOfPacked(none).rails).toStrictEqual([]);
+  });
+
+  it('refuses a blob of the reader before the railway lines (#2660)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 5, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob of the reader before the water lines (#2659)', async () => {

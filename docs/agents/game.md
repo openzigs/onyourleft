@@ -1683,7 +1683,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
                         a mapped park (not a protected area's boundary,
-                        #2657) is still dropped (`insidePark`).
+                        #2657) is still dropped (`insidePark`). ⚠️ **Since
+                        #2696 (proposed) a yard is not a park here**: a
+                        footprint touching a `garden`, `grass`,
+                        `village_green` or `allotments` (`land-class.ts`
+                        §`YARD_KINDS`) is kept; rule 2 drops it only where a
+                        park that is not a yard is within half a mask cell
+                        (§`parkProperNear`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
@@ -2047,7 +2053,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
-                        (`people.ts`). No crossing is either
+                        (`people.ts`). No crossing is either. It still
+                        draws nothing: since #2972 `footway-surfaces.ts` does
+    src/game/footway-surfaces.ts
+                        the mapped footways DRAWN (#2972, the owner's ruling
+                        of 2026-11-15) — `footwayNetwork`'s lines as ribbons
+                        on the ground by kind (paved footway, cycleway, park
+                        path, steps in treads), and a zebra wherever a mapped
+                        `crossing` crosses the drawn road. ⚠️ A ribbon is kept
+                        off the carriageway by its own half-width, off the
+                        mapped side roads (`people.ts` §`besideSideRoads`), off
+                        mapped water, and off a drawn village pavement
+                        (#1620's rule, `people.ts` §`onPavement`). Chunked,
+                        grounded the first time a chunk is in reach, ≤
+                        `FOOTWAY_FRAME_TRIANGLES` within `FOOTWAY_DRAW_METRES`
+                        of the camera, nearest first; `SceneFrame.footways`,
+                        drawn in ONE call by `three-renderer.ts`
+                        §`FootwayBelt`, realistic world only, on the ground as
+                        the side roads are. Lever `-footways`, page
+                        `town=footways`
     src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
                         Poly Haven's `trashbag` beside some bins and one
                         `old_tyre` laid flat by a lamp post, placed from the
@@ -2138,7 +2162,31 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier
+    src/game/nearby-streets.ts
+                        nearby streets (#2973) — the mapped `ground` streets
+                        off the route drawn out to the fog (400 m): a street
+                        that never touches the route with its edge off the
+                        verge, a cross street run on from 23.5 m off the road
+                        (where every stub is still whole, and above it), the
+                        driveways and parking aisles at the service width,
+                        stopping short of a footprint; none on water or an
+                        overpass's road. ⚠️ **Side roads, not a belt of their
+                        own**: `scene.ts` appends the pieces in view to the
+                        frame's `sideRoads`, so `SideRoadBelt` draws them in the
+                        road's material in its ONE call and every clearance
+                        keeps the scenery and the people off them. At most 256
+                        pieces of 32 triangles a frame, chosen again every 40 m.
+                        A footprint on one is dropped `on-street`
+                        (`footprint-buildings.ts` rule 3b). `streetRibbon` names
+                        no route: #2903's open world draws with it.
+                        Lever `-nearby-streets`, page `town=streets`
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

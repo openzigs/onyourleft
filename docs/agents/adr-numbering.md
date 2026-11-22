@@ -21,8 +21,8 @@ It has the same authority as the root file. Where the text below says "this file
   `## Amendments` entry pointing to it. The owner's lane note of 2026-11-19 reserved it, beside
   **0087** (#2885), **0088** (#2887) and **0090** (#2884, moved off 0086, which ADR 0086 had
   taken). **0091** is claimed by the open pull request
-  [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886), and 0081 and 0083 to 0085 by
-  the open pull requests #2873, #2864, #2863 and #2872. The next free number is **0092**. The older
+  [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886), and 0083 and 0085 by the open
+  pull requests #2864 and #2872; 0084 is ADR 0084 (#2863, the entry below). The next free number is **0092**. The older
   entries below that call 0081 free were written before #2873 claimed it.
   ⚠️ **0088 is [ADR 0088](../adr/0088-junction-choice-is-a-discrete-press-that-cannot-reach-the-trainer.md)**,
   taken by [#2887](https://github.com/openzigs/onyourleft/issues/2887) on 2026-11-19 for junction
@@ -56,6 +56,15 @@ It has the same authority as the root file. Where the text below says "this file
   ADR 0046's 2026-11-14 entry, point 8, and ADR 0031 D-4 condition 2, for that step only; both
   gained one dated `## Amendments` entry pointing to it. It skipped 0081, 0083, 0084 and 0085, which
   the open pull requests #2873, #2864, #2863 and #2872 write.
+  ⚠️ **0084 is [ADR 0084](../adr/0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md)**,
+  taken by [#2856](https://github.com/openzigs/onyourleft/issues/2856) on 2026-11-19 for a scan of the
+  instance's code agreed to in place by a narrower agreement, **Accepted** the same day on the
+  owner's rulings on its pull request [#2863](https://github.com/openzigs/onyourleft/pull/2863). It
+  supersedes in part ADR 0033 D-4 and ADR 0029 D-5; each gained one dated `## Amendments` entry
+  pointing to it. It skipped **0081**, then claimed by #2836's lane (ADR 0081 since, the entry below), and
+  **0083**, which the open pull request
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864) (#2835) writes. The next free number is the
+  one the top entry states.
   ⚠️ **0081 is [ADR 0081](../adr/0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md)**,
   taken by [#2836](https://github.com/openzigs/onyourleft/issues/2836) on 2026-11-18 for the AI
   bots asked about one at a time from a menu the device makes, with the model's `sit-in` as no

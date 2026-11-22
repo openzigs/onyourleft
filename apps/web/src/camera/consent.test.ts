@@ -22,7 +22,9 @@ import {
   CONSENT_REFUSAL_TEXT,
   CONSENT_STATEMENT,
   NO_CONSENT,
+  SCAN_CONSENT_STATEMENT,
   SCREENSHOT_SENTENCE,
+  cameraMayOpen,
   consentDecision,
 } from './consent';
 
@@ -173,5 +175,51 @@ describe('the decision', () => {
     for (const refusal of ['not-acknowledged', 'nothing-agreed'] as const) {
       expect(CONSENT_REFUSAL_TEXT[refusal].length).toBeGreaterThan(20);
     }
+  });
+});
+
+/**
+ * #2856: the scan's own, narrower agreement. Its two sentences are what a
+ * rider agrees to, so they are the ones the published policy and ADR 0084
+ * quote, and the rule for what they admit is a truth table.
+ */
+describe('the scan’s own agreement — #2856', () => {
+  const AGREED_TO_THE_CAMERA = { local: true };
+
+  it('admits a scan, and never the camera’s other uses', () => {
+    // The whole table. `scan` alone opens the camera for a scan and for
+    // nothing else; `local` covers a scan too (ADR 0033 D-4).
+    expect(cameraMayOpen('scan', { consent: NO_CONSENT, scan: false })).toBe(false);
+    expect(cameraMayOpen('scan', { consent: NO_CONSENT, scan: true })).toBe(true);
+    expect(cameraMayOpen('camera', { consent: NO_CONSENT, scan: true })).toBe(false);
+    expect(cameraMayOpen('camera', { consent: NO_CONSENT, scan: false })).toBe(false);
+    expect(cameraMayOpen('camera', { consent: AGREED_TO_THE_CAMERA, scan: false })).toBe(true);
+    expect(cameraMayOpen('scan', { consent: AGREED_TO_THE_CAMERA, scan: false })).toBe(true);
+  });
+
+  it('says what the camera is used for, that nothing is kept or sent, and that nothing else is switched on', () => {
+    expect(SCAN_CONSENT_STATEMENT).toContain('only to read this code');
+    expect(SCAN_CONSENT_STATEMENT).toContain('No picture is kept or sent anywhere');
+    expect(SCAN_CONSENT_STATEMENT).toContain('nothing on the Camera screen is switched on');
+    // One or two sentences, where the rider pressed: not a page.
+    expect(SCAN_CONSENT_STATEMENT.match(/\.(?:\s|$)/g)).toHaveLength(2);
+  });
+
+  it.each([
+    [
+      'the privacy policy',
+      '../../../../docs/privacy-policy.md',
+      'Scanning a code with this device',
+    ],
+    [
+      'ADR 0084',
+      '../../../../docs/adr/0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md',
+      'D-1 — The scan asks where it was pressed',
+    ],
+  ])('is quoted word for word by %s', (_, path, landmark) => {
+    const document = asProse(readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'));
+    // The control: a moved or emptied file must not pass for one that agrees.
+    expect(document).toContain(landmark);
+    expect(document).toContain(SCAN_CONSENT_STATEMENT);
   });
 });

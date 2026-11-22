@@ -4,9 +4,9 @@
     "source": "a 3 km section of the owner's own ride, exported from Strava, ends far from any home",
     "confirmed": "2026-10-25"
   },
-  "sha256": "1589ecac9b2b1b202ab72262d049f26bc6365e46704b83ac7e15cf5232c01b0d",
+  "sha256": "0c9d2a476605724ea31943664cdeec03c6809594dd7bec7141595f46818bd7d8",
   "archiveUrl": "https://tiles.openzigs.com/basemap-us-oyl-20261031.pmtiles",
   "archiveIdentity": "\"d31ad8c706ecfaaec69ab8fdee191ada-164\"",
   "gpxSha256": "1c5b7ed9c4835b1b37da99f5bf8c97bac24213d59c97c4a8f6373105a5edc837",
-  "readerVersion": 6
+  "readerVersion": 7
 }
