@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 
-import { withoutTileCopies } from './tile-copies';
+import { TILE_COPY_WORK_PER_FOOTPRINT, withoutTileCopies } from './tile-copies';
 
 /** A building from `x, z` pairs. */
 function building(
@@ -141,5 +141,24 @@ describe('withoutTileCopies — #3047', () => {
       [5, 10],
     ]);
     expect(withoutTileCopies([west, east])).toHaveLength(2);
+  });
+
+  it('holds its work to the budget: stacked copies of a hostile 4,096-vertex footprint are kept, fast', () => {
+    // The review of #3060: unbounded, 48 of these took 234 s; a dozen at 4,096 is minutes.
+    const ring = Float32Array.from(
+      Array.from({ length: 4_096 }, (_, i) => {
+        const angle = (i / 4_096) * 2 * Math.PI;
+        return [20 * Math.cos(angle), 20 * Math.sin(angle)];
+      }).flat(),
+    );
+    const stacked = Array.from({ length: 12 }, () => building([], { rings: [ring] }));
+    expect(withoutTileCopies(stacked)).toHaveLength(12);
+  });
+
+  it('keeps every footprint as it is once the budget is spent, and dedupes while it lasts', () => {
+    // A pair of 4-vertex houses costs 6 · 4 · 4 = 96 units and a candidate, and each is tested once.
+    expect(withoutTileCopies([HOUSE, REGRIDDED], 97)).toEqual([HOUSE]);
+    expect(withoutTileCopies([HOUSE, REGRIDDED], 96)).toHaveLength(2);
+    expect(TILE_COPY_WORK_PER_FOOTPRINT).toBe(20_000);
   });
 });

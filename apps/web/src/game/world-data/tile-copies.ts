@@ -30,7 +30,8 @@
  *
  * ⚠️ **What it does not mend**: a building more than the buffer across the
  * seam on both sides is clipped in both tiles, and neither copy holds the
- * other. Both are kept.
+ * other. Both are kept. Nor a pair the work budget
+ * ({@link TILE_COPY_WORK_PER_FOOTPRINT}) cannot pay for: both are kept.
  */
 
 import type { BuildingFeature, Ring } from '@onyourleft/map-features';
@@ -45,10 +46,28 @@ const TILE_COPY_METRES = 0.5;
 /** The side of a cell of the grid the candidates are found in, metres. */
 const CELL_METRES = 32;
 
+/**
+ * The work the search may do, per footprint in the corridor, pooled:
+ * **20,000** units (the review of #3060). A tile is untrusted input from a
+ * configurable URL (`limits.ts`), and testing a pair costs the one's vertices
+ * times the other's, both ways and twice over: 48 stacked copies of an
+ * 8,192-vertex footprint, under every decode limit, took 234 s with no bound.
+ * A unit is one candidate looked at or one vertex-to-edge step, and a pair is
+ * charged its whole cost, `6 · n · m`, before it is tested. A pair the budget
+ * left cannot pay for is not tested and both are kept; once it is spent the
+ * search **stops** and every footprint after is kept as it is — a copy drawn
+ * twice loses walls, which is the safe direction to be wrong in. Two copies of
+ * a 30-vertex house cost 5,400, so a corridor of ordinary buildings never
+ * reaches it; **not measured against the archive**.
+ */
+export const TILE_COPY_WORK_PER_FOOTPRINT = 20_000;
+
 /** The corridor's buildings with every tile copy left out, in their order — #3047. */
 export function withoutTileCopies(
   buildings: readonly BuildingFeature[],
+  workPerFootprint: number = TILE_COPY_WORK_PER_FOOTPRINT,
 ): readonly BuildingFeature[] {
+  let budget = workPerFootprint * buildings.length;
   const outers = buildings.map((building) => building.rings[0] ?? new Float32Array(0));
   const areas = outers.map((ring) => Math.abs(signedArea(ring)));
   const cells = new Map<number, number[]>();
@@ -66,15 +85,16 @@ export function withoutTileCopies(
   const dropped = new Uint8Array(buildings.length);
   // #2975: a POI is matched within its own tile, so the copy left out may hold the one the kept lacks.
   const pois = new Map<number, BuildingFeature['poi']>();
-  for (let index = 0; index < buildings.length; index++) {
+  for (let index = 0; index < buildings.length && budget > 0; index++) {
     const [minX, maxX, minZ, maxZ] = boxes[index] as Box;
     const seen = new Set<number>();
     let keeper = -1;
     for (let ix = Math.floor(minX / CELL_METRES); ix <= Math.floor(maxX / CELL_METRES); ix++) {
       for (let iz = Math.floor(minZ / CELL_METRES); iz <= Math.floor(maxZ / CELL_METRES); iz++) {
         for (const other of cells.get(key(ix, iz)) ?? []) {
-          if (other === index || seen.has(other) || keeper >= 0) continue;
+          if (other === index || seen.has(other) || keeper >= 0 || budget <= 0) continue;
           seen.add(other);
+          budget -= 1;
           if (dropped[other] === 1) continue;
           // A copy's box is inside the other's: the cheap test, before any vertex is.
           const [otherMinX, otherMaxX, otherMinZ, otherMaxZ] = boxes[other] as Box;
@@ -88,9 +108,12 @@ export function withoutTileCopies(
           }
           const a = buildings[index] as BuildingFeature;
           const b = buildings[other] as BuildingFeature;
-          if (!sameAttributes(a, b) || !isCopyOf(outers[index] as Ring, outers[other] as Ring)) {
-            continue;
-          }
+          if (!sameAttributes(a, b)) continue;
+          // Both tests, both passes, each vertex of one against each edge of the other.
+          const cost = (6 * (outers[index] as Ring).length * (outers[other] as Ring).length) / 4;
+          if (cost > budget) continue;
+          budget -= cost;
+          if (!isCopyOf(outers[index] as Ring, outers[other] as Ring)) continue;
           const mine = areas[index] as number;
           const theirs = areas[other] as number;
           // Two copies of each other (both whole) keep the first read; otherwise the larger.
