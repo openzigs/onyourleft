@@ -17939,8 +17939,10 @@ export class RealisticRiderBelt {
   /**
    * The body's own fall and get-up in a Delivery crash — #2493: every bone
    * turned from the riding pose `#pose` left toward the crash clip's pose at
-   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
-   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * `crash.seconds`, the clip's own time (`delivery/crash-look.ts`
+   * §`crashClipSeconds`), by `crash.share`, the body's own share
+   * (§`crashBodyShare`, not the roll's §`crashShare`), and the skeleton's root
+   * moved likewise. The clip falls to the rider's
    * right; a fall to the left reads each bone's mirror image (its other
    * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
    * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
