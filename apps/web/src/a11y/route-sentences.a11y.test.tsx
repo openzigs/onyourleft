@@ -291,15 +291,13 @@ type Record_ = Record<string, readonly string[]>;
  * zone read "07:00 EST" where the record says "12:00 UTC"; the Instance
  * screen's keys and account notices draw their days in it
  * (`account-change-notices.ts`), so one far enough east, UTC+14, read the
- * next day. Node takes a `TZ` set at run time for
- * `Date` and `Intl` alike. It is set here, hoisted above the imports, because
- * those notices' formatters are built when their module loads and keep the
- * zone they were built in; it is put back after the file.
+ * next day. Node takes a `TZ` set at run time for `Date` and `Intl` alike.
+ * It is stubbed here, hoisted above the imports, because those notices'
+ * formatters are built when their module loads and keep the zone they were
+ * built in; the stub is undone after the file.
  */
-const zoneBefore = vi.hoisted(() => {
-  const before = process.env['TZ'];
-  process.env['TZ'] = 'UTC';
-  return before;
+vi.hoisted(() => {
+  vi.stubEnv('TZ', 'UTC');
 });
 
 const SNAPSHOT = join(dirname(fileURLToPath(import.meta.url)), 'route-sentences.snapshot.json');
@@ -321,8 +319,7 @@ beforeAll(() => {
 
 afterAll(() => {
   vi.useRealTimers();
-  if (zoneBefore === undefined) delete process.env['TZ'];
-  else process.env['TZ'] = zoneBefore;
+  vi.unstubAllEnvs();
 });
 
 afterEach(async () => {
