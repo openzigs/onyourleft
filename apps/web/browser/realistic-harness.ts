@@ -83,6 +83,7 @@ import {
   parksFixture,
   neighbourhoodFixture,
   railFixture,
+  tracksFixture,
   yardsFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
   footwaysFixture,
@@ -609,7 +610,10 @@ async function run(): Promise<void> {
                                                 : // #2974: water beside the road, and pools.
                                                   config.town === 'water'
                                                   ? waterFixture(latitude)
-                                                  : undefined;
+                                                  : // #2695: unpaved ways.
+                                                    config.town === 'tracks'
+                                                    ? tracksFixture(latitude)
+                                                    : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

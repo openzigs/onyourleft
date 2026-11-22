@@ -25,7 +25,7 @@ import {
   SIDE_ROAD_WIDTHS,
   sideRoadsAt,
   TARMAC,
-  withLevelCrossings,
+  joinedJunctions,
   type SideRoad,
 } from './cross-streets';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
@@ -173,11 +173,11 @@ describe('where a level crossing is — #2660', () => {
     const crossings = levelCrossings(corridor, FARMLAND, ORIGIN, SEED);
     expect(levelCrossings(corridor, FARMLAND, ORIGIN, SEED)).toBe(crossings);
     const junctions = mappedJunctions(corridor, FARMLAND, ORIGIN, SEED);
-    const both = withLevelCrossings(junctions, crossings);
+    const both = joinedJunctions(junctions, crossings);
     expect(both.map((j) => j.source)).toEqual(['mapped', 'rail']);
-    expect(withLevelCrossings(junctions, crossings)).toBe(both);
-    expect(withLevelCrossings(junctions, [])).toBe(junctions);
-    expect(withLevelCrossings([], crossings)).toBe(crossings);
+    expect(joinedJunctions(junctions, crossings)).toBe(both);
+    expect(joinedJunctions(junctions, [])).toBe(junctions);
+    expect(joinedJunctions([], crossings)).toBe(crossings);
   });
 
   it('stops resampling at RAIL_MAX_METRES, so a hostile tile cannot exhaust memory', () => {

@@ -2250,7 +2250,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         grade (§`levelCrossings`): ballast and two rails a
                         side road's length off each side, the rails carried
                         across the carriageway, in the same mesh under the
-                        same frame bound — no crossbuck, signal or barrier
+                        same frame bound — no crossbuck, signal or barrier.
+                        ⚠️ **Since #2695 an unpaved way** wherever a mapped
+                        `track` or `bridleway` (`WorldCorridor.paths`) leaves
+                        the route (§`mappedTracks`): gravel or earth, 3 m or
+                        2 m wide, no give-way line, joined as a side road is,
+                        in the same mesh under the same frame bound
     src/game/nearby-streets.ts
                         nearby streets (#2973) — the mapped `ground` streets
                         off the route drawn out to the fog (400 m): a street
