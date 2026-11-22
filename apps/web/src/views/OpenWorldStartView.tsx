@@ -23,6 +23,12 @@
  * the start is read only by the device (ADR 0090; `OpenWorldStartView.test.tsx`
  * §"no request").
  *
+ * Once a start is chosen the button is pinned to the bottom of the window
+ * (#3050, `theme.css` §"#3050"): a pin is dropped near the top of the page and
+ * a route or a ride chosen near its foot, and the owner found it below the
+ * fold after a pin on the tablet. A drop says where it is, in the pin's live
+ * region.
+ *
  * ⚠️ **No coordinate is shown or said.** A refusal names the constraint and
  * never the value (ADR 0004 D); a chosen start is said by where it came from
  * ("the pin", a route's name, a ride's name and date), never by a number.
@@ -86,6 +92,9 @@ export const START_NO_MAP_TEXT =
 /** What the screen says when a past ride's start could not be read from the device (#2985). */
 export const START_RIDE_UNREAD_TEXT =
   'That ride could not be read on this device. Choose it again, or start from the pin or a saved route.';
+
+/** What the pin's live region adds to a drop that *Start the ride* can take (#3050). */
+export const START_NEXT_STEP_TEXT = 'Start the ride is at the bottom of the screen.';
 
 /** The pin's marker, as the map draws it. */
 const PIN_ID = 'open-world-pin';
@@ -207,25 +216,38 @@ export function OpenWorldStartView({
     };
   }, [port]);
 
+  /**
+   * Drops or moves the pin. A DROP (`drop`) that makes a start *Start the ride*
+   * takes also says where the button is, in the same live region (#3050): the
+   * button is pinned to the bottom of the screen, and a screen-reader user
+   * would not otherwise know there is a next step. A move does not repeat it.
+   */
   const placePin = useCallback(
-    (position: GeographicPosition, words: string) => {
+    (position: GeographicPosition, words: string, drop = false) => {
       reading.current = undefined;
+      const placed = openWorldStart(position, 'pin', coverage);
       setPin(position);
-      setChosen({ source: 'pin', outcome: openWorldStart(position, 'pin', coverage) });
-      setSaid((last) => ({ words, count: last.count + 1 }));
+      setChosen({ source: 'pin', outcome: placed });
+      const next = drop && placed.kind === 'start' && tiles && port !== undefined;
+      setSaid((last) => ({
+        words: next ? `${words} ${START_NEXT_STEP_TEXT}` : words,
+        count: last.count + 1,
+      }));
     },
-    [coverage],
+    [coverage, tiles, port],
   );
 
   const outcome = chosen.source === 'none' ? undefined : chosen.outcome;
   const start = typeof outcome === 'object' && outcome.kind === 'start' ? outcome.start : undefined;
+  /** Whether *Start the ride* is offered: a start, map tiles on, and somewhere to hand it. */
+  const offered = start !== undefined && tiles && port !== undefined;
   /** Where the pin stands: the dropped pin, or the chosen route's or ride's start. */
   const pinAt =
     chosen.source === 'none' || chosen.source === 'pin' ? pin : (start?.position ?? undefined);
 
   const pointer: MapPointerHandlers = {
     tap: (position) => {
-      placePin(position, 'Pin dropped.');
+      placePin(position, 'Pin dropped.', true);
     },
     moveWaypoint: (_id, position) => {
       placePin(position, 'Pin moved.');
@@ -248,7 +270,7 @@ export function OpenWorldStartView({
           label: 'Put the pin at the map’s centre',
           icon: 'pin',
           act: (view) => {
-            placePin(view.centre(), 'Pin put at the map’s centre.');
+            placePin(view.centre(), 'Pin put at the map’s centre.', true);
           },
         },
         {
@@ -422,7 +444,16 @@ export function OpenWorldStartView({
             {START_NEEDS_TILES_TEXT}
           </StatusMessage>
         )}
-        {start !== undefined && tiles && port !== undefined ? (
+      </section>
+      {/*
+        #3050: on the rider's screen once a start is chosen, wherever they
+        chose it — pinned to the bottom of the window while the page scrolls
+        beneath, and in the flow at the end of the page. `theme.css`
+        §"#3050" argues the pin; it is the view's last child so it can stick
+        anywhere in the view.
+      */}
+      {offered ? (
+        <div className="oyl-open-world__go tw:border-t tw:border-border tw:bg-canvas tw:py-sm">
           <Button
             onClick={() => {
               port.begin(start);
@@ -430,8 +461,8 @@ export function OpenWorldStartView({
           >
             Start the ride
           </Button>
-        ) : null}
-      </section>
+        </div>
+      ) : null}
     </>
   );
 }
