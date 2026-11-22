@@ -91,7 +91,13 @@ function plansDigest(
   // ({@link withoutTheWarehouse}) and its verdict counted as the record has it, `too-large`.
   // #2761 counts the plinth in `farTriangleCount`, since the far level draws it; the record
   // predates it, so the plinth is taken back out of the count. The triangles are unmoved.
-  const recorded = { ...verdicts, 'too-large': verdicts['too-large'] + 1 };
+  // #2973 added the `on-street` verdict; no footprint here comes to it, and the record
+  // predates it, so it is left out.
+  expect(verdicts['on-street']).toBe(0);
+  const before = Object.fromEntries(
+    Object.entries(verdicts).filter(([verdict]) => verdict !== 'on-street'),
+  );
+  const recorded = { ...before, 'too-large': verdicts['too-large'] + 1 };
   const text = JSON.stringify(
     { plans, verdicts: recorded },
     function (this: unknown, key: string, value: unknown) {

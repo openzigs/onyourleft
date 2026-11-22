@@ -44,6 +44,7 @@ import {
   mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
+  neighbourhoodFixture,
   planFingerprint,
   typedStreetFixture,
   untaggedStreetFixture,
@@ -664,5 +665,42 @@ describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
     // The garages and barns stay: only the shop rule is off.
     expect(off.plans.some((plan) => plan.family === 'garage')).toBe(true);
     expect(off.plans.some((plan) => plan.family === 'barn')).toBe(true);
+  });
+});
+
+describe('the realistic page’s `nearby-streets` lever — #2973', () => {
+  const town = neighbourhoodFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  /** The page's town and a frame of it for `query`, as `realistic-harness.ts` builds them. */
+  const page = (query: string) => {
+    const config = parseConfig(query);
+    const { land, plans, urban } = plannedTown(town, config.leversOff);
+    const frame = rideFrame({
+      profile: town.profile,
+      origin: town.origin,
+      distance: 1_500,
+      elapsed: 1,
+      rung: top,
+      peopleOff: true,
+      nearbyStreetsOff: config.leversOff.includes('nearby-streets'),
+      town: {
+        corridor: town.corridor,
+        land,
+        buildings: mappedBuildingsOf(plans),
+        lots: mappedTown(town.corridor, plans, urban),
+      },
+    });
+    return {
+      plans,
+      streets: frame.sideRoads.filter((road) => road.junction.source === 'street'),
+    };
+  };
+
+  it('draws the streets off the route and drops the footprint the map draws over one', () => {
+    const product = page('?town=streets');
+    expect(product.streets.length).toBeGreaterThan(0);
+    const control = page('?town=streets&levers=-nearby-streets');
+    expect(control.streets).toEqual([]);
+    expect(product.plans.length).toBe(control.plans.length - 1);
   });
 });

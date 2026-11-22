@@ -7148,6 +7148,93 @@ select.oyl-input {
 }
 
 /*
+ * The open-world start picker's map (#2889, the owner's ruling of
+ * 2026-11-20): moved by hand, the page's hero, with its few buttons on it.
+ *
+ * The frame is the buttons' containing block, so they sit in the map's top
+ * right corner without being inside MapLibre's container. The map is as tall
+ * as the screen leaves it under the title, the section heading and its line —
+ * inside the safe area: 412 px on the landscape tablet in the shell, 480 in a
+ * browser at 1280 × 800. Never under the 20 rem every other map has, or over
+ * 40 rem. `controls-first.browser.spec.ts` §"#2889" measures it
+ * against its frame, its buttons and its pin.
+ */
+.oyl-map-frame {
+  margin-top: var(--oyl-space-sm);
+  position: relative;
+}
+
+.oyl-map-frame > .oyl-map {
+  margin-top: 0;
+}
+
+.oyl-map--direct {
+  height: clamp(
+    20rem,
+    calc(100vh - 20rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)),
+    40rem
+  );
+}
+
+/* The canvas takes focus on this map; its ring is drawn inside the frame, which clips. */
+.oyl-map--direct canvas:focus-visible {
+  outline-offset: -4px;
+}
+
+.oyl-map__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+  position: absolute;
+  right: var(--oyl-space-sm);
+  top: var(--oyl-space-sm);
+  z-index: 1;
+}
+
+/* 48 px, the owner's ruling for this map's buttons; layout only, the colours are the variant's. */
+.oyl-map__control {
+  align-items: center;
+  display: inline-flex;
+  height: 3rem;
+  justify-content: center;
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0;
+  width: 3rem;
+}
+
+/*
+ * The start pin: a drop whose tip is the point, drawn by `map/maplibre.ts`
+ * §`pinGraphic`, in the accent with the surface round it and through it, as
+ * the waypoints' disc is. No text on it, so there is none to clip; on the
+ * picker it takes focus, and its name is its `aria-label`.
+ */
+.oyl-map__waypoint--pin {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  height: 2.75rem;
+  width: 2.0625rem;
+}
+
+.oyl-map__waypoint--pin svg {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+.oyl-map__pin-drop {
+  fill: var(--oyl-color-accent);
+  stroke: var(--oyl-color-surface);
+  stroke-width: 1.5;
+}
+
+.oyl-map__pin-hole {
+  fill: var(--oyl-color-surface);
+}
+
+/*
  * THE ILLUSTRATION KIT'S PAINT — #936, the menus' house style
  * (`docs/architecture.md` §"House style for the menus").
  *
@@ -8846,12 +8933,15 @@ select.oyl-input {
 
    #1810: and so is the throw control's, while the touch lock is on.
 
-   #1901: and the lap race's item control's, likewise. */
+   #1901: and the lap race's item control's, likewise.
+
+   #2898: and the junction prompt's, likewise. */
 .oyl-hud__trainer,
 .oyl-hud__side-camera,
 .oyl-hud__plan-change,
 .oyl-hud__throw-note,
-.oyl-hud__item-note {
+.oyl-hud__item-note,
+.oyl-hud__junction-note {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -8915,6 +9005,112 @@ select.oyl-input {
 .oyl-hud__item .oyl-hud__control[aria-disabled='true'] {
   cursor: not-allowed;
   color: var(--oyl-color-hud-ink-muted);
+}
+
+/* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT, under *Pause* and *End ride*
+   where a round's throws stand: every way on from the next junction as a
+   ride-time control at #94's 72 px floor (set inline from
+   CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own
+   direction, its name, *Default* and *Chosen* in words, and its key and pad
+   hints; over them its title and how far until the choice is final, and the
+   U-turn beside them. The ways wrap, as the throws do,
+   rather than overflow a landscape phone's narrow actions panel. In the
+   HUD's own ink on the panel's opaque surface: no backing of its own.
+   `junction-prompt.browser.spec.ts` measures its targets on a tablet; no ride
+   shows it until #2896, which measures where it lands on the stage. */
+.oyl-hud__junction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oyl-space-sm);
+  margin-block-start: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-prompt {
+  display: grid;
+  justify-items: start;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-note {
+  flex-basis: 100%;
+}
+
+/* Its own width, never `.oyl-hud__control`'s `flex: 1`, which comes later. */
+.oyl-hud__junction > .oyl-hud__junction-u-turn {
+  flex: none;
+}
+
+.oyl-hud__junction-u-turn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-title,
+.oyl-hud__junction-lock {
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-hud__junction-title {
+  font-weight: 700;
+}
+
+.oyl-hud__junction-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-hud__junction-way {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* *Default* and *Chosen* on one line under the way's name, smaller, so a way
+   that is both is no taller than one that is either. */
+.oyl-hud__junction-marks {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* The way chosen says so in words; bold and a heavier edge are the glance's
+   half, never the only signal (SC 1.4.1). */
+.oyl-hud__junction-way--chosen {
+  font-weight: 700;
+  border-width: 3px;
+}
+
+/* Once the choice is final the ways carry `aria-disabled`, never `disabled`,
+   for the item control's reason above: they stay in the tab order and still
+   show which way the ride goes, so their ink is the HUD's full ink. */
+.oyl-hud__junction-way[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.oyl-hud__junction-hints,
+.oyl-hud__junction-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-hint kbd {
+  font-family: inherit;
 }
 
 /*

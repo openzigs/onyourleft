@@ -538,8 +538,12 @@ describe('what an apron never covers — #2848', () => {
       trianglesOf(planned(street([long], { streets: own(5) })).plans[0] as FootprintPlan),
     ).toBe(whole);
     // Control: 9 m off it is past `cross-streets.ts`' tolerance, a road of its own before the shop.
+    // #2973's rule 3b would drop the shop it runs through; off, the apron's own check is the one read.
     expect(
-      (planned(street([long], { streets: own(9) })).plans[0] as FootprintPlan).apron,
+      (
+        planned(street([long], { streets: own(9) }), { nearbyStreets: false })
+          .plans[0] as FootprintPlan
+      ).apron,
     ).toHaveLength(0);
   });
 

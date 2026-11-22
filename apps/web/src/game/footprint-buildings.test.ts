@@ -706,7 +706,8 @@ describe('every land-use kind our archive emits keeps its footprint use — #194
       'hospital',
       'pedestrian',
     ],
-    farmland: ['farmland', 'meadow'],
+    // #2976 classed `grassland` farmland since, as a `meadow` is.
+    farmland: ['farmland', 'meadow', 'grassland'],
   } as const;
   const kinds = [...Object.keys(TOWN_LAND_USE_CLASSES), ...REMOVED_LAND_USE_KINDS];
   const expectedUse = (kind: string): string =>
