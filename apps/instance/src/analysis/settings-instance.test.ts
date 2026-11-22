@@ -35,6 +35,9 @@ import { startFakeModelServer, type FakeModelServer } from './fake-model-server-
 import { secretText } from './hosted-key-testing.ts';
 import { MASKING_ITEM_KEY } from './hosted.ts';
 import { jobBody, parseStream } from './jobs-testing.ts';
+import { startOllamaStub, type OllamaStub } from './ollama-stub-testing.ts';
+import { TACTICS_PROMPT_VERSION } from './tactics-prompt.ts';
+import { ATTACK, CHAT_FIGURES, TACTICS_INPUT } from './tactics-testing.ts';
 
 const SECRET_FILL = 7;
 const HOSTED = new URL('https://models.example/v1');
@@ -42,10 +45,12 @@ const HOSTED = new URL('https://models.example/v1');
 let directory: string | undefined;
 let running: StartedInstance | undefined;
 const servers: FakeModelServer[] = [];
+const stubs: OllamaStub[] = [];
 afterEach(async () => {
   await running?.stop();
   running = undefined;
   for (const server of servers.splice(0)) await server.close();
+  for (const stub of stubs.splice(0)) await stub.close();
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
   directory = undefined;
 });
@@ -472,5 +477,64 @@ describe('hosted turned off, and no Share mode (#2609, ADR 0046 D-9)', () => {
       }),
     ).toEqual({ status: 'failed', failure: 'hosted_unavailable' });
     expect(sent).toEqual([]);
+  });
+});
+
+describe('a bot-tactics call on the running instance writes its one line (#2836, ADR 0081 D-5.2)', () => {
+  it('logs the prompt, the model and the model server’s figures, and nothing of the race or the answer', async () => {
+    const stub = await startOllamaStub({
+      chat: (body) => ({
+        model: (body as { model?: unknown } | null)?.model,
+        message: { role: 'assistant', content: ATTACK },
+        done: true,
+        ...CHAT_FIGURES,
+      }),
+    });
+    stubs.push(stub);
+    const env = {
+      analysisModelUrl: `http://127.0.0.1:${String(stub.port)}/v1`,
+      analysisModel: 'env-model',
+    };
+    const ownerDevice = await testDevice();
+    const log: string[] = [];
+    const instance = await start(await freshPath(), { owner: ownerDevice, env, log });
+    const owner = await signIn(instance, ownerDevice);
+
+    const status = (await sealed(instance, owner, 'GET', '/v1/analysis/tactics')).body as {
+      instance: string;
+      modelAddress: string;
+    };
+    const consented = await sealed(instance, owner, 'POST', '/v1/analysis/tactics/consent', {
+      instance: status.instance,
+      modelAddress: status.modelAddress,
+    });
+    expect(consented.status, JSON.stringify(consented.body)).toBe(200);
+    const decided = await sealed(instance, owner, 'POST', '/v1/analysis/tactics/decide', {
+      input: TACTICS_INPUT,
+    });
+    expect(decided).toEqual({
+      status: 200,
+      body: { reason: 'my-terrain', move: 'attack', effort: 'all-out' },
+    });
+
+    const lines = log.filter((each) => each.includes('"event":"tactics-call"'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? '{}')).toEqual({
+      event: 'tactics-call',
+      prompt: TACTICS_PROMPT_VERSION,
+      model: 'env-model',
+      state: 'decision',
+      ms: expect.any(Number) as number,
+      loadMs: 21,
+      tokensIn: 1_420,
+      tokensOut: 17,
+      promptEvalMs: 302,
+      evalMs: 456,
+    });
+    // Whole, through the one redaction: nothing was cut, and nothing of the race or the pick is there.
+    expect(lines[0]).not.toContain('[redacted]');
+    for (const word of ['attack', 'my-terrain', 'climber', 'cues', 'menu', '127.0.0.1']) {
+      expect(lines[0]).not.toContain(word);
+    }
   });
 });
