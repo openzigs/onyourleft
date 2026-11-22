@@ -284,6 +284,24 @@ import { emptyTransferPort } from '../testing/transfer-port';
 /** `{ "<route id> <empty|populated>": [sentence, …] }`, in first-seen order. */
 type Record_ = Record<string, readonly string[]>;
 
+/**
+ * #3043: the record is taken, and read, in one zone, UTC, as CI's runners
+ * are. The Operate screen draws its moments in the device's zone and names it
+ * (`OperateView.tsx` §`deviceTimeZone`), so a walk on a machine in another
+ * zone read "07:00 EST" where the record says "12:00 UTC"; the Instance
+ * screen's keys and account notices draw their days in it
+ * (`account-change-notices.ts`), so one far enough east, UTC+14, read the
+ * next day. Node takes a `TZ` set at run time for
+ * `Date` and `Intl` alike. It is set here, hoisted above the imports, because
+ * those notices' formatters are built when their module loads and keep the
+ * zone they were built in; it is put back after the file.
+ */
+const zoneBefore = vi.hoisted(() => {
+  const before = process.env['TZ'];
+  process.env['TZ'] = 'UTC';
+  return before;
+});
+
 const SNAPSHOT = join(dirname(fileURLToPath(import.meta.url)), 'route-sentences.snapshot.json');
 const RECORDING = process.env['OYL_RECORD_ROUTE_SENTENCES'] === '1';
 
@@ -303,6 +321,8 @@ beforeAll(() => {
 
 afterAll(() => {
   vi.useRealTimers();
+  if (zoneBefore === undefined) delete process.env['TZ'];
+  else process.env['TZ'] = zoneBefore;
 });
 
 afterEach(async () => {
