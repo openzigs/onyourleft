@@ -8,8 +8,10 @@ import {
   buildingFieldCaseTile,
   HOSTILE_BUILDING_FIELD_CASES,
   HOSTILE_FIXTURES,
+  HOSTILE_ROAD_FIELD_CASES,
   LIMIT_NAMES,
   NAMED_FIXTURES,
+  roadFieldCaseTile,
   tileAtLimit,
   tileOverLimit,
 } from './testing';
@@ -27,10 +29,11 @@ const DIGESTS: Readonly<Record<string, string>> = {
   lake: 'be4cc2dd1a6e37408137c704f712d9d5e97a6f029f67eda7786037f07357c2e5',
   sidewalk: 'd3be4fa925a4fa736f16319e6edeece2124a8dd29ab4200da4d3ad829964c936',
   buildingPart: 'af4566be1ffb30a9abb4d78678fb87bd87b31537ddd2a3609636dbfad403db44',
-  streets: 'fe3bd3eeeb96e84b90626f48bf57bd8919aba69332ead3951515eb4797ffbaf0',
+  streets: '9f82afda59a4e382e29f04249efdac8a0118f587fb51c9ba03ce79ae3f896c90',
   places: '9851995321b9ab45bce3c24df91e06b9f33fa6949f846806cdaf111a1ffd6d5d',
   buildingFields: '28639c36c4c37e47b25fa3e4af834afd3ae772121bf486742dbe6bcc72f27dd7',
   waterLines: '006e9d5229c38c320fd24d126ef189a2683fcb34b26b460eba06eb180e3531a7',
+  roadFields: '961e7637fd6dec3135f045c86f430c6ebe7b91dd891f1097610306726317c43c',
 };
 
 describe('the synthetic fixtures', () => {
@@ -46,6 +49,8 @@ describe('the synthetic fixtures', () => {
       expect(sha256(buildingFieldCaseTile(fieldCase))).toBe(
         sha256(buildingFieldCaseTile(fieldCase)),
       );
+    for (const fieldCase of HOSTILE_ROAD_FIELD_CASES)
+      expect(sha256(roadFieldCaseTile(fieldCase))).toBe(sha256(roadFieldCaseTile(fieldCase)));
   });
 
   it('are pinned by digest', () => {

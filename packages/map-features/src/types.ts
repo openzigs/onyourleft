@@ -14,6 +14,7 @@
 import type {
   BUILDING_TYPES,
   LANDMARKS,
+  RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
   ROOF_SHAPES,
@@ -87,8 +88,8 @@ export interface BuildingFeature extends PolygonFeature, BuildingFields {
 
 /**
  * A `water` line that is a river, a stream or a canal — #2659, ADR 0054's
- * entry of 2026-11-15. Its `kind` and its line, and nothing else: no name, no
- * id, no `layer`.
+ * entry of 2026-11-15 — or since #2974 a ditch or a drain. Its `kind` and its
+ * line, and nothing else: no name, no id, no `layer`.
  */
 export interface WaterLineFeature {
   readonly kind: (typeof WATER_LINE_KINDS)[number];
@@ -125,6 +126,50 @@ export interface StreetFeature {
 }
 
 /**
+ * A `roads` line that is a railway kept as track (#2660): `kind`
+ * {@link RAIL_KIND} with a `kind_detail` in {@link RAIL_KIND_DETAILS}. Its
+ * detail, its grade and its line; never a name, an operator or an id.
+ */
+export interface RailFeature {
+  readonly kindDetail: (typeof RAIL_KIND_DETAILS)[number];
+  /** From `is_bridge` and `is_tunnel`, as a street's. */
+  readonly grade: StreetGrade;
+  /** `x0, z0, x1, z1, …` in local metres. */
+  readonly line: Float32Array;
+}
+
+/**
+ * A street's `oneway` (#2892, ADR 0091 D-2): `'with-line'` for `yes`, which
+ * runs along the line's vertex order, `'against-line'` for `-1`, and `'no'`
+ * for `no`, for none, and for anything else. A fact about the street: it never
+ * removes a way on (D-5).
+ */
+export type StreetOneway = 'no' | 'with-line' | 'against-line';
+
+/** A street's `access`, read only to tell `no` or `private` from open (#2892, ADR 0091 D-2). */
+export type StreetAccess = 'open' | 'no' | 'private';
+
+/**
+ * The three road fields the open-world street graph reads besides a street's
+ * kind and grade (#2892, ADR 0091 D-2). Every one is always set: a field the
+ * tile does not carry, or carries a value the decoder does not recognise, is
+ * its default (`schema.ts` §`NO_ROAD_FIELDS`), never `undefined`.
+ */
+export interface StreetRoadFields {
+  readonly oneway: StreetOneway;
+  readonly access: StreetAccess;
+  /** From `is_link`: `true` only for a boolean `true`. */
+  readonly isLink: boolean;
+}
+
+/**
+ * A street as {@link decodeTile} hands it out: a {@link StreetFeature} and its
+ * road fields. A corridor's packed streets (`apps/web` §`world-data/corridor.ts`)
+ * keep the {@link StreetFeature} alone, which is why the fields are not on it.
+ */
+export interface DecodedStreetFeature extends StreetFeature, StreetRoadFields {}
+
+/**
  * A point from `places` (#1632, ADR 0055 D-2): what kind of settlement stands
  * there and roughly how big, **never which one** — no name, no `wikidata`, no
  * `population`, no id is ever decoded (D-3).
@@ -145,12 +190,26 @@ export interface DecodedTile {
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
-  /** #1565: the streets, for the cross streets at their junctions with the route. */
-  readonly streets: readonly StreetFeature[];
+  /**
+   * #1565: the streets, for the cross streets at their junctions with the
+   * route; since #2892 each with its road fields, for the open-world graph.
+   */
+  readonly streets: readonly DecodedStreetFeature[];
+  /**
+   * #2892: how many road-field values on the streets kept were present but
+   * not recognised, and read as their default — a hostile or unknown
+   * `oneway`, `access` or `is_link`. A count, never the value.
+   */
+  readonly roadValuesDefaulted: number;
   /** #1632: the place points, at most `DecodeLimits.maxPlacesPerTile` of them. */
   readonly places: readonly PlaceFeature[];
-  /** #2659: the rivers, streams and canals, for where they cross the route. */
+  /**
+   * #2659: the rivers, streams and canals, for where they cross the route;
+   * since #2974 the ditches and drains too, for where they run beside it.
+   */
   readonly waterLines: readonly WaterLineFeature[];
+  /** #2660: the railway lines, for the level crossings where they cross the route. */
+  readonly rails: readonly RailFeature[];
 }
 
 /**

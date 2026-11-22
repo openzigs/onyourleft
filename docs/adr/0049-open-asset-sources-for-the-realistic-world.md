@@ -428,3 +428,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   (`fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4`). `sources.ts`
   §`DELIVERY_CAR_SOURCE` records it, and `blender/process_vehicle.py` makes the shipped car.
   ([#2540](https://github.com/openzigs/onyourleft/issues/2540))
+- **2026-11-18** — **MakeHuman's own system assets pack is taken for the people's clothes too.**
+  ⚠️ **Written by the pull request that took them, and waiting on the owner's confirmation.** D-10's
+  **In** table admits *"MakeHuman's own files"* for *"the rider's body, and MakeHuman's own system
+  assets pack (the 2026-09-28 amendment)"*, and that amendment left clothes unruled. Asked on
+  2026-11-18 for *"a real model for the pedestrian"*, the owner's request is read by
+  [ADR 0026](0026-realistic-game-world.md)'s entry of the same date as ruling them in: clothes,
+  shoes, hair and a second skin out of the SAME pinned archive, each on its own `makehuman_system`,
+  CC0 row, for the three people `apps/web/tools/realistic/blender/process_people.py` makes. This
+  admits no new source and no new address: the row's *For* column is widened by this entry alone,
+  D-6's bar on a trade mark is kept (ADR 0026's entry says which garments are refused and what is
+  painted out), and D-10's two tables stand as written. `sources.ts` §`PEOPLE_GARMENTS` is the list.

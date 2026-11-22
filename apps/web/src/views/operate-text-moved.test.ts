@@ -95,6 +95,17 @@ describe('the Operate words live in @onyourleft/operate-text alone — #2644', (
     expect(declaredMoved(source)).toEqual(['NOT_RECORDED', 'durationText']);
   });
 
+  it('finds every export in one pass, from a source that declares them all (#2713)', () => {
+    // A pattern built from only some of the names would miss the rest here.
+    const source = MOVED.map((name) => `const ${name} = 1;`).join('\n');
+    expect(declaredMoved(source)).toEqual(MOVED);
+  });
+
+  it('builds its pattern from plain identifiers only, so no name can widen it (#2713)', () => {
+    // Unescaped in the pattern: a `$`, a `.` or a `|` in a name would change what it matches.
+    expect(MOVED.filter((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))).toEqual([]);
+  });
+
   it('declares none of the moved names anywhere under apps/web/src', () => {
     const left: string[] = [];
     // This file is skipped: its own probes above are declarations on purpose.

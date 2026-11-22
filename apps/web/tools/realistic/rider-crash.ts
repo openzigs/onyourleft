@@ -20,9 +20,9 @@
  */
 
 import {
+  CRASH_CLIP_SECONDS,
   CRASH_FALL_SECONDS,
   CRASH_RISE_AT_SECONDS,
-  CRASH_SECONDS,
 } from '../../src/game/delivery/crash-look';
 
 import { packPose, type PackPhase, type PackPose } from './rider-pack';
@@ -50,6 +50,8 @@ export function riderCrashPose(): RiderCrashPose {
     leg: pose.leg,
     fall: CRASH_FALL_SECONDS,
     riseAt: CRASH_RISE_AT_SECONDS,
-    end: CRASH_SECONDS,
+    // The clip's own end, not the drawn crash's: the runtime plays the clip's
+    // rise across a longer drawn one (`crash-look.ts` §`crashClipSeconds`).
+    end: CRASH_CLIP_SECONDS,
   };
 }

@@ -46,7 +46,7 @@ import {
   type LapRaceRide,
 } from './ride-race';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
-import { modelTacticsInputOf } from './model-race';
+import { modelTacticsRaceOf } from './model-race';
 import { drawnShift } from './pack-layout';
 
 const LOOP = circuitRoute(40);
@@ -773,7 +773,7 @@ describe('the bots ride the road from the line — #2800', () => {
       // route's own start is flat for the bots' first 100 m.
       expect(climbed).toBeGreaterThan(ride.bots.length * 50);
       // And the model is shown the grade 50 m up the road the bots ride.
-      const input = modelTacticsInputOf(
+      const input = modelTacticsRaceOf(
         ride.race,
         ride.bots,
         ride.conditions,

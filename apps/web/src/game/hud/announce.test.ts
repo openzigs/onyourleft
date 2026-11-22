@@ -339,6 +339,8 @@ describe('priority is an ORDER, not a politeness', () => {
       'delivery-obstacle-ahead',
       // #2365: a house ahead that must not get a parcel, for the same reason (ADR 0065 D-10.5).
       'delivery-skip-house',
+      // #2898: an open-world junction ahead, a choice and the lock (ADR 0088 D-3).
+      'junction',
     ]);
     // #1312, third pass: a lap's summary is NOT one of them.
     expect(ALWAYS_SPOKEN).not.toContain('lap-ended');
@@ -426,6 +428,24 @@ describe('a room’s race and its riders — #784, #785', () => {
     expect(run([{ now: 0, events: [joined] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual(
       ['A rider joined the room.'],
     );
+  });
+});
+
+describe('an open-world ride’s next junction — #2898', () => {
+  it('ranks below the ERG answer and above the workout’s own sentences, a lap and every reading', () => {
+    const rank = PRIORITY.indexOf('junction');
+    expect(rank).toBe(PRIORITY.indexOf('erg-held') + 1);
+    expect(rank).toBe(PRIORITY.indexOf('hold-changed') - 1);
+    for (const lower of ['lap-ended', 'power-off-target', 'distance-tick', 'power'] as const) {
+      expect(rank).toBeLessThan(PRIORITY.indexOf(lower));
+    }
+  });
+
+  it('is said with announcements off', () => {
+    const junction = { kind: 'junction', text: 'Junction ahead.' } as const;
+    expect(run([{ now: 0, events: [junction] }], { ...ON, enabled: false }).said).toEqual([
+      'Junction ahead.',
+    ]);
   });
 });
 
