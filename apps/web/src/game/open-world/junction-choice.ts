@@ -31,12 +31,13 @@
  * input to `gradient.ts` and names no trainer command; the grade comes from
  * the road ridden. `open-world-cannot-reach-trainer.test.ts` holds it.
  *
- * @unwired the open-world ride session (#2896) constructs this when it starts
- * a ride and hands the HUD its prompt and its press; it does not exist yet. The
- * HUD's junction prompt (`hud/JunctionChoicePrompt.tsx`, #2898) draws
+ * `GameView` constructs one when an open-world ride starts, over the rolling
+ * route its road follows, and hands the HUD its prompt and its press (#3013).
+ * The HUD's junction prompt (`hud/JunctionChoicePrompt.tsx`, #2898) draws
  * {@link JunctionChoice.prompt} and labels its ways with
- * {@link pressesOfWays}. The behavioural rides in `junction-choice.test.ts`
- * and `hud/JunctionChoicePrompt.test.tsx` drive it as the session will.
+ * {@link pressesOfWays}. `junction-wiring.test.tsx` rides it through the
+ * real game screen; the behavioural rides in `junction-choice.test.ts` and
+ * `hud/JunctionChoicePrompt.test.tsx` drive it as `GameView` does.
  */
 
 import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyourleft/domain';
@@ -46,9 +47,8 @@ import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyou
  * **250 m** (ADR 0088 D-1.2, answered by the owner in D-9 Q2). With two
  * junctions closer than this, the second's prompt appears as the first is
  * passed, because only the next junction is ever prompted.
- *
- * @test-facing `junction-choice.test.ts` holds the prompt to appearing at
- * exactly this distance; {@link createJunctionChoice} reads it here.
+ * `junction-choice.test.ts` holds the prompt to appearing at exactly this
+ * distance; {@link createJunctionChoice} reads it here.
  */
 export const JUNCTION_PROMPT_METRES = 250;
 
@@ -138,10 +138,7 @@ export function pressesOfWays(shown: JunctionPrompt): ReadonlyMap<string, readon
   return presses;
 }
 
-/**
- * @unwired the open-world ride session (#2896) holds one for its ride and
- * hands the HUD its prompt and its press; it does not exist yet.
- */
+/** An open-world ride's junction choice: `GameView` holds one for the ride (#3013). */
 export interface JunctionChoice {
   /** The prompt for the next junction, or `undefined` while none is within {@link JUNCTION_PROMPT_METRES}. */
   prompt(rider: number): JunctionPrompt | undefined;
@@ -150,11 +147,8 @@ export interface JunctionChoice {
 }
 
 /**
- * The junction choice for an open-world ride on `route`.
- *
- * @unwired the open-world ride session (#2896) constructs it when a ride
- * starts; it does not exist yet. The behavioural rides construct it as the
- * session will.
+ * The junction choice for an open-world ride on `route`: `GameView`
+ * constructs it when the ride starts, on its road's rolling route (#3013).
  */
 export function createJunctionChoice(route: RollingRoute): JunctionChoice {
   const prompt = (rider: number): JunctionPrompt | undefined => {

@@ -59,6 +59,35 @@ const tick = (): Promise<void> =>
     setTimeout(resolve, 0);
   });
 
+type ArchiveSource = Parameters<typeof corridorArchiveFrom>[0];
+
+/**
+ * #3046: more tasks than the ride on after a release takes (600 m in 25 m
+ * steps, a task each), so a read that waits this long outlasts that ride.
+ */
+const LAG_TASKS = 32;
+
+/**
+ * `source`, with every range read answered {@link LAG_TASKS} tasks late once
+ * `lag()` is called: a slow read on every machine, as a loaded runner's is on
+ * some runs (#3046). A wait by a count of ticks fails against it every time.
+ */
+function lagging(source: ArchiveSource): { source: ArchiveSource; lag: () => void } {
+  let late = false;
+  return {
+    source: {
+      getKey: () => source.getKey(),
+      getBytes: async (offset, length, signal, etag) => {
+        for (let task = 0; late && task < LAG_TASKS; task += 1) await tick();
+        return source.getBytes(offset, length, signal, etag);
+      },
+    },
+    lag: () => {
+      late = true;
+    },
+  };
+}
+
 /** A crossing's delay at once (a microtask on), and the start's own bound never. */
 const promptly = (run: () => void, ms: number): (() => void) => {
   if (ms <= CROSSING_DELAY_MAX_MS) queueMicrotask(run);
@@ -90,13 +119,39 @@ function heldCrossings(): {
   };
 }
 
-/** The worker the session made, its requests counted, answering as the real one does. */
-function countedWorker(): { make: () => GraphWorkerLike; requests: GraphRequest[] } {
+/**
+ * The worker the session made, its requests counted, answering as the real one
+ * does. #3046: `answered` waits on the answers themselves — until the changes
+ * the worker has answered satisfy `done` — never on a count of ticks, which a
+ * loaded runner's archive reads can outlast.
+ */
+function countedWorker(): {
+  make: () => GraphWorkerLike;
+  requests: GraphRequest[];
+  answered: (done: (changes: readonly GraphRequest[]) => boolean) => Promise<void>;
+} {
   const requests: GraphRequest[] = [];
+  const answers: GraphRequest[] = [];
+  const waiting: { done: (changes: readonly GraphRequest[]) => boolean; go: () => void }[] = [];
+  const heard = (data: unknown): void => {
+    const id = (data as { id?: unknown } | null)?.id;
+    const request = requests.find((each) => each.kind === 'change' && each.id === id);
+    if (request !== undefined) answers.push(request);
+    for (const waiter of waiting.splice(0)) {
+      if (waiter.done(answers)) waiter.go();
+      else waiting.push(waiter);
+    }
+  };
   return {
     requests,
+    answered: (done) =>
+      new Promise((go) => {
+        if (done(answers)) go();
+        else waiting.push({ done, go });
+      }),
     make: () => {
       const inner = inlineGraphWorker();
+      let handler: GraphWorkerLike['onmessage'] = null;
       const worker: GraphWorkerLike = {
         postMessage: (message) => {
           requests.push(message);
@@ -106,10 +161,17 @@ function countedWorker(): { make: () => GraphWorkerLike; requests: GraphRequest[
           inner.terminate();
         },
         get onmessage() {
-          return inner.onmessage;
+          return handler;
         },
-        set onmessage(handler) {
-          inner.onmessage = handler;
+        set onmessage(next) {
+          handler = next;
+          inner.onmessage =
+            next === null
+              ? null
+              : (event) => {
+                  next(event);
+                  heard(event.data);
+                };
         },
         onerror: null,
       };
@@ -117,6 +179,21 @@ function countedWorker(): { make: () => GraphWorkerLike; requests: GraphRequest[
     },
   };
 }
+
+const tileKeyOf = (tile: { readonly x: number; readonly y: number }): string =>
+  `${String(tile.x)}/${String(tile.y)}`;
+
+/** Every tile of the `east`th block, added by the changes in `changes`. */
+const addsBlock =
+  (east: number) =>
+  (changes: readonly GraphRequest[]): boolean => {
+    const added = new Set(
+      changes.flatMap((request) =>
+        request.kind === 'change' ? request.change.add.map((each) => tileKeyOf(each.tile)) : [],
+      ),
+    );
+    return fixtureBlockTiles(east).every((tile) => added.has(tileKeyOf(tile)));
+  };
 
 async function readyOn(
   bytes: Uint8Array,
@@ -156,7 +233,9 @@ describe('an open-world ride past the start’s blocks — #2990', () => {
     const worker = countedWorker();
     const crossings = heldCrossings();
     const bytes = await openWorldFixtureArchive(LONG_MAIN_STREET, 2);
+    const slow = lagging(countingSource(bytes));
     const { ready, stop } = await readyOn(bytes, fixtureStart(START_COLUMN, START_ROW), {
+      archive: corridorArchiveFrom(slow.source),
       graphBuilder: (frame) => workerGraphBuilder(frame, worker.make),
       schedule: crossings.schedule,
     });
@@ -176,8 +255,15 @@ describe('an open-world ride past the start’s blocks — #2990', () => {
       expect(turnsRound(road)).toBe(true);
       expect(distanceBetween(placeOn(road, edge + 300), snapped)).toBeCloseTo(edge - 300, -1);
       // The crossing's request goes 300 m short of that turn: the third
-      // block is read, and the road goes on past it.
+      // block is read, and the road goes on past it. #3046: the read is made
+      // slow, and the rider rides on once the graph has taken the third block
+      // (the worker has answered the change that adds it, and a task on the
+      // session's mirror holds it), however long the read took, not after a
+      // count of ticks.
+      slow.lag();
       crossings.release();
+      await worker.answered(addsBlock(2));
+      await tick();
       await ride(road, edge + 300, edge - 300);
       expect(turnsRound(road)).toBe(false);
       // The third block's tiles went in as the rider rode into the second.

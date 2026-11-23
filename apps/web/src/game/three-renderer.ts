@@ -152,6 +152,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CanvasTexture,
   CircleGeometry,
   Color,
   type CompressedTexture,
@@ -574,6 +575,12 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import {
+  STREET_NAME_ATLAS_COLUMNS,
+  STREET_NAME_ATLAS_ROWS,
+  STREET_NAME_CHARSET,
+  type StreetNamesInView,
+} from './street-names';
 import { NO_FOOTWAYS, type FootwayPiece } from './footway-surfaces';
 import type { Embankment } from './overpasses';
 import {
@@ -11047,6 +11054,146 @@ export class SideRoadBelt {
   dispose(): void {
     this.#mesh.geometry.dispose();
   }
+}
+
+/** The paint a street's name is drawn in: a warm white that holds against tarmac in either world. */
+export const STREET_NAME_PAINT = 0xf3f1e8;
+
+/** How many pixels a glyph atlas cell is, square. */
+const STREET_NAME_CELL_PIXELS = 64;
+
+/**
+ * The glyph atlas — #3052: every character of `street-names.ts`
+ * §`STREET_NAME_CHARSET`, white on clear, one to a cell, drawn once into an
+ * `OffscreenCanvas`. `undefined` where there is none to draw into (the jsdom
+ * suite): the belt then draws its quads unmapped, which nobody sees.
+ */
+function streetNameAtlas(): CanvasTexture<OffscreenCanvas> | undefined {
+  if (typeof OffscreenCanvas === 'undefined') return undefined;
+  const canvas = new OffscreenCanvas(
+    STREET_NAME_ATLAS_COLUMNS * STREET_NAME_CELL_PIXELS,
+    STREET_NAME_ATLAS_ROWS * STREET_NAME_CELL_PIXELS,
+  );
+  const context = canvas.getContext('2d');
+  if (context === null) return undefined;
+  context.fillStyle = '#ffffff';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.font = `bold ${String(Math.round(STREET_NAME_CELL_PIXELS * 0.8))}px sans-serif`;
+  for (const [cell, character] of Array.from(STREET_NAME_CHARSET).entries()) {
+    const column = cell % STREET_NAME_ATLAS_COLUMNS;
+    const row = Math.floor(cell / STREET_NAME_ATLAS_COLUMNS);
+    context.fillText(
+      character,
+      (column + 0.5) * STREET_NAME_CELL_PIXELS,
+      (row + 0.55) * STREET_NAME_CELL_PIXELS,
+      STREET_NAME_CELL_PIXELS,
+    );
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  // Read at a grazing angle from the chase camera: the most the GPU allows of
+  // eight, so a name 60 m on is not a smear.
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * The street names painted on the open world's roads — #3052, ADR 0096:
+ * every letter in view as one quad of ONE mesh, in one material with one
+ * texture, the glyph atlas. **One draw call** however many streets are named,
+ * and none on a frame that names none: the mesh is hidden. Built by
+ * `ThreeGameView` on the first frame that carries a name, so a ride that
+ * names no street never makes it.
+ *
+ * ⚠️ **Rebuilt only when the names in view change**, which `street-names.ts`
+ * §`streetNamesInView` does at most once every
+ * `STREET_NAME_REFRESH_METRES` ridden: it hands every frame between the same
+ * object.
+ *
+ * Unlit paint, alpha-tested rather than blended so it sorts with nothing; in
+ * the realistic world it breathes the realistic air (#622), and in the
+ * stylised one it takes the scene's fog, so a far name fades as the road does.
+ */
+export class StreetNameBelt {
+  readonly #mesh: Mesh;
+  readonly #atlas: CanvasTexture<OffscreenCanvas> | undefined;
+  readonly #materials: { readonly stylised: Material; readonly realistic: Material };
+  #held: StreetNamesInView | undefined;
+
+  constructor(atlas: CanvasTexture<OffscreenCanvas> | undefined = streetNameAtlas()) {
+    this.#atlas = atlas;
+    const paint = (): MeshBasicMaterial =>
+      constructed(
+        new MeshBasicMaterial({
+          color: STREET_NAME_PAINT,
+          map: atlas ?? null,
+          alphaTest: 0.5,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        }),
+      );
+    this.#materials = { stylised: paint(), realistic: withAtmosphere(paint()) };
+    this.#mesh = new Mesh(new BufferGeometry(), this.#materials.stylised);
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the jsdom suite's count of calls, and the browser gate. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** This frame's names, in the world `drawing` draws. */
+  update(names: StreetNamesInView | undefined, drawing: 'stylised' | 'realistic'): void {
+    this.#mesh.material = this.#materials[drawing];
+    if (names !== this.#held) {
+      this.#held = names;
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = streetNameGeometry(names);
+    }
+    this.#mesh.visible = names !== undefined && names.cells.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.stylised.dispose();
+    this.#materials.realistic.dispose();
+    this.#atlas?.dispose();
+  }
+}
+
+/** Every letter of `names` as one geometry: four corners and two triangles a letter, its cell's corner of the atlas each. */
+function streetNameGeometry(names: StreetNamesInView | undefined): BufferGeometry {
+  const geometry = new BufferGeometry();
+  const letters = names?.cells.length ?? 0;
+  if (names === undefined || letters === 0) return geometry;
+  const uvs = new Float32Array(letters * 8);
+  const normals = new Float32Array(letters * 12);
+  const index = new Uint32Array(letters * 6);
+  const across = 1 / STREET_NAME_ATLAS_COLUMNS;
+  const down = 1 / STREET_NAME_ATLAS_ROWS;
+  for (let letter = 0; letter < letters; letter += 1) {
+    const cell = names.cells[letter] as number;
+    const u0 = (cell % STREET_NAME_ATLAS_COLUMNS) * across;
+    // The canvas is drawn top row first and uploaded flipped: row 0 is at the top.
+    const v1 = 1 - Math.floor(cell / STREET_NAME_ATLAS_COLUMNS) * down;
+    const v0 = v1 - down;
+    uvs.set([u0, v0, u0 + across, v0, u0 + across, v1, u0, v1], letter * 8);
+    for (let corner = 0; corner < 4; corner += 1) normals[letter * 12 + corner * 3 + 1] = 1;
+    const first = letter * 4;
+    index.set([first, first + 1, first + 2, first, first + 2, first + 3], letter * 6);
+  }
+  geometry.setAttribute('position', new BufferAttribute(names.corners, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  return geometry;
 }
 
 /** No side roads: what a belt that is off holds. */
@@ -27161,6 +27308,8 @@ class ThreeGameView implements GameView {
    * handed none. @see #updateParkDressing
    */
   #parkDressing: ParkDressingBelt | undefined;
+  /** #3052: the open world's street names, once a frame has carried one. */
+  #streetNames: StreetNameBelt | undefined;
   /**
    * A lap race's pick-up points, puddles and hit effects — #1902, built on
    * the first frame that carries a lap race and dropped when the world
@@ -27393,6 +27542,8 @@ class ThreeGameView implements GameView {
     // #1565: the cross streets, in whatever the road wears this frame.
     this.#sideRoads.setMaterial(this.#road.material as Material);
     this.#sideRoads.update(frame.sideRoads);
+    // #3052: an open-world ride's street names, painted on those roads.
+    this.#updateStreetNames(frame.streetNames);
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
@@ -27502,6 +27653,23 @@ class ThreeGameView implements GameView {
       this.#parkDressing.addTo(this.#scene);
     }
     this.#parkDressing?.update(pieces);
+  }
+
+  /**
+   * The street names — #3052: the belt built on the first frame that names a
+   * street, and handed every frame after; a frame with none hides it.
+   */
+  #updateStreetNames(names: StreetNamesInView | undefined): void {
+    if (names !== undefined && names.cells.length > 0 && this.#streetNames === undefined) {
+      this.#streetNames = new StreetNameBelt();
+      this.#streetNames.addTo(this.#scene);
+    }
+    this.#streetNames?.update(names, this.#drawing);
+  }
+
+  /** The street names' belt, once a frame has built it. For the jsdom suite. */
+  get streetNameBelt(): StreetNameBelt | undefined {
+    return this.#streetNames;
   }
 
   /** The park dressing's belt, once a frame has built it. For the jsdom suite. */
@@ -28403,6 +28571,7 @@ class ThreeGameView implements GameView {
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
     this.#parkDressing?.dispose();
+    this.#streetNames?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();

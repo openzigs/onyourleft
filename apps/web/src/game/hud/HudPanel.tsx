@@ -397,9 +397,10 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    * goes. With it the HUD shows `JunctionChoicePrompt` in its actions panel,
    * inside the touch lock and exempt from none of it, listens for the turn
    * keys, and hands a pad's turn buttons to the same press
-   * (`GamepadIntents.tsx`). `undefined` on every other ride. ⚠️ No ride hands
-   * it in yet: the open-world ride session (#2896) will, so this is an
-   * optional prop nobody supplies (`wiring-gate.md` §Limits) until then.
+   * (`GamepadIntents.tsx`). `undefined` on every other ride. `GameView` hands
+   * it in on an open-world ride (#3013). ⚠️ It is an optional prop, which the
+   * wiring gate cannot see dropped (`wiring-gate.md` §Limits):
+   * `open-world/junction-wiring.test.tsx` is what goes red.
    */
   readonly junction?: JunctionInput | undefined;
 }

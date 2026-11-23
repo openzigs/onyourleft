@@ -234,6 +234,17 @@ import {
   type OpenWorldRoadView,
 } from './open-world/road';
 import type { OpenWorldStart } from './open-world/start';
+import {
+  createJunctionChoice,
+  type JunctionChoice,
+  type TurnPress,
+} from './open-world/junction-choice';
+import {
+  junctionEvent,
+  junctionSpoken,
+  NO_JUNCTION_ANNOUNCED,
+  type JunctionAnnounced,
+} from './hud/junction-text';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
@@ -1412,6 +1423,17 @@ function GameScreen({
    */
   const rideRoadRef = useRef<RideRoad>(NO_RIDE_ROAD);
   const [rideRoad, setRideRoad] = useState<RideRoad | undefined>(undefined);
+  /**
+   * #3013: an open-world ride's junction choice (#2897, ADR 0088), over the
+   * rolling route its road follows, and what its prompt has said (#2898).
+   * The HUD is handed its prompt and its press; a press changes which way the
+   * rolling route takes and nothing else, and the loop's next follow hands
+   * the new view on. `undefined` on every other ride.
+   */
+  const junctionRef = useRef<JunctionChoice | undefined>(undefined);
+  const junctionSaidRef = useRef<JunctionAnnounced>(NO_JUNCTION_ANNOUNCED);
+  /** #3013: a junction press, so the prompt draws the way it took without waiting for a frame. */
+  const [, setJunctionPresses] = useState(0);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
   // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
@@ -3025,6 +3047,10 @@ function GameScreen({
       rideRoadRef.current =
         openRoad === undefined ? { profile, origin: 0 } : { ...openRoad.view, follower: openRoad };
       setRideRoad(rideRoadRef.current);
+      // #3013: and its junctions, chosen on the same rolling route.
+      junctionRef.current =
+        openRoad === undefined ? undefined : createJunctionChoice(openRoad.route);
+      junctionSaidRef.current = NO_JUNCTION_ANNOUNCED;
       // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
       // rider switched it on and consented — never in a room, a race or a
       // simulated ride. Every ask is logged with the recording under the ride.
@@ -4162,6 +4188,15 @@ function GameScreen({
       // #1812: the round's sentences, owed until said (`hud/delivery-announce.ts`);
       // and #1818's one sentence on a ride that asked for a round and has none.
       events.push(...deliveryEvents(deliveryOwedRef.current));
+      // #3013: an open-world ride's next junction — its ways as the prompt
+      // appears, each change of choice, the lock — owed until said
+      // (`hud/junction-text.ts`). Nothing on every other ride.
+      const junctionOffered = junctionEvent(
+        junctionSaidRef.current,
+        junctionRef.current?.prompt(simulation.state.ride.distance),
+      );
+      junctionSaidRef.current = junctionOffered.announced;
+      if (junctionOffered.event !== undefined) events.push(junctionOffered.event);
       // #1906: the lap race's laps, hits, items, place and finish, owed until said.
       // #2546: the announcer's clock is the ride's and the time held on a
       // race's line together. @see heldOnLineMsRef
@@ -4200,6 +4235,7 @@ function GameScreen({
         lapOwedRef.current = undefined;
       }
       deliveryOwedRef.current = deliverySpoken(deliveryOwedRef.current, heard.kind);
+      junctionSaidRef.current = junctionSpoken(junctionSaidRef.current, heard.kind);
       if (raceAnnounced !== undefined) {
         lapRaceRef.current = lapRaceHeard(raceAnnounced, heard.kind, sayAt);
       }
@@ -4510,6 +4546,23 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #2902: an open-world ride's mapped buildings, planned round the
+          // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
+          // and ranked by the ways on from the next junction too.
+          ...(road.follower === undefined
+            ? {}
+            : {
+                mappedBuildings: road.follower.buildings(),
+                // #2903: and its streets, drawn to the fog as road, with a
+                // stub at each junction (`open-world/street-corridor.ts`).
+                worldCorridor: road.follower.streets(),
+                // #3052: and where each named street's name is painted on it.
+                streetNames: road.follower.streetNames(),
+                mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
+                // #3051: and the ways out the route does not take, so the
+                // scenery stands along each before a choice and after it.
+                waysOut: road.follower.waysOut(simulation.state.ride.distance),
+              }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the
           // obstacles meet them; none on a ride with no round, or in a room
@@ -5319,6 +5372,26 @@ function GameScreen({
         state={rideRoad === undefined ? state : alongRoad(state, rideRoad.origin)}
         // #2990: and no "to go" or route length on it, which a view's end is not.
         openEnded={rideRoad?.follower !== undefined}
+        // #3013, ADR 0088: an open-world ride's next junction, as the rider
+        // stands on this frame, and where a press goes: the junction choice,
+        // at the rider's distance as it is pressed. Keys, a bar remote, a pad
+        // and a tap all reach it through the HUD (#2898).
+        junction={(() => {
+          const choice = junctionRef.current;
+          return choice === undefined
+            ? undefined
+            : {
+                prompt: choice.prompt(state.ride.distance),
+                press: (turn: TurnPress) => {
+                  choice.press(
+                    turn,
+                    simulationRef.current?.state.ride.distance ?? state.ride.distance,
+                  );
+                  // Drawn at once, without waiting for the loop's next frame.
+                  setJunctionPresses((presses) => presses + 1);
+                },
+              };
+        })()}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         // #1111: the RECORDER's moving time — never the simulation's

@@ -157,6 +157,12 @@ export interface RollingEdge {
   readonly points: readonly RollingPoint[];
   /** Higher is the bigger road. Breaks a tie in ADR 0088 D-1.4's default. */
   readonly roadClass: number;
+  /**
+   * #3052, ADR 0096: the street's mapped name, as the map has it, for the
+   * junction prompt to name the way by. Absent where the street has none:
+   * nothing invents one.
+   */
+  readonly name?: string | undefined;
 }
 
 /** What the rolling route reads of the street graph (#2894). */
@@ -245,6 +251,7 @@ function reversed(edge: RollingEdge): RollingEdge {
     to: edge.from,
     points: [...edge.points].reverse(),
     roadClass: edge.roadClass,
+    ...(edge.name === undefined ? {} : { name: edge.name }),
   };
 }
 
@@ -495,6 +502,50 @@ export class RollingRoute {
     this.#push(way.edge, 'chosen', junction, 0);
     this.#settle(rider);
     return 'swapped';
+  }
+
+  /**
+   * The route this one would be were `edgeId` taken at the junction at ride
+   * distance `junction`: a NEW route, and this one left exactly as it is —
+   * #3051. An open-world ride draws the scenery along every way out of a
+   * junction before the rider chooses one, and keeps it after, so a choice
+   * replaces nothing the rider can see; and the ways out of the junctions
+   * along such a way are read off the route that takes it. Its view holds the
+   * samples {@link choose} would give from this route: this road as far as
+   * the junction, the way, and the default ways on from there, to within a
+   * sample of where this route ends now; the same {@link origin}. No lock
+   * applies, because nothing this route holds is taken. `undefined` where
+   * there is no such junction on the route or no such way on from it.
+   */
+  taking(junction: number, edgeId: string): RollingRoute | undefined {
+    const index = this.#legs.findIndex((leg) => leg.atNode && leg.end === junction);
+    if (index < 0) return undefined;
+    const way = this.#waysAfter(this.#legs[index] as Leg).ways.find(
+      (candidate) => candidate.edge.id === edgeId,
+    );
+    if (way === undefined) return undefined;
+    // A route of its own, on any street this one holds, then given what this
+    // one holds: every leg and sample is a value no method changes in place.
+    const other = new RollingRoute(this.#graph, (this.#legs[0] as Leg).edge);
+    const put = <T>(into: T[], from: readonly T[]): void => {
+      into.length = 0;
+      for (const each of from) into.push(each);
+    };
+    put(other.#legs, this.#legs);
+    put(other.#positions, this.#positions);
+    put(other.#heights, this.#heights);
+    put(other.#despiked, this.#despiked);
+    put(other.#grades, this.#grades);
+    other.#first = this.#first;
+    other.#uTurns = this.#uTurns;
+    other.#view = undefined;
+    other.#cutAfter(index, junction);
+    other.#push(way.edge, 'chosen', junction, 0);
+    // A rider a reach and a sample short of the end: the tail is extended to
+    // within a sample of the same end, and nothing behind is trimmed, since
+    // this route was last settled for a rider further on than that.
+    other.#settle(this.end - ROLLING_AHEAD_METRES - ROLLING_RESOLUTION_METRES);
+    return other;
   }
 
   /**

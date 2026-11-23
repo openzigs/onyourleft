@@ -23,11 +23,13 @@
  * and a junction passed owes nothing, because a sentence about a junction
  * behind the rider is noise.
  *
- * ## No place in words
+ * ## No position in words; a street by its mapped name
  *
- * A way is named by how it turns from the rider's heading, never by a street
- * name, a node or a position (ADR 0004 D, #2880's hard rules): nothing here is
- * handed anything else.
+ * A way is named by how it turns from the rider's heading, and since #3052
+ * (ADR 0096) by the street's mapped name beside it where the map gives one —
+ * "Right onto Third Avenue" — never by a node, a coordinate or a position
+ * (ADR 0004 D). A way with no name is named by its turn alone: nothing here
+ * invents one. The name is shown and said, and never logged.
  *
  * ## The words are new, for the owner's approval
  *
@@ -35,6 +37,7 @@
  * #2898's pull request.
  */
 
+import type { RollingWay } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatSmallDistance } from '../../units/format';
@@ -76,6 +79,33 @@ export function wayWord(turnDegrees: number): string {
   return `Sharp ${side}`;
 }
 
+/**
+ * The street a way is, as mapped (#3052, ADR 0096), or `undefined` where the
+ * map names none.
+ */
+export function wayStreet(way: Pick<RollingWay, 'edge'>): string | undefined {
+  const name = way.edge.name;
+  return name === undefined || name.length === 0 ? undefined : name;
+}
+
+/**
+ * The words under a way's turn that name its street — "onto Third Avenue",
+ * or "along Main Street" for the way straight on — or `undefined` with no
+ * name (#3052).
+ */
+export function wayStreetLine(way: Pick<RollingWay, 'edge' | 'turnDegrees'>): string | undefined {
+  const street = wayStreet(way);
+  if (street === undefined) return undefined;
+  return `${Math.abs(way.turnDegrees) <= 15 ? 'along' : 'onto'} ${street}`;
+}
+
+/** A way in a sentence: its turn, and its street where it has one — "right onto Third Avenue". */
+export function wayPhrase(way: Pick<RollingWay, 'edge' | 'turnDegrees'>): string {
+  const line = wayStreetLine(way);
+  const word = wayWord(way.turnDegrees).toLowerCase();
+  return line === undefined ? word : `${word} ${line}`;
+}
+
 /** The line the prompt shows until the choice is final: how far until it is, in tens of the rider's unit. */
 export function lockLine(toLock: number, units: UnitSystem): string {
   const measured = formatSmallDistance(toLock, units);
@@ -85,7 +115,7 @@ export function lockLine(toLock: number, units: UnitSystem): string {
 
 function wordOf(shown: JunctionPrompt, id: string): string {
   const way = shown.ways.find((each) => each.edge.id === id);
-  return wayWord(way?.turnDegrees ?? 0).toLowerCase();
+  return way === undefined ? wayWord(0).toLowerCase() : wayPhrase(way);
 }
 
 /** "a, b or c". */
@@ -96,7 +126,7 @@ function listed(words: readonly string[]): string {
 
 /** The sentence said as a junction's prompt appears: its ways, and the default. */
 function aheadSentence(shown: JunctionPrompt): string {
-  const ways = listed(shown.ways.map((way) => wayWord(way.turnDegrees).toLowerCase()));
+  const ways = listed(shown.ways.map(wayPhrase));
   return `${JUNCTION_PROMPT_TITLE}: ${ways}. The default is ${wordOf(shown, shown.defaultWay)}.`;
 }
 
@@ -128,7 +158,7 @@ export interface JunctionAnnounced {
   readonly owed: string | undefined;
 }
 
-/** @unwired the open-world ride session (#2896) starts each ride from it; it does not exist yet. */
+/** Nothing said yet: `GameView` starts each open-world ride from it (#3013). */
 export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
   junction: undefined,
   chosen: undefined,
@@ -140,10 +170,9 @@ export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
  * This frame's junction event, if one is owed, from the prompt as the rider
  * stands now (`JunctionChoice.prompt`).
  *
- * @unwired the open-world ride session (#2896) offers it to `announce.ts`
- * every frame, beside the ride's other events; that session does not exist
- * yet. `JunctionChoicePrompt.a11y.test.tsx` drives it into the HUD's region as
- * the session will.
+ * `GameView` offers it to `announce.ts` every frame of an open-world ride,
+ * beside the ride's other events (#3013). `JunctionChoicePrompt.a11y.test.tsx`
+ * drives it into the HUD's region as `GameView` does.
  */
 export function junctionEvent(
   announced: JunctionAnnounced,
@@ -174,8 +203,7 @@ export function junctionEvent(
  * The state after the announcer said `kind` this frame: a junction sentence
  * said is owed no longer.
  *
- * @unwired the open-world ride session (#2896) hands back each frame's
- * `Announcement.kind`; that session does not exist yet.
+ * `GameView` hands back each frame's `Announcement.kind` (#3013).
  */
 export function junctionSpoken(
   announced: JunctionAnnounced,

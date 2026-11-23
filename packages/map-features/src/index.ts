@@ -91,6 +91,7 @@ export type {
   CorridorFrame,
   DecodedStreetFeature,
   DecodedTile,
+  DecodeOptions,
   DecodeRefusal,
   GridSpec,
   Landmark,
