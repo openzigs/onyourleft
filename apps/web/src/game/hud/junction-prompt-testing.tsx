@@ -74,9 +74,9 @@ export function JunctionHud(props: {
   );
 }
 
-/** Every way the prompt draws, in its order, from the furthest left. */
+/** Every way the prompt draws, in its order, from the furthest left: in its pop-up (#3053). */
 export function wayButtons(): HTMLButtonElement[] {
-  return queryAll<HTMLButtonElement>(document, 'button[data-oyl-way]');
+  return queryAll<HTMLButtonElement>(document, '.oyl-hud__junction-popup button[data-oyl-way]');
 }
 
 /** The way the prompt draws for the edge `id`. */
