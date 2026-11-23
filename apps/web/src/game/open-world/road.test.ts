@@ -119,19 +119,47 @@ describe('the open-world road past its first view — #2982', () => {
   it('keys every view it hands on to the ride: the first view seed, and its own origin — #3055', () => {
     const road = grid();
     const seed = routeSeed(road.view.profile);
-    expect(sceneryAnchor(road.view.profile)).toEqual({ seed, origin: 0 });
+    // #3094: and one set of held streets and one frame for every view's places.
+    const first = sceneryAnchor(road.view.profile);
+    const { levels, frame } = first ?? {};
+    expect(levels).toBeDefined();
+    expect(frame).toEqual(corridorOrigin(road.view.profile));
+    expect(first).toEqual({ seed, origin: 0, levels, frame });
     let views = 0;
     for (let rider = 0; rider <= 6_000; rider += 50) {
       if (rider === 3_000) road.route.uTurn(rider);
       const next = road.follow(rider);
       if (next === undefined) continue;
       views += 1;
-      expect(sceneryAnchor(next.profile), `at ${rider} m`).toEqual({ seed, origin: next.origin });
+      const anchor = sceneryAnchor(next.profile);
+      expect(anchor, `at ${rider} m`).toEqual({ seed, origin: next.origin, levels, frame });
+      expect(anchor?.levels, `at ${rider} m`).toBe(levels);
       // The view's own seed is not the ride's: it is the view that changed.
       expect(routeSeed(next.profile)).not.toBe(seed);
     }
     expect(views).toBeGreaterThan(3);
     expect(road.view.origin).toBeGreaterThan(0);
+  });
+
+  it('keys each view before the session plans buildings against it — #3094', () => {
+    // The session plans the buildings round the rider against `route.view()`
+    // from the `ahead` hook, and hands the worker what that view is keyed on.
+    const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+    const route = new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
+    const seen: { readonly origin: number; readonly anchor: unknown }[] = [];
+    const road = new OpenWorldRoad(route, {
+      ahead: (each) => seen.push({ origin: each.origin, anchor: sceneryAnchor(each.view()) }),
+    });
+    const seed = sceneryAnchor(road.view.profile)?.seed;
+    let changes = 0;
+    for (let rider = 0; rider <= 6_000; rider += 50) {
+      if (rider === 3_000) road.route.uTurn(rider);
+      if (road.follow(rider) !== undefined) changes += 1;
+    }
+    expect(changes).toBeGreaterThan(3);
+    for (const { origin, anchor } of seen) {
+      expect(anchor).toMatchObject({ seed, origin });
+    }
   });
 
   it('advances nothing for a rider distance that is not a finite number', () => {

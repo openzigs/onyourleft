@@ -26,6 +26,7 @@ import {
 } from '@onyourleft/map-features';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { FootprintPlan } from '../footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from '../mapped-buildings';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from '../realistic-assets';
 import {
@@ -35,11 +36,13 @@ import {
   REALISTIC_STRUCTURE_ITEMS,
 } from '../realistic-budget';
 import { sceneFrame } from '../scene';
+import { sceneryAnchor } from '../scenery-anchor';
 import { atStartLine } from '../simulation';
 import { corridorOrigin, localGroundPosition } from '../terrain';
 import { MappedBuildingBelt, refillMappedBuildings } from '../three-renderer';
 import { OpenWorldRoad } from './road';
-import { REDUCED_BUILDINGS_MOST } from './tile-buildings';
+import { openWorldStreetCorridor } from './street-corridor';
+import { REDUCED_BUILDINGS_MOST, type BuildingsRequest } from './tile-buildings';
 import type { TileBlockFeatures } from './tile-plan';
 import { tilePlanWorkerCore } from './tile-planner';
 
@@ -330,5 +333,59 @@ describe('an open-world ride fills its belt from its tiles — #2902', () => {
     expect(full.reply.plans.length).toBeGreaterThan(REDUCED_BUILDINGS_MOST);
     expect(reduced.reply.plans.length).toBeLessThanOrEqual(REDUCED_BUILDINGS_MOST);
     expect(reduced.reply.plans.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a worker plans the buildings on the ground the scene draws — #3094', () => {
+  /** The plans round a rider 60 m short of the junction, against `request`'s view, by a fresh handler. */
+  const plansFor = (request: Omit<BuildingsRequest, 'x' | 'z'>): readonly FootprintPlan[] => {
+    const { block } = denseBlock();
+    const core = tilePlanWorkerCore();
+    core.handle({ kind: 'frame', frame: FRAME });
+    core.handle({ kind: 'hold', block: 'b', features: block });
+    for (const [id, { tile }] of block.tiles.entries()) {
+      core.handle({ kind: 'plan', id, block: 'b', tile, detail: 'full' });
+    }
+    const here = local(0, -60);
+    const answer = core.handle({
+      kind: 'buildings',
+      id: 7,
+      request: { ...request, x: here.x, z: here.z },
+      detail: 'full',
+    });
+    if (answer?.reply.kind !== 'buildings') throw new Error('no buildings planned');
+    return answer.reply.plans;
+  };
+  /** Each plan's foot, by where it stands. */
+  const feet = (plans: readonly FootprintPlan[]): Map<string, number> =>
+    new Map(
+      plans.map((plan) => [
+        `${plan.centroid.x.toFixed(2)},${plan.centroid.z.toFixed(2)}`,
+        plan.base,
+      ]),
+    );
+
+  it('keys its copy of the view as the road keyed the view, and stands every plan where the page would', () => {
+    // The road as a session makes it: in the ride's frame, levelled beside the held streets.
+    const { block } = denseBlock();
+    const streets = openWorldStreetCorridor(FRAME, [block]);
+    const road = new OpenWorldRoad(crossroads(), { frame: FRAME, streets: () => streets });
+    const view = road.view.profile;
+    const anchor = sceneryAnchor(view);
+    if (anchor === undefined) throw new Error('the road keyed no view');
+    const scenery = { seed: anchor.seed, origin: anchor.origin };
+    // On the page: the road's own view. In a worker: a copy nobody keyed.
+    const page = feet(plansFor({ profile: view, scenery }));
+    const copy = structuredClone(view);
+    expect(sceneryAnchor(copy)).toBeUndefined();
+    const worker = feet(plansFor({ profile: copy, scenery }));
+    expect(page.size).toBeGreaterThan(50);
+    expect([...worker.keys()].sort()).toStrictEqual([...page.keys()].sort());
+    for (const [at, base] of page) expect(worker.get(at), at).toBeCloseTo(base, 6);
+    // The control: a copy handed over without what the road keyed it on
+    // stands its plans on another ground.
+    const unkeyed = feet(plansFor({ profile: structuredClone(view) }));
+    const apart = [...page].map(([at, base]) => Math.abs((unkeyed.get(at) ?? base) - base));
+    expect(Math.max(...apart)).toBeGreaterThan(0.05);
   });
 });

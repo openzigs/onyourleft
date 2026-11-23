@@ -38,6 +38,8 @@ import type { Box, BuildingFeature, CorridorFrame, LandUseFeature } from '@onyou
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, type FootprintPlan } from '../footprint-buildings';
 import { NO_LAND_CLASS } from '../land-class';
 import { MAPPED_BUILDING_REACH_METRES } from '../realistic-budget';
+import { anchorScenery, sceneryAnchor } from '../scenery-anchor';
+import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
 import { openWorldStreetCorridor } from './street-corridor';
 import type { TileBlockFeatures, TilePlanDetail } from './tile-plan';
@@ -73,6 +75,13 @@ export interface BuildingsRequest {
   /** Where the rider is, in the ride's frame. */
   readonly x: number;
   readonly z: number;
+  /**
+   * #3094: what the road keyed {@link profile}'s scenery and ground on
+   * (`scenery-anchor.ts`): the ride's seed and the view's ride distance. A
+   * worker is handed a copy of the profile, which nobody keyed, and keys it
+   * with these, so a plan stands on the ground the scene draws.
+   */
+  readonly scenery?: { readonly seed: number; readonly origin: number } | undefined;
 }
 
 /**
@@ -85,6 +94,11 @@ export function planBuildingsNear(
   owned: Iterable<OwnedFootprints>,
   request: BuildingsRequest,
   detail: TilePlanDetail,
+  /**
+   * #3094: the held streets the ground is levelled beside, kept by the caller
+   * across requests; absent, found from `blocks` for this one.
+   */
+  levels?: StreetLevels,
 ): readonly FootprintPlan[] {
   const reach =
     detail === 'full' ? OPEN_WORLD_BUILDINGS_REACH_METRES : MAPPED_BUILDING_REACH_METRES;
@@ -120,6 +134,20 @@ export function planBuildingsNear(
     landUse,
     buildings: near.map((each) => each.building),
   };
+  // #3094: a copy of the view the road keyed is keyed here as the road keyed
+  // it, its ground levelled beside the same held streets, so the plans stand
+  // on the ground the scene draws. The view itself, on the page, is the
+  // road's own and keyed already.
+  const { scenery } = request;
+  if (scenery !== undefined && sceneryAnchor(request.profile) === undefined) {
+    const streets = corridor.streets;
+    anchorScenery(request.profile, {
+      seed: scenery.seed,
+      origin: scenery.origin,
+      levels: levels ?? new StreetLevels(() => streets),
+      frame: corridor.origin,
+    });
+  }
   return footprintPlans(
     corridor,
     NO_LAND_CLASS,
