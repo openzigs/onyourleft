@@ -46,6 +46,7 @@ const RIDE_SECONDS: Readonly<Record<DemoPreset['id'], number>> = {
   climb: 400,
   sprint: 180,
   group: 300,
+  hill: 120,
 };
 
 function rideOf(preset: DemoPreset): DemoFrame[] {
@@ -102,6 +103,7 @@ describe('a demo ride is deterministic', () => {
     climb: '1373305848a796b9e38ec5d680bd3b844a1b2c65f2ba33df5c85e82e9c047dce',
     sprint: '5b418d469b3b077e168302a48724418916f70d21f098749de47db1cd46b18f39',
     group: '31b601e39708b503fb404e933a9c2f28ce6ec40f8d880eb21353e80f87c162bf',
+    hill: 'cffdfd8a78a133427d112fdde89ab9e43c2d59ab8c46a67b99e271cb738b3317',
   };
 
   it.each(DEMO_PRESETS.map((preset) => [preset.id, preset] as const))(

@@ -25,6 +25,9 @@
     // program so ESLint's project service can resolve it, and out of the
     // coverage report, which is `apps/*/src/**`.
     "tools/**/*.ts",
+    // #3074: the demo video's caption scripts, words an owner edits, which
+    // `src/demo/caption-script.ts` imports.
+    "demo/captions/**/*.ts",
     "vite.config.ts",
     "vite.browser.config.ts",
     "vite.demo.config.ts",

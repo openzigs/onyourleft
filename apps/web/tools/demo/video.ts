@@ -9,9 +9,18 @@
  * its output is read back, the pixel test for a credit — is here, so that
  * `video.test.ts` runs it in the ordinary Vitest suite.
  *
- * Imports nothing, so `node` runs `demo-video.ts` with types stripped
- * (`package.json`'s `demo:video`).
+ * Imports only the caption scripts (`src/demo/caption-script.ts`, #3074),
+ * which import nothing but their words and types, so `node` runs
+ * `demo-video.ts` with types stripped (`package.json`'s `demo:video`).
  */
+
+import {
+  CAPTION_SCRIPTS,
+  isCaptionScriptId,
+  scriptSeconds,
+  type CaptionScript,
+  type CaptionScriptId,
+} from '../../src/demo/caption-script';
 
 /**
  * A baked route's id: `route-bundle.ts` §`ROUTE_ID`, written out because that
@@ -22,8 +31,11 @@
 export const VIDEO_ROUTE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** The presets a video can ride (`src/demo/presets.ts`). */
-export const VIDEO_PRESETS = ['climb', 'sprint', 'group'] as const;
+export const VIDEO_PRESETS = ['climb', 'sprint', 'group', 'hill'] as const;
 export type VideoPreset = (typeof VIDEO_PRESETS)[number];
+
+/** What `--preset` takes: a preset, or a captioned tour's script (#3074). */
+export const VIDEO_CHOICES: readonly string[] = [...VIDEO_PRESETS, ...Object.keys(CAPTION_SCRIPTS)];
 
 /**
  * How long the closing card a baked route's video ends on is held — ADR 0056
@@ -34,9 +46,14 @@ export const CLOSING_CARD_SECONDS = 4;
 
 /** What `demo:video` was asked for. */
 export interface VideoRequest {
-  readonly preset: VideoPreset;
-  /** A baked route's id (`demo:bake`), or none: the synthetic road. */
+  /** A preset, or a captioned tour's script: its scenes, each a preset (#3074). */
+  readonly preset: VideoPreset | CaptionScriptId;
+  /**
+   * A baked route's id (`demo:bake`), or none: the synthetic road. A tour
+   * rides it in the scenes marked to, and each other scene on its own road.
+   */
   readonly route: string | undefined;
+  /** Seconds of ride; a tour's are its scenes', end to end. */
   readonly seconds: number;
   readonly fps: number;
   readonly width: number;
@@ -83,17 +100,25 @@ export function parseVideoArgs(
     at += 1;
   }
   const preset = values.get('--preset') ?? 'climb';
-  if (!(VIDEO_PRESETS as readonly string[]).includes(preset)) {
+  if (!VIDEO_CHOICES.includes(preset)) {
     return {
       ok: false,
-      message: `demo:video: --preset is one of ${VIDEO_PRESETS.join(', ')}, not ${preset}`,
+      message: `demo:video: --preset is one of ${VIDEO_CHOICES.join(', ')}, not ${preset}`,
+    };
+  }
+  const tour = isCaptionScriptId(preset) ? CAPTION_SCRIPTS[preset] : undefined;
+  if (tour !== undefined && values.has('--seconds')) {
+    return {
+      ok: false,
+      message: `demo:video: the ${preset} tour is as long as its scenes, so it takes no --seconds`,
     };
   }
   const route = values.get('--route');
   if (route !== undefined && !VIDEO_ROUTE_ID.test(route)) {
     return { ok: false, message: `demo:video: no route can be called ${route}` };
   }
-  const seconds = Number(values.get('--seconds') ?? '30');
+  const seconds =
+    tour === undefined ? Number(values.get('--seconds') ?? '30') : scriptSeconds(tour);
   if (!(Number.isFinite(seconds) && seconds > 0)) {
     return { ok: false, message: `demo:video: --seconds is a positive number` };
   }
@@ -132,7 +157,7 @@ export function parseVideoArgs(
   return {
     ok: true,
     request: {
-      preset: preset as VideoPreset,
+      preset: preset as VideoRequest['preset'],
       route,
       seconds,
       fps,
@@ -150,9 +175,19 @@ export function rideFrames(request: Pick<VideoRequest, 'seconds' | 'fps'>): numb
   return Math.round(request.seconds * request.fps);
 }
 
-/** The closing card's frames: none on the synthetic road, where nothing is owed. */
-export function cardFrames(request: Pick<VideoRequest, 'route' | 'fps'>): number {
-  return request.route === undefined ? 0 : CLOSING_CARD_SECONDS * request.fps;
+/** The captioned tour `request` renders, if it is one — #3074. */
+export function videoTour(request: Pick<VideoRequest, 'preset'>): CaptionScript | undefined {
+  return isCaptionScriptId(request.preset) ? CAPTION_SCRIPTS[request.preset] : undefined;
+}
+
+/**
+ * The closing card's frames: none for a preset on the synthetic road, where
+ * nothing is owed. A tour always ends on it, for the project's address (#3074).
+ */
+export function cardFrames(request: Pick<VideoRequest, 'preset' | 'route' | 'fps'>): number {
+  return request.route === undefined && videoTour(request) === undefined
+    ? 0
+    : CLOSING_CARD_SECONDS * request.fps;
 }
 
 /** `climb-1920x1080.webm`, or `climb-upstate-climb-1920x1080.webm` on a baked route. */
@@ -168,6 +203,36 @@ export function videoName(
 export function renderUrl(origin: string, request: Pick<VideoRequest, 'preset' | 'route'>): string {
   const route = request.route === undefined ? '' : `&route=${request.route}`;
   return `${origin}/?preset=${request.preset}${route}&render`;
+}
+
+/** One page a render opens, and how many frames it takes of it. */
+export interface RenderScene {
+  readonly url: string;
+  readonly frames: number;
+  /** The baked route this page rides, which it must load; none on its own road. */
+  readonly route: string | undefined;
+}
+
+/**
+ * The pages a render opens, in order: the preset's one, or each of a tour's
+ * scenes (#3074), a baked route given only to the scenes marked to ride it.
+ */
+export function renderScenes(
+  origin: string,
+  request: Pick<VideoRequest, 'preset' | 'route' | 'seconds' | 'fps'>,
+): RenderScene[] {
+  const tour = videoTour(request);
+  if (tour === undefined) {
+    return [{ url: renderUrl(origin, request), frames: rideFrames(request), route: request.route }];
+  }
+  return tour.scenes.map((scene) => {
+    const route = scene.route === true ? request.route : undefined;
+    return {
+      url: `${origin}/?captions=${request.preset}&scene=${scene.id}${route === undefined ? '' : `&route=${route}`}&render`,
+      frames: Math.round(scene.seconds * request.fps),
+      route,
+    };
+  });
 }
 
 /**
