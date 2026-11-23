@@ -73,6 +73,49 @@ export const OPEN_WORLD_FIXTURE_STREETS: readonly GraphFixtureStreet[] = [
   },
 ];
 
+/** The columns of {@link OPEN_WORLD_GRID_STREETS}' north–south streets. */
+export const GRID_COLUMNS: readonly number[] = [-4000, -2000, -1000, 0, 1000, 2000, 3500];
+
+/** The rows of {@link OPEN_WORLD_GRID_STREETS}' east–west streets: Main street's among them. */
+export const GRID_ROWS: readonly number[] = [
+  300,
+  948,
+  MAIN_STREET_ROW,
+  3148,
+  4248,
+  5348,
+  6448,
+  7548,
+  7900,
+];
+
+/**
+ * #3051: a town of crossroads — every street of {@link GRID_ROWS} and
+ * {@link GRID_COLUMNS} running the block's width, so a ride from the start
+ * pin meets a four-way junction every 230–260 m and can turn left and right
+ * at three in a row without reaching a dead end. Residential streets, with
+ * Main street a secondary road.
+ */
+export const OPEN_WORLD_GRID_STREETS: readonly GraphFixtureStreet[] = [
+  ...GRID_ROWS.map((row) => ({
+    tags: {
+      kind: row === MAIN_STREET_ROW ? 'major_road' : 'minor_road',
+      kind_detail: row === MAIN_STREET_ROW ? 'secondary' : 'residential',
+    },
+    line: [
+      [-4000, row],
+      [3500, row],
+    ] as const,
+  })),
+  ...GRID_COLUMNS.map((column) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [column, 300],
+      [column, 7900],
+    ] as const,
+  })),
+];
+
 /** The block's four z15 tiles. */
 export const OPEN_WORLD_FIXTURE_TILES: readonly TileId[] = [
   { z: 15, x: FIXTURE_TILE.x - 1, y: FIXTURE_TILE.y },

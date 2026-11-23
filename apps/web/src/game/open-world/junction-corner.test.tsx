@@ -38,15 +38,42 @@
  * does; the game, the simulation, the road, the junction choice, its prompt,
  * the scene, the camera's damping and the trainer port are the product's.
  *
+ * ## The owner's ruling of 2026-11-23: the real session, three turns
+ *
+ * The cases above ride a session double with no street corridor and read
+ * only the rider and the camera, which turned smoothly while the tablet
+ * showed the screen flipping. The cause was what they did not read: every
+ * view change (a press, an extension) re-seeded the whole scenery (#3055),
+ * so on the frame of the press every tree and house round the rider was
+ * replaced; and no side street was drawn (#2903). The second describe below
+ * rides the product's own session (`session.ts`, its reader, graph and
+ * rolling route) over {@link OPEN_WORLD_GRID_STREETS}, a town of
+ * crossroads, through three turns, and holds on the frames the renderer was
+ * handed:
+ *
+ * - each corner ridden round with the same bounds as above;
+ * - **no frame replaces the scene**: the scenery and the ground within
+ *   {@link SCENERY_NEAR_METRES} of the rider stay where they were from one
+ *   frame to the next through every press and corner — on #2903's branch
+ *   alone none of it survives the press;
+ * - **the junction is drawn before the rider reaches it, on every way out**,
+ *   before the press and after it: the road or a side street runs out along
+ *   each way the ride did not come in by.
+ *
  * ## What this file does not hold
  *
  * - **A U-turn.** A U-turn press changes the road under the rider at once
  *   (ADR 0088 D-1.6) and its line is drawn at once (`line-ease.ts`), so the
  *   drawn rider and the eye jump. Drawing it round an arc is #3045's lane
  *   (the turnaround's arc), and the press's jump is #3066.
- * - **The side street.** The street turned into is drawn only as the road
- *   the ride takes; the junction's other ways are #2903.
+ * - **A street that ends.** Where the street turned into ends within the
+ *   view, the route turns round there and comes back through the junction,
+ *   and the junction's way out the route will come back along is drawn as
+ *   neither the road nor a side street until the road reaches it. The grid
+ *   closes every street on another for that reason. That is #3091.
  */
+
+import { Blob as NodeBlob } from 'node:buffer';
 
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,6 +81,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   RollingRoute,
   degreesLatitude,
+  distanceBetween,
   degreesLongitude,
   geographicPosition,
   gradeAt,
@@ -64,15 +92,30 @@ import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
+import { countingSource, type CountingSource } from '../../world-data/archive-testing';
+import { corridorArchiveFrom } from '../../world-data/corridor-source';
 import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from '../camera';
 import { GameView, type GamePort } from '../GameView';
 import type { GameRenderer, SceneFrame } from '../port';
 import type { SceneInput } from '../scene';
 import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
-import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
+import { createOpenWorldEntry } from './entry';
+import {
+  fixturePosition,
+  fixtureStart,
+  GRID_COLUMNS,
+  GRID_ROWS,
+  MAIN_STREET_ROW,
+  OPEN_WORLD_GRID_STREETS,
+  openWorldFixtureArchive,
+  START_COLUMN,
+  START_ROW,
+} from './fixture-testing';
 import { OPEN_WORLD_ROUTE_ID, type OpenWorldSessions } from './ride';
 import { OpenWorldRoad } from './road';
+import { createOpenWorldSession } from './session';
+import { lazyOpenWorldSessions } from './session-lazy';
 
 const inputs: SceneInput[] = [];
 
@@ -390,8 +433,8 @@ interface Turned {
   readonly arc: number;
 }
 
-function turned(frames: readonly Watched[]): Turned {
-  const seconds = 1 / FPS;
+function turned(frames: readonly Watched[], fps: number = FPS): Turned {
+  const seconds = 1 / fps;
   const first = frames[0] as Watched;
   const last = frames[frames.length - 1] as Watched;
   const turn = turnBetween(first.yaw, last.yaw);
@@ -451,6 +494,7 @@ function expectRoundTheCorner(
   ridden: Turned,
   side: 'left' | 'right',
   cap: number = CAMERA_MAXIMUM_YAW_RATE,
+  fps: number = FPS,
 ): void {
   const facts = JSON.stringify(ridden);
   // The whole quarter turn, the right way round, the camera and the rider both.
@@ -464,8 +508,10 @@ function expectRoundTheCorner(
   // A heading that changes continuously.
   expect(ridden.yawRate, facts).toBeLessThanOrEqual(cap + RATE_ROUNDING);
   expect(ridden.backTurn, facts).toBeLessThan(BACK_TURN_RADIANS);
-  expect(ridden.yawRateStep, facts).toBeLessThan(YAW_RATE_STEP);
-  expect(ridden.riderYawRateStep, facts).toBeLessThan(YAW_RATE_STEP);
+  // A rate's change over one frame is its change a second over the frame's
+  // time: the bound is stated at {@link FPS}, and scales with the frame's length.
+  expect(ridden.yawRateStep, facts).toBeLessThan((YAW_RATE_STEP * FPS) / fps);
+  expect(ridden.riderYawRateStep, facts).toBeLessThan((YAW_RATE_STEP * FPS) / fps);
   // A corner, not a cut.
   expect(ridden.arc, facts).toBeGreaterThanOrEqual(LEAST_ARC_METRES);
 }
@@ -531,6 +577,412 @@ describe('an open-world ride turns round the corner at a junction, frame by fram
         ),
       );
       expect(off, `the write on frame ${String(write.frame)}`).toBeLessThan(1e-6);
+    }
+  });
+});
+
+// --- The owner's ruling of 2026-11-23: three turns through the real session ---
+
+/**
+ * The three junctions of {@link OPEN_WORLD_GRID_STREETS} the ride turns at, in
+ * fixture pixels; the key pressed for each; and the way the ride came in, as
+ * a step in pixels: left off Main street to go north, right to go east, right
+ * to go south.
+ */
+const GRID_TURNS: readonly {
+  readonly at: readonly [number, number];
+  readonly key: 'ArrowLeft' | 'ArrowRight';
+  readonly from: readonly [number, number];
+}[] = [
+  { at: [GRID_COLUMNS[1] as number, MAIN_STREET_ROW], key: 'ArrowLeft', from: [-1, 0] },
+  { at: [GRID_COLUMNS[1] as number, GRID_ROWS[1] as number], key: 'ArrowRight', from: [0, 1] },
+  { at: [GRID_COLUMNS[2] as number, GRID_ROWS[1] as number], key: 'ArrowRight', from: [-1, 0] },
+];
+
+/** The four ways out of a crossroads, as a step in fixture pixels. */
+const WAYS_OUT: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/** How far out along each way a junction must be drawn, metres: past a stub's 60 m. */
+const DRAWN_OUT_METRES: readonly number[] = [15, 30, 60, 120];
+
+/**
+ * How near a point on a way out the road or a side road's centreline must
+ * run for that way to count as drawn there, metres: **3**, inside the
+ * narrowest street's 5.5 m.
+ */
+const DRAWN_WITHIN_METRES = 3;
+
+/**
+ * The frame rate the grid ride is drawn at where it is watched: **20**, the
+ * lowest #3068 measured at, so a ride of three turns stays inside a test's
+ * time. The cap and the damping are by the wall clock.
+ */
+const GRID_FPS = 20;
+
+/** How far from the rider the scenery and the ground are compared frame to frame, metres: **60**. */
+const SCENERY_NEAR_METRES = 60;
+
+/**
+ * The least share of the scenery within {@link SCENERY_NEAR_METRES} of the
+ * rider that is still there, in place, on the next frame, wherever there are
+ * at least {@link SCENERY_COUNTED} such items: **0.75**. Measured on
+ * 2026-11-23 through the three presses and corners: never below 0.9 (an item
+ * or two left behind the rider), and 1 on each press. On #2903's branch
+ * without #3055's ride-keyed scenery it is **0** on the frame of every press:
+ * the whole scene is replaced, which is what the owner saw as the screen
+ * flipping.
+ */
+const SCENERY_KEPT_LEAST = 0.75;
+
+/** The fewest items within {@link SCENERY_NEAR_METRES} a share is counted over. */
+const SCENERY_COUNTED = 10;
+
+/** The most the ground near the rider may move up or down from one frame to the next, metres. */
+const GROUND_MOVED_MOST = 0.01;
+
+/** The ride distance of each of {@link GRID_TURNS}, from the start snapped onto Main street. */
+function gridTurnDistances(): number[] {
+  const out: number[] = [];
+  let from = fixturePosition(START_COLUMN, MAIN_STREET_ROW);
+  let ridden = 0;
+  for (const turn of GRID_TURNS) {
+    const here = fixturePosition(turn.at[0], turn.at[1]);
+    ridden += distanceBetween(from, here) as number;
+    out.push(ridden);
+    from = here;
+  }
+  return out;
+}
+
+/** The product's open-world sessions over `source`: the session, its reader, graph and route are the real ones. */
+function realSessions(source: CountingSource): OpenWorldSessions {
+  const entry = createOpenWorldEntry();
+  entry.hand(fixtureStart(START_COLUMN, START_ROW));
+  return lazyOpenWorldSessions(
+    {
+      entry,
+      basemap: () => ({ archiveUrl: 'https://tiles.example.invalid/a.pmtiles', attribution: '' }),
+      mapTilesOn: () => true,
+    },
+    () =>
+      Promise.resolve((start) =>
+        createOpenWorldSession({
+          start,
+          archive: corridorArchiveFrom(source),
+          mapTilesOn: () => true,
+          yieldToIdle: () => Promise.resolve(),
+        }),
+      ),
+  );
+}
+
+/** One frame the renderer was handed, and whether it followed the one before at {@link GRID_FPS}. */
+interface GridFrame {
+  readonly frame: SceneFrame;
+  readonly input: SceneInput;
+  readonly fine: boolean;
+}
+
+/** One junction of the ride, as the renderer was handed it. */
+interface RiddenJunction {
+  /** Its ride distance. */
+  readonly at: number;
+  readonly turn: (typeof GRID_TURNS)[number];
+  /** The last frame built before the press, and the first after it. */
+  readonly beforePress: GridFrame;
+  readonly afterPress: GridFrame;
+  /** The frames from {@link WATCH_FROM_METRES} before it to {@link WATCH_TO_METRES} past it. */
+  readonly round: readonly GridFrame[];
+}
+
+/** The whole ride through {@link GRID_TURNS}. */
+interface GridRide {
+  readonly junctions: readonly RiddenJunction[];
+  /** Every frame the renderer was handed from the start. */
+  readonly frames: readonly GridFrame[];
+}
+
+/**
+ * Rides the real game screen, over the real session on
+ * {@link OPEN_WORLD_GRID_STREETS}, through {@link GRID_TURNS}, pressing each
+ * turn's key {@link JUNCTION_METRES} − {@link PRESS_AT_METRES} before it.
+ * Frames are drawn at {@link GRID_FPS} for five metres either side of each press
+ * and from {@link WATCH_FROM_METRES} before each junction to
+ * {@link WATCH_TO_METRES} past it, and {@link APPROACH_FRAME_MS} apart
+ * between, so the ride fits a test's time.
+ */
+async function rideTheGrid(): Promise<GridRide> {
+  const source = countingSource(await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS));
+  mounted = await mount(
+    <GameView
+      port={{ ...port(), openWorld: realSessions(source) }}
+      renderer={() => Promise.resolve(capturingRenderer())}
+      now={() => nowMs}
+    />,
+  );
+  for (let tries = 0; tries < 400 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+    await settle();
+  }
+  expect(rideButton()?.textContent).toBe('Ride Open world');
+  await act(async () => {
+    rideButton()?.click();
+    await Promise.resolve();
+  });
+  await settle();
+  const distances = gridTurnDistances();
+  const watched = distances.flatMap((at) => {
+    const press = at - (JUNCTION_METRES - PRESS_AT_METRES);
+    return [
+      { from: press - 5, to: press + 5 },
+      {
+        from: at - (JUNCTION_METRES - WATCH_FROM_METRES),
+        to: at + (WATCH_TO_METRES - JUNCTION_METRES),
+      },
+    ];
+  });
+  const frames: GridFrame[] = [];
+  /** Draws one frame, at {@link GRID_FPS} inside a watched stretch or about to enter one. */
+  const ride = async (): Promise<void> => {
+    const here = odometer();
+    frameMs = watched.some(({ from, to }) => here >= from - 10 && here <= to)
+      ? 1000 / GRID_FPS
+      : APPROACH_FRAME_MS;
+    const fine = frameMs < APPROACH_FRAME_MS;
+    const before = drawn.length;
+    await pump();
+    for (const each of drawn.slice(before)) frames.push({ ...each, fine });
+  };
+  const junctions: RiddenJunction[] = [];
+  for (const [index, at] of distances.entries()) {
+    const turn = GRID_TURNS[index] as (typeof GRID_TURNS)[number];
+    const press = at - (JUNCTION_METRES - PRESS_AT_METRES);
+    for (let frame = 0; frame < 2_000 && odometer() < press; frame += 1) await ride();
+    expect(odometer()).toBeLessThan(at - 100);
+    const pressed = frames.length;
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: turn.key, code: turn.key, bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    const end = at + (WATCH_TO_METRES - JUNCTION_METRES);
+    for (let frame = 0; frame < 3_000 && odometer() < end; frame += 1) await ride();
+    expect(odometer()).toBeGreaterThanOrEqual(end);
+    const from = at - (JUNCTION_METRES - WATCH_FROM_METRES);
+    junctions.push({
+      at,
+      turn,
+      beforePress: frames[pressed - 1] as GridFrame,
+      afterPress: frames[pressed] as GridFrame,
+      round: frames
+        .slice(pressed)
+        .filter(({ input }) => (input.state.ride.distance as number) >= from),
+    });
+  }
+  return { junctions, frames };
+}
+
+/** The ride, ridden once for the cases below that read it. */
+let gridRide: Promise<GridRide> | undefined;
+
+function theGridRide(): Promise<GridRide> {
+  // jsdom's `Blob` has no `stream()`, which the fixture archive's gzip uses.
+  vi.stubGlobal('Blob', NodeBlob);
+  gridRide ??= rideTheGrid();
+  return gridRide;
+}
+
+/** `frames` as {@link Watched}, in the ride's one frame (#2902): no view moves it. */
+function watchedOn(frames: readonly GridFrame[]): Watched[] {
+  const common = corridorOrigin((frames[0] as GridFrame).input.profile);
+  return frames.map(({ frame, input }) => {
+    expect(corridorOrigin(input.profile)).toStrictEqual(common);
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) throw new Error('no rider drawn');
+    return {
+      odometer: input.state.ride.distance,
+      eye: { x: frame.camera.x, z: frame.camera.z },
+      rider: { x: rider.x, z: rider.z },
+      yaw: Math.atan2(frame.camera.headingX, frame.camera.headingZ),
+      riderYaw: Math.atan2(rider.headingX, rider.headingZ),
+    };
+  });
+}
+
+/** What changed in the scene round the rider between two frames drawn one after the other. */
+interface SceneChange {
+  /** How many scenery items stood within {@link SCENERY_NEAR_METRES} of the rider, and the share still there, in place. */
+  readonly scenery: number;
+  readonly sceneryKept: number;
+  /** The share of the ground's vertices within it still there, and the most one moved up or down. */
+  readonly groundKept: number;
+  readonly groundMoved: number;
+}
+
+function sceneChange(before: SceneFrame, after: SceneFrame): SceneChange {
+  const rider = before.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) throw new Error('no rider drawn');
+  const near = (x: number, z: number): boolean =>
+    Math.hypot(x - rider.x, z - rider.z) <= SCENERY_NEAR_METRES;
+  const scenery = before.scatter.filter((item) => near(item.x, item.z));
+  const kept = scenery.filter((item) =>
+    after.scatter.some(
+      (other) =>
+        other.kind === item.kind &&
+        Math.abs(other.x - item.x) < 0.01 &&
+        Math.abs(other.z - item.z) < 0.01 &&
+        Math.abs(other.y - item.y) < 0.01,
+    ),
+  ).length;
+  const key = (x: number, z: number): string => `${x.toFixed(2)},${z.toFixed(2)}`;
+  const heights = new Map<string, number>();
+  const next = after.terrain.mesh.vertices;
+  for (let at = 0; at + 2 < next.length; at += 3) {
+    heights.set(key(next[at] as number, next[at + 2] as number), next[at + 1] as number);
+  }
+  const last = before.terrain.mesh.vertices;
+  let ground = 0;
+  let groundKept = 0;
+  let groundMoved = 0;
+  for (let at = 0; at + 2 < last.length; at += 3) {
+    const x = last[at] as number;
+    const z = last[at + 2] as number;
+    if (!near(x, z)) continue;
+    ground += 1;
+    const y = heights.get(key(x, z));
+    if (y === undefined) continue;
+    groundKept += 1;
+    groundMoved = Math.max(groundMoved, Math.abs(y - (last[at + 1] as number)));
+  }
+  return {
+    scenery: scenery.length,
+    sceneryKept: scenery.length === 0 ? 1 : kept / scenery.length,
+    groundKept: ground === 0 ? 1 : groundKept / ground,
+    groundMoved,
+  };
+}
+
+/** The least distance from `(x, z)` to a polyline of `x, z` pairs, or to one of `x, z, x, z` segments. */
+function toSegments(
+  x: number,
+  z: number,
+  points: ArrayLike<number>,
+  stride: 2 | 4,
+  least = Number.POSITIVE_INFINITY,
+): number {
+  const step = stride === 2 ? 2 : 4;
+  for (let at = 0; at + 3 < points.length; at += step) {
+    const ax = points[at] as number;
+    const az = points[at + 1] as number;
+    const bx = points[at + 2] as number;
+    const bz = points[at + 3] as number;
+    const span = (bx - ax) ** 2 + (bz - az) ** 2;
+    const t =
+      span > 0 ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / span)) : 0;
+    least = Math.min(least, Math.hypot(x - ax - t * (bx - ax), z - az - t * (bz - az)));
+  }
+  return least;
+}
+
+/**
+ * The ways out of `junction` that `frame` does not draw: each as `way@metres`,
+ * for every point {@link DRAWN_OUT_METRES} along a way the ride did not come
+ * in by that neither the road nor any side road runs within
+ * {@link DRAWN_WITHIN_METRES} of.
+ */
+function undrawnWaysOut(junction: RiddenJunction, frame: GridFrame): string[] {
+  const origin = corridorOrigin(frame.input.profile);
+  const [column, row] = junction.turn.at;
+  const metresPerPixel =
+    (distanceBetween(fixturePosition(column, row), fixturePosition(column + 1000, row)) as number) /
+    1000;
+  const centre = frame.frame.corridor.centre.flatMap((point) => [point.x, point.z]);
+  const missing: string[] = [];
+  for (const way of WAYS_OUT) {
+    if (way[0] === junction.turn.from[0] && way[1] === junction.turn.from[1]) continue;
+    for (const metres of DRAWN_OUT_METRES) {
+      const out = metres / metresPerPixel;
+      const { x, z } = localGroundPosition(
+        origin,
+        fixturePosition(column + way[0] * out, row + way[1] * out),
+      );
+      let least = toSegments(x, z, centre, 2);
+      for (const road of frame.frame.sideRoads) least = toSegments(x, z, road.segments, 4, least);
+      if (!(least <= DRAWN_WITHIN_METRES)) missing.push(`${way.join(',')}@${String(metres)}`);
+    }
+  }
+  return missing;
+}
+
+describe('the owner’s ruling of 2026-11-23: three turns through the real session — #3051', () => {
+  it('turns left, right and right at three crossroads, and rides round each corner with no jump', async () => {
+    const { junctions } = await theGridRide();
+    expect(junctions).toHaveLength(GRID_TURNS.length);
+    for (const junction of junctions) {
+      const side = junction.turn.key === 'ArrowLeft' ? 'left' : 'right';
+      // Every frame of the turn at the frame rate, so the measures read one frame's change.
+      expect(junction.round.every(({ fine }) => fine)).toBe(true);
+      expectRoundTheCorner(
+        turned(watchedOn(junction.round), GRID_FPS),
+        side,
+        CAMERA_MAXIMUM_YAW_RATE,
+        GRID_FPS,
+      );
+    }
+  });
+
+  it('keeps the scenery and the ground in place through every press and every corner: no frame replaces the scene', async () => {
+    const { frames } = await theGridRide();
+    let pairs = 0;
+    let viewChanges = 0;
+    for (let index = 1; index < frames.length; index += 1) {
+      const before = frames[index - 1] as GridFrame;
+      const after = frames[index] as GridFrame;
+      if (!before.fine || !after.fine) continue;
+      // The quality governor reads the frame times, and the long frames
+      // between the watched stretches read as a slow device: where it moved
+      // the rung, the rung's scenery budget changed what is placed, not the
+      // road. Measured: one pair in the ride, 50 m before the first corner.
+      if (
+        before.input.scatterItems !== after.input.scatterItems ||
+        before.input.structureItems !== after.input.structureItems
+      ) {
+        continue;
+      }
+      pairs += 1;
+      if (before.input.profile !== after.input.profile) viewChanges += 1;
+      const change = sceneChange(before.frame, after.frame);
+      const facts = `at ${String(after.input.state.ride.distance)} m: ${JSON.stringify(change)}`;
+      if (change.scenery >= SCENERY_COUNTED) {
+        expect(change.sceneryKept, facts).toBeGreaterThanOrEqual(SCENERY_KEPT_LEAST);
+      }
+      expect(change.groundKept, facts).toBeGreaterThan(0.99);
+      expect(change.groundMoved, facts).toBeLessThanOrEqual(GROUND_MOVED_MOST);
+    }
+    expect(pairs).toBeGreaterThan(400);
+    // Every press changed the view, at the frame rate: the measure saw each.
+    expect(viewChanges).toBeGreaterThanOrEqual(GRID_TURNS.length);
+  });
+
+  it('draws every way out of each junction before the rider reaches it, before the press and after it', async () => {
+    const { junctions } = await theGridRide();
+    for (const junction of junctions) {
+      const short = junction.round.filter(
+        ({ input }) => (input.state.ride.distance as number) <= junction.at - 10,
+      );
+      const last = short[short.length - 1] as GridFrame;
+      for (const [when, frame] of [
+        ['before the press', junction.beforePress],
+        ['after the press', junction.afterPress],
+        ['10 m short of it', last],
+      ] as const) {
+        expect(undrawnWaysOut(junction, frame), `${junction.turn.key} ${when}`).toStrictEqual([]);
+      }
     }
   });
 });
