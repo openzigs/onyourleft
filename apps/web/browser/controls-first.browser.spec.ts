@@ -1746,7 +1746,7 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
       expect(seen.hit, `${where}: something is drawn over Start the ride`).toBe(true);
     }
 
-    for (const viewport of TABLETS) {
+    for (const viewport of [PHONE, ...TABLETS]) {
       test(`after a pin, a saved route and a past ride, on a ${viewport.name}`, async ({
         page,
       }) => {
@@ -1768,7 +1768,7 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
         // The map's own buttons (`z-index` 1) pass beneath the bar, not over
         // it: scrolled so the first of them is behind the bar's middle, a hit
         // test there lands on the bar. They stand at the top of the map, above
-        // the bar at both sizes, so a spacer the height of the window is put
+        // the bar at every size, so a spacer the height of the window is put
         // above the view first, for the page to scroll them up through it.
         const beneath = await page.evaluate((height) => {
           const bar = document.querySelector('.oyl-open-world__go');

@@ -7225,7 +7225,8 @@ select.oyl-input {
  *
  * `controls-first.browser.spec.ts` §"#3050" measures the button between the
  * window's top and the fold with a hit test at its centre, after a pin, a
- * route and a ride, at 1280 × 800 and 800 × 1280, and Tab stopping above it.
+ * route and a ride, at 390 × 844, 1280 × 800 and 800 × 1280, and Tab stopping
+ * above it: the phone is the size that reaches the compact rule below.
  */
 .oyl-open-world__go {
   position: sticky;
