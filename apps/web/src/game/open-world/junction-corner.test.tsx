@@ -66,6 +66,16 @@
  *   it all off the road straight on and stood it along the street turned
  *   into: `road.ts` §`waysOut` places it along every way out before the
  *   press, and `ways-out.test.ts` holds that on its own;
+ * - **nor the ground past the junction** (#3094): at every change of view
+ *   the ground from {@link SCENERY_NEAR_METRES} to {@link SCENERY_FAR_METRES}
+ *   stays where it was, to {@link FAR_GROUND_MOST_METRES} at any place, and
+ *   what stands on it with it. A view's ground was its own road's
+ *   (`landform.ts` §`terrainHeightAt`), so a press redrew the hills past the
+ *   junction from the street turned into: half the ground from 60 m to 300 m
+ *   moved by more than 25 cm, by up to 29 m, and the scenery standing on it
+ *   by up to 18 m. An open-world view's relief is the place's now, levelled
+ *   beside every street the ride holds (`street-levels.ts`), and
+ *   `ground-of-place.test.ts` holds that on its own;
  * - **the junction is drawn before the rider reaches it, on every way out**,
  *   before the press and after it: the road or a side street runs out along
  *   each way the ride did not come in by.
@@ -80,18 +90,17 @@
  *   and the junction's way out the route will come back along is drawn as
  *   neither the road nor a side street until the road reaches it. The grid
  *   closes every street on another for that reason. That is #3091.
- * - **The ground past the junction.** A view's ground is built from its own
- *   road (`landform.ts` §`terrainHeightAt`), so a press redraws the hills
- *   past the junction from the street turned into: measured on these three
- *   presses, a third to a half of the ground from 110 m to 300 m ahead moves
- *   by more than 25 cm, and by up to 32 m. What stands there is held to its
- *   place in plan, and moves up or down with the ground under it. The
- *   ground within {@link SCENERY_NEAR_METRES} is held; the nearest of the
- *   redrawn ground reaches it on the third press
- *   ({@link GROUND_MOVED_MOST}). That is #3094.
- * - **What is not scenery items.** Village streets and pavements,
- *   billboards, people and the other cyclists are placed along the road
- *   alone. None stands near these three junctions. That is #3095.
+ * - **The ground exactly.** Two views' meshes sample the one surface at
+ *   their own vertices and are flat between them, so where their triangles
+ *   differ the ground drawn differs by up to {@link FAR_GROUND_MOST_METRES}
+ *   (#3094's residual, all of it past 200 m on these presses).
+ * - **What is not scenery items, at these three junctions.** None stands
+ *   near them. Since #3095 a village's streets and crossroads, the
+ *   billboards, the people and the other cyclists are placed along every way
+ *   out too: the last two describes below ride the real game screen past a
+ *   village, its billboards, its people and the other cyclists on a level
+ *   grid (the last in the realistic world, where people and cyclists are
+ *   drawn), and `ways-out-villages.test.ts` holds all five through a press.
  *
  * ⚠️ **Every frame held here is a copy** (`frame-testing.ts`
  * §`retainedFrame`). A frame's ground is lent storage that the next build
@@ -114,7 +123,12 @@ import {
   watts,
   type RollingEdge,
 } from '@onyourleft/domain';
-import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
+import {
+  gridGraph,
+  placeAt,
+  roughGround,
+  type SyntheticGround,
+} from '@onyourleft/domain/rolling-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
@@ -126,7 +140,9 @@ import { GameView, type GamePort } from '../GameView';
 import { standingOnGround } from '../landform';
 import type { GameRenderer, SceneFrame } from '../port';
 import type { ScatterItem } from '../scatter';
+import { PEOPLE_FAR_METRES } from '../people';
 import type { SceneInput } from '../scene';
+import { REALISTIC_WORLD_STORAGE_KEY } from '../world-preference';
 import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 import { createOpenWorldEntry } from './entry';
@@ -220,6 +236,13 @@ const RATE_ROUNDING = 1e-6;
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
 let frameMs = APPROACH_FRAME_MS;
+/**
+ * #3095: a wall clock that a frame moves on by a 60 Hz frame whatever
+ * {@link frameMs} is, for a ride that keeps the realistic world's top rung:
+ * on {@link nowMs} the quality ladder reads a long approach frame as a hot
+ * one and drops the people and the other cyclists.
+ */
+let wallMs = 0;
 let mounted: Mounted | undefined;
 const drawn: { readonly frame: SceneFrame; readonly input: SceneInput }[] = [];
 
@@ -228,6 +251,7 @@ beforeEach(() => {
   drawn.length = 0;
   pending = [];
   nowMs = 0;
+  wallMs = 0;
   frameMs = APPROACH_FRAME_MS;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -247,6 +271,7 @@ async function pump(): Promise<void> {
   const next = pending.shift();
   if (next === undefined) return;
   nowMs += frameMs;
+  wallMs += 1000 / 60;
   await act(async () => {
     next(nowMs);
     await Promise.resolve();
@@ -254,9 +279,13 @@ async function pump(): Promise<void> {
 }
 
 /** A renderer that keeps each frame it was handed, with the scene input it was built from. */
-function capturingRenderer(): GameRenderer {
+function capturingRenderer(realistic = false): GameRenderer {
   return {
-    loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+    // #3095: the realistic world, where people and the other cyclists are drawn, loads at once.
+    loadRealisticWorld: () =>
+      realistic
+        ? Promise.resolve({ loaded: true })
+        : Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
       prepare: () => Promise.resolve(),
@@ -276,12 +305,20 @@ function capturingRenderer(): GameRenderer {
 }
 
 /** The grid, ridden east from its corner along row 3, the major road: straight on is its default. */
-function gridRoute(): RollingRoute {
-  const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+function gridRoute(
+  ground: SyntheticGround = roughGround,
+  rows: readonly number[] = ROWS,
+  columns: readonly number[] = COLUMNS,
+): RollingRoute {
+  const { graph, edges } = gridGraph(columns, rows, ground, 3);
   return new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
 }
 
-function sessions(): OpenWorldSessions {
+function sessions(
+  ground: SyntheticGround = roughGround,
+  rows: readonly number[] = ROWS,
+  columns: readonly number[] = COLUMNS,
+): OpenWorldSessions {
   let start = fixtureStart(START_COLUMN, START_ROW) as ReturnType<typeof fixtureStart> | undefined;
   return {
     take: () => {
@@ -295,10 +332,10 @@ function sessions(): OpenWorldSessions {
         route: {
           id: OPEN_WORLD_ROUTE_ID,
           name: 'Open world',
-          profile: gridRoute().view(),
+          profile: gridRoute(ground, rows, columns).view(),
           attempts: 0,
         },
-        road: () => new OpenWorldRoad(gridRoute()),
+        road: () => new OpenWorldRoad(gridRoute(ground, rows, columns)),
       }),
       stop: () => undefined,
     }),
@@ -687,10 +724,10 @@ const GROUND_MOVED_METRES = 0.1;
  * The most of the ground near the rider that may move by more than
  * {@link GROUND_MOVED_METRES} from one frame to the next, as a share of the
  * places compared: **0.02**. Measured on 2026-11-23: 0.001, 0.010 and 0.011
- * at the worst pair of each ride. ⚠️ The worst of all is the third press:
- * 9 of 797 places, 58 m and 59 m from the rider, drawn 1.5 m lower. That is
- * the nearest of the ground past the junction, which a choice still redraws
- * (this file's header, "What this file does not hold").
+ * at the worst pair of each ride. The worst of all was the third press:
+ * 9 of 797 places, 58 m and 59 m from the rider, drawn 1.5 m lower, the
+ * nearest of the ground past the junction, which a choice redrew until
+ * #3094; none since.
  */
 const GROUND_MOVED_MOST = 0.02;
 
@@ -883,6 +920,39 @@ const SCENERY_FAR_METRES = 300;
  */
 const SCENERY_ADDED_MOST = 0.25;
 
+/**
+ * How far the ground at a place from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES} may be drawn higher or lower across a change of
+ * view and still count as unmoved, metres: **0.25** — #3094's own measure,
+ * the verge's drop (`landform.ts` §`VERGE_DROP_METRES`), which the edge of a
+ * street that stops being the road takes.
+ */
+const FAR_GROUND_MOVED_METRES = 0.25;
+
+/**
+ * The most of the ground from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES} that a change of view may move by more than
+ * {@link FAR_GROUND_MOVED_METRES}, as a share of the places compared:
+ * **0.2** — #3094. Measured on 2026-11-23 on the three presses: 0.47, 0.49
+ * and 0.56 with each view's ground its own road's; 0.085, 0.106 and 0.068
+ * with it the place's (`landform.ts` §`placeFields`), levelled beside every
+ * street held (`street-levels.ts`). What is left is two meshes drawing one
+ * surface: each samples it at its own vertices and is flat between them, and
+ * past 200 m a triangle is 65 to 120 m across.
+ */
+const FAR_GROUND_MOVED_MOST = 0.2;
+
+/**
+ * The most the ground at any place from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES}, or an item standing there, may move on a change
+ * of view, metres: **4** — #3094. Measured on 2026-11-23 on the three
+ * presses: the ground 17, 27 and 29 m and the scenery 7.4, 14 and 18 m with
+ * each view's ground its own road's; the ground 2.0, 2.6 and 1.5 m and the
+ * scenery 0.5, 2.3 and 1.2 m with it the place's, all of it more than 200 m
+ * from the rider, where the fog has taken half of what stands there.
+ */
+const FAR_GROUND_MOST_METRES = 4;
+
 /** What changed in the scene round the rider between two frames drawn one after the other. */
 interface SceneChange {
   /** How many scenery items stood within {@link SCENERY_NEAR_METRES} of the rider, and the share still there, in place. */
@@ -904,6 +974,20 @@ interface SceneChange {
    */
   readonly groundKept: number;
   readonly groundMoved: number;
+  /**
+   * #3094, compared only where asked (`far`): of the places the frame drew
+   * ground at from {@link SCENERY_NEAR_METRES} to {@link SCENERY_FAR_METRES},
+   * the share whose ground the next frame draws more than
+   * {@link FAR_GROUND_MOVED_METRES} higher or lower, and the most any of
+   * them moved, metres.
+   */
+  readonly farGroundMoved: number;
+  readonly farGroundMost: number;
+  /**
+   * #3094: the most an item from there to {@link SCENERY_FAR_METRES} that
+   * is still there in plan was stood higher or lower, metres.
+   */
+  readonly farHeightMost: number;
 }
 
 /**
@@ -913,10 +997,15 @@ interface SceneChange {
  * each frame's own mesh draws at that place (`landform.ts`
  * §`standingOnGround`, the highest triangle there, which is the one seen).
  * Two frames' meshes share no vertex, since each is built round its own
- * rider, and at a corner one mesh lies over itself. `ground` is whether to
- * compare it at all: it walks both meshes for every vertex.
+ * rider, and at a corner one mesh lies over itself. `ground` is how far to
+ * compare it: not at all, `near` the rider, or `far` as well, out to
+ * {@link SCENERY_FAR_METRES} (#3094); it walks both meshes for every vertex.
  */
-function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): SceneChange {
+function sceneChange(
+  before: GridFrame,
+  after: GridFrame,
+  ground: 'none' | 'near' | 'far',
+): SceneChange {
   const rider = before.frame.markers.find((marker) => marker.kind === 'rider');
   if (rider === undefined) throw new Error('no rider drawn');
   const from = (x: number, z: number): number => Math.hypot(x - rider.x, z - rider.z);
@@ -931,26 +1020,36 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
   const kept = scenery.filter((item) =>
     after.frame.scatter.some((other) => inPlan(item, other) && Math.abs(other.y - item.y) < 0.01),
   ).length;
-  // Past the junction the ground itself is another view's after a choice
-  // (this file's header), so there an item is held to its place in plan.
+  // Past the junction an item is held to its place in plan, and how far it
+  // was stood up or down there is read beside it (#3094).
   const farBefore = before.frame.scatter.filter((item) => far(item.x, item.z));
   const farAfter = after.frame.scatter.filter((item) => far(item.x, item.z));
-  const farKept = farBefore.filter((item) =>
-    after.frame.scatter.some((other) => inPlan(item, other)),
-  ).length;
+  let farKept = 0;
+  let farHeightMost = 0;
+  for (const item of farBefore) {
+    const other = after.frame.scatter.find((each) => inPlan(item, each));
+    if (other === undefined) continue;
+    farKept += 1;
+    farHeightMost = Math.max(farHeightMost, Math.abs(other.y - item.y));
+  }
   const farAdded = farAfter.filter(
     (item) => !before.frame.scatter.some((other) => inPlan(item, other)),
   ).length;
   let vertices = 0;
   let groundKept = 0;
   let groundMoved = 0;
-  if (ground) {
+  let farVertices = 0;
+  let farGroundMoved = 0;
+  let farGroundMost = 0;
+  if (ground !== 'none') {
     const last = before.frame.terrain.mesh.vertices;
-    const drawn: { x: number; y: number; z: number }[] = [];
+    const drawn: { x: number; y: number; z: number; far: boolean }[] = [];
     for (let at = 0; at + 2 < last.length; at += 3) {
       const x = last[at] as number;
       const z = last[at + 2] as number;
-      if (near(x, z)) drawn.push({ x, y: last[at + 1] as number, z });
+      const y = last[at + 1] as number;
+      if (near(x, z)) drawn.push({ x, y, z, far: false });
+      else if (ground === 'far' && far(x, z)) drawn.push({ x, y, z, far: true });
     }
     const place = (point: { x: number; z: number }): string =>
       `${String(point.x)},${String(point.z)}`;
@@ -958,9 +1057,18 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
       new Map(standingOnGround(drawn, mesh).map((point) => [place(point), point.y]));
     const was = tops(before.frame.terrain.mesh);
     const now = tops(after.frame.terrain.mesh);
-    vertices = was.size;
+    const farPlaces = new Set(drawn.filter((point) => point.far).map(place));
     for (const [at, y] of was) {
       const next = now.get(at);
+      if (farPlaces.has(at)) {
+        if (next === undefined) continue;
+        farVertices += 1;
+        const moved = Math.abs(next - y);
+        farGroundMost = Math.max(farGroundMost, moved);
+        if (moved > FAR_GROUND_MOVED_METRES) farGroundMoved += 1;
+        continue;
+      }
+      vertices += 1;
       if (next === undefined) continue;
       groundKept += 1;
       if (Math.abs(next - y) > GROUND_MOVED_METRES) groundMoved += 1;
@@ -974,6 +1082,9 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
     farAdded: farAfter.length === 0 ? 0 : farAdded / farAfter.length,
     groundKept: vertices === 0 ? 1 : groundKept / vertices,
     groundMoved: vertices === 0 ? 0 : groundMoved / vertices,
+    farGroundMoved: farVertices === 0 ? 0 : farGroundMoved / farVertices,
+    farGroundMost,
+    farHeightMost,
   };
 }
 
@@ -1062,8 +1173,13 @@ function expectTheRuling(junction: RiddenJunction): void {
     pairs += 1;
     const viewChanged = before.input.profile !== after.input.profile;
     if (viewChanged) viewChanges += 1;
-    // The ground at every change of view, and on every tenth pair between.
-    const change = sceneChange(before, after, viewChanged || pairs % 10 === 0);
+    // The ground at every change of view, out to the far places then, and
+    // near the rider on every tenth pair between.
+    const change = sceneChange(
+      before,
+      after,
+      viewChanged ? 'far' : pairs % 10 === 0 ? 'near' : 'none',
+    );
     const facts = `at ${String(after.input.state.ride.distance)} m: ${JSON.stringify(change)}`;
     if (change.scenery >= SCENERY_COUNTED) {
       expect(change.sceneryKept, facts).toBeGreaterThanOrEqual(SCENERY_KEPT_LEAST);
@@ -1077,6 +1193,10 @@ function expectTheRuling(junction: RiddenJunction): void {
       expect(change.far, facts).toBeGreaterThanOrEqual(SCENERY_COUNTED);
       expect(change.farKept, facts).toBeGreaterThanOrEqual(SCENERY_KEPT_LEAST);
       expect(change.farAdded, facts).toBeLessThanOrEqual(SCENERY_ADDED_MOST);
+      // #3094: and the ground there stays where it was, and so what stands on it.
+      expect(change.farGroundMoved, facts).toBeLessThanOrEqual(FAR_GROUND_MOVED_MOST);
+      expect(change.farGroundMost, facts).toBeLessThanOrEqual(FAR_GROUND_MOST_METRES);
+      expect(change.farHeightMost, facts).toBeLessThanOrEqual(FAR_GROUND_MOST_METRES);
     }
   }
   // Every frame of the ride was handed the ways out the route does not take.
@@ -1113,5 +1233,230 @@ describe('the owner’s ruling of 2026-11-23: three turns through the real sessi
 
   it('turn 3, right again: round the corner, the scene kept, every way out drawn', async () => {
     expectTheRuling(await rideTheGridTo(2));
+  });
+});
+
+// --- #3095: a village and its billboards past the junction, on the real game screen ---
+
+/** `ways-out.test.ts`' lowland grid: the same columns, and rows on to 2 150 m. */
+const LOWLAND_ROWS = [0, 230, 400, 650, 820, 1_090, 1_280, 1_510, 1_700, 1_960, 2_150];
+
+/** Low, level ground: villages stand on it. */
+const LOWLAND: SyntheticGround = () => 120;
+
+/** How far either side of the junction the corner the route takes is drawn, metres. */
+const VILLAGE_CORNER_METRES = 20;
+
+/** A place on the frame's ground, as a frame's pieces hold it. */
+type Plan = { readonly x: number; readonly z: number };
+
+/** Every vertex of a frame's village pavements. */
+function villagePavements(frame: SceneFrame): Plan[] {
+  return frame.streets.flatMap((street) => {
+    const out: Plan[] = [];
+    for (let at = 0; at + 2 < street.pavement.positions.length; at += 3) {
+      out.push({
+        x: street.pavement.positions[at] as number,
+        z: street.pavement.positions[at + 2] as number,
+      });
+    }
+    return out;
+  });
+}
+
+/** Every point of a frame's village crossroads' arms. */
+function villageCrossroads(frame: SceneFrame): Plan[] {
+  return frame.sideRoads
+    .filter((road) => road.junction.source === 'village')
+    .flatMap((road) => {
+      const out: Plan[] = [];
+      for (let at = 0; at + 1 < road.segments.length; at += 2) {
+        out.push({ x: road.segments[at] as number, z: road.segments[at + 1] as number });
+      }
+      return out;
+    });
+}
+
+/**
+ * Rides the real game screen over the lowland grid to 110 m short of the
+ * junction at `column` along Main street, turns left there, and returns the
+ * last frame before the press and the first of the view it gave, with the
+ * junction's place in the first's frame.
+ */
+async function rideTheLowlandTo(column: number, realistic = false, east = 0, back = 110) {
+  const junctionAt = (COLUMNS[column] as number) - (COLUMNS[0] as number);
+  if (realistic) localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+  const columns = COLUMNS.map((each) => each + east);
+  mounted = await mount(
+    <GameView
+      port={{ ...port(), openWorld: sessions(LOWLAND, LOWLAND_ROWS, columns) }}
+      renderer={() => Promise.resolve(capturingRenderer(realistic))}
+      now={() => nowMs}
+      frameNow={realistic ? () => wallMs : undefined}
+    />,
+  );
+  for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+    await settle();
+  }
+  await act(async () => {
+    rideButton()?.click();
+    await Promise.resolve();
+  });
+  await settle();
+  frameMs = 1000;
+  const pressAt = junctionAt - back;
+  for (let frame = 0; frame < 400 && odometer() < pressAt - 15; frame += 1) await pump();
+  frameMs = 1000 / 30;
+  for (let frame = 0; frame < 400 && odometer() < pressAt; frame += 1) await pump();
+  // Inside the prompt, short of the lock, as a rider's press would be.
+  expect(odometer()).toBeLessThan(junctionAt - 100);
+  const pressed = drawn.length;
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true }),
+    );
+    await Promise.resolve();
+  });
+  for (let frame = 0; frame < 3; frame += 1) await pump();
+  const before = drawn[pressed - 1];
+  const after = drawn.slice(pressed).find(({ input }) => input.profile !== before?.input.profile);
+  if (before === undefined || after === undefined) throw new Error('the press changed no view');
+  const common = corridorOrigin(before.input.profile);
+  return {
+    before,
+    after,
+    common,
+    junction: localGroundPosition(common, placeAt(junctionAt + east, LOWLAND_ROWS[3] as number)),
+  };
+}
+
+/**
+ * What of `read` stands past the junction's corner and within reach of the
+ * rider, before the press and after it, each in the frame the press was made
+ * in, to 10 cm; and the share of each the other still has.
+ */
+function heldThroughThePress(
+  ridden: Awaited<ReturnType<typeof rideTheLowlandTo>>,
+  read: (frame: SceneFrame) => readonly Plan[],
+): { readonly was: number; readonly kept: number; readonly added: number } {
+  const rider = ridden.before.frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) throw new Error('no rider drawn');
+  const past = (frame: GridFrame | (typeof drawn)[number]): string[] =>
+    read(frame.frame)
+      .map((place) => reframed(corridorOrigin(frame.input.profile), ridden.common, place))
+      .filter(
+        (place) =>
+          Math.hypot(place.x - ridden.junction.x, place.z - ridden.junction.z) >
+            VILLAGE_CORNER_METRES &&
+          Math.hypot(place.x - rider.x, place.z - rider.z) <= SCENERY_FAR_METRES + 100,
+      )
+      .map((place) => `${place.x.toFixed(1)},${place.z.toFixed(1)}`);
+  const was = past(ridden.before);
+  const now = past(ridden.after);
+  const share = (of: readonly string[], within: readonly string[]): number =>
+    of.length === 0 ? 1 : of.filter((each) => within.includes(each)).length / of.length;
+  return { was: was.length, kept: share(was, now), added: 1 - share(now, was) };
+}
+
+/**
+ * Of what `read` finds past the junction's corner and within reach of the
+ * rider before the press, how many are still there on the first frame of the
+ * view it gave — each within `within` metres of where it was, in plan, in the
+ * frame the press was made in: people walk, and the other cyclists ride, for
+ * the frame between. And how many the second frame has there that the first
+ * had nowhere within `within`.
+ */
+function movingThroughThePress(
+  ridden: Awaited<ReturnType<typeof rideTheLowlandTo>>,
+  read: (frame: SceneFrame) => readonly Plan[],
+  within: number,
+  reach: number = SCENERY_FAR_METRES + 100,
+): { readonly was: number; readonly moved: number; readonly added: number } {
+  const rider = ridden.before.frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) throw new Error('no rider drawn');
+  const past = (frame: GridFrame | (typeof drawn)[number]): Plan[] =>
+    read(frame.frame)
+      .map((place) => reframed(corridorOrigin(frame.input.profile), ridden.common, place))
+      .filter(
+        (place) =>
+          Math.hypot(place.x - ridden.junction.x, place.z - ridden.junction.z) >
+            VILLAGE_CORNER_METRES && Math.hypot(place.x - rider.x, place.z - rider.z) <= reach,
+      );
+  const was = past(ridden.before);
+  const now = past(ridden.after);
+  const missing = (of: readonly Plan[], within_: readonly Plan[]): number =>
+    of.filter(
+      (place) =>
+        !within_.some((other) => Math.hypot(other.x - place.x, other.z - place.z) <= within),
+    ).length;
+  return { was: was.length, moved: missing(was, now), added: missing(now, was) };
+}
+
+/**
+ * How far a person walks, or one of the other cyclists rides, from the last
+ * frame before the press to the first of the view it gave, at most, metres:
+ * **1** — a frame of the 30 Hz ride is 3.3 cm walked and 27 cm ridden at 8 m/s.
+ * A choice that took one off the road straight on put it on another street.
+ */
+const MOVED_IN_A_FRAME_METRES = 1;
+
+/**
+ * How far from the rider people are compared, metres: `people.ts`
+ * §`PEOPLE_FAR_METRES`, less 20 m. Who is drawn is read from the camera,
+ * which stands behind the rider and turns with the frame between.
+ */
+const PEOPLE_COMPARED_METRES = PEOPLE_FAR_METRES - 20;
+
+describe('#3095: a village and its billboards past the junction stay through the press, on the real game screen', () => {
+  it('lays the village’s pavements and its crossroads past the fourth junction where they were', async () => {
+    const ridden = await rideTheLowlandTo(4);
+    for (const [what, read] of [
+      ['pavements', villagePavements],
+      ['crossroads', villageCrossroads],
+    ] as const) {
+      const held = heldThroughThePress(ridden, read);
+      expect(held.was, what).toBeGreaterThan(10);
+      expect({ what, kept: held.kept, added: held.added }).toStrictEqual({
+        what,
+        kept: 1,
+        added: 0,
+      });
+    }
+  });
+
+  it('stands the billboards past the sixth junction where they were', async () => {
+    const held = heldThroughThePress(await rideTheLowlandTo(6), (frame) => frame.billboards);
+    expect(held.was).toBeGreaterThanOrEqual(1);
+    expect({ kept: held.kept, added: held.added }).toStrictEqual({ kept: 1, added: 0 });
+  });
+});
+
+describe('#3095: the people and the other cyclists past the junction stay through the press, on the real game screen in the realistic world', () => {
+  // Both are drawn only on the realistic world's top rung (`scene.ts`
+  // §`SceneInput.people`), which this ride loads and keeps.
+  it('walks the village’s people past the sixth junction where they walked', async () => {
+    const ridden = await rideTheLowlandTo(5, true);
+    expect(ridden.before.input.people).toBeGreaterThan(0);
+    const held = movingThroughThePress(
+      ridden,
+      (frame) => [...(frame.people?.near ?? []), ...(frame.people?.far ?? [])],
+      MOVED_IN_A_FRAME_METRES,
+      PEOPLE_COMPARED_METRES,
+    );
+    expect({ moved: held.moved, added: held.added }).toStrictEqual({ moved: 0, added: 0 });
+    expect(held.was).toBeGreaterThan(10);
+  });
+
+  it('rides the other cyclists past the seventh junction where they rode', async () => {
+    // A grid moved 14 m east, whose encounters put cyclists past the junction at the press.
+    const ridden = await rideTheLowlandTo(6, true, 14, 104);
+    expect(ridden.before.input.sceneryCyclists).toBe(true);
+    const held = movingThroughThePress(
+      ridden,
+      (frame) => frame.cyclists ?? [],
+      MOVED_IN_A_FRAME_METRES,
+    );
+    expect({ moved: held.moved, added: held.added }).toStrictEqual({ moved: 0, added: 0 });
+    expect(held.was).toBeGreaterThanOrEqual(2);
   });
 });

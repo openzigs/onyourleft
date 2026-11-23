@@ -87,6 +87,15 @@
  * junctions' ways, so the street a choice makes the road must already have
  * its own, or they would all appear on the frame of the press.
  *
+ * ## The ground past a junction (#3094)
+ *
+ * A view's ground was its own road's, so a choice redrew the hills along every
+ * way out. Every view of the ride is anchored with the same
+ * `street-levels.ts` §`StreetLevels` over the streets the ride holds
+ * ({@link OpenWorldRoadHooks.streets}), and `landform.ts` reads an anchored
+ * view's relief at the place and levels it beside every one of them: the same
+ * ground whichever street is the road.
+ *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
@@ -95,6 +104,7 @@ import {
   metres,
   positionAt,
   type GeographicPosition,
+  type RollingJunction,
   type RollingRoute,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -113,6 +123,7 @@ import { routeSeed } from '../scatter';
 import { anchorScenery } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
+import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
 import {
   ROAD_WIDTH_METRES,
@@ -257,6 +268,29 @@ interface HeldWayOut extends OpenWorldWayOut {
 }
 
 const NO_WAYS_OUT: readonly OpenWorldWayOut[] = [];
+
+/**
+ * One junction of the ride, as the scene cuts a village's street at it
+ * (`scene.ts` §`SceneInput.junctionsSeen`). @see OpenWorldRoad.junctionsSeen
+ */
+export interface OpenWorldJunctionSeen {
+  /** The junction's ride distance, on the route it was seen on. */
+  readonly distance: number;
+  /** Where it is: the node every way on from it leaves. */
+  readonly position: GeographicPosition;
+}
+
+const NO_JUNCTIONS_SEEN: readonly OpenWorldJunctionSeen[] = [];
+
+/**
+ * How far behind the rider a junction seen is still handed on, metres:
+ * **1 000** — #3095. A junction is a cut in a village's street, and a cut
+ * dropped makes the street whole again, which re-lays it: so one is dropped
+ * only once the whole of any street it cuts is behind the view. A village's
+ * street is under 220 m (`settlements.ts` §`VILLAGE_METRES` and a plot either
+ * end) and the view reaches 60 m behind.
+ */
+export const JUNCTIONS_SEEN_BEHIND_METRES = 1_000;
 
 /** The road, as every reader in the ride loop reads it. */
 export interface OpenWorldRoadView {
@@ -444,6 +478,13 @@ export class OpenWorldRoad {
   readonly #hooks: OpenWorldRoadHooks;
   /** The ride's scenery seed, from its first view (#3055). */
   readonly #seed: number;
+  /**
+   * #3094: the streets the ride holds, which every view's ground is levelled
+   * beside — one for the ride, so every view reads the same ground.
+   */
+  readonly #levels: StreetLevels;
+  /** #3094: the frame the ride's places are read in: the session's, or the first view's. */
+  readonly #placeFrame: CorridorOrigin;
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
@@ -467,8 +508,10 @@ export class OpenWorldRoad {
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
+    this.#levels = new StreetLevels(() => hooks.streets?.()?.streets);
     const profile = this.#framed(route.view());
     this.#seed = routeSeed(profile);
+    this.#placeFrame = corridorOrigin(profile);
     this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
 
@@ -546,6 +589,38 @@ export class OpenWorldRoad {
       }
     | undefined;
 
+  /** Every junction seen, by ride distance and node. @see junctionsSeen */
+  #junctionsSeen = new Map<string, OpenWorldJunctionSeen>();
+  /** What {@link junctionsSeen} last handed on: the same array until a junction is seen or dropped. */
+  #junctionsSeenList: readonly OpenWorldJunctionSeen[] = NO_JUNCTIONS_SEEN;
+
+  /**
+   * Every junction {@link waysOut} has seen on the road and along its ways
+   * out — #3095: each of the whole route held ahead (`RollingRoute`
+   * §`junctionsAfter`, 2 km, so a junction is seen long before the view
+   * reaches it), kept as the rider passes it until
+   * {@link JUNCTIONS_SEEN_BEHIND_METRES} behind, and dropped at a U-turn.
+   * The scene cuts a village's street at each that stands on the street, so
+   * the piece past one is laid alike along the road and every way out
+   * (`streets.ts` §`streetsAt`); and since the set does not change as a
+   * junction comes into the view or leaves it, no street is re-laid on an
+   * ordinary frame. The same array until a junction is seen or dropped.
+   */
+  junctionsSeen(): readonly OpenWorldJunctionSeen[] {
+    return this.#junctionsSeenList;
+  }
+
+  /** Notes `junction` as seen, at its ride distance. @see junctionsSeen */
+  #seen(junction: RollingJunction): void {
+    const node = junction.ways[0]?.edge;
+    const at = node?.points[0];
+    if (node === undefined || at === undefined) return;
+    const key = `${String(junction.distance)}:${node.from}`;
+    if (this.#junctionsSeen.has(key)) return;
+    this.#junctionsSeen.set(key, { distance: junction.distance, position: at.position });
+    this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+  }
+
   /**
    * The ways out not taken, of every junction from
    * {@link WAYS_OUT_BEHIND_METRES} behind a rider at ride distance `rider` to
@@ -574,7 +649,9 @@ export class OpenWorldRoad {
     /** The ways out of `route`'s junctions past ride distance `after`, `depth` junctions from the road. */
     const look = (route: RollingRoute, after: number, depth: number): void => {
       for (const junction of route.junctionsAfter(after)) {
-        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) break;
+        // #3095: every junction of the route held, in view or not.
+        this.#seen(junction);
+        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) continue;
         for (const way of junction.ways) {
           if (way.edge.id === junction.taken) continue;
           // A way is where it leaves and along which street: the same way
@@ -587,7 +664,7 @@ export class OpenWorldRoad {
             const taking = route.taking(junction.distance, way.edge.id);
             if (taking === undefined) continue;
             const profile = this.#framed(taking.view());
-            anchorScenery(profile, { seed: this.#seed, origin: taking.origin });
+            this.#keyed(profile, taking.origin);
             out = {
               profile,
               fromMetres: junction.distance - taking.origin,
@@ -618,6 +695,15 @@ export class OpenWorldRoad {
       }
     }
     look(this.route, rider, 1);
+    for (const [key, junction] of this.#junctionsSeen) {
+      if (junction.distance < rider - JUNCTIONS_SEEN_BEHIND_METRES) {
+        this.#junctionsSeen.delete(key);
+        this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+      }
+    }
+    if (this.#junctionsSeenList === NO_JUNCTIONS_SEEN && this.#junctionsSeen.size > 0) {
+      this.#junctionsSeenList = [...this.#junctionsSeen.values()];
+    }
     const ways: readonly OpenWorldWayOut[] = [...held.values()];
     const same =
       last !== undefined &&
@@ -657,6 +743,9 @@ export class OpenWorldRoad {
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);
       if (at >= 0 && at <= route.end - route.origin) this.#hooks.at?.(positionAt(route.view(), at));
+      // #3094: the view keyed before the session plans buildings against it,
+      // so they are planned on the ground the scene will draw under them.
+      this.#keyed(this.#framed(route.view()), route.origin);
       this.#hooks.ahead?.(route, rider);
     }
     const profile = route.view();
@@ -687,15 +776,29 @@ export class OpenWorldRoad {
     this.#turned = undefined;
     this.#drawn = undefined;
     // #3051: after a U-turn no junction behind is one the rider passed on this road.
-    if (turned) this.#waysOut.clear();
+    if (turned) {
+      this.#waysOut.clear();
+      this.#junctionsSeen.clear();
+      this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+    }
     this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;
   }
 
   /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
   #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
-    anchorScenery(view.profile, { seed: this.#seed, origin: view.origin });
+    this.#keyed(view.profile, view.origin);
     return view;
+  }
+
+  /** Keys `profile`, at ride distance `origin`, on the ride (#3055) and its places (#3094). */
+  #keyed(profile: RouteProfile, origin: number): void {
+    anchorScenery(profile, {
+      seed: this.#seed,
+      origin,
+      levels: this.#levels,
+      frame: this.#placeFrame,
+    });
   }
 
   /**
