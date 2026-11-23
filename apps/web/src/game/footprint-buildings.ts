@@ -487,6 +487,7 @@ import {
   type DrawnRoadPoints,
 } from './road-grid';
 import { scatterSeed } from './scatter';
+import { wrappedCell } from './scenery-anchor';
 import {
   APRON,
   ApronObstacles,
@@ -5925,18 +5926,25 @@ function terracePlans(
 ): FootprintPlan[] {
   if (land.bytes === 0) return [];
   const index = footprintIndexOf(kept.flatMap(groundRingsOf));
-  const { plots, span } = lotSpacing(profile);
+  // #3055: `lotsAt`'s own grid, so on an open-world view a block is keyed on
+  // the ride's plot, never the view's: plot `i` starts at `i·span − shift`.
+  const grid = lotSpacing(profile);
+  const { span, shift } = grid;
   const total: number = profile.totalDistance;
   const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
   const back = front + TERRACE_DEPTH_METRES;
   const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
   const blocks: Measured[] = [];
-  for (let plot = 0; plot < plots; plot += 1) {
-    const along = (plot + 0.5) * span;
+  for (let plot = grid.first; plot <= grid.last; plot += 1) {
+    const from = plot * span - shift;
+    const to = (plot + 1) * span - shift;
+    // A view's end cuts its first and last plots short: a block is a whole plot or none.
+    if (grid.anchored && (from < 0 || to > total)) continue;
+    const along = (plot + 0.5) * span - shift;
     if (urban.classAt(along) !== 'city-centre') continue;
     const middle = drawnRoadFrame(profile, origin, along);
-    const start = drawnRoadFrame(profile, origin, plot * span);
-    const end = drawnRoadFrame(profile, origin, Math.min(total, (plot + 1) * span));
+    const start = drawnRoadFrame(profile, origin, from);
+    const end = drawnRoadFrame(profile, origin, Math.min(total, to));
     if (middle === undefined || start === undefined || end === undefined) continue;
     for (const side of [1, -1] as const) {
       const out = (front + back) / 2;
@@ -5970,7 +5978,10 @@ function terracePlans(
       ) {
         continue;
       }
-      const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
+      const draw = uniformFrom(
+        slotHash(seed, wrappedCell(grid, plot), TERRACE_KEY + (side === 1 ? 1 : 2)),
+        0,
+      );
       const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
       // #1635: measured, then planned, as a mapped footprint is — every block
       // measured before any is planned, so the party walls between them are
