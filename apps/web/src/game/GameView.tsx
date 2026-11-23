@@ -118,7 +118,13 @@ import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
-import { dampedHeading, dampedLookAhead, turnedPose, type GroundHeading } from './camera';
+import {
+  dampedHeading,
+  dampedLookAhead,
+  pivotDuringUTurn,
+  turnedPose,
+  type GroundHeading,
+} from './camera';
 import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -3552,6 +3558,14 @@ function GameScreen({
     // #3045: and how far ahead it looked, which `camera.ts` §`dampedLookAhead`
     // eases toward the frame's, so a turnaround's exit does not pitch the view.
     let cameraLookAhead: number | undefined;
+    // #3066: how far the point the camera turned about stood from the drawn
+    // rider on the frame before, and, from a U-turn pressed in an open-world
+    // ride until `camera.ts` §`pivotDuringUTurn` hands that point back, how
+    // far it stood at the press and the ride distance it was pressed at.
+    let cameraPivotOff: { readonly x: number; readonly z: number } | undefined;
+    let cameraUTurn:
+      | { readonly held: { readonly x: number; readonly z: number }; readonly at: number }
+      | undefined;
     // #2456: how fast the steered rider is DRAWN moving across the road, and
     // when it was last drawn, which `lane-change-lean.ts` §`dampedSway` follows
     // the steering toward by the wall clock, as the camera's heading is: a
@@ -3760,6 +3774,12 @@ function GameScreen({
         // ADR 0087 D-6: a U-turn's grade is walked at 1 % a second; nothing
         // else here changes a grade the rider was sent. `gradient.ts` §`follow`.
         gradientRef.current?.follow(followed.profile, followed.origin, followed.turned);
+        if (followed.turned) {
+          cameraUTurn = {
+            held: cameraPivotOff ?? { x: 0, z: 0 },
+            at: simulation.state.ride.distance,
+          };
+        }
         slopesRef.current = slopesOf(followed.profile);
         setRideRoad(rideRoadRef.current);
       }
@@ -4617,9 +4637,27 @@ function GameScreen({
           (at - cameraHeadingAt) / 1000,
         );
         cameraHeadingAt = at;
+        // #3066: across a pressed U-turn, the camera turns about the drawn
+        // rider, who moves smoothly through it, rather than about a point
+        // that swung behind them with the road at the press.
+        const riderMarker = unturned.markers.find((marker) => marker.kind === 'rider');
+        const carried =
+          cameraUTurn === undefined || riderMarker === undefined
+            ? unturned.camera
+            : pivotDuringUTurn(
+                unturned.camera,
+                riderMarker,
+                cameraUTurn.held,
+                drawn.riderDistance - cameraUTurn.at,
+              );
+        if (carried === unturned.camera) cameraUTurn = undefined;
+        cameraPivotOff =
+          riderMarker === undefined
+            ? undefined
+            : { x: carried.x - riderMarker.x, z: carried.z - riderMarker.z };
         const scene = {
           ...unturned,
-          camera: turnedPose(unturned.camera, cameraHeading, cameraLookAhead),
+          camera: turnedPose(carried, cameraHeading, cameraLookAhead),
         };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's

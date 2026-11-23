@@ -216,10 +216,36 @@ describe('the path an open-world ride is drawn along — #2989', () => {
     expect(road.drawnPath(ride + LINE_EASE_METRES + 1)).toBe(own);
   });
 
-  it('draws a U-turn’s line at once: the road under the rider changed', () => {
-    const road = riddenTo(900);
-    road.route.uTurn(900);
-    expect(road.follow(900)?.turned).toBe(true);
-    expect(road.drawnPath(900)).toBe(drawnLine(road.view.profile));
+  it('draws a U-turn from where the rider was drawn, round a half-turn onto the road back — #3066', () => {
+    // Before #3066 a U-turn's line was drawn at once, a sample behind the
+    // rider on the view's own U-turn: the drawn rider stepped metres.
+    // At 1 505 m the U-turn's view also starts 490 m further on, in a new frame.
+    const ride = 1_505;
+    const road = riddenTo(1_500);
+    road.drawnPath(ride);
+    const frame = corridorOrigin(road.view.profile);
+    const before = placeOn(road, ride, frame);
+    road.route.uTurn(ride);
+    expect(road.follow(ride)?.turned).toBe(true);
+    const path = road.drawnPath(ride);
+    // On the frame of the press: where it was drawn the frame before.
+    const after = placeOn(road, ride, frame);
+    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeLessThan(1e-3);
+    // And half a metre on, into the half-turn, half a metre from there: it
+    // starts in the new view's frame, on the old path's heading.
+    const into = placeOn(road, ride + 0.5, frame);
+    expect(Math.abs(Math.hypot(into.x - before.x, into.z - before.z) - 0.5)).toBeLessThan(0.1);
+    // Round a half-turn of its own, and not the view's U-turn at the press.
+    const own = drawnLine(road.view.profile);
+    const turnSample = Math.ceil(ride / 10) - road.view.origin / 10;
+    expect(own.uTurns).toContain(turnSample);
+    expect(path.uTurns).not.toContain(turnSample);
+    expect(path.pressed?.pieces.length).toBe(2);
+    // And ridden past it, on the view's own line.
+    const end = path.pressed?.pieces[1]?.to as number;
+    const out = road.view.origin + end + 30;
+    const drawnThere = drawnLineAt(road.drawnPath(out), alongView(road.view, out));
+    const ownThere = drawnLineAt(own, alongView(road.view, out));
+    expect(Math.hypot(drawnThere.x - ownThere.x, drawnThere.z - ownThere.z)).toBeLessThan(1e-6);
   });
 });

@@ -58,7 +58,9 @@
  * eases a new view's line in from the path last drawn over the next
  * `line-ease.ts` §`LINE_EASE_METRES` ridden, so a choice moves neither the
  * drawn rider nor the camera on the frame it is made (ADR 0089 C-6, #2989). A
- * U-turn's line is drawn at once: the road under the rider changed.
+ * U-turn's is eased in too, and drawn round a half-turn of its own from where
+ * the rider was drawn at the press (#3066, §`pressedTurn`): the road under
+ * the rider changed, so the view's own line turns back within a sample of them.
  *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
@@ -72,15 +74,71 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { drawnLine, type DrawnLine } from '../drawn-line';
+import {
+  drawnLine,
+  drawnLineAt,
+  type DrawnLine,
+  type PathPoint,
+  type PressedTurn,
+} from '../drawn-line';
 import type { GameState } from '../simulation';
-import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
+import { lineOffsetAt } from '../racing-line';
+import { ROAD_WIDTH_METRES, corridorOrigin } from '../terrain';
+import { easeWeight, easedLine, heldLine, reframing, type HeldLine } from './line-ease';
 
 /**
  * How little road may be held ahead of the rider before the route is advanced:
  * **1 km**. *#2982's choice*, above.
  */
 export const OPEN_WORLD_REACH_FLOOR_METRES = 1_000;
+
+/**
+ * How far across the road a pressed U-turn is drawn, at least, in metres:
+ * **3**, `drawn-line.ts` §`U_TURN_LEAST_ACROSS_METRES` — #3066, *its
+ * choice*. The half-turn ends across from where the rider was, on the new
+ * view's line where that is far enough over, and otherwise this far over,
+ * towards it where there is room: the new view's line can run back within a
+ * metre of where the rider was, and a half-turn that narrow is a spin on the
+ * spot.
+ */
+const PRESSED_TURN_ACROSS_METRES = 3;
+
+/** How far in from the road's edge a pressed U-turn stays, metres: **0.75**. */
+const PRESSED_TURN_KERB_METRES = 0.75;
+
+/** Half the road's width, metres: `terrain.ts` §`ROAD_WIDTH_METRES` over two. */
+const ROAD_HALF_METRES = ROAD_WIDTH_METRES / 2;
+
+/**
+ * How fast the drawn rider rounds a pressed U-turn, as a share of how fast
+ * they ride: **0.5** at its slowest, so its half-turn takes twice its length
+ * in odometer — #3066, *its choice*. They slow into it and pick up out of it
+ * (`drawn-line.ts` §`halfTurnAt`).
+ */
+const PRESSED_TURN_PACE = 0.5;
+
+/**
+ * How far along the road back the drawn rider is eased from the side of the
+ * road the half-turn ends on to the new view's line, at least, in metres:
+ * **10** — #3066.
+ */
+const PRESSED_TURN_MERGE_METRES = 10;
+
+/** The step the slope of a path is read over, metres of odometer either side. */
+const SLOPE_STEP_METRES = 0.01;
+
+/** The path at odometer `at`, and its slope per metre of odometer there. */
+function pathPointAt(line: DrawnLine, at: number): PathPoint {
+  const here = drawnLineAt(line, at);
+  const before = drawnLineAt(line, at - SLOPE_STEP_METRES);
+  const after = drawnLineAt(line, at + SLOPE_STEP_METRES);
+  return {
+    x: here.x,
+    z: here.z,
+    slopeX: (after.x - before.x) / (2 * SLOPE_STEP_METRES),
+    slopeZ: (after.z - before.z) / (2 * SLOPE_STEP_METRES),
+  };
+}
 
 /** The road, as every reader in the ride loop reads it. */
 export interface OpenWorldRoadView {
@@ -130,6 +188,112 @@ export interface OpenWorldRoadHooks {
   readonly graphVersion?: (() => number) | undefined;
 }
 
+/**
+ * The half-turn a U-turn pressed is drawn round, on `line`'s view, whose
+ * distance zero is ride distance `origin`, for a rider drawn at ride distance
+ * `rider` — #3066. The road turns back at ride distance `turnedAt`, and
+ * `before` is the path drawn on the view before the press, whose distance
+ * zero is `beforeOrigin`.
+ *
+ * Two pieces: a half-turn from where `before` has the rider, across to
+ * {@link PRESSED_TURN_ACROSS_METRES} over on the side of the road with more
+ * room, slowed to {@link PRESSED_TURN_PACE}; then, facing back, an ease onto
+ * `line` over at least {@link PRESSED_TURN_MERGE_METRES} of the road back.
+ * Undefined where the view ends before that, or the rider is past the turn.
+ */
+function pressedTurn(
+  before: DrawnLine,
+  beforeOrigin: number,
+  line: DrawnLine,
+  origin: number,
+  rider: number,
+  turnedAt: number,
+): PressedTurn | undefined {
+  const from = rider - origin;
+  const ahead = turnedAt - rider;
+  if (!(from >= 0 && ahead >= 0)) return undefined;
+  const { shift, scaleX } = reframing(corridorOrigin(before.profile), corridorOrigin(line.profile));
+  const was = pathPointAt(before, rider - beforeOrigin);
+  const start: PathPoint = {
+    x: was.x * scaleX + shift.x,
+    z: was.z + shift.z,
+    slopeX: was.slopeX * scaleX,
+    slopeZ: was.slopeZ,
+  };
+  const pace = Math.hypot(start.slopeX, start.slopeZ);
+  if (!(pace > 0)) return undefined;
+  // Across, along the path's normal: `scene.ts` §`chaseRider`'s, (−z, x) of
+  // its heading, the side its offsets are measured to.
+  const normalX = -start.slopeZ / pace;
+  const normalZ = start.slopeX / pace;
+  const offset = lineOffsetAt(before, rider - beforeOrigin);
+  const room = ROAD_HALF_METRES - PRESSED_TURN_KERB_METRES;
+  // Where the new line runs back, across the road the same way: its own
+  // normal faces the other way. Estimated where the rider will be once the
+  // half-turn is ridden; read again at the merge's end, below.
+  const back = -lineOffsetAt(line, from + 2 * ahead + PRESSED_TURN_MERGE_METRES);
+  const wanted = back - offset;
+  const towards = wanted >= 0 ? 1 : -1;
+  const roomOn = (side: number): number => room - side * offset;
+  const side =
+    roomOn(towards) >= Math.min(PRESSED_TURN_ACROSS_METRES, Math.abs(wanted)) ||
+    roomOn(towards) >= roomOn(-towards)
+      ? towards
+      : -towards;
+  const across = Math.min(Math.max(PRESSED_TURN_ACROSS_METRES, Math.abs(wanted)), roomOn(side));
+  const radius = across / 2;
+  const turnSpan = (Math.PI * radius) / PRESSED_TURN_PACE;
+  // The second piece ends where the road back is at least the merge's length
+  // back from where the first ends: the place `ahead` past the press is the
+  // turn, so ridden `span` past the press the rider is `span − 2·ahead`
+  // back from the press's place.
+  const span = Math.max(
+    turnSpan + PRESSED_TURN_MERGE_METRES,
+    PRESSED_TURN_MERGE_METRES + 2 * ahead,
+  );
+  const to = from + span;
+  if (!(across > 0) || !(to <= (line.profile.totalDistance as number))) return undefined;
+  const across1: PathPoint = {
+    x: start.x + normalX * side * across,
+    z: start.z + normalZ * side * across,
+    slopeX: -start.slopeX,
+    slopeZ: -start.slopeZ,
+  };
+  return {
+    pieces: [
+      { from, to: from + turnSpan, start, end: across1 },
+      { from: from + turnSpan, to, start: across1, end: pathPointAt({ ...line, uTurns: [] }, to) },
+    ],
+  };
+}
+
+/**
+ * `line` with `turn` drawn on it — #3066. The view's own U-turn at the press
+ * is the half-turn's to draw, so it is not drawn as well; and over the
+ * half-turn, and the samples either side of it, the line's curvature is
+ * nought. `scene.ts` §`drawnRider` eases the drawn rider off for a sharp bend
+ * read from that curvature, and the view's own was its U-turn's, a bend the
+ * half-turn is not: read there, the drawn place moved with every step of the
+ * rider's speed, by up to 17 cm from one frame's move to the next. So the
+ * drawn rider does not lean round the half-turn, either.
+ */
+function withPressedTurn(line: DrawnLine, turn: PressedTurn): DrawnLine {
+  const first = turn.pieces[0];
+  const last = turn.pieces[turn.pieces.length - 1];
+  if (first === undefined || last === undefined) return line;
+  const resolution = line.profile.resolution as number;
+  const low = Math.max(0, Math.floor(first.from / resolution) - 1);
+  const high = Math.min(line.curvatures.length - 1, Math.ceil(last.to / resolution) + 1);
+  const curvatures = new Float64Array(line.curvatures);
+  curvatures.fill(0, low, high + 1);
+  return {
+    ...line,
+    curvatures,
+    pressed: turn,
+    uTurns: line.uTurns.filter((sample) => !(sample + 1 >= low && sample - 1 <= high)),
+  };
+}
+
 /** One open-world ride's road, from its start. See the file's header. */
 export class OpenWorldRoad {
   /** The rolling route itself: #2897's junction choice presses through it. */
@@ -142,6 +306,16 @@ export class OpenWorldRoad {
   #drawn: DrawnLine | undefined;
   /** The path being eased from, and the ride distance the ease began at. @see drawnPath */
   #easing: { readonly from: HeldLine; readonly at: number } | undefined;
+  /**
+   * #3066: a U-turn pressed since the last path was drawn, and the path drawn
+   * before it with its view's origin, which the half-turn starts from.
+   */
+  #press:
+    { readonly from: DrawnLine; readonly origin: number; readonly turnedAt: number } | undefined;
+  /** The pressed U-turn drawn on {@link view}, kept for the view. @see drawnPath */
+  #turn: PressedTurn | undefined;
+  /** The last line {@link drawnPath} drew {@link #turn} on, and that line with it. */
+  #turned: { readonly base: DrawnLine; readonly line: DrawnLine } | undefined;
 
   constructor(route: RollingRoute, hooks: OpenWorldRoadHooks = {}) {
     this.route = route;
@@ -182,12 +356,26 @@ export class OpenWorldRoad {
     const turned = route.uTurns !== this.#uTurns;
     this.#uTurns = route.uTurns;
     // #2989: the new view's line is eased in from the path last drawn, from
-    // here; after a U-turn that path is on a road the rider has left.
+    // here. #3066: after a U-turn too, where the road up to the rider is the
+    // road they came along, and the half-turn starts from that path.
     const drawn = this.#drawn;
     this.#easing =
-      turned || drawn === undefined || !Number.isFinite(rider)
+      drawn === undefined || !Number.isFinite(rider)
         ? undefined
         : { from: heldLine(drawn, this.#view.origin), at: rider };
+    // `RollingRoute.uTurn` turns the road round on the first sample at or
+    // after the rider.
+    const resolution = profile.resolution as number;
+    this.#press =
+      turned && drawn !== undefined && Number.isFinite(rider)
+        ? {
+            from: drawn,
+            origin: this.#view.origin,
+            turnedAt: Math.ceil(rider / resolution) * resolution,
+          }
+        : undefined;
+    this.#turn = undefined;
+    this.#turned = undefined;
     this.#drawn = undefined;
     this.#view = { profile, origin: route.origin, turned };
     return this.#view;
@@ -207,7 +395,25 @@ export class OpenWorldRoad {
     const easing = this.#easing;
     const weight = easing === undefined ? 1 : easeWeight(rider - easing.at);
     if (easing !== undefined && !(weight < 1)) this.#easing = undefined;
-    const drawn = easing === undefined ? line : easedLine(easing.from, line, view.origin, weight);
+    const eased = easing === undefined ? line : easedLine(easing.from, line, view.origin, weight);
+    // #3066: a U-turn pressed since the last path, drawn from where that path
+    // had the rider on this frame.
+    const press = this.#press;
+    this.#press = undefined;
+    if (press !== undefined && Number.isFinite(rider)) {
+      this.#turn = pressedTurn(press.from, press.origin, line, view.origin, rider, press.turnedAt);
+    }
+    const turn = this.#turn;
+    const known = this.#turned;
+    const drawn =
+      turn === undefined
+        ? eased
+        : known?.base === eased
+          ? known.line
+          : withPressedTurn(eased, turn);
+    // Kept while the ease runs, the eased line being a new one each frame;
+    // once it is over the line is the view's own, and so is this.
+    if (turn !== undefined) this.#turned = { base: eased, line: drawn };
     this.#drawn = drawn;
     return drawn;
   }
