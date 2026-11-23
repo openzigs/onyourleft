@@ -36,6 +36,7 @@ import {
   OpenWorldStartView,
   PIN_NAME,
   START_NEEDS_TILES_TEXT,
+  START_NEXT_STEP_TEXT,
   START_NO_MAP_TEXT,
   START_RIDE_UNREAD_TEXT,
 } from './OpenWorldStartView';
@@ -156,7 +157,7 @@ describe('a pin on the map — #2889', () => {
     expect(picker.engine.created.at(-1)?.waypoints.at(-1)).toEqual([
       { id: 'open-world-pin', position: DENVER, label: PIN_NAME, kind: 'pin' },
     ]);
-    expect(pinSaid(picker.view)).toBe('Pin dropped.');
+    expect(pinSaid(picker.view)).toBe(`Pin dropped. ${START_NEXT_STEP_TEXT}`);
     expect(picker.entry.take(), 'nothing is handed before the press').toBeUndefined();
     await activateWithKeyboard(button(picker.view, 'Start the ride'));
     expect(picker.entry.take()).toEqual({ position: DENVER, source: 'pin' });
@@ -179,7 +180,7 @@ describe('a pin on the map — #2889', () => {
   it('places the pin by keyboard, and moves it by the focused pin’s arrow keys', async () => {
     const picker = await open();
     await activateWithKeyboard(button(picker.view, 'Put the pin at the map’s centre'));
-    expect(pinSaid(picker.view)).toBe('Pin put at the map’s centre.');
+    expect(pinSaid(picker.view)).toBe(`Pin put at the map’s centre. ${START_NEXT_STEP_TEXT}`);
     await nudge(picker, 'north');
     expect(pinSaid(picker.view)).toBe('Pin moved north.');
     await nudge(picker, 'east');
@@ -201,6 +202,8 @@ describe('a pin on the map — #2889', () => {
       .join(' ');
     expect(status).not.toMatch(/\d/u);
     expect(hasButton(picker.view, 'Start the ride')).toBe(false);
+    // #3050: no next step is said for a start that cannot be ridden.
+    expect(pinSaid(picker.view)).toBe('Pin dropped.');
   });
 
   it('starts from a pin outside the US on a self-hoster’s own archive — #2985', async () => {
@@ -314,7 +317,7 @@ describe('the map is moved by hand, with no rows of buttons — #2889, 2026-11-2
     await settle();
     said.push(pinSaid(picker.view));
     expect(said).toEqual([
-      'Pin dropped.',
+      `Pin dropped. ${START_NEXT_STEP_TEXT}`,
       'Pin moved north.',
       'Pin moved south.',
       'Pin moved east.',
@@ -454,6 +457,13 @@ describe('map tiles off — ADR 0090 D-7.2', () => {
     await activateWithKeyboard(button(picker.view, 'Lookout loop'));
     expect(picker.view.container.textContent).toContain(START_NEEDS_TILES_TEXT);
     expect(hasButton(picker.view, 'Start the ride')).toBe(false);
+  });
+
+  it('says no next step for a pin it offers no start for — #3050', async () => {
+    const picker = await open({ tiles: false });
+    await tap(picker, DENVER);
+    expect(hasButton(picker.view, 'Start the ride')).toBe(false);
+    expect(pinSaid(picker.view)).toBe('Pin dropped.');
   });
 });
 

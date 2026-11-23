@@ -25,7 +25,7 @@ import { ME, tilesPreference, twoAthletesStore } from '../game/open-world/start-
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { stubMapPort } from '../map/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
-import { OpenWorldStartView } from './OpenWorldStartView';
+import { OpenWorldStartView, START_NEXT_STEP_TEXT } from './OpenWorldStartView';
 
 const BASEMAP = {
   archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
@@ -97,7 +97,7 @@ describe('the open-world start picker is inside the accessibility gate — #2889
     expect(
       view.container.querySelector('section[aria-labelledby="oyl-open-world-pin"] [role="status"]')
         ?.textContent,
-    ).toBe('Pin put at the map’s centre.');
+    ).toBe(`Pin put at the map’s centre. ${START_NEXT_STEP_TEXT}`);
     expect(tabStop(view, 'Start the ride')).toBeDefined();
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
