@@ -4550,6 +4550,23 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #2902: an open-world ride's mapped buildings, planned round the
+          // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
+          // and ranked by the ways on from the next junction too.
+          ...(road.follower === undefined
+            ? {}
+            : {
+                mappedBuildings: road.follower.buildings(),
+                // #2903: and its streets, drawn to the fog as road, with a
+                // stub at each junction (`open-world/street-corridor.ts`).
+                worldCorridor: road.follower.streets(),
+                // #3052: and where each named street's name is painted on it.
+                streetNames: road.follower.streetNames(),
+                mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
+                // #3051: and the ways out the route does not take, so the
+                // scenery stands along each before a choice and after it.
+                waysOut: road.follower.waysOut(simulation.state.ride.distance),
+              }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the
           // obstacles meet them; none on a ride with no round, or in a room

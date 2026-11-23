@@ -9,9 +9,27 @@
  * furthest right, each as a button with an arrow that points **the way's own
  * direction** (its turn from the rider's heading: the owner's ruling of
  * 2026-11-20 recorded on ADR 0088), its name, whether it is the default and
- * whether it is chosen, and the key and pad button that take it. Under them,
+ * whether it is chosen, and the key and pad button that take it. Over them,
  * how far until the choice is final, or that it is (D-1.5). A U-turn button
- * stands beside it for the whole ride (D-1.6, D-3).
+ * stands with the ride controls for the whole ride (D-1.6, D-3):
+ * {@link JunctionUTurn}.
+ *
+ * ## A pop-up of its own, which no fade reaches — #3053
+ *
+ * The owner's report and ruling of 2026-11-22 (ADR 0088's amendment of that
+ * date): the ways were drawn in the ride controls' panel, which fades and is
+ * then clipped with no touch (`controls-reveal.ts`, ADR 0075), so a rider not
+ * touching the screen did not see the junction coming. {@link
+ * JunctionChoicePrompt} is now a pop-up in the upper middle of the view,
+ * `HudCore`'s own child rather than the actions panel's, and carries no
+ * `HIDES_ATTRIBUTE`: it is drawn from the prompt's 250 m until the choice is
+ * final and {@link JUNCTION_LOCKED_SHOWN_MILLISECONDS} after, showing the
+ * chosen way alone once it is. The first tap on a way is that way's press,
+ * hidden controls or not: `controls-reveal.ts` swallows only a tap on a
+ * control that hides. Where it is drawn is `theme.css` §"#3053", and
+ * `junction-prompt.browser.spec.ts` measures it clear of the rider. The
+ * U-turn, which is not a junction's, stays with the controls and fades with
+ * them, so a first tap on it while they are hidden only shows them.
  *
  * ## Which press takes which way comes from the choice, not from here
  *
@@ -26,7 +44,8 @@
  *
  * ## Keys
  *
- * While it is mounted, a turn key (`turn-input.ts` §`TURN_KEYS`: the arrows,
+ * While {@link JunctionUTurn} is mounted, which is the whole of an open-world
+ * ride, a turn key (`turn-input.ts` §`TURN_KEYS`: the arrows,
  * Page Up and Page Down) is a press, read with the ride keys' discipline
  * (`lanes.ts` §`intentOfKeyIn`), as `ThrowControl.tsx` reads the throw keys.
  * A pad's turn buttons reach the same press through `GamepadIntents.tsx`.
@@ -63,7 +82,7 @@
  * which `GameView` hands it (#3013).
  */
 
-import { useEffect, useRef, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import type { UnitSystem } from '@onyourleft/store';
 
@@ -71,6 +90,7 @@ import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { VisuallyHidden } from '../../design/VisuallyHidden';
 import { pressesOfWays, type JunctionPrompt, type TurnPress } from '../open-world/junction-choice';
 import { turnOfKey, turnOfSymbol, type TurnSymbol } from '../open-world/turn-input';
+import { HIDES_ATTRIBUTE } from './controls-reveal';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
 import {
   JUNCTION_BY_KEY_SENTENCE,
@@ -80,6 +100,7 @@ import {
   JUNCTION_PROMPT_TITLE,
   lockLine,
   U_TURN_NAME,
+  wayStreetLine,
   wayWord,
 } from './junction-text';
 
@@ -101,6 +122,15 @@ export interface JunctionChoicePromptProps {
   readonly touchLocked: boolean;
   readonly units: UnitSystem;
 }
+
+/**
+ * How long the pop-up stays once the choice is final, showing the chosen way
+ * alone, before it goes — #3053's *"shows the chosen way briefly and then goes
+ * away"*. Two seconds: long enough to read one word at a glance, and gone
+ * well before a rider at 13 mph reaches the junction 100 m on (about 17 s).
+ * The maintainer's number, open to the owner on the tablet.
+ */
+export const JUNCTION_LOCKED_SHOWN_MILLISECONDS = 2_000;
 
 /**
  * The key and the pad button that make each press, as the prompt shows them:
@@ -142,9 +172,14 @@ const SYMBOLS: Readonly<Record<TurnPress, TurnSymbol>> = {
   'u-turn': 'turn-u-turn',
 };
 
-/** The ids the buttons' `aria-describedby` and the group's label name. One HUD per page. */
+/**
+ * The ids the buttons' `aria-describedby` and the group's label name. One HUD
+ * per page. The pop-up's ways and the U-turn are in different places since
+ * #3053, so each says the touch lock's sentence where it is drawn.
+ */
 const TITLE_ID = 'oyl-hud-junction-title';
 const NOTE_ID = 'oyl-hud-junction-note';
+const U_TURN_NOTE_ID = 'oyl-hud-junction-u-turn-note';
 
 /** An arrow pointing `turnDegrees` from straight up: the way's own direction. */
 function WayArrow(props: { readonly turnDegrees: number }): JSX.Element {
@@ -211,9 +246,140 @@ function Hints(props: { readonly presses: readonly TurnPress[] }): ReactNode {
   );
 }
 
-/** @see the module header */
-export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Element {
+/** A way's tap: one discrete press through the keys' path (D-3.1.1). */
+function tapOf(junction: JunctionInput): (turn: TurnPress) => void {
+  return (turn) => {
+    junction.press(turnOfSymbol(SYMBOLS[turn]));
+  };
+}
+
+/**
+ * Each control's ride-time size. A function, read as each renders: `HudCore`
+ * imports this module and this module reads its floor, so at this module's
+ * first evaluation `CONTROL_MINIMUM_PIXELS` is not yet defined.
+ */
+function size(): { readonly minWidth: number; readonly minHeight: number } {
+  return { minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS };
+}
+
+/**
+ * The junction's pop-up — #3053. @see the module header
+ *
+ * Nothing at all while no junction is within the prompt's reach, and nothing
+ * once the choice has been final for {@link JUNCTION_LOCKED_SHOWN_MILLISECONDS}.
+ */
+export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Element | null {
   const { junction, touchLocked, units } = props;
+  const shown = junction.prompt;
+  // The junction whose pop-up has gone, after its brief look at the way chosen.
+  // By its ride distance: a junction is the one at that distance on this ride.
+  const [goneFor, setGoneFor] = useState<number | undefined>(undefined);
+  const lockedAt = shown?.locked === true ? shown.distance : undefined;
+  useEffect(() => {
+    if (lockedAt === undefined) return undefined;
+    const timer = setTimeout(() => {
+      setGoneFor(lockedAt);
+    }, JUNCTION_LOCKED_SHOWN_MILLISECONDS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [lockedAt]);
+  if (shown === undefined || goneFor === shown.distance) return null;
+
+  const described = touchLocked ? NOTE_ID : undefined;
+  const tap = tapOf(junction);
+  const presses = pressesOfWays(shown);
+  const chosenAt = shown.ways.findIndex((way) => way.edge.id === shown.chosen);
+  return (
+    <div className="oyl-hud__junction-popup">
+      <div role="group" aria-labelledby={TITLE_ID} className="oyl-hud__junction-prompt">
+        <div className="oyl-hud__junction-head">
+          <p id={TITLE_ID} className="oyl-hud__junction-title">
+            {JUNCTION_PROMPT_TITLE}
+          </p>
+          <p className="oyl-hud__junction-lock">
+            {shown.locked ? JUNCTION_LOCKED_LINE : lockLine(shown.toLock, units)}
+          </p>
+        </div>
+        <ul className="oyl-hud__junction-ways">
+          {shown.ways.map((way, index) => {
+            const id = way.edge.id;
+            const isChosen = id === shown.chosen;
+            // Once the choice is final, the way chosen alone (#3053).
+            if (shown.locked && !isChosen) return null;
+            const own = presses.get(id) ?? [];
+            const isDefault = id === shown.defaultWay;
+            const street = wayStreetLine(way);
+            // A way with a press of its own takes that press; with more than
+            // three ways on, one with none is a step toward it; the chosen way
+            // with none is already where the ride goes.
+            const turn: TurnPress | undefined =
+              own[0] ?? (isChosen ? undefined : index < chosenAt ? 'left' : 'right');
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  className={`oyl-hud__control oyl-hud__junction-way ${RIDE_SIZE_CLASS}${
+                    isChosen ? ' oyl-hud__junction-way--chosen' : ''
+                  }`}
+                  data-oyl-way={id}
+                  aria-disabled={shown.locked ? 'true' : undefined}
+                  aria-describedby={described}
+                  style={size()}
+                  onClick={() => {
+                    if (turn !== undefined) tap(turn);
+                  }}
+                >
+                  <WayArrow turnDegrees={way.turnDegrees} />
+                  <span className="oyl-hud__junction-word">{wayWord(way.turnDegrees)}</span>
+                  {/* #3052: the street, as mapped, under its turn; none where the map names none. */}
+                  {street === undefined ? null : (
+                    // A leading space, as the marks have, so the accessible name reads
+                    // "Right onto Third Avenue" and never "Rightonto".
+                    <span className="oyl-hud__junction-street">{` ${street}`}</span>
+                  )}
+                  {isDefault || isChosen ? (
+                    <span className="oyl-hud__junction-marks">
+                      {isDefault ? ` ${JUNCTION_DEFAULT_WORD}` : null}
+                      {isChosen ? ` ${JUNCTION_CHOSEN_WORD}` : null}
+                    </span>
+                  ) : null}
+                  <Hints presses={own} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {touchLocked ? (
+          <p id={NOTE_ID} className="oyl-hud__junction-note">
+            {JUNCTION_BY_KEY_SENTENCE}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** What {@link JunctionUTurn} is handed. */
+export interface JunctionUTurnProps {
+  readonly junction: JunctionInput;
+  /** The HUD's touch lock is on. */
+  readonly touchLocked: boolean;
+}
+
+/**
+ * The U-turn (D-1.6), with the ride controls for the whole ride, and the turn
+ * keys' listener, which a U-turn key needs with no junction ahead.
+ *
+ * ⚠️ **It hides with the controls, as Pause does** (#3053): the actions panel
+ * it is drawn in fades and is clipped with no touch, and a control there that
+ * did not carry {@link HIDES_ATTRIBUTE} took the first tap that only showed
+ * them: before #3053, `HudPanel.controls-hide.test.tsx` §"keeps the U-turn
+ * with the controls" saw that first tap turn the rider round. A first tap on
+ * it while they are hidden now only shows them.
+ */
+export function JunctionUTurn(props: JunctionUTurnProps): JSX.Element {
+  const { junction, touchLocked } = props;
   // Read through a ref: the ride hands in a new press each frame, and the
   // keys' listener should not be torn down and added again at 60 fps.
   const press = useRef(junction.press);
@@ -235,79 +401,14 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
     };
   }, []);
 
-  const shown = junction.prompt;
-  const described = touchLocked ? NOTE_ID : undefined;
-  const size = { minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS };
-  const tap = (turn: TurnPress): void => {
-    junction.press(turnOfSymbol(SYMBOLS[turn]));
-  };
-
-  let ways: ReactNode = null;
-  if (shown !== undefined) {
-    const presses = pressesOfWays(shown);
-    const chosenAt = shown.ways.findIndex((way) => way.edge.id === shown.chosen);
-    ways = (
-      <div role="group" aria-labelledby={TITLE_ID} className="oyl-hud__junction-prompt">
-        <div className="oyl-hud__junction-head">
-          <p id={TITLE_ID} className="oyl-hud__junction-title">
-            {JUNCTION_PROMPT_TITLE}
-          </p>
-          <p className="oyl-hud__junction-lock">
-            {shown.locked ? JUNCTION_LOCKED_LINE : lockLine(shown.toLock, units)}
-          </p>
-        </div>
-        <ul className="oyl-hud__junction-ways">
-          {shown.ways.map((way, index) => {
-            const id = way.edge.id;
-            const own = presses.get(id) ?? [];
-            const isDefault = id === shown.defaultWay;
-            const isChosen = id === shown.chosen;
-            // A way with a press of its own takes that press; with more than
-            // three ways on, one with none is a step toward it; the chosen way
-            // with none is already where the ride goes.
-            const turn: TurnPress | undefined =
-              own[0] ?? (isChosen ? undefined : index < chosenAt ? 'left' : 'right');
-            return (
-              <li key={id}>
-                <button
-                  type="button"
-                  className={`oyl-hud__control oyl-hud__junction-way ${RIDE_SIZE_CLASS}${
-                    isChosen ? ' oyl-hud__junction-way--chosen' : ''
-                  }`}
-                  data-oyl-way={id}
-                  aria-disabled={shown.locked ? 'true' : undefined}
-                  aria-describedby={described}
-                  style={size}
-                  onClick={() => {
-                    if (turn !== undefined) tap(turn);
-                  }}
-                >
-                  <WayArrow turnDegrees={way.turnDegrees} />
-                  <span className="oyl-hud__junction-word">{wayWord(way.turnDegrees)}</span>
-                  {isDefault || isChosen ? (
-                    <span className="oyl-hud__junction-marks">
-                      {isDefault ? ` ${JUNCTION_DEFAULT_WORD}` : null}
-                      {isChosen ? ` ${JUNCTION_CHOSEN_WORD}` : null}
-                    </span>
-                  ) : null}
-                  <Hints presses={own} />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    );
-  }
-
+  const tap = tapOf(junction);
   return (
-    <div className="oyl-hud__junction">
-      {ways}
+    <div className="oyl-hud__junction" {...{ [HIDES_ATTRIBUTE]: '' }}>
       <button
         type="button"
         className={`oyl-hud__control oyl-hud__junction-u-turn ${RIDE_SIZE_CLASS}`}
-        aria-describedby={described}
-        style={size}
+        aria-describedby={touchLocked ? U_TURN_NOTE_ID : undefined}
+        style={size()}
         onClick={() => {
           tap('u-turn');
         }}
@@ -316,7 +417,7 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
         <Hints presses={['u-turn']} />
       </button>
       {touchLocked ? (
-        <p id={NOTE_ID} className="oyl-hud__junction-note">
+        <p id={U_TURN_NOTE_ID} className="oyl-hud__junction-note">
           {JUNCTION_BY_KEY_SENTENCE}
         </p>
       ) : null}

@@ -25,7 +25,7 @@ import { TOUCH_LOCK_NAME } from '../../design/TouchLockButton';
 import { CONTRAST_REQUIREMENTS, paletteColours, THEMES } from '../../design/tokens';
 import { activateWithKeyboard, mount, type Mounted } from '../../testing/mount';
 import type { JunctionChoice } from '../open-world/junction-choice';
-import { newRide, theJunction } from '../open-world/junction-ride-testing';
+import { newRide, starRide, theJunction } from '../open-world/junction-ride-testing';
 import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './announce';
 import { DEFAULT_ANNOUNCEMENTS } from './announce-preference';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
@@ -130,6 +130,8 @@ describe('the junction prompt on the HUD — #2898', () => {
     mounted = await mount(<JunctionHud choice={choice} rider={junction.distance - 60} />);
 
     expect(document.body.textContent).toContain(JUNCTION_LOCKED_LINE);
+    // #3053: the way chosen, alone.
+    expect(wayButtons().map((each) => each.dataset.oylWay)).toEqual([junction.defaultWay]);
     for (const each of wayButtons()) {
       expect(each.getAttribute('aria-disabled')).toBe('true');
       // Never `disabled`: it stays focusable and still shows the way taken.
@@ -151,7 +153,9 @@ describe('reachable and operable by keyboard alone (ADR 0088 D-3)', () => {
     expect(ways).toHaveLength(3);
     for (const each of [...ways, uTurn()]) expect(at(each)).toBeGreaterThan(end);
     expect(ways.map(at)).toEqual([...ways.map(at)].sort((a, b) => a - b));
-    expect(at(uTurn())).toBeGreaterThan(at(ways[2]));
+    // #3053: the U-turn stays with the controls; the ways are the pop-up
+    // after them in the document.
+    expect(at(uTurn())).toBeLessThan(at(ways[0]));
   });
 
   it('chooses each way with Enter on it, or with its key, and the default is a key away', async () => {
@@ -179,8 +183,12 @@ describe('reachable and operable by keyboard alone (ADR 0088 D-3)', () => {
     mounted = await mount(<JunctionHud choice={choice} rider={rider} />);
     const taken = () => route.legs.find((leg) => leg.start === junction.distance)?.edge.id;
 
-    await activateWithKeyboard(wayButton(junction.ways[0]?.edge.id as string));
+    // #3053: once final the pop-up shows the way chosen alone, and Enter on it
+    // does nothing; nor does a key for another way.
+    expect(wayButtons()).toHaveLength(1);
+    await activateWithKeyboard(wayButtons()[0] as HTMLButtonElement);
     pressKey('ArrowRight');
+    pressKey('ArrowLeft');
     expect(taken()).toBe(junction.defaultWay);
   });
 });
@@ -271,10 +279,18 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
     pressKey('ArrowLeft');
     expect(taken()).toBe(left);
     expect(document.body.textContent).toContain(JUNCTION_BY_KEY_SENTENCE);
-    const note = [...document.querySelectorAll('p')].find(
-      (each) => each.textContent === JUNCTION_BY_KEY_SENTENCE,
-    );
+    // Said where each is drawn (#3053): in the pop-up for its ways, and with
+    // the controls for the U-turn.
+    const noteIn = (place: Element | null | undefined): Element | undefined =>
+      [...(place?.querySelectorAll('p') ?? [])].find(
+        (each) => each.textContent === JUNCTION_BY_KEY_SENTENCE,
+      );
+    const note = noteIn(document.querySelector('.oyl-hud__junction-popup'));
+    expect(note?.id).toBeTruthy();
     for (const each of wayButtons()) expect(each.getAttribute('aria-describedby')).toBe(note?.id);
+    const uTurnNote = noteIn(uTurn()?.closest('.oyl-hud__actions'));
+    expect(uTurnNote?.id).toBeTruthy();
+    expect(uTurn()?.getAttribute('aria-describedby')).toBe(uTurnNote?.id);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
@@ -286,10 +302,26 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
     ]);
     expect(declared('.oyl-hud__junction-title', 'color')).toEqual(['var(--oyl-color-hud-ink)']);
     expect(declared('.oyl-hud__panel', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
-    // No backing of its own to change the pair the panel declares.
-    for (const selector of ['.oyl-hud__junction', '.oyl-hud__junction-prompt']) {
+    // The U-turn's wrapper, in the actions panel, has no backing of its own to
+    // change the pair the panel declares; nor do the pop-up and its group,
+    // which paint nothing between their parts (#3053).
+    for (const selector of [
+      '.oyl-hud__junction',
+      '.oyl-hud__junction-popup',
+      '.oyl-hud__junction-prompt',
+    ]) {
       expect(declared(selector, 'background')).toEqual([]);
     }
+    // #3053: over the road, every line the pop-up says is on the HUD's opaque
+    // surface, the colour its pairs are checked against; each way is a
+    // control, on that surface already (`.oyl-hud__control`).
+    expect(declared('.oyl-hud__junction-head', 'background')).toEqual([
+      'var(--oyl-color-hud-surface)',
+    ]);
+    expect(declared('.oyl-hud__junction-popup .oyl-hud__junction-note', 'background')).toEqual([
+      'var(--oyl-color-hud-surface)',
+    ]);
+    expect(declared('.oyl-hud__control', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
     for (const ink of ['hudInk', 'hudInkMuted'] as const) {
       const pair = CONTRAST_REQUIREMENTS.find(
         (each) => each.foreground === ink && each.background === 'hudSurface',
@@ -300,5 +332,64 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
         expect(contrastRatio(palette[ink], palette.hudSurface)).toBeGreaterThanOrEqual(AA_TEXT);
       }
     }
+  });
+});
+
+describe('the junction prompt names each way’s street, as mapped — #3052, ADR 0096', () => {
+  /** A crossroads 200 m ahead: left onto Oak Street, straight on along Main Street, right onto a way with no name. */
+  function namedCrossroads() {
+    return starRide([-90, 0, 90], [], ['Oak Street', 'Main Street', undefined], 'Main Street');
+  }
+
+  it('shows each named way’s street under its turn, in its accessible name, and nothing for a way the map does not name', async () => {
+    const { choice, rider } = namedCrossroads();
+    mounted = await mount(<JunctionHud choice={choice} rider={rider} />);
+    expect(wayButtons().map(nameOf)).toEqual([
+      'Left onto Oak Street, key left arrow, pad left button',
+      'Straight on along Main Street Default Chosen, key up arrow, pad bottom button',
+      'Right, key right arrow, pad right button',
+    ]);
+    // The unnamed way draws no street line at all: no invented name, no blank.
+    const unnamed = wayButtons()[2] as HTMLButtonElement;
+    expect(unnamed.querySelector('.oyl-hud__junction-street')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('says the street names in the HUD’s one region, as the prompt appears and as the choice changes', async () => {
+    const { choice, rider } = namedCrossroads();
+    let announced: JunctionAnnounced = NO_JUNCTION_ANNOUNCED;
+    let announcer: AnnouncerState = INITIAL_ANNOUNCER;
+    let now = 0;
+    const region = (): string =>
+      document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    /** One frame as `GameView` runs it: the prompt's event offered, the sentence said rendered into the HUD. */
+    const frame = async (): Promise<string> => {
+      now += 10;
+      const step = junctionEvent(announced, choice.prompt(rider));
+      const said = announce(announcer, {
+        now,
+        readings: [],
+        events: step.event === undefined ? [] : [step.event],
+        preference: DEFAULT_ANNOUNCEMENTS,
+      });
+      announcer = said.state;
+      announced = junctionSpoken(step.announced, said.kind);
+      const sentence = said.sentence ?? '';
+      if (mounted === undefined) {
+        mounted = await mount(
+          <JunctionHud choice={choice} rider={rider} announcement={sentence} />,
+        );
+      } else {
+        await mounted.rerender(
+          <JunctionHud choice={choice} rider={rider} announcement={sentence} />,
+        );
+      }
+      return region();
+    };
+    expect(await frame()).toBe(
+      'Junction ahead: left onto Oak Street, straight on along Main Street or right. The default is straight on along Main Street.',
+    );
+    choice.press('left', rider);
+    expect(await frame()).toBe('Chosen: left onto Oak Street.');
   });
 });

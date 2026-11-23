@@ -134,7 +134,10 @@ export const MAPPED_AHEAD_STEP_METRES = 25;
 /**
  * How far `(x, z)` is from the road a refill ranks by — #2429: from the
  * nearest point of `ahead` (`x, z` pairs, a polyline), or from `(fromX,
- * fromZ)` where `ahead` is absent or a single point.
+ * fromZ)` where `ahead` is absent or a single point. #2902: a `NaN` pair in
+ * `ahead` separates two polylines — every segment touching it measures `NaN`,
+ * which is never nearer — so an open-world ride ranks by the road ahead and
+ * the ways on from its next junction at once (`scene.ts` §`mappedBranches`).
  */
 export function rankFrom(
   ahead: Float32Array | undefined,
