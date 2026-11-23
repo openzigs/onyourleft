@@ -118,7 +118,7 @@ import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
-import { dampedHeading, turnedPose, type GroundHeading } from './camera';
+import { dampedHeading, dampedLookAhead, turnedPose, type GroundHeading } from './camera';
 import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -3549,6 +3549,9 @@ function GameScreen({
     // the first, which takes the road's own: a resumed ride starts afresh.
     let cameraHeading: GroundHeading | undefined;
     let cameraHeadingAt = 0;
+    // #3045: and how far ahead it looked, which `camera.ts` §`dampedLookAhead`
+    // eases toward the frame's, so a turnaround's exit does not pitch the view.
+    let cameraLookAhead: number | undefined;
     // #2456: how fast the steered rider is DRAWN moving across the road, and
     // when it was last drawn, which `lane-change-lean.ts` §`dampedSway` follows
     // the steering toward by the wall clock, as the camera's heading is: a
@@ -4605,8 +4608,19 @@ function GameScreen({
           (at - cameraHeadingAt) / 1000,
           reducedMotionRef.current,
         );
+        // #3045: the look-ahead by the same clock, and the same rule for a
+        // length: coming out of a turnaround it grows over a second rather
+        // than in two frames. `GameView.test.tsx` reads it back off the frames.
+        cameraLookAhead = dampedLookAhead(
+          cameraLookAhead,
+          unturned.camera.targetAheadMetres,
+          (at - cameraHeadingAt) / 1000,
+        );
         cameraHeadingAt = at;
-        const scene = { ...unturned, camera: turnedPose(unturned.camera, cameraHeading) };
+        const scene = {
+          ...unturned,
+          camera: turnedPose(unturned.camera, cameraHeading, cameraLookAhead),
+        };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
