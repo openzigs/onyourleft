@@ -121,6 +121,7 @@ import {
 
 import { treeLineHeight } from './ground-blend';
 import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
+import { sceneryAnchor, sceneryGrid } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   DRY,
@@ -308,11 +309,20 @@ export const FIELD_SPAN_METRES = 90;
 /**
  * The field length that divides this route evenly — {@link FIELD_SPAN_METRES}
  * stretched, as `scatter.ts` §`cellSpanMetres` stretches its cells, so a loop's
- * seam is a field boundary and lap two's fields are lap one's.
+ * seam is a field boundary and lap two's fields are lap one's. An open-world
+ * view's is {@link FIELD_SPAN_METRES} itself, counted in ride distance (#3055,
+ * `scenery-anchor.ts`).
  */
 export function fieldSpanMetres(profile: RouteProfile): number {
-  return profile.totalDistance / Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES));
+  return sceneryGrid(profile, FIELD_SPAN_METRES).span;
 }
+
+/**
+ * How many fields the ground's patchwork wraps by — {@link TerrainMesh.fieldCount}:
+ * a lap's, on a route; on an open-world view, which wraps nothing, more fields
+ * than any ride has (2²⁴ of them, 1.5 million km).
+ */
+const UNWRAPPED_FIELD_COUNT = 2 ** 24;
 
 /** The ground beside the road for one frame, ready to become a vertex buffer. */
 export interface TerrainMesh {
@@ -568,6 +578,10 @@ export function terrainCorridor(
   // its relief. @see waterShaping
   const ways = waterways(profile, seed, land);
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
+  // #3055: the patchwork's odometer is ride distance on an open-world view,
+  // so its fields are the walls' (`settlements.ts`) on every view.
+  const anchor = sceneryAnchor(profile);
+  const shift = anchor?.origin ?? 0;
   const centre = corridor.centre;
   const rows = centre.length;
   const normals2d = ribbonNormals(centre);
@@ -731,7 +745,7 @@ export function terrainCorridor(
         colours[at * 3] = tint * (1 + (WET_GROUND_TINT[0] - 1) * wet);
         colours[at * 3 + 1] = tint * (1 + (WET_GROUND_TINT[1] - 1) * wet);
         colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);
-        fields[at * 2] = point.along;
+        fields[at * 2] = point.along + shift;
         fields[at * 2 + 1] = lateral * sign;
         if (mapped) surfaces[at] = surfaceByte(land.bareSurfaceAt(x, z));
       }
@@ -765,7 +779,10 @@ export function terrainCorridor(
     rows,
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
     fieldSpan: fieldSpanMetres(profile),
-    fieldCount: Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES)),
+    fieldCount:
+      anchor === undefined
+        ? Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES))
+        : UNWRAPPED_FIELD_COUNT,
     treeLine: treeLineHeight(origin),
     lease: terrainLease,
   };
@@ -920,6 +937,8 @@ function retracedGround(
 ): void {
   const rows = centre.length;
   const { capAnchor, capAngle, capWay, vertices, colours, fields, surfaces } = lent;
+  // #3055: ride distance on an open-world view, as {@link terrainCorridor}'s own rows.
+  const shift = sceneryAnchor(profile)?.origin ?? 0;
   const perRow = COLUMNS * 2;
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const levelled = land.levellingBytes > 0;
@@ -935,7 +954,7 @@ function retracedGround(
         vertices[at * 3 + 1] = point.y - RETRACE_SINK_METRES;
         vertices[at * 3 + 2] = point.z;
         colours.fill(1, at * 3, at * 3 + 3);
-        fields[at * 2] = point.along;
+        fields[at * 2] = point.along + shift;
         fields[at * 2 + 1] = 0;
       }
       continue;
@@ -991,7 +1010,7 @@ function retracedGround(
           : groundHeight(point.y, relief, lateral, shaping, hold, hold);
       vertices[at * 3 + 2] = z;
       colours.fill(tint, at * 3, at * 3 + 3);
-      fields[at * 2] = point.along + lateral * sin;
+      fields[at * 2] = point.along + shift + lateral * sin;
       fields[at * 2 + 1] = lateral * cos;
       surfaces[at] = mapped ? surfaceByte(land.bareSurfaceAt(x, z)) : 0;
     }
@@ -2170,13 +2189,20 @@ function ownReliefFields(
    */
   reading: 'everything' | 'height-near-the-road' = 'everything',
 ): ReliefFields {
+  // #3055: on an open-world view, a node every RELIEF_SPAN_METRES of ride
+  // distance, which nothing wraps, so no view change moves a hill.
+  const anchor = sceneryAnchor(profile);
   const nodes = Math.max(2, Math.round(profile.totalDistance / RELIEF_SPAN_METRES));
-  const at = (wrapped / profile.totalDistance) * nodes;
+  const at =
+    anchor === undefined
+      ? (wrapped / profile.totalDistance) * nodes
+      : (wrapped + anchor.origin) / RELIEF_SPAN_METRES;
   const node = Math.floor(at);
   const ramp = smoothstep01(at - node);
+  const wrap = (index: number): number => (anchor === undefined ? index % nodes : index);
   const field = (layer: number): number => {
-    const from = reliefNodeValue(seed, node % nodes, layer);
-    const to = reliefNodeValue(seed, (node + 1) % nodes, layer);
+    const from = reliefNodeValue(seed, wrap(node), layer);
+    const to = reliefNodeValue(seed, wrap(node + 1), layer);
     return (from + (to - from) * ramp) * 2 - 1;
   };
   // Which side is uphill: one smooth field for both sides, used with opposite
