@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **The tile planner's worker is made by the app's own session** — #2901.
+ *
+ * ⚠️ **Why this file exists.** `tile-plan-worker.ts` is a second entry point
+ * that `check:wiring` cannot reach (its `@unwired`), and the planner is made
+ * by the session only once a block is held, which no gate follows. So this
+ * rides the real session (`session.ts` §`createOpenWorldSession`, the one
+ * `session-lazy.ts` opens for `main.tsx`, which `session-wiring.test.ts`
+ * holds) over the synthetic fixture archive, with the platform's `Worker`
+ * stood in by one that runs each worker's own handler, and reads back which
+ * workers were made and what they were asked. A session that stopped making
+ * the planner, a road that stopped asking it, or a planner that stopped making
+ * its worker, is red here.
+ */
+
+import type { TileId } from '@onyourleft/map-features';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { corridorArchiveFrom } from '../../world-data/corridor-source';
+import { countingSource } from '../../world-data/archive-testing';
+import { fixtureStart, openWorldFixtureArchive, START_COLUMN, START_ROW } from './fixture-testing';
+import { graphWorkerCore } from './graph-build';
+import { createOpenWorldSession, TILE_ASK_METRES } from './session';
+import {
+  createTilePlanner,
+  describeTilePlanFailure,
+  tilePlanWorkerCore,
+  type TilePlanner,
+  type TilePlanRequest,
+} from './tile-planner';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+interface Made {
+  readonly url: string;
+  readonly name: unknown;
+  readonly asked: unknown[];
+}
+
+/** A `Worker` that runs the handler of the worker its URL names, a microtask later. */
+function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
+  const made: Made[] = [];
+  vi.stubGlobal(
+    'Worker',
+    class {
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      readonly #made: Made;
+      readonly #handle: (data: unknown) => unknown;
+      constructor(url: URL | string, init?: { name?: string }) {
+        this.#made = { url: String(url), name: init?.name, asked: [] };
+        made.push(this.#made);
+        if (/graph-worker\.ts$/.test(String(url))) {
+          const core = graphWorkerCore();
+          this.#handle = (data) => core.handle(data);
+        } else {
+          const core = tilePlanWorkerCore();
+          this.#handle = (data) => core.handle(data)?.reply;
+        }
+      }
+      postMessage(message: unknown): void {
+        this.#made.asked.push(message);
+        queueMicrotask(() => {
+          if (options.tileWorkerErrors === true && (message as TilePlanRequest).kind === 'plan') {
+            this.onerror?.({});
+            return;
+          }
+          const reply = this.#handle(structuredClone(message));
+          if (reply !== undefined) this.onmessage?.({ data: structuredClone(reply) });
+        });
+      }
+      terminate(): void {}
+    },
+  );
+  return made;
+}
+
+async function openRide(
+  log?: (line: string) => void,
+  wrap?: (planner: TilePlanner) => TilePlanner,
+) {
+  const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
+  const session = createOpenWorldSession({
+    start: fixtureStart(START_COLUMN, START_ROW),
+    archive,
+    mapTilesOn: () => true,
+    yieldToIdle: () => Promise.resolve(),
+    random: () => 0,
+    log,
+    tilePlanner: wrap === undefined ? undefined : (options) => wrap(createTilePlanner(options)),
+  });
+  const ready = await session.ready;
+  if (ready.kind !== 'ready') throw new Error(`no ride: ${ready.kind}`);
+  return { session, road: ready.road() };
+}
+
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+describe('the open-world session makes the tile planner’s worker — #2901', () => {
+  it('makes it once a block is held, and the road asks it to plan the rider’s tiles', async () => {
+    const made = stubWorkers();
+    const { session, road } = await openRide();
+    const tiles = made.filter((each) => /tile-plan-worker\.ts$/.test(each.url));
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]?.name).toBe('oyl-tile-plans');
+    // Before the ride moves, the blocks are held and nothing is planned.
+    const before = tiles[0]?.asked.map((each) => (each as TilePlanRequest).kind);
+    expect(before?.[0]).toBe('frame');
+    expect(before).toContain('hold');
+    expect(before).not.toContain('plan');
+    road.follow(0);
+    await settle();
+    const plans = (tiles[0]?.asked ?? []).filter(
+      (each) => (each as TilePlanRequest).kind === 'plan',
+    );
+    expect(plans.length).toBeGreaterThan(0);
+    session.stop();
+  });
+
+  it('asks again once the rider has ridden on, so the tiles past the start are planned', async () => {
+    stubWorkers();
+    const wants: (readonly TileId[])[] = [];
+    const { session, road } = await openRide(undefined, (planner) => ({
+      ...planner,
+      want: (tiles) => {
+        wants.push(tiles);
+        planner.want(tiles);
+      },
+    }));
+    road.follow(0);
+    expect(wants).toHaveLength(1);
+    // Within TILE_ASK_METRES on the same view: the same answer, not asked again.
+    road.follow(TILE_ASK_METRES / 2);
+    expect(wants).toHaveLength(1);
+    road.follow(TILE_ASK_METRES * 2);
+    expect(wants).toHaveLength(2);
+    session.stop();
+  });
+
+  it('says a failed worker in words with no coordinate or tile, and the ride rides on', async () => {
+    stubWorkers({ tileWorkerErrors: true });
+    const lines: string[] = [];
+    const { session, road } = await openRide((line) => lines.push(line));
+    road.follow(0);
+    await settle();
+    expect(lines).toContain(describeTilePlanFailure());
+    expect(lines.filter((line) => /\d/.test(line))).toStrictEqual([]);
+    // The ride goes on along its road after the failure.
+    for (let rider = 0; rider <= 400; rider += 50) road.follow(rider);
+    expect(road.view.profile.totalDistance as number).toBeGreaterThan(0);
+    session.stop();
+  });
+});

@@ -45,6 +45,14 @@
  * road takes the way on there (`RollingRoute.reopen`) while the rider is far
  * enough short of it that no grade sent changes.
  *
+ * ## The map's tiles (#2901)
+ *
+ * Every block held is handed to a tile planner too (`tile-planner.ts`), which
+ * plans the tiles the road asks for (`road.ts` §`OpenWorldRoadHooks.ahead`):
+ * the rider's, the ones ahead and the ones on every way on from the next
+ * junction (`tiles-ahead.ts`), in a worker, in the same frame as the graph.
+ * A block let go takes its tiles' plans with it.
+ *
  * A loop (`from === to`) is offered as two ways, `id` and `id:reverse`, of
  * one street, so a choice by id can tell them apart (`GraphStreets`).
  *
@@ -52,8 +60,9 @@
  *
  * {@link OpenWorldSession.stop} stops the reader — its running read
  * abandoned, its waiting ones dropped and its held blocks let go — the
- * start's deadline, and the graph's worker. The worker is made with the first
- * tile to build, so a start stopped before any is read never makes one.
+ * start's deadline, the graph's worker and the tile planner's. Each worker is
+ * made with the first tile to build, so a start stopped before any is read
+ * never makes one.
  *
  * ⚠️ **Nothing here logs, stores or sends the start** (ADR 0090, the start
  * "never leaves the device"): what is asked for is the start's blocks, which
@@ -82,7 +91,7 @@ import {
   type TileId,
 } from '@onyourleft/map-features';
 
-import { createAreaReader } from '../world-data/area';
+import { createAreaReader, type HeldBlock } from '../world-data/area';
 import type { CorridorArchive } from '../world-data/corridor';
 import {
   graphBuilder,
@@ -100,6 +109,9 @@ import {
 } from './ride';
 import { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
+import type { TileBlockFeatures } from './tile-plan';
+import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
+import { tilesToPlan } from './tiles-ahead';
 
 /**
  * How long the start may take before the session gives up on the map:
@@ -134,6 +146,32 @@ export interface OpenWorldSessionOptions {
   readonly startTimeoutMs?: number | undefined;
   /** Where the graph is built: `graph-build.ts` §`graphBuilder`, a worker, when absent. */
   readonly graphBuilder?: ((frame: CorridorFrame) => GraphBuilder) | undefined;
+  /** Where the tiles are planned (#2901): `tile-planner.ts` §`createTilePlanner`, a worker, when absent. */
+  readonly tilePlanner?: ((options: TilePlannerOptions) => TilePlanner) | undefined;
+}
+
+/**
+ * How far the rider rides between two askings for the tiles to plan: **25 m**.
+ * *#2901's choice*: a tile is a kilometre across, so asking each frame would
+ * walk the route sixty times a second for the same answer; a new view (a
+ * choice, a turn-round, an extension) asks at once.
+ */
+export const TILE_ASK_METRES = 25;
+
+/** A held block's features as the tile planner is handed them: the same object while it is held. */
+const blockFeatures = new WeakMap<HeldBlock, TileBlockFeatures>();
+
+function featuresOf(block: HeldBlock): TileBlockFeatures {
+  let features = blockFeatures.get(block);
+  if (features === undefined) {
+    features = {
+      buildings: block.features.buildings,
+      landUse: block.features.landUse,
+      tiles: block.streets,
+    };
+    blockFeatures.set(block, features);
+  }
+  return features;
 }
 
 const defaultSchedule = (run: () => void, ms: number): (() => void) => {
@@ -367,6 +405,30 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   const sent = new Map<string, TileId>();
   let syncing: Promise<void> = Promise.resolve();
   let stopped = false;
+  /**
+   * #2901: where the ride's tiles are planned — made with the first block
+   * held, so a start stopped before any is read never makes its worker.
+   */
+  let planner: TilePlanner | undefined;
+  /** What the planner was last asked for: the view and the rider. @see TILE_ASK_METRES */
+  let asked: { readonly view: unknown; readonly rider: number } | undefined;
+  function holdTiles(): void {
+    if (stopped) return;
+    const blocks = new Map<string, TileBlockFeatures>();
+    for (const block of reader.held()) {
+      blocks.set(`${String(block.block.x)}/${String(block.block.y)}`, featuresOf(block));
+    }
+    if (blocks.size === 0 && planner === undefined) return;
+    planner ??= (options.tilePlanner ?? createTilePlanner)({ frame, log: options.log });
+    planner.hold(blocks);
+  }
+  function planAhead(route: RollingRoute, rider: number): void {
+    if (planner === undefined || !Number.isFinite(rider)) return;
+    const view = route.view();
+    if (asked?.view === view && Math.abs(rider - asked.rider) < TILE_ASK_METRES) return;
+    asked = { view, rider };
+    planner.want(tilesToPlan(route, rider));
+  }
   const reader = createAreaReader({
     archive: options.archive,
     frame,
@@ -376,6 +438,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     log: options.log,
     yieldToIdle: options.yieldToIdle,
     onChange: () => {
+      holdTiles();
       void sync();
     },
   });
@@ -439,6 +502,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       );
     }
     if (begun.kind !== 'ready' || late) return refused('unavailable');
+    holdTiles();
     await sync();
     if (stopped) return { kind: 'stopped' };
     if (graphFailed) return refused('unavailable');
@@ -463,6 +527,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
             reader.moveTo(position);
           },
           graphVersion: () => mirror.version,
+          ahead: planAhead,
         }),
     };
   })();
@@ -476,6 +541,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // is cancelled there, as it is after any start.
       reader.stop();
       builder?.stop();
+      planner?.stop();
     },
   };
 }

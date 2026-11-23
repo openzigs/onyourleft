@@ -48,7 +48,9 @@
  * graph's version: when the graph has grown, the route takes a way on past any
  * turn-round more than the lock ahead (`RollingRoute.reopen`), which changes no
  * grade the rider can have been sent, so its view is handed on as an extension
- * is.
+ * is. #2901: and it hands the route and the rider to
+ * {@link OpenWorldRoadHooks.ahead}, so the tiles ahead and on every way on
+ * from the next junction are planned before the rider reaches them.
  *
  * ## What a change means for the drawn path
  *
@@ -137,6 +139,12 @@ export interface OpenWorldRoadHooks {
    * (`RollingRoute.reopen`).
    */
   readonly graphVersion?: (() => number) | undefined;
+  /**
+   * #2901: the route and the rider, after each follow has advanced it, so the
+   * session can ask for the map tiles ahead and on every way on from the next
+   * junction to be planned (`tiles-ahead.ts`).
+   */
+  readonly ahead?: ((route: RollingRoute, rider: number) => void) | undefined;
 }
 
 /** One open-world ride's road, from its start. See the file's header. */
@@ -189,6 +197,7 @@ export class OpenWorldRoad {
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);
       if (at >= 0 && at <= route.end - route.origin) this.#hooks.at?.(positionAt(route.view(), at));
+      this.#hooks.ahead?.(route, rider);
     }
     const profile = route.view();
     if (profile === this.#view.profile) return undefined;
