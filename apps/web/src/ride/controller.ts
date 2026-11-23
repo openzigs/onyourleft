@@ -1361,8 +1361,9 @@ export interface RideController {
   /**
    * Where the rider is on an open-world ride's street — #3059, the owner's
    * ruling of 2026-11-22 that an open-world ride saves its track. Recorded as
-   * the `latitude` and `longitude` channels, at most once a second on the
-   * controller's clock, and only while a ride is recording: the saved ride
+   * the `latitude` and `longitude` channels on every frame, the recording
+   * keeping the last in each of its slots, and only while a ride is
+   * recording: the saved ride
    * then has a position like any recorded track, private by default
    * (`putActivity`, ADR 0004) and trimmed by the rider's zones wherever it is
    * shared (`detail/load.ts` §`loadSharedTrack`). Paused, idle or stopped, it
@@ -2158,8 +2159,6 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   const detached = new WeakSet<TrainerControl>();
   let clock: UnixSeconds = now();
-  /** The second {@link RideController.notePosition} last recorded a position in (#3059). */
-  let positionSecond: number | undefined;
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
 
@@ -4610,11 +4609,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       // Idle, paused or stopped, the recording engine refuses the reading itself.
       if (recorder === undefined) return;
       const at = now();
-      // A frame is about a sixtieth of a second and a slot a whole one: the
-      // first position in each second is the one kept.
-      const second = Math.floor(at);
-      if (second === positionSecond) return;
-      positionSecond = second;
+      // Every frame goes in: the session keeps the last reading in each slot.
+      // A once-a-second throttle keyed on the wall-clock second left slots
+      // empty, because a slot starts at the ride's own fractional start, and
+      // an empty slot splits the track (#3059).
       recorder.observeReading({ channel: 'latitude', value: position.latitude, at });
       recorder.observeReading({ channel: 'longitude', value: position.longitude, at });
     },

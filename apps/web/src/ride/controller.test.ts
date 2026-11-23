@@ -319,6 +319,8 @@ interface BenchOptions {
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   /** #1240: the simulated rider, and a heart rate that answers to load. */
   readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate' | 'startAt' | 'traits'>;
+  /** #3059: seconds added to the controller's clock, for a frame between the bench's whole seconds. */
+  readonly frameOffset?: () => number;
   /** #1305: the device's memory of acknowledged targets, as `main.tsx` hands it over. */
   readonly trainerTargets?: TrainerTargetMemory | undefined;
   /** #1244: the rider's instance, goals and saved workouts, as `main.tsx` hands them over. */
@@ -591,7 +593,7 @@ function benchWith(options: BenchOptions = {}): Bench {
       sessionIds.push(id);
       return id;
     },
-    now: () => bench.now,
+    now: () => unixSeconds(bench.now + (options.frameOffset?.() ?? 0)),
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
     ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
     ...(options.presence === undefined ? {} : { presence: options.presence }),
@@ -10667,9 +10669,9 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await rig.controller.start();
     const ridden = Array.from({ length: 8 }, (_unused, index) => north(index * 100));
     for (const position of ridden) {
-      game.rodeAt(position);
-      // A later frame in the same second keeps the first.
+      // An earlier frame in the same second is overwritten by the later one.
       game.rodeAt(north(-9_000));
+      game.rodeAt(position);
       await ride(rig, 1);
     }
     rig.controller.armStop();
@@ -10733,6 +10735,50 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
       expect(Number(point[1])).toBeCloseTo(ridden[index]!.latitude, 6);
       expect(Number(point[2])).toBeCloseTo(ridden[index]!.longitude, 6);
     });
+    rig.controller.dispose();
+  });
+
+  it('leaves no slot of an open-world track empty when the ride starts on a fractional second and frames jitter — #3059', async () => {
+    // In production the clock is `Date.now() / 1000`, so a ride starts part way
+    // through a second and every slot straddles two wall-clock seconds. Here
+    // the slots start a tenth past each whole second, and the first frame of
+    // each wall-clock second lands either side of that boundary in turn.
+    let offset = 0;
+    const rig = benchWith({
+      rideSave: storeSavePort(),
+      simulator: { startAt: unixSeconds(1_800_000_000.1) },
+      frameOffset: () => offset,
+    });
+    const game = gameTrainerPortOver(rig.controller);
+    if (game.rodeAt === undefined) throw new Error('the game port carries no rodeAt');
+    const at = (step: number) =>
+      geographicPosition(degreesLatitude(51.5 + step / 10_000), degreesLongitude(-0.1));
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    const ridden = 8;
+    for (let second = 1; second <= ridden; second += 1) {
+      await ride(rig, 1);
+      // The bench reads 1_800_000_000.1 + second. A frame 0.05 s past the
+      // whole second is still in the slot before; one 0.15 s past is in this one.
+      offset = second % 2 === 1 ? -0.05 : 0.05;
+      game.rodeAt(at(second * 10));
+      // Later frames in the same wall-clock second, in this slot.
+      offset = 0.3;
+      game.rodeAt(at(second * 10 + 1));
+      offset = 0.5;
+      game.rodeAt(at(second * 10 + 2));
+      offset = 0;
+    }
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    if (saved === undefined) throw new Error('the ride was not saved');
+    const own = await harness.read(async (store) =>
+      loadOwnTrack({ athleteId: ATHLETE_A, store }, saved),
+    );
+    // One unbroken track, a point for every slot from the first to the last.
+    expect(own?.segments).toHaveLength(1);
+    expect(own?.segments[0]?.points).toHaveLength(ridden + 1);
     rig.controller.dispose();
   });
 
