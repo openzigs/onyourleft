@@ -28,6 +28,9 @@
  * 1. **The seed comes from the route**, through {@link scatterSeed} — its first
  *    coordinate and its length. Not from the store id, which does not exist for
  *    a route ridden before it is saved; not from a clock; not from a counter.
+ *    ⚠️ An open-world ride's views are seeded from its first view, and placed
+ *    on cells counted in ride distance (#3055, `scenery-anchor.ts`), so a
+ *    change of view moves nothing short of the change.
  * 2. **Placement is a stateless hash of where you are**, never a walk forward
  *    from where you were. {@link scatterAt} for `[0, 400)` and the concatenation
  *    of `[0, 200)` and `[200, 400)` return the same items. A generator that
@@ -98,6 +101,7 @@ import {
   type ParkLook,
 } from './land-class';
 import { terrainHeightAt } from './landform';
+import { sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
 import { distanceToDrawnRoad } from './road-grid';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import { inWater, waterways } from './waterways';
@@ -893,8 +897,20 @@ const SEED_COORDINATE_SCALE = 1e5;
  * The coordinates are rounded to {@link SEED_COORDINATE_SCALE} — about a metre —
  * before they are mixed, so that two imports of the same ride whose floating
  * point differs in the last bit still seed the same world.
+ *
+ * ⚠️ **An open-world view's is the ride's** (#3055, `scenery-anchor.ts`): a
+ * view is a new profile, of a new length, after every change, and seeding
+ * from it regenerated the world on each.
  */
 export function scatterSeed(profile: RouteProfile): number {
+  return sceneryAnchor(profile)?.seed ?? routeSeed(profile);
+}
+
+/**
+ * The seed {@link scatterSeed} gives a route: its first coordinate and its
+ * length. `open-world/road.ts` seeds a ride from its first view with it.
+ */
+export function routeSeed(profile: RouteProfile): number {
   const first = profile.positions[0] as GeographicPosition;
   let seed = SEED_BASIS;
   seed = mix(seed, Math.round(first.latitude * SEED_COORDINATE_SCALE));
@@ -945,8 +961,11 @@ export function scatterAt(
   // The behaviour is still asserted — it is the *guards* that were redundant,
   // and a guard that cannot be observed is a line that hides which code is
   // really responsible for an answer.
-  const span = cellSpanMetres(profile);
-  const cellCount = Math.max(1, Math.round(profile.totalDistance / span));
+  // #3055: on an open-world view, cells of the nominal span counted in ride
+  // distance, so a change of view keeps every cell short of the change.
+  const grid = sceneryGrid(profile, SCATTER_CELL_METRES);
+  const { span, shift } = grid;
+  const cellCount = grid.count;
   // Every cell that can hold an item inside `[from, to)`. A cell's items lie in
   // `[cell · span, (cell + 1) · span)`, so the range is wider than the span at
   // both ends and each item is admitted on its own `along` below.
@@ -958,10 +977,10 @@ export function scatterAt(
   // costing anything at all.
   const firstCell = profile.loop
     ? Math.floor(fromMetres / span)
-    : Math.max(0, Math.floor(fromMetres / span));
+    : Math.max(grid.first, Math.floor((fromMetres + shift) / span));
   const lastCell = profile.loop
     ? Math.ceil(toMetres / span) - 1
-    : Math.min(cellCount - 1, Math.ceil(toMetres / span) - 1);
+    : Math.min(grid.last, Math.ceil((toMetres + shift) / span) - 1);
 
   // ⚠️ **Never more cells than the route has**, and this is the whole of the
   // loop-seam de-duplication: consecutive cell indices wrap onto distinct places
@@ -983,12 +1002,12 @@ export function scatterAt(
   const found: Placed[] = [];
   for (let step = 0; step < cells; step += 1) {
     const cell = firstCell + step;
-    const wrapped = ((cell % cellCount) + cellCount) % cellCount;
+    const wrapped = wrappedCell(grid, cell);
     fillCell(
       profile,
       origin,
       seed,
-      { cell, wrapped, cellCount, span, fromMetres, toMetres },
+      { cell, wrapped, cellCount, span, shift, anchored: grid.anchored, fromMetres, toMetres },
       found,
       land,
       countryside,
@@ -1018,10 +1037,14 @@ interface Placed {
  * is what "does not double up or leave a bare gap" means in code.
  *
  * A route shorter than one nominal cell gets exactly one cell rather than none.
+ * An open-world view, which never loops, is not stretched (#3055).
+ *
+ * @test-facing `scatter.test.ts` and `scenery-anchor.test.ts` hold the cells to
+ * it; {@link scatterAt} reads `scenery-anchor.ts` §`sceneryGrid` itself, which
+ * also says where an open-world view's cells are counted from.
  */
 export function cellSpanMetres(profile: RouteProfile): number {
-  const cells = Math.max(1, Math.round(profile.totalDistance / SCATTER_CELL_METRES));
-  return profile.totalDistance / cells;
+  return sceneryGrid(profile, SCATTER_CELL_METRES).span;
 }
 
 /** What the geography at one cell says about what grows there. */
@@ -1044,6 +1067,13 @@ interface Cell {
   /** How many cells the whole route has. @see clusterAt */
   readonly cellCount: number;
   readonly span: number;
+  /**
+   * The ride distance of the profile's distance zero, which cell `i` is
+   * counted from: 0 but on an open-world view (#3055). @see sceneryGrid
+   */
+  readonly shift: number;
+  /** An open-world view's cells, which nothing wraps. @see clusterAt */
+  readonly anchored: boolean;
   readonly fromMetres: number;
   readonly toMetres: number;
 }
@@ -1066,7 +1096,7 @@ function fillCell(
   // have to follow three functions into `packages/domain` to satisfy themselves
   // that lap two reads the same hill. The hash below is a different matter — it
   // goes through nothing, and `wrapped` there is the whole seam.
-  const centreOfCell = (cell.wrapped + 0.5) * cell.span;
+  const centreOfCell = (cell.wrapped + 0.5) * cell.span - cell.shift;
   const place = placeAt(profile, origin, centreOfCell);
   // ⚠️ **Two independent reasons a cell can be empty, and they multiply.** The
   // geography says how much grows here; the clustering says whether this
@@ -1110,7 +1140,7 @@ function fillCell(
         SCATTER_VERGE_METRES +
         (band + inBand(uniform(base, STREAM_LATERAL))) * bandWidthMetres();
 
-      const along = cell.cell * cell.span + alongInCell;
+      const along = cell.cell * cell.span - cell.shift + alongInCell;
       // ⚠️ **Admitted on its own `along`, half-open, rather than by which cell
       // it came from.** A cell straddles the end of a span, so emitting whole
       // cells makes `[0, 200)` and `[200, 400)` both claim the cell at 200 —
@@ -1120,7 +1150,7 @@ function fillCell(
       if (along < cell.fromMetres || along >= cell.toMetres) {
         continue;
       }
-      const at = distanceOnRoute(profile, cell.wrapped * cell.span + alongInCell);
+      const at = distanceOnRoute(profile, cell.wrapped * cell.span - cell.shift + alongInCell);
       // ⚠️ **Nothing stands in water — #459.** Dropped after every draw is
       // made, so a stream or a lake takes the items that would have stood in
       // it and moves no other: every quantity is its own hash stream, and the
@@ -1655,6 +1685,13 @@ function turnAt(
  * route where every other property is continuous across it.
  */
 function clusterAt(seed: number, cell: Cell): number {
+  // #3055: on an open-world view, nodes every {@link CLUSTER_SPAN_METRES} of
+  // ride distance, which nothing wraps, so no view change moves one.
+  if (cell.anchored) {
+    const at = (cell.wrapped * cell.span) / CLUSTER_SPAN_METRES;
+    const node = Math.floor(at);
+    return openness(nodeOpenness(seed, node), nodeOpenness(seed, node + 1), at - node);
+  }
   // ⚠️ **At least two**, and one is what a first draft had. A single node makes
   // the field constant — `(0 + 1) % 1` is `0`, so it interpolates a value
   // against itself — and a route shorter than two cluster spans then comes out
@@ -1665,13 +1702,19 @@ function clusterAt(seed: number, cell: Cell): number {
   const nodes = Math.max(2, Math.round((cell.cellCount * cell.span) / CLUSTER_SPAN_METRES));
   const at = (cell.wrapped / cell.cellCount) * nodes;
   const node = Math.floor(at);
-  const from = nodeOpenness(seed, node % nodes);
-  const to = nodeOpenness(seed, (node + 1) % nodes);
-  const ramp = at - node;
+  return openness(
+    nodeOpenness(seed, node % nodes),
+    nodeOpenness(seed, (node + 1) % nodes),
+    at - node,
+  );
+}
+
+/** The clustering field `ramp` of the way from one node's openness to the next's. */
+function openness(from: number, to: number, ramp: number): number {
   // Smoothstep, so the field has no corner at a node — a linear ramp between
   // hashed values reads as a run of straight lines, which is its own rhythm.
-  const openness = from + (to - from) * ramp * ramp * (3 - 2 * ramp);
-  return clamp01((openness - OPEN_GROUND_SHARE) / (PLANTED_GROUND_SHARE - OPEN_GROUND_SHARE));
+  const between = from + (to - from) * ramp * ramp * (3 - 2 * ramp);
+  return clamp01((between - OPEN_GROUND_SHARE) / (PLANTED_GROUND_SHARE - OPEN_GROUND_SHARE));
 }
 
 /** How open one node of the clustering field is, in `[0, 1)`. */

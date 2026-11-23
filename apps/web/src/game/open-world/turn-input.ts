@@ -43,8 +43,8 @@
  * The HUD reads the keys and the pads through these (#2898): the junction
  * prompt (`hud/JunctionChoicePrompt.tsx`) takes the turn keys and maps its
  * symbols through {@link turnOfSymbol}, and `hud/GamepadIntents.tsx` reads the
- * pads' turn buttons. The controller's half waits for the open-world ride
- * session (#2896), whose declarations say so.
+ * pads' turn buttons; `GameView` hands the HUD an open-world ride's junction
+ * (#3013). The controller's half is #3041, whose declarations say so.
  */
 
 import type { OpenBikeControlEvent } from '@onyourleft/sensors/protocol';
@@ -138,8 +138,8 @@ export function readTurnPads(
 /**
  * OpenBikeControl v1's Navigation buttons, by id.
  *
- * @unwired the open-world ride session (#2896) reads a paired controller's
- * events through {@link readTurnController}; it does not exist yet.
+ * @unwired #3041 reads a paired controller's events through
+ * {@link readTurnController} on an open-world ride; nothing does yet.
  */
 export const TURN_CONTROLLER_BUTTONS: Readonly<Record<number, TurnPress>> = Object.freeze({
   0x10: 'straight',
@@ -151,15 +151,15 @@ export const TURN_CONTROLLER_BUTTONS: Readonly<Record<number, TurnPress>> = Obje
 /** The controller's Navigation buttons held down, as its last events left them. */
 export type TurnControllerState = ReadonlySet<number>;
 
-/** @unwired the open-world ride session (#2896) starts a ride's controller from it; it does not exist yet. */
+/** @unwired #3041 starts an open-world ride's controller from it; nothing does yet. */
 export const NO_TURN_CONTROLLER_HELD: TurnControllerState = Object.freeze(new Set<number>());
 
 /**
  * A controller's events as presses: one for each Navigation button that goes
  * down, none for a button already down, and none for a steer or an angle.
  *
- * @unwired the open-world ride session (#2896) hands each press to the
- * junction choice; it does not exist yet.
+ * @unwired #3041 hands each press to the ride's junction choice; nothing
+ * does yet.
  */
 export function readTurnController(
   state: TurnControllerState,

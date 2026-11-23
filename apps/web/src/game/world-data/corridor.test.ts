@@ -56,6 +56,7 @@ import {
   corridorFeaturesOfPacked,
   coveredLookup,
   describeCorridorFailure,
+  joinCorridorFeatures,
   packCorridorFeatures,
   packedCorridorFeatures,
   planCorridor,
@@ -65,6 +66,7 @@ import {
   worldCorridorOf,
   type CorridorArchive,
   type CorridorFailure,
+  type CorridorFeatures,
   type CorridorPlan,
   type CorridorState,
 } from './corridor';
@@ -845,6 +847,51 @@ describe('packing', () => {
     await expect(
       unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
     ).rejects.toThrow(/not a version/);
+  });
+});
+
+describe('joinCorridorFeatures', () => {
+  /**
+   * Every kind {@link CorridorFeatures} holds, optional ones included. Typed
+   * over `Required<CorridorFeatures>`, so a kind added there and not here is a
+   * type error, and the walk below then proves the join keeps it (#3037: the
+   * railway lines were declared, read and dropped by the join).
+   */
+  const EVERY_KIND: { readonly [K in keyof Required<CorridorFeatures>]: K } = {
+    landUse: 'landUse',
+    buildings: 'buildings',
+    paths: 'paths',
+    streets: 'streets',
+    places: 'places',
+    waterLines: 'waterLines',
+    rails: 'rails',
+  };
+  const kinds = Object.values(EVERY_KIND);
+
+  /** Features with one stand-in of every kind, each naming its read and kind. */
+  const oneOfEach = (read: string): CorridorFeatures =>
+    Object.fromEntries(kinds.map((kind) => [kind, [`${read}:${kind}`]])) as never;
+
+  it('keeps every kind of both reads, the first’s before the second’s', () => {
+    const joined = joinCorridorFeatures(oneOfEach('first'), oneOfEach('second'));
+    expect(Object.keys(joined).sort()).toStrictEqual([...kinds].sort());
+    for (const kind of kinds) {
+      expect(joined[kind], kind).toStrictEqual([`first:${kind}`, `second:${kind}`]);
+    }
+  });
+
+  it('takes an optional kind a read leaves out as none', () => {
+    const bare: CorridorFeatures = {
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+      places: [],
+    };
+    const full = oneOfEach('full');
+    expect(joinCorridorFeatures(bare, full).rails).toStrictEqual(full.rails);
+    expect(joinCorridorFeatures(full, bare).waterLines).toStrictEqual(full.waterLines);
+    expect(joinCorridorFeatures(bare, bare).rails).toStrictEqual([]);
   });
 });
 
