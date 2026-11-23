@@ -16,12 +16,18 @@
  * decoded in the session's frame, which is the frame the whole ride is drawn
  * in (`terrain.ts` §`drawProfileIn`), and the blocks' tiles as covered land.
  *
- * ## Streets only
+ * ## Streets, and the footprints only for the driveways
  *
- * It carries no land use, footprint, footway, place, river or railway: the
- * mapped buildings are the tile worker's (`tile-buildings.ts`, #2902), and the
- * rest is not this issue's. With no footprints in it, nothing the scene plans
- * from a corridor's buildings — the procedural lots' town — plans anything.
+ * It carries no land use, footway, place, river or railway: the rest is not
+ * this issue's. It does carry every held block's footprints, for one reader:
+ * `nearby-streets.ts`, where a service road stops short of a mapped house
+ * (its `FootprintGrid`). Without them the scene drew a driveway through every
+ * house the worker had kept beside it (the review of #3080). The scene plans
+ * no building from them: the mapped buildings are the tile worker's
+ * (`tile-buildings.ts`, #2902), and `scene.ts` reads a corridor's footprints
+ * nowhere else. The worker clears its service roads against the footprints it
+ * plans, a subset of these, so every driveway the scene draws is one the
+ * worker kept its buildings off.
  *
  * ## The road wins, against the whole network
  *
@@ -31,7 +37,7 @@
  * scene draws, by its class's width (ADR 0054 D-5.4 applied to the network).
  */
 
-import type { CorridorFrame, StreetFeature } from '@onyourleft/map-features';
+import type { BuildingFeature, CorridorFrame, StreetFeature } from '@onyourleft/map-features';
 
 import { coveredLookup, type CorridorTile, type WorldCorridor } from '../world-data/corridor';
 import { tileBox } from '@onyourleft/map-features';
@@ -45,7 +51,9 @@ export function openWorldStreetCorridor(
   const origin = { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 };
   const tiles: CorridorTile[] = [];
   const streets: StreetFeature[] = [];
+  const buildings: BuildingFeature[] = [];
   for (const block of blocks) {
+    for (const building of block.buildings) buildings.push(building);
     for (const each of block.tiles) {
       tiles.push({ x: each.tile.x, y: each.tile.y, state: 'covered' });
       for (const street of each.streets) {
@@ -64,7 +72,7 @@ export function openWorldStreetCorridor(
     covered: coveredLookup(origin, tiles),
     coveredBoxes: tiles.map((tile) => tileBox(frame, { z: 15, x: tile.x, y: tile.y })),
     landUse: [],
-    buildings: [],
+    buildings,
     paths: [],
     streets,
     places: [],

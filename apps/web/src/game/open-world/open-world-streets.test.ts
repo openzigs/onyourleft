@@ -169,13 +169,26 @@ function grid(rowEvery: number, step: number): TileBlockFeatures {
   };
 }
 
-/** The buildings planned round the rider, as the worker plans them. */
-function planned(road: OpenWorldRoad, block: TileBlockFeatures, rider: number): FootprintPlan[] {
+/**
+ * The buildings planned round the rider, as the worker plans them, from
+ * `block` and any `others` held beside it (each held and its tiles planned).
+ */
+function planned(
+  road: OpenWorldRoad,
+  block: TileBlockFeatures,
+  rider: number,
+  others: readonly TileBlockFeatures[] = [],
+): FootprintPlan[] {
   const core = tilePlanWorkerCore();
   core.handle({ kind: 'frame', frame: FRAME });
-  core.handle({ kind: 'hold', block: 'b', features: block });
-  for (const [id, { tile }] of block.tiles.entries()) {
-    core.handle({ kind: 'plan', id, block: 'b', tile, detail: 'full' });
+  let id = 0;
+  for (const [at, each] of [block, ...others].entries()) {
+    const key = `b${String(at)}`;
+    core.handle({ kind: 'hold', block: key, features: each });
+    for (const { tile } of each.tiles) {
+      core.handle({ kind: 'plan', id, block: key, tile, detail: 'full' });
+      id += 1;
+    }
   }
   const here = local(0, rider - APPROACH_METRES);
   const answer = core.handle({
@@ -191,7 +204,7 @@ function planned(road: OpenWorldRoad, block: TileBlockFeatures, rider: number): 
 /** The scene's frame for a rider at `rider`, given the streets and the buildings as a ride is. */
 function frameAt(
   road: OpenWorldRoad,
-  block: TileBlockFeatures,
+  block: TileBlockFeatures | readonly TileBlockFeatures[],
   plans: FootprintPlan[],
   rider: number,
 ) {
@@ -201,7 +214,7 @@ function frameAt(
     profile,
     origin: corridorOrigin(profile),
     state: { ...start, ride: { ...start.ride, distance: metres(rider) } },
-    worldCorridor: openWorldStreetCorridor(FRAME, [block]),
+    worldCorridor: openWorldStreetCorridor(FRAME, Array.isArray(block) ? block : [block]),
     mappedBuildings: mappedBuildingsOf(plans),
     structureItems: REALISTIC_STRUCTURE_ITEMS,
   });
@@ -249,6 +262,57 @@ describe('an open-world ride draws its side streets, and keeps its buildings off
     // Control: the lattice does stand on the streets before it is planned.
     const all = block.buildings.length;
     expect(all).toBeGreaterThan(plans.length);
+  });
+
+  it('keeps the footprints off a service road the frame draws, which stops short of the houses', () => {
+    const road = new OpenWorldRoad(crossroads(), { frame: FRAME });
+    const block = grid(150, 30);
+    // A service road through a row of the lattice's houses, beside the
+    // rider. It stops short of the route: where a mapped street meets the
+    // route, its junction's stub (`cross-streets.ts`) is drawn whatever
+    // stands on it, which is not the nearby streets' clearance.
+    const service = street(
+      [
+        [30, 60],
+        [300, 60],
+      ],
+      'minor_road',
+      'service',
+    );
+    const withService: TileBlockFeatures = {
+      ...block,
+      tiles: block.tiles.map((each, at) =>
+        at === 0 ? { ...each, streets: [...each.streets, service] } : each,
+      ),
+    };
+    const plans = planned(road, withService, RIDER);
+    const frame = frameAt(road, withService, plans, RIDER);
+    // Control: the service road is drawn (pieces of it, between the houses).
+    const bare = frameAt(road, block, plans, RIDER);
+    expect(frame.sideRoads.length).toBeGreaterThan(bare.sideRoads.length);
+    expect(plans.filter((plan) => onAny(frame.sideRoads, plan))).toStrictEqual([]);
+  });
+
+  it('keeps the footprints off a street held in a block that owns none of them', () => {
+    const road = new OpenWorldRoad(crossroads(), { frame: FRAME });
+    const block = grid(150, 30);
+    // The footprints' block carries no street; the streets are another
+    // block's, which owns no footprint near the rider.
+    const houses: TileBlockFeatures = {
+      ...block,
+      tiles: block.tiles.map((each) => ({ ...each, streets: [] })),
+    };
+    const far = tileOf(0, 3_000);
+    const streets: TileBlockFeatures = {
+      buildings: [],
+      landUse: [],
+      tiles: [{ tile: far, streets: block.tiles[0]?.streets ?? [] }],
+    };
+    const plans = planned(road, houses, RIDER, [streets]);
+    expect(plans.length).toBeGreaterThan(0);
+    const frame = frameAt(road, [houses, streets], plans, RIDER);
+    expect(frame.sideRoads.length).toBeGreaterThan(4);
+    expect(plans.filter((plan) => onAny(frame.sideRoads, plan))).toStrictEqual([]);
   });
 
   it('reports what a dense block loses to the streets, and holds it under 40 %', () => {

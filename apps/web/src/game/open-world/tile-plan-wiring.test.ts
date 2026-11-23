@@ -28,7 +28,20 @@ import {
 } from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
 import { createOpenWorldSession } from './session';
-import { describeTilePlanFailure, tilePlanWorkerCore, type TilePlanRequest } from './tile-planner';
+import { openWorldStreetCorridor } from './street-corridor';
+import type { TileBlockFeatures } from './tile-plan';
+import {
+  createTilePlanner,
+  describeTilePlanFailure,
+  tilePlanWorkerCore,
+  type TilePlanRequest,
+} from './tile-planner';
+
+// #2903: counted, so a test can tell a reused street corridor from a rebuilt one.
+vi.mock('./street-corridor', async (actual) => {
+  const real = await actual<typeof import('./street-corridor')>();
+  return { openWorldStreetCorridor: vi.fn(real.openWorldStreetCorridor) };
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -78,7 +91,10 @@ function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
   return made;
 }
 
-async function openRide(log?: (line: string) => void) {
+async function openRide(
+  log?: (line: string) => void,
+  held?: ReadonlyMap<string, TileBlockFeatures>[],
+) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
   const session = createOpenWorldSession({
     start: fixtureStart(START_COLUMN, START_ROW),
@@ -87,6 +103,16 @@ async function openRide(log?: (line: string) => void) {
     yieldToIdle: () => Promise.resolve(),
     random: () => 0,
     log,
+    // The real planner, with what each `hold` was handed recorded.
+    tilePlanner: (options) => {
+      const planner = createTilePlanner(options);
+      const hold = planner.hold.bind(planner);
+      planner.hold = (blocks) => {
+        held?.push(blocks);
+        hold(blocks);
+      };
+      return planner;
+    },
   });
   const ready = await session.ready;
   if (ready.kind !== 'ready') throw new Error(`no ride: ${ready.kind}`);
@@ -128,6 +154,27 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     expect(road.streets()?.streets.length).toBeGreaterThanOrEqual(
       OPEN_WORLD_FIXTURE_STREETS.length,
     );
+    session.stop();
+  });
+
+  it('builds the street corridor again only when the held blocks change — #2903', async () => {
+    stubWorkers();
+    const built = vi.mocked(openWorldStreetCorridor);
+    built.mockClear();
+    const held: ReadonlyMap<string, TileBlockFeatures>[] = [];
+    const { session, road } = await openRide(undefined, held);
+    road.follow(0);
+    await settle();
+    const same = (
+      a: ReadonlyMap<string, TileBlockFeatures>,
+      b: ReadonlyMap<string, TileBlockFeatures>,
+    ) => a.size === b.size && [...a].every(([key, features]) => b.get(key) === features);
+    const changes = held.filter((blocks, at) => at === 0 || !same(blocks, held[at - 1] as never));
+    // Control: the session did hand the planner the same blocks more than once.
+    expect(held.length).toBeGreaterThan(changes.length);
+    // One corridor per change of what is held, and the road hands on the last.
+    expect(built).toHaveBeenCalledTimes(changes.length);
+    expect(road.streets()).toBe(built.mock.results.at(-1)?.value);
     session.stop();
   });
 
