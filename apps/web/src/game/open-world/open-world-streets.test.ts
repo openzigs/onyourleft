@@ -332,8 +332,11 @@ describe('an open-world ride draws its side streets, and keeps its buildings off
     // proposed there. A loss over it is said rather than shipped silently.
     // 512 since #3055's ride-keyed plots (merged in for #3051): an open-world
     // view's terraced block is a whole plot or none, so three fewer
-    // footprints give way to a terrace than #2903 measured (515).
-    expect({ lost: near - kept, of: near }).toStrictEqual({ lost: 512, of: 1_681 });
+    // footprints give way to a terrace than #2903 measured (515). 514 since
+    // #3094: an open-world view's ground is its place's, not its road's, and
+    // a plan reads the ground under its footprint, so two more of this
+    // fixture's footprints are given up to it.
+    expect({ lost: near - kept, of: near }).toStrictEqual({ lost: 514, of: 1_681 });
     expect(lost).toBeLessThan(0.4);
   });
 

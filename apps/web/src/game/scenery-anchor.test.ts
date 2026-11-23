@@ -165,10 +165,13 @@ describe('every generator reads an anchored view in ride distance — #3055', ()
   const whole = eastRoad(0, 12_000);
   const late = eastRoad(7_000, 12_000);
   const trimmed = (whole.totalDistance as number) - (late.totalDistance as number);
-  // The ride's range is its first view's, on both (#3065).
+  // The ride's range is its first view's, on both (#3065); #3094: and one
+  // frame its places are read in, the first view's, as `open-world/road.ts`
+  // keys every view of a ride.
   const band = elevationBand(whole);
-  anchorScenery(whole, { seed, origin: 0, band });
-  anchorScenery(late, { seed, origin: trimmed, band });
+  const rideFrame = corridorOrigin(whole);
+  anchorScenery(whole, { seed, origin: 0, frame: rideFrame, band });
+  anchorScenery(late, { seed, origin: trimmed, frame: rideFrame, band });
   const views = [
     { profile: whole, shift: 0, origin: corridorOrigin(whole) },
     { profile: late, shift: trimmed, origin: corridorOrigin(late) },

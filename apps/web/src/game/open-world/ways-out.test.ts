@@ -195,8 +195,18 @@ describe('the ways out of the junctions in view — #3051', () => {
       expect(out.profile.positions.slice(0, count)).toEqual(swapped.positions.slice(0, count));
     }
     for (const out of ways) {
-      // The ride's seed, elevation range and this view's origin, and the ride's frame.
-      expect(sceneryAnchor(out.profile)).toEqual({ seed, origin: road.view.origin, band });
+      // The ride's seed, elevation range and this view's origin, and the ride's
+      // frame; #3094: and the ride's held streets and the frame its places are
+      // read in.
+      const { levels } = sceneryAnchor(road.view.profile) ?? {};
+      expect(sceneryAnchor(out.profile)).toEqual({
+        seed,
+        origin: road.view.origin,
+        levels,
+        frame,
+        band,
+      });
+      expect(sceneryAnchor(out.profile)?.levels).toBe(levels);
       expect(corridorOrigin(out.profile)).toBe(frame);
     }
     // And the route itself was left as it was.
