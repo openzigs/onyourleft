@@ -2179,13 +2179,16 @@ export function bridgeParts(
 }
 
 /**
- * The most pieces one deck is built from: **16** — #3105. A stream's bridge is
+ * The most pieces one deck is built from: **12** — #3105. A stream's bridge is
  * six pieces of {@link BRIDGE_PIECE_METRES}; a mapped river's is longer, and
- * past sixteen pieces each piece is longer instead, so the longest bridge is
- * 80 boxes of the belt's {@link MAXIMUM_BRIDGE_PARTS} and its abutments and
- * approaches still fit.
+ * past twelve pieces each piece is longer instead, so the longest bridge is
+ * 60 boxes of the belt's {@link MAXIMUM_BRIDGE_PARTS}, and its abutments and
+ * approaches (12 more), the rest of a mapped span's parapets and a side
+ * street's deck beside it still fit. A piece is then a straight chord of up
+ * to 25 m of a 300 m river's bridge: on a bridge that bends, its parapet
+ * stands a few decimetres off the carriageway's edge at the chord's middle.
  */
-export const BRIDGE_MAX_PIECES = 16;
+export const BRIDGE_MAX_PIECES = 12;
 
 /** The road at an odometer reading, and a block's top under a stretch of it. */
 function roadUnder(

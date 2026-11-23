@@ -136,8 +136,8 @@ export const PORTAL_DEPTH_METRES = 1.5;
 /** How deep a portal's lintel is, in metres: **1**. */
 export const PORTAL_LINTEL_METRES = 1;
 
-/** How many of a side deck's 4 m stations one parapet runs along: **3**, 12 m. */
-const SIDE_DECK_STATIONS = 3;
+/** How many of a side deck's 4 m stations one parapet runs along: **4**, 16 m. */
+const SIDE_DECK_STATIONS = 4;
 
 /** A stretch of a view on a mapped bridge or in a mapped tunnel, in the view's own distance. */
 export interface RiddenSpan {
@@ -406,17 +406,19 @@ function partsOfDeck(road: SideRoad): readonly BridgePart[] {
 
 /**
  * The parapets of the side streets' decks among `roads` — #3105
- * (`cross-streets.ts` §`SideRoad.deck`): whole decks, in the order given, in
- * at most `room` boxes. Built once a deck, from the ribbon it is drawn as.
+ * (`cross-streets.ts` §`SideRoad.deck`), in the order given, in at most
+ * `room` boxes: past that a deck's road is drawn without them. Built once a
+ * deck, from the ribbon it is drawn as.
  */
 export function sideDeckParts(roads: readonly SideRoad[], room: number): readonly BridgePart[] {
   let parts: BridgePart[] | undefined;
   for (const road of roads) {
     if (road.deck !== true) continue;
+    const left = room - (parts?.length ?? 0);
+    if (left <= 0) break;
     const own = partsOfDeck(road);
-    if ((parts?.length ?? 0) + own.length > room) continue;
     parts ??= [];
-    parts.push(...own);
+    parts.push(...(own.length > left ? own.slice(0, left) : own));
   }
   return parts ?? [];
 }

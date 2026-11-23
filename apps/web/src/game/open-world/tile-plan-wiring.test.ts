@@ -227,7 +227,11 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
       tile,
       'reduced',
     );
-    const { session, road } = await openRide(undefined, undefined, () => [pond]);
+    let beside: TilePlan[] = [];
+    const { session, road } = await openRide(undefined, undefined, () => beside);
+    // Before any tile is planned there is no water, and the road says so.
+    expect(road.water()).toBeUndefined();
+    beside = [pond];
     road.follow(0);
     await settle();
     const mask = road.water();

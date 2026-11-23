@@ -70,7 +70,12 @@ import {
 import type { WorldCorridor } from '../world-data/corridor';
 import { OpenWorldRoad } from './road';
 import { openWorldStreetCorridor } from './street-corridor';
-import { tilePlanBuffers, type TileBlockFeatures, type TilePlan } from './tile-plan';
+import {
+  TILE_LAND_CELL_METRES,
+  tilePlanBuffers,
+  type TileBlockFeatures,
+  type TilePlan,
+} from './tile-plan';
 import { tilePlanWorkerCore } from './tile-planner';
 import {
   openWorldWaterMask,
@@ -86,8 +91,8 @@ const START_NORTH = -1_300;
 const JUNCTION_NORTH = 900;
 /** The river's banks, metres north. */
 const RIVER = { south: 300, north: 360 };
-/** The mapped bridge, a little longer than the water is wide. */
-const BRIDGE = { south: 290, north: 370 };
+/** The mapped bridge: over the river and 50 m of the land either side of it. */
+const BRIDGE = { south: 250, north: 410 };
 /** The mapped tunnel. */
 const TUNNEL = { south: 500, north: 580 };
 /** The second street, metres east of the ridden one. */
@@ -250,7 +255,7 @@ function plansOf(block: TileBlockFeatures): TilePlan[] {
   core.handle({ kind: 'frame', frame: FRAME });
   core.handle({ kind: 'hold', block: 'b', features: block });
   return block.tiles.map(({ tile }, id) => {
-    const answer = core.handle({ kind: 'plan', id, block: 'b', tile, detail: 'reduced' });
+    const answer = core.handle({ kind: 'plan', id, block: 'b', tile, detail: 'full' });
     if (answer?.reply.kind !== 'plan') throw new Error('a tile was not planned');
     return structuredClone(answer.reply.plan, { transfer: answer.transfer });
   });
@@ -324,6 +329,16 @@ const parapets = (parts: readonly BridgePart[]): BridgePart[] =>
   stone(parts).filter((part) => part.width === PARAPET_THICKNESS_METRES);
 const northOf = (part: { z: number }): number => part.z - zOf(0);
 const between = (value: number, from: number, to: number): boolean => value >= from && value <= to;
+/** Each place, every 4 m from `from` to `to` north, that none of `parts` reaches along the road. */
+function gaps(parts: readonly BridgePart[], from: number, to: number): number[] {
+  const open: number[] = [];
+  for (let north = from; north <= to; north += 4) {
+    if (!parts.some((part) => Math.abs(northOf(part) - north) <= part.length / 2 + 0.5)) {
+      open.push(north);
+    }
+  }
+  return open;
+}
 
 let world: World;
 let wide: World;
@@ -376,6 +391,40 @@ describe('the tiles hold the real water — #3105', () => {
       const at = local(0, north);
       expect(land.covered(at.x, at.z)).toBe(false);
     }
+  });
+
+  it('marks a mapped wetland as wetland, and cuts no crossing through it', () => {
+    const corners = [local(-600, 300), local(600, 300), local(600, 360), local(-600, 360)];
+    const marsh: LandUseFeature = {
+      layer: 'landuse',
+      kind: 'wetland',
+      rings: [Float32Array.from(corners.flatMap((corner) => [corner.x, corner.z]))],
+    };
+    const land = openWorldWaterMask(plansOf({ ...blockOf({ dry: true }), landUse: [marsh] }));
+    expect(land).toBeDefined();
+    if (land === undefined) return;
+    const at = local(0, 330);
+    expect(land.classAt(at.x, at.z)).toBe('water');
+    expect(land.wetlandAt(at.x, at.z)).toBe(true);
+    // Wet ground, not a river: the road is not bridged over it.
+    const profile = dry.profile;
+    expect(
+      waterways(profile, scatterSeed(profile), land).crossings.filter(
+        (crossing) => crossing.halfWidth !== undefined,
+      ),
+    ).toStrictEqual([]);
+    // Control: the same polygon as open water is a crossing.
+    const open = openWorldWaterMask(
+      plansOf({
+        ...blockOf({ dry: true }),
+        landUse: [{ ...marsh, layer: 'water', kind: 'river' }],
+      }),
+    );
+    expect(
+      waterways(profile, scatterSeed(profile), open ?? NO_LAND_CLASS).crossings.filter(
+        (crossing) => crossing.halfWidth !== undefined,
+      ),
+    ).toHaveLength(1);
   });
 
   it('is no mask at all where no tile holds water', () => {
@@ -486,6 +535,10 @@ describe('an open-world ride draws a real river and the bridge over it — #3105
       ]);
       expect(Math.min(...reach)).toBeLessThanOrEqual(BRIDGE.south + SPAN_SAMPLE_METRES);
       expect(Math.max(...reach)).toBeGreaterThanOrEqual(BRIDGE.north - SPAN_SAMPLE_METRES);
+      // With no gap: the river's own bridge in the middle, the mapped span's either end.
+      expect(
+        gaps(edgeParts, BRIDGE.south + SPAN_SAMPLE_METRES, BRIDGE.north - SPAN_SAMPLE_METRES),
+      ).toStrictEqual([]);
     }
     // A slab under the deck over the water: a box as wide as the road and its parapets.
     const slabs = stone(seen.bridges).filter(
@@ -611,19 +664,28 @@ describe('a side street on a bridge is drawn as a deck, not dropped — #3105', 
     );
     expect(beside.some((part) => part.x > xOf(SIDE_EAST))).toBe(true);
     expect(beside.some((part) => part.x < xOf(SIDE_EAST))).toBe(true);
-    // And the deck is level with the road it is drawn beside, over the water.
-    const [deck] = decks as [SceneFrame['sideRoads'][number]];
-    const heights: number[] = [];
-    for (let at = 1; at < deck.mesh.positions.length; at += 3) {
-      heights.push(deck.mesh.positions[at] as number);
-    }
+    // And every deck is at the level of the road it is drawn beside, over the water too.
     const river = waterways(
       world.profile,
       scatterSeed(world.profile),
       world.land ?? NO_LAND_CLASS,
     ).crossings.find((crossing) => crossing.halfWidth !== undefined);
     expect(river).toBeDefined();
-    expect(Math.min(...heights)).toBeGreaterThan((river?.waterElevation ?? 0) + 1);
+    let overWater = 0;
+    for (const deck of decks) {
+      const { positions } = deck.mesh;
+      for (let at = 0; at + 2 < positions.length; at += 3) {
+        const north = (positions[at + 2] as number) - zOf(0);
+        const height = positions[at + 1] as number;
+        const road = elevationAt(world.profile, alongOf(north));
+        expect(Math.abs(height - road)).toBeLessThan(0.5);
+        if (between(north, RIVER.south, RIVER.north)) {
+          overWater += 1;
+          expect(height).toBeGreaterThan((river?.waterElevation ?? 0) + 1);
+        }
+      }
+    }
+    expect(overWater).toBeGreaterThan(0);
   });
 
   it('is what the street lacked: the same stretch mapped on the ground stops at the water', () => {
@@ -662,6 +724,17 @@ describe('the budgets hold on a long bridge — #3105', () => {
     ]);
     expect(Math.min(...reach)).toBeLessThanOrEqual(RIVER.south);
     expect(Math.max(...reach)).toBeGreaterThanOrEqual(RIVER.south + 250);
+    // With no gap on either edge, and a slab under the deck all the way over the water.
+    for (const side of [1, -1]) {
+      const edgeParts = beside.filter((part) => Math.sign(part.x - xOf(0)) === side);
+      expect(gaps(edgeParts, RIVER.south, RIVER.south + 250)).toStrictEqual([]);
+    }
+    const slabs = stone(seen.bridges).filter(
+      (part) => Math.abs(part.width - (ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 2)) < 1e-6,
+    );
+    expect(gaps(slabs, RIVER.south, RIVER.south + 250 - TILE_LAND_CELL_METRES.full)).toStrictEqual(
+      [],
+    );
     // A stream's bridge is 24 m; this one is the river's width and its abutments'.
     expect(Math.max(...reach) - Math.min(...reach)).toBeGreaterThan(
       2 * BRIDGE_HALF_SPAN_METRES + 250 - 2 * STREAM_HALF_WIDTH_METRES - 20,
