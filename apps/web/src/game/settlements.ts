@@ -119,15 +119,19 @@ import {
 } from './landform';
 import {
   SCATTER_VARIANT_SLOTS,
+  SCATTER_WAY_REACH_METRES,
   SETTLEMENT_GRADE_PERCENT,
   SETTLEMENT_TREE_LINE_FRACTION,
+  sameCountryside,
+  sameOrigin,
   type ScatterItem,
+  type ScatterWay,
   type StructureKind,
 } from './scatter';
 import type { ChainLinkPiece } from './chain-link';
 import { sceneryGrid, wrappedCell, type SceneryGrid } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
-import { leastSquaredNearRoad, squaredToSegment } from './road-grid';
+import { leastSquaredNearRoad, nearestOnDrawnRoad, squaredToSegment } from './road-grid';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
 import type { UrbanClassMap } from './urban-class';
 import { inWater, waterways } from './waterways';
@@ -312,6 +316,127 @@ export function structuresAt(
     if (structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES) kept.push(item);
   }
   return kept;
+}
+
+/** What is built along a way out, in order along it. @see structuresOnWay */
+export interface StructuresOnWay {
+  /** Each structure, as the way's own view stands it, the nearest its junction first. */
+  readonly items: readonly ScatterItem[];
+  /** Where along the way's own view each of {@link items} stands, ascending. */
+  readonly alongs: readonly number[];
+  /** Whether each of {@link items} is a field boundary ({@link BOUNDARY_KINDS}). */
+  readonly boundaries: readonly boolean[];
+  /** The ground its settlements take, the nearest the junction first. */
+  readonly footprints: readonly SettlementFootprint[];
+}
+
+/**
+ * How many of `built`'s items, and of its footprints, stand short of
+ * `toMetres` along the way's own view: each is in order along it, so those
+ * are its first. A frame reads no more of a way than its view reaches.
+ */
+export function structuresWithin(
+  built: StructuresOnWay,
+  toMetres: number,
+): { readonly items: number; readonly footprints: number } {
+  let items = 0;
+  while (items < built.alongs.length && (built.alongs[items] as number) < toMetres) items += 1;
+  let footprints = 0;
+  while (
+    footprints < built.footprints.length &&
+    (built.footprints[footprints] as SettlementFootprint).along < toMetres
+  ) {
+    footprints += 1;
+  }
+  return { items, footprints };
+}
+
+/** What stands along a way out, as built on the way's own view. @see structuresOnWay */
+const structuresAlongWays = new WeakMap<
+  RouteProfile,
+  StructuresOnWay & {
+    readonly origin: CorridorOrigin;
+    readonly seed: number;
+    readonly fromMetres: number;
+    readonly land: LandClassMask;
+    readonly town: MappedTown | null;
+    readonly countryside: Countryside;
+  }
+>();
+
+/** How far from the way's road the search for where a structure stands along it reaches, metres. */
+const WAY_STRUCTURE_REACH_METRES = 256;
+
+/**
+ * The villages, farmsteads and field boundaries along `way`, a way out of a
+ * junction that an open-world ride's route does not take (#3051,
+ * `scatter.ts` §`ScatterWay`), for `scatter.ts` §`SCATTER_WAY_REACH_METRES`
+ * past the junction: built on the way's own view, so each is where that
+ * view's own {@link structuresAt} puts it. Built once, the first time the way
+ * is asked for, and kept for as long as its view is; in order along the way,
+ * so a frame reads only as far along it as its view reaches.
+ *
+ * ⚠️ As the way's own view stands them: at the height of its ground, and off
+ * its road only. `scene.ts` holds each off the road the frame draws
+ * ({@link structureClearance}) and stands it on the frame's own ground.
+ */
+export function structuresOnWay(
+  way: ScatterWay,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask = NO_LAND_CLASS,
+  town: MappedTown | null = NO_MAPPED_TOWN,
+  countryside: Countryside = COUNTRYSIDE,
+): StructuresOnWay {
+  let held = structuresAlongWays.get(way.profile);
+  if (
+    held === undefined ||
+    !sameOrigin(held.origin, origin) ||
+    held.seed !== seed ||
+    held.fromMetres !== way.fromMetres ||
+    held.land !== land ||
+    held.town !== town ||
+    !sameCountryside(held.countryside, countryside)
+  ) {
+    const ground: SettlementFootprint[] = [];
+    const built = structuresAt(
+      way.profile,
+      origin,
+      seed,
+      way.fromMetres,
+      way.fromMetres + SCATTER_WAY_REACH_METRES,
+      { maxItems: STRUCTURE_MAX_ITEMS, riderMetres: way.fromMetres },
+      ground,
+      land,
+      town,
+      countryside,
+    )
+      .map((item) => ({
+        item,
+        // Past the search's reach, or behind the junction, it stands as far
+        // along as the junction: a frame that reaches the way reaches it.
+        along: Math.max(
+          way.fromMetres,
+          nearestOnDrawnRoad(way.profile, origin, item.x, item.z, WAY_STRUCTURE_REACH_METRES)
+            ?.along ?? way.fromMetres,
+        ),
+      }))
+      .sort((first, second) => first.along - second.along);
+    held = {
+      origin,
+      seed,
+      fromMetres: way.fromMetres,
+      land,
+      town,
+      countryside,
+      items: built.map(({ item }) => item),
+      alongs: built.map(({ along }) => along),
+      boundaries: built.map(({ item }) => BOUNDARY_KINDS.has(item.kind as StructureKind)),
+      footprints: ground.sort((first, second) => first.along - second.along),
+    };
+    structuresAlongWays.set(way.profile, held);
+  }
+  return held;
 }
 
 /**

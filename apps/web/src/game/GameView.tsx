@@ -4557,6 +4557,9 @@ function GameScreen({
                 // stub at each junction (`open-world/street-corridor.ts`).
                 worldCorridor: road.follower.streets(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
+                // #3051: and the ways out the route does not take, so the
+                // scenery stands along each before a choice and after it.
+                waysOut: road.follower.waysOut(simulation.state.ride.distance),
               }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the
