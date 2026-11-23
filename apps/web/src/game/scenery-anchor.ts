@@ -40,12 +40,33 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 
+import type { CorridorOrigin } from './terrain';
+
 /** What an open-world view's scenery is keyed on. */
 export interface SceneryAnchor {
   /** The ride's scenery seed, fixed when it started. */
   readonly seed: number;
   /** The ride distance of the profile's distance zero (`RollingRoute.origin`). */
   readonly origin: number;
+  /**
+   * #3094: how far a place in the ride's frame is from the nearest street the
+   * ride holds (`street-levels.ts`), which `landform.ts` levels the ground
+   * beside; the same object for every view of the ride. Absent, the ground is
+   * levelled beside the view's own road alone.
+   */
+  readonly levels?: PlaceLevels | undefined;
+  /**
+   * #3094: the frame the ride's places are read in — the session's start, or
+   * the ride's first view's own — which {@link levels}' streets are in too.
+   * A view drawn about another point is read in this one, so the ground at a
+   * place is the same on every view. Absent, each view's own.
+   */
+  readonly frame?: CorridorOrigin | undefined;
+}
+
+/** How far a place is from the nearest street held, metres: `Infinity` where none is held. */
+export interface PlaceLevels {
+  distance(x: number, z: number): number;
 }
 
 const anchors = new WeakMap<RouteProfile, SceneryAnchor>();

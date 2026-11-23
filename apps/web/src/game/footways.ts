@@ -235,7 +235,7 @@ function sidesHere(
 }
 
 /** One corridor's sides, kept with the profile it was read against. */
-const sidesBuilt = new WeakMap<WorldCorridor, { profile: RouteProfile; sides: PavementSides }>();
+const sidesBuilt = new WeakMap<WorldCorridor, WeakMap<RouteProfile, PavementSides>>();
 
 /**
  * Which side of the drawn road a mapped sidewalk runs on, every
@@ -248,8 +248,15 @@ export function pavementSides(
   profile: RouteProfile,
   origin: CorridorOrigin,
 ): PavementSides {
-  const cached = sidesBuilt.get(corridor);
-  if (cached?.profile === profile) return cached.sides;
+  // #3095: by profile as well, so a frame that reads an open-world ride's
+  // ways out as well as its road builds each once, not each every frame.
+  let byProfile = sidesBuilt.get(corridor);
+  if (byProfile === undefined) {
+    byProfile = new WeakMap();
+    sidesBuilt.set(corridor, byProfile);
+  }
+  const cached = byProfile.get(profile);
+  if (cached !== undefined) return cached;
   const grid = segmentGrid(corridor.paths);
   const length: number = profile.totalDistance;
   const count = Math.max(1, Math.floor(length / PAVEMENT_SIDES_STEP_METRES) + 1);
@@ -269,7 +276,7 @@ export function pavementSides(
       return sideOf(codes[index] ?? 0);
     },
   };
-  sidesBuilt.set(corridor, { profile, sides });
+  byProfile.set(profile, sides);
   return sides;
 }
 

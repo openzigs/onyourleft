@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
+import { sceneryAnchor } from '../scenery-anchor';
 import { countingSource } from '../../world-data/archive-testing';
 import {
   fixtureStart,
@@ -149,6 +150,21 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
     expect(road.buildings()?.plans).toStrictEqual([]);
+    // #3094: each handing the worker what the road keyed the view on, so the
+    // worker's copy of it stands the plans on the ground the scene draws.
+    const anchor = sceneryAnchor(road.view.profile);
+    expect(anchor).toBeDefined();
+    const requests = (tiles[0]?.asked ?? []).filter(
+      (each): each is Extract<TilePlanRequest, { kind: 'buildings' }> =>
+        (each as TilePlanRequest).kind === 'buildings',
+    );
+    expect(requests.length).toBeGreaterThan(0);
+    for (const { request } of requests) {
+      expect(request.scenery).toStrictEqual({
+        seed: anchor?.seed,
+        origin: sceneryAnchor(request.profile)?.origin,
+      });
+    }
     // #2903: and every held street, for the scene to draw: the fixture's three, in each tile it crosses.
     // Each tile carries its own cut of a street it crosses, as a route's corridor does.
     expect(road.streets()?.streets.length).toBeGreaterThanOrEqual(
