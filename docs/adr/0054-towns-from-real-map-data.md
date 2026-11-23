@@ -772,3 +772,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-4 and D-5.7. **Status: proposed, in force only when the owner approves #2975's screenshots and
   a moving-ride tablet frame check**; the PR is not to be merged before that, and this entry is to
   be corrected or struck there if the ruling differs.
+- **2026-11-23** — **Superseded in part, for the open-world ride only, by
+  [ADR 0096](0096-the-open-world-names-its-streets-on-the-road-and-in-the-junction-prompt.md)**
+  ([#3052](https://github.com/openzigs/onyourleft/issues/3052)). The open world's area reader reads a
+  `roads` street's `name`, bounded and cleaned, painting it on the road and naming the way in the
+  junction prompt; D-2.2's no-name rule and D-5.7's *"no street name"* no longer hold there for
+  street names. **Status: proposed**, in force only once the owner accepts ADR 0096. A route ride's
+  corridor reads no name, and D-2.2 and D-5.7 stand for it word for word.

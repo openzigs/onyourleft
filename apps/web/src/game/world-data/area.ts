@@ -358,6 +358,9 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       log: options.log,
       mustStop: () => stopped || !options.mapTilesOn(),
       yieldToIdle: options.yieldToIdle,
+      // #3052, ADR 0096: the open world names its streets on the road and in
+      // the junction prompt. Held in memory with the block, never stored.
+      streetNames: true,
     });
     if (read.kind === 'wrong-schema') return 'wrong-schema';
     // A block the rider has left behind while it was read is not kept: its

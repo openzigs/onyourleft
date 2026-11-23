@@ -34,6 +34,8 @@ import { atStartLine } from '../simulation';
 import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from './controls-reveal';
 import { HudCore } from './HudCore';
 import { HudPanel, type HudPanelProps } from './HudPanel';
+import { JUNCTION_LOCKED_SHOWN_MILLISECONDS } from './JunctionChoicePrompt';
+import { JUNCTION_LOCKED_LINE } from './junction-text';
 import { REPORT_REASONS_MS } from './RoomReport';
 import { BOTS, RIDER, holding, hudOf, startRace, tick } from './lap-race-testing';
 import { RIDE_CHROME_STORAGE_KEY, writeRideChrome } from './ride-chrome-preference';
@@ -358,11 +360,6 @@ describe('the ride controls hide until touched — #2600', () => {
       ['a waiting re-plan', { keepPlan: { sentence: 'Easier next.', onKeep: () => undefined } }],
       ['the side camera filming', { sideCamera: { line: 'Filming', onStop: undefined } }],
       ['a Delivery round’s throw buttons', { throwing: { throwParcel: () => undefined } }],
-      // #2898: the prompt is in the actions panel, which hiding clips.
-      [
-        'an open-world junction’s prompt',
-        { junction: { prompt: junctionAhead(), press: () => undefined } },
-      ],
     ];
     for (const [reason, more] of held) {
       mounted?.unmount();
@@ -376,11 +373,92 @@ describe('the ride controls hide until touched — #2600', () => {
     await hud({ lapRace: hudOf(startRace({ laps: 1 })) });
     idle();
     expect(controls()).toBe('hidden');
-    // Nor an open-world ride with no junction within its prompt's reach.
-    mounted?.unmount();
-    await hud({ junction: { prompt: undefined, press: () => undefined } });
-    idle();
-    expect(controls()).toBe('hidden');
+    // Nor an open-world ride, with a junction's pop-up up or without (#3053).
+    for (const prompt of [junctionAhead(), undefined]) {
+      mounted?.unmount();
+      await hud({ junction: { prompt, press: () => undefined } });
+      idle();
+      expect(controls(), prompt === undefined ? 'no junction' : 'a junction ahead').toBe('hidden');
+    }
+  });
+
+  /**
+   * #3053, the owner's report of 2026-11-22: the junction prompt was drawn in
+   * the actions panel, which hiding clips, so a rider who was not touching the
+   * screen did not see the junction coming. It is a pop-up of its own now,
+   * which no fade reaches, and its first tap takes the way tapped.
+   */
+  describe('a junction’s pop-up — #3053', () => {
+    const popup = (): Element | null =>
+      mounted?.container.querySelector('.oyl-hud__junction-popup') ?? null;
+    const ways = (): HTMLButtonElement[] =>
+      queryAll<HTMLButtonElement>(popup() ?? document.createElement('div'), 'button[data-oyl-way]');
+
+    it('stays drawn while the controls fade, in nothing the fade hides or clips', async () => {
+      await hud({ junction: { prompt: junctionAhead(), press: () => undefined } });
+      for (let waits = 0; waits < 5; waits += 1) idle();
+      expect(controls()).toBe('hidden');
+      expect(popup()).not.toBeNull();
+      expect(ways()).toHaveLength(3);
+      expect(popup()?.closest(`[${HIDES_ATTRIBUTE}], .oyl-hud__actions`)).toBeNull();
+      expect(popup()?.querySelector(`[${HIDES_ATTRIBUTE}]`)).toBeNull();
+      // And it is the HUD's own child: the touch lock's region holds it.
+      expect(popup()?.parentElement?.classList.contains('oyl-hud')).toBe(true);
+    });
+
+    it('takes the first tap on a way while the controls are hidden', async () => {
+      const presses: string[] = [];
+      await hud({
+        junction: {
+          prompt: junctionAhead(),
+          press: (press) => {
+            presses.push(press);
+          },
+        },
+      });
+      idle();
+      expect(controls()).toBe('hidden');
+      tap(ways()[0] as HTMLButtonElement);
+      expect(presses, 'the first tap was spent showing the controls').toEqual(['left']);
+    });
+
+    it('shows the chosen way alone once the choice is final, and then goes', async () => {
+      const ride = starRide([-90, 0, 90]);
+      const locked = ride.choice.prompt(ride.junction.distance - 50);
+      expect(locked?.locked).toBe(true);
+      await hud({ junction: { prompt: locked, press: () => undefined } });
+      expect(ways().map((each) => each.dataset['oylWay'])).toEqual([locked?.chosen]);
+      expect(ways()[0]?.getAttribute('aria-disabled')).toBe('true');
+      expect(popup()?.textContent).toContain(JUNCTION_LOCKED_LINE);
+      wait(JUNCTION_LOCKED_SHOWN_MILLISECONDS - 100);
+      expect(popup()).not.toBeNull();
+      wait(200);
+      expect(popup()).toBeNull();
+    });
+
+    it('keeps the U-turn with the controls: a first tap on it while they are hidden only shows them', async () => {
+      const presses: string[] = [];
+      await hud({
+        junction: {
+          prompt: undefined,
+          press: (press) => {
+            presses.push(press);
+          },
+        },
+      });
+      idle();
+      expect(controls()).toBe('hidden');
+      const uTurn = queryAll<HTMLButtonElement>(
+        mounted?.container ?? document,
+        'button.oyl-hud__junction-u-turn',
+      )[0] as HTMLButtonElement;
+      expect(uTurn.closest('.oyl-hud__actions')).not.toBeNull();
+      tap(uTurn);
+      expect(presses, 'a stray first tap turned the rider round').toEqual([]);
+      expect(controls()).toBe('shown');
+      tap(uTurn);
+      expect(presses).toEqual(['u-turn']);
+    });
   });
 
   it('keep Use item shown while the rider holds an item in a lap race, and a first tap uses it', async () => {

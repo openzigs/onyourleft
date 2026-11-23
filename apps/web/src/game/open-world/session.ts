@@ -45,6 +45,14 @@
  * road takes the way on there (`RollingRoute.reopen`) while the rider is far
  * enough short of it that no grade sent changes.
  *
+ * ## The map's tiles (#2901)
+ *
+ * Every block held is handed to a tile planner too (`tile-planner.ts`), which
+ * plans the tiles the road asks for (`road.ts` §`OpenWorldRoadHooks.ahead`):
+ * the rider's, the ones ahead and the ones on every way on from the next
+ * junction (`tiles-ahead.ts`), in a worker, in the same frame as the graph.
+ * A block let go takes its tiles' plans with it.
+ *
  * A loop (`from === to`) is offered as two ways, `id` and `id:reverse`, of
  * one street, so a choice by id can tell them apart (`GraphStreets`).
  *
@@ -52,8 +60,9 @@
  *
  * {@link OpenWorldSession.stop} stops the reader — its running read
  * abandoned, its waiting ones dropped and its held blocks let go — the
- * start's deadline, and the graph's worker. The worker is made with the first
- * tile to build, so a start stopped before any is read never makes one.
+ * start's deadline, the graph's worker and the tile planner's. Each worker is
+ * made with the first tile to build, so a start stopped before any is read
+ * never makes one.
  *
  * ⚠️ **Nothing here logs, stores or sends the start** (ADR 0090, the start
  * "never leaves the device"): what is asked for is the start's blocks, which
@@ -67,6 +76,7 @@ import {
   degreesLongitude,
   geographicPosition,
   altitudeMetres,
+  positionAt as positionAlong,
   RollingRoute,
   ROLLING_LEAST_WAY_METRES,
   type GeographicPosition,
@@ -76,14 +86,15 @@ import {
 } from '@onyourleft/domain';
 import {
   describeStreetGraphRefusal,
+  localMetres,
   METRES_PER_DEGREE_LATITUDE,
   type CorridorFrame,
   type StreetGraphEdge,
   type TileId,
 } from '@onyourleft/map-features';
 
-import { createAreaReader } from '../world-data/area';
-import type { CorridorArchive } from '../world-data/corridor';
+import { createAreaReader, type HeldBlock } from '../world-data/area';
+import type { CorridorArchive, WorldCorridor } from '../world-data/corridor';
 import {
   graphBuilder,
   StreetMirror,
@@ -99,7 +110,13 @@ import {
   type OpenWorldSession,
 } from './ride';
 import { OpenWorldRoad } from './road';
+import { streetNameLabels, type NamedStreetLine, type StreetNameLabel } from '../street-names';
 import type { OpenWorldStart } from './start';
+import { openWorldStreetCorridor } from './street-corridor';
+import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
+import type { TileBlockFeatures } from './tile-plan';
+import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
+import { tilesToPlan } from './tiles-ahead';
 
 /**
  * How long the start may take before the session gives up on the map:
@@ -134,6 +151,32 @@ export interface OpenWorldSessionOptions {
   readonly startTimeoutMs?: number | undefined;
   /** Where the graph is built: `graph-build.ts` §`graphBuilder`, a worker, when absent. */
   readonly graphBuilder?: ((frame: CorridorFrame) => GraphBuilder) | undefined;
+  /** Where the tiles are planned (#2901): `tile-planner.ts` §`createTilePlanner`, a worker, when absent. */
+  readonly tilePlanner?: ((options: TilePlannerOptions) => TilePlanner) | undefined;
+}
+
+/**
+ * How far the rider rides between two askings for the tiles to plan: **25 m**.
+ * *#2901's choice*: a tile is a kilometre across, so asking each frame would
+ * walk the route sixty times a second for the same answer; a new view (a
+ * choice, a turn-round, an extension) asks at once.
+ */
+export const TILE_ASK_METRES = 25;
+
+/** A held block's features as the tile planner is handed them: the same object while it is held. */
+const blockFeatures = new WeakMap<HeldBlock, TileBlockFeatures>();
+
+function featuresOf(block: HeldBlock): TileBlockFeatures {
+  let features = blockFeatures.get(block);
+  if (features === undefined) {
+    features = {
+      buildings: block.features.buildings,
+      landUse: block.features.landUse,
+      tiles: block.streets,
+    };
+    blockFeatures.set(block, features);
+  }
+  return features;
 }
 
 const defaultSchedule = (run: () => void, ms: number): (() => void) => {
@@ -274,6 +317,8 @@ class GraphStreets implements RollingStreetGraph {
       to: String(forward ? edge.to : edge.from),
       points,
       roadClass: ROAD_CLASS[edge.kind] ?? 0,
+      // #3052: the mapped name, for the junction prompt (ADR 0096).
+      ...(edge.name === undefined ? {} : { name: edge.name }),
     };
     this.#oriented.set(key, oriented);
     return oriented;
@@ -315,6 +360,7 @@ function startWays(
     line.map(([x, z]) => pointAt(frame, x, z));
   const id = String(edge.id);
   const roadClass = ROAD_CLASS[edge.kind] ?? 0;
+  const named = edge.name === undefined ? {} : { name: edge.name };
   // The way the ride begins carries the street's id, so the way back at the
   // node it reaches is the whole street and is never the way on. The other
   // half has its own id: the way on from the start if the route turns round
@@ -326,6 +372,7 @@ function startWays(
     to: String(forwards ? edge.to : edge.from),
     points: points(forwards ? ahead : behind),
     roadClass,
+    ...named,
   };
   const other: RollingEdge = {
     id: `${id}:behind`,
@@ -333,6 +380,7 @@ function startWays(
     to: String(forwards ? edge.from : edge.to),
     points: points(forwards ? behind : ahead),
     roadClass,
+    ...named,
   };
   return [first, other];
 }
@@ -360,6 +408,19 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   };
   const schedule = options.schedule ?? defaultSchedule;
   const mirror = new StreetMirror();
+  /** #3052: the graph's street names, where to paint each, built again only when the graph changes. */
+  let named: { readonly version: number; readonly labels: readonly StreetNameLabel[] } | undefined;
+  const streetNames = (): readonly StreetNameLabel[] => {
+    if (named?.version !== mirror.version) {
+      const streets: NamedStreetLine[] = [];
+      for (const edge of mirror.edges()) {
+        if (edge.name !== undefined)
+          streets.push({ id: String(edge.id), line: edge.line, name: edge.name });
+      }
+      named = { version: mirror.version, labels: streetNameLabels(streets) };
+    }
+    return named.labels;
+  };
   let builder: GraphBuilder | undefined;
   /** Whether the graph could not be built: the ride rides on what it has. */
   let graphFailed = false;
@@ -367,6 +428,68 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   const sent = new Map<string, TileId>();
   let syncing: Promise<void> = Promise.resolve();
   let stopped = false;
+  /**
+   * #2901: where the ride's tiles are planned — made with the first block
+   * held, so a start stopped before any is read never makes its worker.
+   */
+  let planner: TilePlanner | undefined;
+  /** What the planner was last asked for: the view and the rider. @see TILE_ASK_METRES */
+  let asked: { readonly view: unknown; readonly rider: number } | undefined;
+  function holdTiles(): void {
+    if (stopped) return;
+    const blocks = new Map<string, TileBlockFeatures>();
+    for (const block of reader.held()) {
+      blocks.set(`${String(block.block.x)}/${String(block.block.y)}`, featuresOf(block));
+    }
+    if (blocks.size === 0 && planner === undefined) return;
+    planner ??= (options.tilePlanner ?? createTilePlanner)({ frame, log: options.log });
+    planner.hold(blocks);
+    // #2903: the streets of the held blocks, for the scene — a new corridor
+    // only when what is held changed, since the scene keeps what it draws
+    // from one against the corridor object.
+    const same =
+      heldFeatures !== undefined &&
+      heldFeatures.size === blocks.size &&
+      [...blocks].every(([key, features]) => heldFeatures?.get(key) === features);
+    if (!same) {
+      heldFeatures = blocks;
+      streetCorridor = openWorldStreetCorridor(frame, blocks.values());
+    }
+  }
+  /** #2903: the held blocks the street corridor was built from, and that corridor. */
+  let heldFeatures: ReadonlyMap<string, TileBlockFeatures> | undefined;
+  let streetCorridor: WorldCorridor | undefined;
+  function planAhead(route: RollingRoute, rider: number): void {
+    if (planner === undefined || !Number.isFinite(rider)) return;
+    const view = route.view();
+    if (asked?.view === view && Math.abs(rider - asked.rider) < TILE_ASK_METRES) return;
+    asked = { view, rider };
+    planner.want(tilesToPlan(route, rider));
+    // #2902: and the mapped buildings round the rider, against this view,
+    // whenever the view or the tiles planned changed, or the rider has ridden
+    // on far enough that the reach planned no longer covers the belt's.
+    const along = rider - route.origin;
+    if (!(along >= 0 && along <= route.end - route.origin)) return;
+    const tiles = [...planner.plans()].length;
+    if (tiles === 0) return;
+    const at = positionAlong(view, along);
+    const { x, z } = localMetres(frame, at.longitude, at.latitude);
+    const last = buildingsAsked;
+    if (
+      last !== undefined &&
+      last.view === view &&
+      last.tiles === tiles &&
+      Math.hypot(x - last.x, z - last.z) < OPEN_WORLD_BUILDINGS_REPLAN_METRES
+    ) {
+      return;
+    }
+    buildingsAsked = { view, tiles, x, z };
+    planner.planBuildings({ profile: view, x, z });
+  }
+  /** What the buildings were last planned for. @see planAhead */
+  let buildingsAsked:
+    | { readonly view: unknown; readonly tiles: number; readonly x: number; readonly z: number }
+    | undefined;
   const reader = createAreaReader({
     archive: options.archive,
     frame,
@@ -376,6 +499,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     log: options.log,
     yieldToIdle: options.yieldToIdle,
     onChange: () => {
+      holdTiles();
       void sync();
     },
   });
@@ -439,6 +563,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       );
     }
     if (begun.kind !== 'ready' || late) return refused('unavailable');
+    holdTiles();
     await sync();
     if (stopped) return { kind: 'stopped' };
     if (graphFailed) return refused('unavailable');
@@ -463,6 +588,14 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
             reader.moveTo(position);
           },
           graphVersion: () => mirror.version,
+          ahead: planAhead,
+          // #2902: the whole ride drawn in the start's frame, the tiles' own.
+          frame: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
+          buildings: () => planner?.buildings,
+          // #2903: every held street, drawn to the fog as road.
+          streets: () => streetCorridor,
+          // #3052: and where each named one's name is painted on it.
+          streetNames,
         }),
     };
   })();
@@ -476,6 +609,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // is cancelled there, as it is after any start.
       reader.stop();
       builder?.stop();
+      planner?.stop();
     },
   };
 }

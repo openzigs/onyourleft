@@ -12,6 +12,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0096 is [ADR 0096](../adr/0096-the-open-world-names-its-streets-on-the-road-and-in-the-junction-prompt.md)**,
+  taken by [#3052](https://github.com/openzigs/onyourleft/issues/3052) on 2026-11-23 for street
+  names in the open world, painted on the road and said in the junction prompt. **Accepted** 2026-11-23 on
+  #3052's pull request #3093. It supersedes in part ADR 0054 D-2.2 and D-5.7 and ADR 0091
+  D-2's unread `name`, for the open-world ride only; each gained one dated `## Amendments` pointer.
+  The next free number is **0097**.
   ⚠️ **0095 is [ADR 0095](../adr/0095-what-a-fit-grade-side-camera-may-report-and-use.md)**,
   taken by [#3034](https://github.com/openzigs/onyourleft/issues/3034) on 2026-11-22 for what a
   fit-grade side camera may report and use (1° once measured within ±3°, a published dynamic range

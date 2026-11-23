@@ -51,6 +51,7 @@ import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
 import type { Season } from './season';
 import type { SideRoad } from './cross-streets';
+import type { StreetNamesInView } from './street-names';
 import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
@@ -538,6 +539,13 @@ export interface SceneFrame {
    * world, ADR 0054 D-6).
    */
   readonly mappedBuildings?: MappedBuildingsInView;
+  /**
+   * #3052, ADR 0096: an open-world ride's street names in view, each letter
+   * a quad on its street's surface (`street-names.ts` §`streetNamesInView`).
+   * Drawn in ONE call from one glyph atlas (`three-renderer.ts`
+   * §`StreetNameBelt`); absent on every ride that names no street.
+   */
+  readonly streetNames?: StreetNamesInView | undefined;
   /**
    * A Delivery round's parcels in flight, the markers on the houses still on
    * the round, and its obstacles — #1814 (`delivery/in-view.ts`

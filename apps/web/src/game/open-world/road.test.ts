@@ -26,6 +26,8 @@ import {
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
 import { drawnLine, drawnLineAt } from '../drawn-line';
+import { routeSeed } from '../scatter';
+import { sceneryAnchor } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
 import { LINE_EASE_METRES } from './line-ease';
@@ -112,6 +114,24 @@ describe('the open-world road past its first view — #2982', () => {
     // The next change is not a U-turn.
     const later = road.view.profile.totalDistance - OPEN_WORLD_REACH_FLOOR_METRES + 130;
     expect(road.follow(later)?.turned).toBe(false);
+  });
+
+  it('keys every view it hands on to the ride: the first view seed, and its own origin — #3055', () => {
+    const road = grid();
+    const seed = routeSeed(road.view.profile);
+    expect(sceneryAnchor(road.view.profile)).toEqual({ seed, origin: 0 });
+    let views = 0;
+    for (let rider = 0; rider <= 6_000; rider += 50) {
+      if (rider === 3_000) road.route.uTurn(rider);
+      const next = road.follow(rider);
+      if (next === undefined) continue;
+      views += 1;
+      expect(sceneryAnchor(next.profile), `at ${rider} m`).toEqual({ seed, origin: next.origin });
+      // The view's own seed is not the ride's: it is the view that changed.
+      expect(routeSeed(next.profile)).not.toBe(seed);
+    }
+    expect(views).toBeGreaterThan(3);
+    expect(road.view.origin).toBeGreaterThan(0);
   });
 
   it('advances nothing for a rider distance that is not a finite number', () => {
