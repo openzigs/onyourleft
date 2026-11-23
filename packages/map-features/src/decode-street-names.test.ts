@@ -192,7 +192,7 @@ describe('a hostile tile’s name is cleaned, bounded or dropped, and never refu
 
   it('malformed UTF-8 is no name, and the tile’s other street keeps its own', () => {
     const bytes = roadsTile([{ name: 'QQZZ' }, { name: 'Control Way' }]);
-    // An overlong '/' (C0 AF) and a lone continuation byte, written over the name's bytes.
+    // Each malformed sequence, written over the name's bytes in turn.
     const at = bytes.findIndex(
       (_, index) =>
         bytes[index] === 0x51 &&
@@ -202,10 +202,14 @@ describe('a hostile tile’s name is cleaned, bounded or dropped, and never refu
     );
     expect(at).toBeGreaterThan(0);
     for (const [patch, label] of [
-      [[0xc0, 0xaf, 0x41, 0x41], 'overlong'],
+      [[0xc0, 0xaf, 0x41, 0x41], 'overlong lead byte'],
+      // E0 80 AF passes the lead-byte check and decodes to U+002F: only `point < least` stops it.
+      [[0xe0, 0x80, 0xaf, 0x41], 'overlong three-byte'],
       [[0x41, 0x80, 0x41, 0x41], 'lone continuation'],
       [[0x41, 0x41, 0x41, 0xe2], 'cut sequence'],
       [[0xed, 0xa0, 0x80, 0x41], 'surrogate'],
+      // F4 90 80 80 is 0x110000, past U+10FFFF: String.fromCodePoint would throw a RangeError.
+      [[0xf4, 0x90, 0x80, 0x80], 'past U+10FFFF'],
     ] as const) {
       const hostile = Uint8Array.from(bytes);
       hostile.set(patch, at);
