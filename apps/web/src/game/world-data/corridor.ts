@@ -66,6 +66,7 @@ import type { PrivacyZoneRecord, WorldCorridorTileState } from '@onyourleft/stor
 
 import { TRIM_JITTER_FRACTION } from '../../detail/privacy';
 import type { CorridorOrigin } from '../terrain';
+import { withoutTileCopies } from './tile-copies';
 
 /**
  * How far either side of the route's line the corridor reaches: **250 m**,
@@ -952,7 +953,11 @@ export function coveredLookup(
   };
 }
 
-/** The corridor a ride is handed, from what was read or kept. */
+/**
+ * The corridor a ride is handed, from what was read or kept. #3047: with each
+ * building two tiles' buffers both carry held once (`tile-copies.ts`), so a
+ * corridor kept before the fix is mended as it is handed over.
+ */
 export function worldCorridorOf(
   routeId: string,
   origin: CorridorOrigin,
@@ -967,7 +972,7 @@ export function worldCorridorOf(
       .filter((tile) => tile.state === 'covered')
       .map((tile) => tileBox(origin, { z: 15, x: tile.x, y: tile.y })),
     landUse: features.landUse,
-    buildings: features.buildings,
+    buildings: withoutTileCopies(features.buildings),
     paths: features.paths,
     streets: features.streets,
     places: features.places,
