@@ -248,4 +248,47 @@ describe('the path an open-world ride is drawn along — #2989', () => {
     const ownThere = drawnLineAt(own, alongView(road.view, out));
     expect(Math.hypot(drawnThere.x - ownThere.x, drawnThere.z - ownThere.z)).toBeLessThan(1e-6);
   });
+
+  /**
+   * The most the pressed half-turn's path may bend the drawn rider's move,
+   * per metre of odometer squared: **0.28**. A frame's change of move is this
+   * times the odometer a frame covers, squared, so it holds
+   * `u-turn-press.test.tsx` §`JUMP_METRES`' 0.05 m at 30 fps up to 45 km/h.
+   * Drawn with `drawn-line.ts` §`halfTurnAt`'s half-circle for both pieces,
+   * as the press was first drawn, every press here was over it (#3066's
+   * review).
+   */
+  const MOST_PULL_PER_SQUARE_METRE = 0.28;
+
+  it.each([70, 100, 120, 1_501, 1_502, 1_503, 1_504, 1_505, 1_506, 1_507, 1_508, 1_509, 1_905])(
+    'pressed at %i m, draws the U-turn at least 3 m across, with no pull on the drawn rider past the bound — #3066',
+    (ride) => {
+      const road = riddenTo(Math.floor(ride / 10) * 10);
+      road.drawnPath(ride);
+      road.route.uTurn(ride);
+      expect(road.follow(ride)?.turned).toBe(true);
+      const path = road.drawnPath(ride);
+      const pieces = path.pressed?.pieces ?? [];
+      expect(pieces.length).toBe(2);
+      // A half-turn, not a spin on the spot: the rider is 1.75 m off the
+      // middle here, so the road has room for 3 m across on one side. Pressed
+      // on a sample (70, 100, 120 m) the new line runs back within a metre of
+      // them on the near side, which was all the room it was first given.
+      const turn = pieces[0] as NonNullable<(typeof pieces)[number]>;
+      const across = Math.hypot(turn.end.x - turn.start.x, turn.end.z - turn.start.z);
+      expect(across, `${String(ride)} m`).toBeGreaterThanOrEqual(3 - 1e-9);
+      const from = (pieces[0]?.from as number) + 0.5;
+      const to = pieces[pieces.length - 1]?.to as number;
+      const step = 0.25;
+      let most = 0;
+      for (let at = from; at + step <= to; at += step) {
+        const a = drawnLineAt(path, at - step);
+        const b = drawnLineAt(path, at);
+        const c = drawnLineAt(path, at + step);
+        const pull = Math.hypot(c.x - 2 * b.x + a.x, c.z - 2 * b.z + a.z) / step ** 2;
+        most = Math.max(most, pull);
+      }
+      expect(most, JSON.stringify({ from, to, pieces })).toBeLessThan(MOST_PULL_PER_SQUARE_METRE);
+    },
+  );
 });

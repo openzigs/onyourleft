@@ -110,19 +110,33 @@ const PRESSED_TURN_KERB_METRES = 0.75;
 const ROAD_HALF_METRES = ROAD_WIDTH_METRES / 2;
 
 /**
- * How fast the drawn rider rounds a pressed U-turn, as a share of how fast
- * they ride: **0.5** at its slowest, so its half-turn takes twice its length
- * in odometer — #3066, *its choice*. They slow into it and pick up out of it
- * (`drawn-line.ts` §`halfTurnAt`).
+ * How much odometer a pressed U-turn's half-turn is ridden over, in metres:
+ * **15** — #3066's review, *its choice*. Each piece is a cubic in the
+ * odometer (`drawn-line.ts` §`hermiteAt`), whose pull on the drawn rider is
+ * largest at its ends, `12r/S²` across and `2/S` along for a radius `r` and a
+ * span `S`: at 15 m under 0.25 a metre for the widest half-turn the road has
+ * room for. The press was first drawn over `πr/0.5`, 9.4 m for the narrowest,
+ * and the drawn rider's move changed by 0.06 to 0.1 m from one frame to the
+ * next (`u-turn-press.test.tsx`). The rider slows into the half-turn, to a
+ * third to a half of their pace midway, and picks up out of it. A fixed span
+ * keeps the lag the merge gives back, and so the whole turn, inside 40 m,
+ * short of `camera.ts` §`U_TURN_PIVOT_METRES`' 45.
  */
-const PRESSED_TURN_PACE = 0.5;
+const PRESSED_TURN_SPAN_METRES = 15;
 
 /**
  * How far along the road back the drawn rider is eased from the side of the
  * road the half-turn ends on to the new view's line, at least, in metres:
- * **10** — #3066.
+ * **10** — #3066. And for each metre the drawn rider is behind (or ahead of)
+ * the new line's place when the half-turn ends, {@link PRESSED_TURN_MERGE_PER_LAG}
+ * more (#3066's review): the half-turn makes no way along the road while the
+ * odometer runs on, so the merge gives that back, and over a short one it
+ * does so with a jerk.
  */
 const PRESSED_TURN_MERGE_METRES = 10;
+
+/** The merge's metres for each metre of lag it gives back: **1** — #3066's review. */
+const PRESSED_TURN_MERGE_PER_LAG = 1;
 
 /** The step the slope of a path is read over, metres of odometer either side. */
 const SLOPE_STEP_METRES = 0.01;
@@ -196,8 +210,9 @@ export interface OpenWorldRoadHooks {
  * zero is `beforeOrigin`.
  *
  * Two pieces: a half-turn from where `before` has the rider, across to
- * {@link PRESSED_TURN_ACROSS_METRES} over on the side of the road with more
- * room, slowed to {@link PRESSED_TURN_PACE}; then, facing back, an ease onto
+ * {@link PRESSED_TURN_ACROSS_METRES} over, towards the new line where the
+ * road has that much room that way and otherwise on the side with more,
+ * over {@link PRESSED_TURN_SPAN_METRES}; then, facing back, an ease onto
  * `line` over at least {@link PRESSED_TURN_MERGE_METRES} of the road back.
  * Undefined where the view ends before that, or the rider is past the turn.
  */
@@ -235,22 +250,19 @@ function pressedTurn(
   const wanted = back - offset;
   const towards = wanted >= 0 ? 1 : -1;
   const roomOn = (side: number): number => room - side * offset;
+  // #3066's review: towards the new line only where that side has room for
+  // the whole half-turn; a half-turn a metre across is a spin on the spot.
   const side =
-    roomOn(towards) >= Math.min(PRESSED_TURN_ACROSS_METRES, Math.abs(wanted)) ||
-    roomOn(towards) >= roomOn(-towards)
+    roomOn(towards) >= PRESSED_TURN_ACROSS_METRES || roomOn(towards) >= roomOn(-towards)
       ? towards
       : -towards;
   const across = Math.min(Math.max(PRESSED_TURN_ACROSS_METRES, Math.abs(wanted)), roomOn(side));
-  const radius = across / 2;
-  const turnSpan = (Math.PI * radius) / PRESSED_TURN_PACE;
-  // The second piece ends where the road back is at least the merge's length
-  // back from where the first ends: the place `ahead` past the press is the
-  // turn, so ridden `span` past the press the rider is `span − 2·ahead`
-  // back from the press's place.
-  const span = Math.max(
-    turnSpan + PRESSED_TURN_MERGE_METRES,
-    PRESSED_TURN_MERGE_METRES + 2 * ahead,
-  );
+  const turnSpan = PRESSED_TURN_SPAN_METRES;
+  // The half-turn ends about where along the road it began, `turnSpan` past
+  // the press; the new line is then `turnSpan − 2·ahead` further back along
+  // the road (it turns `ahead` past the press), which the merge gives back.
+  const lag = turnSpan - 2 * ahead;
+  const span = turnSpan + PRESSED_TURN_MERGE_METRES + PRESSED_TURN_MERGE_PER_LAG * Math.abs(lag);
   const to = from + span;
   if (!(across > 0) || !(to <= (line.profile.totalDistance as number))) return undefined;
   const across1: PathPoint = {

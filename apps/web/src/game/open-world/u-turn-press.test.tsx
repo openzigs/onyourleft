@@ -73,12 +73,16 @@ vi.mock('../scene', async (importOriginal) => {
 const COLUMNS = [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450];
 const ROWS = [0, 230, 400, 650, 820, 1_090, 1_280, 1_510];
 
-/** Where the U-turn is pressed: on the major road, clear of the first junction. */
-const PRESS_AT_METRES = 70;
+/**
+ * Where the U-turn is pressed, metres ridden: on the major road, clear of the
+ * first junction, at places across a 10 m sample and over the straight, so
+ * that no one place the half-turn is tuned to stands for every press.
+ */
+const PRESS_AT_METRES = [64, 70, 72, 75, 77, 79, 99, 109, 118, 125, 131, 138, 157] as const;
 
 /** Watched at the frame rate from this far before the press, and to this far after it. */
 const WATCH_BEFORE_METRES = 5;
-const WATCH_AFTER_METRES = 40;
+const WATCH_AFTER_METRES = 70;
 
 /** The frame rate the press is watched at. */
 const FPS = 30;
@@ -252,10 +256,11 @@ interface Watched {
 
 /**
  * Rides the real game screen up the major road, presses ArrowDown at
- * {@link PRESS_AT_METRES}, and watches every frame the renderer was handed
+ * `pressAt` metres, and watches every frame the renderer was handed
  * at {@link FPS} around it.
  */
 async function rideThePress(
+  pressAt: number,
   written: { grade: number; atMs: number }[] = [],
 ): Promise<readonly Watched[]> {
   mounted = await mount(
@@ -277,15 +282,15 @@ async function rideThePress(
   await settle();
   let watchedFrom: number | undefined;
   const watchFrom = (): void => {
-    if (watchedFrom !== undefined || odometer() < PRESS_AT_METRES - WATCH_BEFORE_METRES) return;
+    if (watchedFrom !== undefined || odometer() < pressAt - WATCH_BEFORE_METRES) return;
     watchedFrom = drawn.length;
     frameMs = 1000 / FPS;
   };
-  for (let frame = 0; frame < 600 && odometer() < PRESS_AT_METRES; frame += 1) {
+  for (let frame = 0; frame < 600 && odometer() < pressAt; frame += 1) {
     await pump();
     watchFrom();
   }
-  expect(odometer()).toBeLessThan(PRESS_AT_METRES + 1);
+  expect(odometer()).toBeLessThan(pressAt + 1);
   await act(async () => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }),
@@ -329,42 +334,48 @@ const turnBetween = (from: number, to: number): number =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
 describe('a U-turn press in an open-world ride, frame by frame — #3066', () => {
-  it('moves neither the drawn rider nor the camera by a jump, and turns the rider round', async () => {
-    const frames = await rideThePress();
-    const rider = mostJump(frames.map((frame) => frame.rider));
-    const camera = mostJump(frames.map((frame) => frame.camera));
-    const facts = JSON.stringify({ rider, camera });
-    expect(rider, facts).toBeLessThan(JUMP_METRES);
-    expect(camera, facts).toBeLessThan(JUMP_METRES);
-    // The rider was turned round, and round a half-turn: facing back down the
-    // road at the end, and still facing more than a quarter of the way round
-    // from where they started for more than a few metres of the ride.
-    const first = frames[0] as Watched;
-    const last = frames[frames.length - 1] as Watched;
-    expect(Math.abs(turnBetween(first.riderYaw, last.riderYaw))).toBeGreaterThan(
-      (170 * Math.PI) / 180,
-    );
-    const turning = frames.filter((frame) => {
-      const turned = Math.abs(turnBetween(first.riderYaw, frame.riderYaw));
-      return turned > Math.PI / 4 && turned < (3 * Math.PI) / 4;
-    });
-    const across = turning.map((frame) => frame.odometer);
-    expect(Math.max(...across) - Math.min(...across)).toBeGreaterThan(3);
-  });
+  it.each(PRESS_AT_METRES)(
+    'pressed at %i m, moves neither the drawn rider nor the camera by a jump, and turns the rider round',
+    async (pressAt) => {
+      const frames = await rideThePress(pressAt);
+      const rider = mostJump(frames.map((frame) => frame.rider));
+      const camera = mostJump(frames.map((frame) => frame.camera));
+      const facts = JSON.stringify({ pressAt, rider, camera });
+      expect(rider, facts).toBeLessThan(JUMP_METRES);
+      expect(camera, facts).toBeLessThan(JUMP_METRES);
+      // The rider was turned round, and round a half-turn: facing back down the
+      // road at the end, and still facing more than a quarter of the way round
+      // from where they started for more than a few metres of the ride.
+      const first = frames[0] as Watched;
+      const last = frames[frames.length - 1] as Watched;
+      expect(Math.abs(turnBetween(first.riderYaw, last.riderYaw))).toBeGreaterThan(
+        (170 * Math.PI) / 180,
+      );
+      const turning = frames.filter((frame) => {
+        const turned = Math.abs(turnBetween(first.riderYaw, frame.riderYaw));
+        return turned > Math.PI / 4 && turned < (3 * Math.PI) / 4;
+      });
+      const across = turning.map((frame) => frame.odometer);
+      expect(Math.max(...across) - Math.min(...across), facts).toBeGreaterThan(3);
+    },
+  );
 
-  it('does not teleport the drawn rider under reduced motion', async () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query === '(prefers-reduced-motion: reduce)',
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }));
-    const frames = await rideThePress();
-    expect(mostJump(frames.map((frame) => frame.rider))).toBeLessThan(JUMP_METRES);
-  });
+  it.each(PRESS_AT_METRES)(
+    'pressed at %i m, does not teleport the drawn rider under reduced motion',
+    async (pressAt) => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(prefers-reduced-motion: reduce)',
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }));
+      const frames = await rideThePress(pressAt);
+      expect(mostJump(frames.map((frame) => frame.rider))).toBeLessThan(JUMP_METRES);
+    },
+  );
 
   it('walks the grade to the road back at 1 % a second: the half-turn is drawn only', async () => {
     const written: { grade: number; atMs: number }[] = [];
-    await rideThePress(written);
+    await rideThePress(70, written);
     const after = written.filter((write) => write.atMs >= pressedAtMs);
     // Non-vacuity: the trainer was written to through the turn, and the
     // grade it was asked for changed.
