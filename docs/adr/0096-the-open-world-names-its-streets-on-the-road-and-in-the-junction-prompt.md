@@ -1,9 +1,9 @@
 # ADR 0096: The open world names its streets, on the road and in the junction prompt
 
-- **Status**: **Proposed**, 2026-11-23. It is written on the owner's request of 2026-11-22 (#3052) and
-  the ruling of 2026-11-23 on #3051. It is in force only once the owner accepts it on #3052's pull
-  request. The implementation in that pull request is built for the owner's tablet ride. It must
-  not merge before acceptance, and D-6 lists the questions for the owner
+- **Status**: **Accepted**, 2026-11-23, by the owner on #3052's pull request (#3093), with every D-6
+  answer as recommended: Q1 accept; Q2 no switch to hide names now; Q3 the painted size as built,
+  to be judged on the tablet ride. Written on the owner's request of 2026-11-22 (#3052) and the
+  ruling of 2026-11-23 on #3051
 - **Date**: 2026-11-23
 - **Deciders**: **the owner**, who asked for this. The author drafted the ADR, and every bound in it
   is the author's choice
@@ -111,11 +111,12 @@ chosen again every 20 m.
 
 ### D-6: For the owner
 
-- **Q1. Accept this ADR?** Recommended: yes. You asked for it.
+- **Q1. Accept this ADR?** Recommended: yes. You asked for it. **Owner, 2026-11-23: accepted.**
 - **Q2. A switch to hide street names**, for riders who stream or share screenshots? Recommended:
-  not now. Ask again if a rider asks for one.
+  not now. Ask again if a rider asks for one. **Owner, 2026-11-23: not now.**
 - **Q3. The painted size**: letters 2.6 m tall across the street and 1.5 m apart along it.
-  Recommended: as built, then judged on the tablet ride.
+  Recommended: as built, then judged on the tablet ride. **Owner, 2026-11-23: as built, judged on the
+  ride.**
 
 ## Consequences
 
