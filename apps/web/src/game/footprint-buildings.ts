@@ -5469,7 +5469,10 @@ export function footprintPlans(
   urban?: UrbanClassMap,
   options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
+  // The ground's seed: the route's, as the scene draws the ground with (`scene.ts`).
   const seed = scatterSeed(profile);
+  // #2902: and the seed each plan's own choices are drawn from, the ground's unless given.
+  const draws = options.seed ?? seed;
   // #2973: the streets drawn beside the route, unless `-nearby-streets` is off.
   const streets =
     options.nearbyStreets === false ? NO_NEARBY_STREETS : nearbyStreets(corridor, profile, origin);
@@ -5559,6 +5562,7 @@ export function footprintPlans(
       typed,
       untagged === undefined ? undefined : { untagged, own },
       options.mappedPois ?? true,
+      draws,
     );
     keeps.set(own, typeof each !== 'string');
     if (typeof each === 'string') {
@@ -5637,6 +5641,7 @@ export function footprintPlans(
         profile,
         origin,
         seed,
+        draws,
         maxVertices,
         streets,
         plans,
@@ -5917,6 +5922,8 @@ function terracePlans(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  // #2902: the seed its blocks' own choices are drawn from.
+  draws: number,
   maxVertices: number,
   streets: NearbyStreets,
   kept: readonly FootprintPlan[],
@@ -5970,7 +5977,7 @@ function terracePlans(
       ) {
         continue;
       }
-      const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
+      const draw = uniformFrom(slotHash(draws, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
       const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
       // #1635: measured, then planned, as a mapped footprint is — every block
       // measured before any is planned, so the party walls between them are
@@ -5996,6 +6003,10 @@ function terracePlans(
         // Its fields are all `null`: a terrace block reads no tag.
         false,
         others.terrace === true,
+        false,
+        undefined,
+        false,
+        draws,
       );
       if (typeof measured === 'string') continue;
       blocks.push(measured);
@@ -6577,6 +6588,8 @@ interface Measured {
   readonly base: number;
   readonly floor: number;
   readonly eaves: number;
+  /** #2902: the seed its own choices are drawn from, which may not be the ground's. */
+  readonly draws: number;
 }
 
 /** One footprint, measured, or the verdict that dropped it: rules 1 to 6 and its height. */
@@ -6602,6 +6615,8 @@ function measureFootprint(
   inference?: { readonly untagged: Untagged; readonly own: number },
   // #2975: whether its POI class is read (`-map-pois` off).
   pois = false,
+  // #2902: the seed its own choices are drawn from; the ground's `seed` unless given.
+  draws = seed,
 ): Measured | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -6743,7 +6758,7 @@ function measureFootprint(
     : typedFamily !== undefined
       ? FAMILY_USE[typedFamily]
       : footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
-  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const share = (stream: number): number => footprintShare(draws, centroid.x, centroid.z, stream);
   // #1790: a mapped `building:levels` is the storey count. Not a part's, which counts from the
   // ground, not from its `min_height`, and whose `building:min_level` the tile does not carry.
   const levels = mapped && !part ? levelsOf(building.levels) : null;
@@ -6795,6 +6810,7 @@ function measureFootprint(
     base,
     floor,
     eaves: floor + wallHeight,
+    draws,
   };
 }
 
@@ -6823,6 +6839,15 @@ interface RoofSplitting {
 
 /** The planner's switches — the realistic page's levers; the product takes the defaults. */
 export interface FootprintPlanOptions {
+  /**
+   * #2902: the seed every plan's own choices are drawn from — its roof, its
+   * storeys, its cladding and paint; absent, the route's ({@link scatterSeed}).
+   * The ground it stands on is always read with the route's, which is the
+   * seed the scene draws that ground with. An open-world ride passes its start
+   * frame's (`scatter.ts` §`frameSeed`): its view, and so the view's seed,
+   * changes as it is ridden, and a building already drawn must not change.
+   */
+  readonly seed?: number;
   /**
    * #1660: L-, T-, U- and Z-shaped footprints pitched over their 2–3
    * rectangles; `true` by default. Off is `main`'s rule, every footprint below
@@ -7088,7 +7113,8 @@ function canopyPlanOf(
   driveways: RingGrid,
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, floor, base } = measured;
-  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const share = (stream: number): number =>
+    footprintShare(measured.draws, centroid.x, centroid.z, stream);
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   const groundAt = (x: number, z: number): number => {
     nearestOnRoadSegments(road, segments, x, z, beside);
@@ -7464,7 +7490,8 @@ function planFootprint(
   // #1791: a civic block's and a shed's door is plain, so wears no wreath; a garage's is its garage door.
   const doorKind: 'door' | 'plain' | 'none' =
     civic || family === 'shed' || pole ? 'plain' : family === 'garage' ? 'none' : 'door';
-  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const share = (stream: number): number =>
+    footprintShare(measured.draws, centroid.x, centroid.z, stream);
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   const groundAt = (x: number, z: number): number => {
     nearestOnRoadSegments(road, segments, x, z, beside);

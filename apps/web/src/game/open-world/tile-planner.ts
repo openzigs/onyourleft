@@ -341,10 +341,10 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
       if (reply.kind === 'buildings') {
         buildings = mappedBuildingsOf(reply.plans);
         version += 1;
-        askBuildings();
-      } else {
-        fail();
       }
+      // A failed one leaves the tiles' planner alone: the buildings last
+      // planned stay drawn, and only a newer ask is planned, never this again.
+      askBuildings();
       return;
     }
     if (reply === null || reply === undefined || inFlight === undefined) return;

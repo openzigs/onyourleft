@@ -34,6 +34,7 @@ import {
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
 } from '../realistic-budget';
+import { scatterSeed } from '../scatter';
 import { sceneFrame } from '../scene';
 import { atStartLine } from '../simulation';
 import { corridorOrigin, localGroundPosition } from '../terrain';
@@ -298,6 +299,43 @@ describe('an open-world ride fills its belt from its tiles — #2902', () => {
     expect(Math.max(...zs)).toBeLessThan(local(0, 5).z);
     // The same array while the view and the junction stay.
     expect(road.branchesAhead(APPROACH_METRES - 50)).toBe(near);
+  });
+
+  it('plans each footprint as it was once the view changes: seeded from the frame, not the view', () => {
+    const road = new OpenWorldRoad(crossroads(), { frame: FRAME });
+    const rider = APPROACH_METRES - 200;
+    const before = road.view.profile;
+    const first = plannedRound(road, rider);
+    let changed = false;
+    for (let at = 0; at <= rider && !changed; at += 25) changed = road.follow(at) !== undefined;
+    // Control: the view did change, and with it the view's own seed.
+    expect(changed).toBe(true);
+    expect(road.view.profile).not.toBe(before);
+    expect(scatterSeed(road.view.profile)).not.toBe(scatterSeed(before));
+    const second = plannedRound(road, rider);
+    // Its base and eaves are not among them: it stands on the ground the scene
+    // draws, which is the view's (`landform.ts` §`terrainHeightAt`), so they
+    // move with the view; its storeys are its own.
+    const looks = (plan: (typeof first.plans)[number]) => ({
+      storeys: plan.storeys,
+      roof: plan.roof,
+      roofVariant: plan.roofVariant,
+      pitchDegrees: plan.pitchDegrees,
+      cladding: plan.cladding,
+      paint: plan.paint,
+      garage: plan.garage,
+    });
+    const keyOf = (plan: (typeof first.plans)[number]) =>
+      `${plan.centroid.x.toFixed(2)},${plan.centroid.z.toFixed(2)}`;
+    const was = new Map(first.plans.map((plan) => [keyOf(plan), looks(plan)]));
+    let shared = 0;
+    for (const plan of second.plans) {
+      const then = was.get(keyOf(plan));
+      if (then === undefined) continue;
+      shared += 1;
+      expect(looks(plan), keyOf(plan)).toStrictEqual(then);
+    }
+    expect(shared).toBeGreaterThan(MAPPED_BUILDING_MAX);
   });
 
   it('plans at most the nearest few on the page’s fallback', () => {

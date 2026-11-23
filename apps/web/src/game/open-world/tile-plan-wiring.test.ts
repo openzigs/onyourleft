@@ -110,9 +110,10 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     );
     expect(plans.length).toBeGreaterThan(0);
     // #2902: once tiles are planned, the buildings round the rider are, and
-    // the road hands them on (the fixture's block has no footprints).
+    // the road hands them on (the fixture's block has no footprints) — at a
+    // standing start, with the rider not yet moved.
     expect(road.buildings()).toBeUndefined();
-    road.follow(30);
+    road.follow(0);
     await settle();
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
