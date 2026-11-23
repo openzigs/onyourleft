@@ -102,6 +102,7 @@ import {
   metres,
   positionAt,
   type GeographicPosition,
+  type RollingJunction,
   type RollingRoute,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -195,6 +196,29 @@ interface HeldWayOut extends OpenWorldWayOut {
 }
 
 const NO_WAYS_OUT: readonly OpenWorldWayOut[] = [];
+
+/**
+ * One junction of the ride, as the scene cuts a village's street at it
+ * (`scene.ts` §`SceneInput.junctionsSeen`). @see OpenWorldRoad.junctionsSeen
+ */
+export interface OpenWorldJunctionSeen {
+  /** The junction's ride distance, on the route it was seen on. */
+  readonly distance: number;
+  /** Where it is: the node every way on from it leaves. */
+  readonly position: GeographicPosition;
+}
+
+const NO_JUNCTIONS_SEEN: readonly OpenWorldJunctionSeen[] = [];
+
+/**
+ * How far behind the rider a junction seen is still handed on, metres:
+ * **1 000** — #3095. A junction is a cut in a village's street, and a cut
+ * dropped makes the street whole again, which re-lays it: so one is dropped
+ * only once the whole of any street it cuts is behind the view. A village's
+ * street is under 220 m (`settlements.ts` §`VILLAGE_METRES` and a plot either
+ * end) and the view reaches 60 m behind.
+ */
+export const JUNCTIONS_SEEN_BEHIND_METRES = 1_000;
 
 /** The road, as every reader in the ride loop reads it. */
 export interface OpenWorldRoadView {
@@ -379,6 +403,38 @@ export class OpenWorldRoad {
       }
     | undefined;
 
+  /** Every junction seen, by ride distance and node. @see junctionsSeen */
+  #junctionsSeen = new Map<string, OpenWorldJunctionSeen>();
+  /** What {@link junctionsSeen} last handed on: the same array until a junction is seen or dropped. */
+  #junctionsSeenList: readonly OpenWorldJunctionSeen[] = NO_JUNCTIONS_SEEN;
+
+  /**
+   * Every junction {@link waysOut} has seen on the road and along its ways
+   * out — #3095: each of the whole route held ahead (`RollingRoute`
+   * §`junctionsAfter`, 2 km, so a junction is seen long before the view
+   * reaches it), kept as the rider passes it until
+   * {@link JUNCTIONS_SEEN_BEHIND_METRES} behind, and dropped at a U-turn.
+   * The scene cuts a village's street at each that stands on the street, so
+   * the piece past one is laid alike along the road and every way out
+   * (`streets.ts` §`streetsAt`); and since the set does not change as a
+   * junction comes into the view or leaves it, no street is re-laid on an
+   * ordinary frame. The same array until a junction is seen or dropped.
+   */
+  junctionsSeen(): readonly OpenWorldJunctionSeen[] {
+    return this.#junctionsSeenList;
+  }
+
+  /** Notes `junction` as seen, at its ride distance. @see junctionsSeen */
+  #seen(junction: RollingJunction): void {
+    const node = junction.ways[0]?.edge;
+    const at = node?.points[0];
+    if (node === undefined || at === undefined) return;
+    const key = `${String(junction.distance)}:${node.from}`;
+    if (this.#junctionsSeen.has(key)) return;
+    this.#junctionsSeen.set(key, { distance: junction.distance, position: at.position });
+    this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+  }
+
   /**
    * The ways out not taken, of every junction from
    * {@link WAYS_OUT_BEHIND_METRES} behind a rider at ride distance `rider` to
@@ -407,7 +463,9 @@ export class OpenWorldRoad {
     /** The ways out of `route`'s junctions past ride distance `after`, `depth` junctions from the road. */
     const look = (route: RollingRoute, after: number, depth: number): void => {
       for (const junction of route.junctionsAfter(after)) {
-        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) break;
+        // #3095: every junction of the route held, in view or not.
+        this.#seen(junction);
+        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) continue;
         for (const way of junction.ways) {
           if (way.edge.id === junction.taken) continue;
           // A way is where it leaves and along which street: the same way
@@ -451,6 +509,15 @@ export class OpenWorldRoad {
       }
     }
     look(this.route, rider, 1);
+    for (const [key, junction] of this.#junctionsSeen) {
+      if (junction.distance < rider - JUNCTIONS_SEEN_BEHIND_METRES) {
+        this.#junctionsSeen.delete(key);
+        this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+      }
+    }
+    if (this.#junctionsSeenList === NO_JUNCTIONS_SEEN && this.#junctionsSeen.size > 0) {
+      this.#junctionsSeenList = [...this.#junctionsSeen.values()];
+    }
     const ways: readonly OpenWorldWayOut[] = [...held.values()];
     const same =
       last !== undefined &&
@@ -509,7 +576,11 @@ export class OpenWorldRoad {
         : { from: heldLine(drawn, this.#view.origin), at: rider };
     this.#drawn = undefined;
     // #3051: after a U-turn no junction behind is one the rider passed on this road.
-    if (turned) this.#waysOut.clear();
+    if (turned) {
+      this.#waysOut.clear();
+      this.#junctionsSeen.clear();
+      this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+    }
     this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;
   }

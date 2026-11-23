@@ -4562,6 +4562,9 @@ function GameScreen({
                 // #3051: and the ways out the route does not take, so the
                 // scenery stands along each before a choice and after it.
                 waysOut: road.follower.waysOut(simulation.state.ride.distance),
+                // #3095: and every junction it has seen, where a village's
+                // street is cut so the piece past one is laid alike on each way.
+                junctionsSeen: road.follower.junctionsSeen(),
               }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the

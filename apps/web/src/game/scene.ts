@@ -210,7 +210,15 @@ import {
   type SceneryCyclist,
 } from './scenery-cyclists';
 import { NO_URBAN_CLASS } from './urban-class';
-import { positionAt, type RouteProfile } from '@onyourleft/domain';
+import { positionAt, type GeographicPosition, type RouteProfile } from '@onyourleft/domain';
+
+/** One junction of an open-world ride. @see SceneInput.junctionsSeen */
+export interface JunctionSeen {
+  /** Its ride distance. */
+  readonly distance: number;
+  /** Where it is. */
+  readonly position: GeographicPosition;
+}
 
 /** Everything a frame needs beyond the rider's own state. */
 export interface SceneInput {
@@ -331,6 +339,22 @@ export interface SceneInput {
    * the renderer was handed.
    */
   readonly waysOut?: readonly ScatterWay[] | undefined;
+  /**
+   * #3095: in an open-world ride, every junction the ride has seen on the
+   * road and along its ways out (`open-world/road.ts`
+   * §`OpenWorldRoad.junctionsSeen`), at its ride distance. A village's street
+   * that reaches across one is laid in pieces either side of it, so the
+   * piece past it is the same along the road and along every way out
+   * ({@link waysOut}). Seen 2 km ahead and kept 1 km behind, so the pieces of
+   * a street in view never change as the ride goes. Absent on every other
+   * ride, which cuts no street.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link waysOut}: with it gone a
+   * village's street past a junction is whole on the road and in pieces on
+   * no way, and a press re-lays it. `open-world/junction-corner.test.tsx`
+   * reads the pavements back off the renderer's frames through a press.
+   */
+  readonly junctionsSeen?: readonly JunctionSeen[] | undefined;
   /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
@@ -1483,34 +1507,43 @@ function withVillageCrossroadsOnWays(
 }
 
 /**
- * Where the junctions of the ways out `reached` are on `profile`, a view
- * whose distances are `shift` short of the road's: each junction that stands
- * on it, at its distance there — #3095, the cuts `streets.ts` §`streetsAt`
- * lays a village's street in pieces at. The road's own junctions on the road,
- * and on a way out its own junction and those along it.
+ * Where the ride's junctions are on `profile`: each of
+ * {@link SceneInput.junctionsSeen} that stands on its line, at its distance
+ * there — #3095, the cuts `streets.ts` §`streetsAt` lays a village's street in
+ * pieces at. The road's own junctions on the road, and on a way out its own
+ * junction and those along it.
+ *
+ * ⚠️ **From the junctions the ride has seen, never from the ways out in
+ * view.** The ways out change as a junction comes within the view's reach
+ * ahead and drops out of it behind, and a cut made or dropped re-lays the
+ * street it cuts: its pavements, lamp posts and walks, and the people on
+ * them, moved on an ordinary frame with no press. The junctions seen are
+ * seen 2 km ahead and kept 1 km behind (`open-world/road.ts`
+ * §`junctionsSeen`), so the cuts on any street in view are the same on every
+ * frame, and on every view through the junction.
  */
 function junctionsOn(profile: RouteProfile, input: SceneInput): readonly number[] {
-  const ways = input.waysOut;
-  if (ways === undefined || ways.length === 0) return NO_JUNCTION_CUTS;
-  // The same while the ways are: `road.ts` hands the same array until they change.
-  let byProfile = cutsFound.get(ways);
+  const seen = input.junctionsSeen;
+  if (seen === undefined || seen.length === 0) return NO_JUNCTION_CUTS;
+  // The same while the junctions are: `road.ts` hands the same array until they change.
+  let byProfile = cutsFound.get(seen);
   if (byProfile === undefined) {
     byProfile = new WeakMap();
-    cutsFound.set(ways, byProfile);
+    cutsFound.set(seen, byProfile);
   }
   const known = byProfile.get(profile);
   if (known !== undefined) return known;
   const { origin } = input;
+  // Its distance on `profile`: the junction's is ride distance.
   const mine = sceneryAnchor(profile)?.origin ?? 0;
   const cuts: number[] = [];
-  for (const way of ways) {
-    // Its junction's distance on `profile`: both count ride distance.
-    const at = way.fromMetres + (sceneryAnchor(way.profile)?.origin ?? 0) - mine;
+  for (const junction of seen) {
+    const at = junction.distance - mine;
     if (!(at >= 0 && at <= profile.totalDistance) || cuts.includes(at)) continue;
     // On the route's own line through the junction, not the drawn road,
     // which rounds the corner a different way on each view.
     const here = localGroundPosition(origin, positionAt(profile, at));
-    const there = localGroundPosition(origin, positionAt(way.profile, way.fromMetres));
+    const there = localGroundPosition(origin, junction.position);
     if (Math.hypot(here.x - there.x, here.z - there.z) > JUNCTION_ON_METRES) continue;
     cuts.push(at);
     // And short of it by the corner the drawn road rounds there, which is
@@ -1524,8 +1557,8 @@ function junctionsOn(profile: RouteProfile, input: SceneInput): readonly number[
 
 const NO_JUNCTION_CUTS: readonly number[] = [];
 
-/** {@link junctionsOn}'s answers, by the ways out and the profile. */
-const cutsFound = new WeakMap<readonly ScatterWay[], WeakMap<RouteProfile, readonly number[]>>();
+/** {@link junctionsOn}'s answers, by the junctions seen and the profile. */
+const cutsFound = new WeakMap<readonly JunctionSeen[], WeakMap<RouteProfile, readonly number[]>>();
 
 /**
  * How far short of a junction a village's street is cut a second time,

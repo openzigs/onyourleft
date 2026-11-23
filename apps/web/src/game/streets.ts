@@ -825,6 +825,8 @@ function streetOf(
   });
   const street = streetSpan(spans);
   if (street === undefined) return null;
+  // #3095: a piece's end at a cut is no end of the street, and has no bollards.
+  const cutEnds = [clip.from, clip.to].filter(Number.isFinite);
   // #1565: the village's crossroads, at its centre, on this lap's odometer.
   const mouth = {
     from: site.centre - lap - VILLAGE_MOUTH_HALF_METRES,
@@ -857,6 +859,7 @@ function streetOf(
         [mouth],
         walks,
         urban,
+        cutEnds,
       );
     } else {
       range = street;
@@ -879,6 +882,7 @@ function streetOf(
         [mouth],
         walks,
         urban,
+        cutEnds,
       );
     }
     if (laid) {

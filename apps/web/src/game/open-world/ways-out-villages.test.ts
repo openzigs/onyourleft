@@ -20,11 +20,15 @@
  * pavement, the people walking it and a cyclist riding it follow that corner:
  * a press redraws it. Everything farther than that from the junction is held.
  *
- * The real game screen through a press, with a village and its billboards
- * past the junction, is `junction-corner.test.tsx`'s. People and the other
- * cyclists are drawn only on the realistic world's top rung (`scene.ts`
- * §`SceneInput.people`), which that file's renderer does not load, so they
- * are held here.
+ * The real game screen through a press, with a village, its billboards, its
+ * people and the other cyclists past the junction, is
+ * `junction-corner.test.tsx`'s, in the realistic world for the people and
+ * the cyclists.
+ *
+ * And with no press (the last describe): a village's street is cut at every
+ * junction the ride has seen (`road.ts` §`junctionsSeen`), never at the ways
+ * out in view, which change as a junction comes into the view and leaves it,
+ * so nothing on a street is re-laid on an ordinary frame.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -63,6 +67,8 @@ interface Pressed {
   readonly before: SceneFrame;
   readonly after: SceneFrame;
   readonly junction: { readonly x: number; readonly z: number };
+  /** The place {@link CORNER_METRES} short of the junction, on the road: the second cut. */
+  readonly short: { readonly x: number; readonly z: number };
   readonly rider: { readonly x: number; readonly z: number };
 }
 
@@ -103,6 +109,7 @@ function press(index: number, back: number, east = 0): Pressed {
       state: { ...start, ride: { speed: 8 as never, distance: metres(along) } },
       riderDistance: along,
       waysOut: road.waysOut(rider),
+      junctionsSeen: road.junctionsSeen(),
       // The realistic world's top rung: people, and the other cyclists.
       people: 16,
       sceneryCyclists: true,
@@ -113,13 +120,17 @@ function press(index: number, back: number, east = 0): Pressed {
     frame,
     positionAt(road.view.profile, at.distance - road.view.origin),
   );
+  const short = localGroundPosition(
+    frame,
+    positionAt(road.view.profile, at.distance - CORNER_METRES - road.view.origin),
+  );
   const riderPlace = localGroundPosition(
     frame,
     positionAt(road.view.profile, rider - road.view.origin),
   );
   expect(road.route.choose(at.distance, other, rider)).toBe('swapped');
   expect(road.follow(rider)).toBeDefined();
-  return { before, after: drawn(), junction: place, rider: riderPlace };
+  return { before, after: drawn(), junction: place, short, rider: riderPlace };
 }
 
 /** Of `places`, those past the corner and within reach. */
@@ -250,3 +261,83 @@ describe('what stands past a junction stays through a choice — #3095', () => {
     expect(compared).toBeGreaterThanOrEqual(2);
   });
 });
+
+/** A frame's street furniture, pavement vertices and all, by place. */
+function laid(frame: SceneFrame): { x: number; z: number }[] {
+  return [...frame.streets.flatMap((street) => street.furniture), ...pavements(frame)];
+}
+
+describe('nothing on a village’s street moves on an ordinary frame — #3095', () => {
+  it('re-lays no street as the junctions come into the view ahead and drop out behind it', () => {
+    // The lowland grid's fifth and sixth crossroads, and the villages either
+    // side: each junction's ways out come into reach 400 m ahead and drop out
+    // 60 m behind on this stretch, with no press.
+    const { graph, edges } = gridGraph(COLUMNS, ROWS, LOWLAND, 3);
+    const route = new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
+    const frame = corridorOrigin(route.view());
+    const road = new OpenWorldRoad(route, { frame });
+    let was: { readonly places: Set<string>; readonly rider: { x: number; z: number } } | undefined;
+    let compared = 0;
+    const moved: string[] = [];
+    for (let rider = 900; rider <= 1_300; rider += 2) {
+      road.follow(rider);
+      const view = road.view;
+      const along = rider - view.origin;
+      const drawn = sceneFrame({
+        profile: view.profile,
+        origin: corridorOrigin(view.profile),
+        state: {
+          ...atStartLine(view.profile),
+          ride: { speed: 8 as never, distance: metres(along) },
+        },
+        riderDistance: along,
+        waysOut: road.waysOut(rider),
+        junctionsSeen: road.junctionsSeen(),
+        people: 16,
+        sceneryCyclists: true,
+      });
+      const here = localGroundPosition(frame, positionAt(view.profile, along));
+      const places = laid(drawn);
+      if (was !== undefined) {
+        const before = was;
+        // What this frame has near both riders that the last frame did not:
+        // a piece laid anew. (A piece behind the view drops out, which is not.)
+        for (const place of places) {
+          if (
+            Math.hypot(place.x - here.x, place.z - here.z) > NO_PRESS_NEAR_METRES ||
+            Math.hypot(place.x - before.rider.x, place.z - before.rider.z) > NO_PRESS_NEAR_METRES
+          ) {
+            continue;
+          }
+          compared += 1;
+          if (!before.places.has(key(place))) moved.push(`${String(rider)} m: ${key(place)}`);
+        }
+      }
+      was = { places: new Set(places.map(key)), rider: here };
+    }
+    expect(moved.slice(0, 5)).toStrictEqual([]);
+    // Not nothing: the villages' pavements and furniture near the rider.
+    expect(compared).toBeGreaterThan(100_000);
+  });
+
+  it('stands no bollard across the pavement at a cut', () => {
+    // A cut is a piece's end and no end of the street: the bollards that
+    // close a street's pavement stand at its real ends alone.
+    let checked = 0;
+    for (const pressed of [press(3, 110), press(4, 110), press(5, 110)]) {
+      const bollards = pressed.before.streets
+        .flatMap((street) => street.furniture)
+        .filter((item) => item.kind === 'bollard');
+      checked += bollards.length;
+      for (const cut of [pressed.junction, pressed.short]) {
+        expect(
+          bollards.filter((item) => Math.hypot(item.x - cut.x, item.z - cut.z) <= 8).map(key),
+        ).toStrictEqual([]);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+});
+
+/** How near the rider a village's street is compared from frame to frame, metres. */
+const NO_PRESS_NEAR_METRES = 150;
