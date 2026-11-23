@@ -65,6 +65,7 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 
+import { sceneryGrid, wrappedCell } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import { siteAt, siteSpacing } from './settlements';
 import type { UrbanClassMap } from './urban-class';
@@ -264,14 +265,15 @@ export type TownAt = (along: number) => boolean;
  * it was mapped, or a procedural village of `settlements.ts` stands there.
  */
 export function townAt(profile: RouteProfile, seed: number, urban: UrbanClassMap): TownAt {
-  const { span } = siteSpacing(profile);
+  // #3055: counted in ride distance on an open-world view. @see siteSpacing
+  const { span, shift } = siteSpacing(profile);
   const length = profile.totalDistance;
   return (along) => {
     const wrapped = profile.loop && length > 0 ? ((along % length) + length) % length : along;
     const mapped = urban.classAt(wrapped);
     if (mapped === 'village' || mapped === 'town' || mapped === 'city-centre') return true;
     if (!(span > 0)) return false;
-    const site = siteAt(profile, seed, Math.floor(along / span));
+    const site = siteAt(profile, seed, Math.floor((along + shift) / span));
     return (
       site !== undefined &&
       site.kind === 'village' &&
@@ -296,14 +298,14 @@ export function encounterOf(
   town: TownAt,
   cell: number,
 ): Encounter | undefined {
-  const length = profile.totalDistance;
-  const cells = Math.max(1, Math.round(length / CYCLIST_CELL_METRES));
-  const span = length / cells;
-  if (!profile.loop && (cell < 0 || cell >= cells)) return undefined;
+  // #3055: counted in ride distance on an open-world view. @see sceneryGrid
+  const grid = sceneryGrid(profile, CYCLIST_CELL_METRES);
+  const { span } = grid;
+  if (!profile.loop && (cell < grid.first || cell > grid.last)) return undefined;
   // Hashed by the cell on the route's first lap, so a loop's every lap shows the same riders.
-  const wrapped = ((cell % cells) + cells) % cells;
+  const wrapped = wrappedCell(grid, cell);
   const key = slotHash(seed, wrapped, ENCOUNTER_KEY);
-  const meeting = cell * span + span * uniformFrom(key, 0);
+  const meeting = cell * span - grid.shift + span * uniformFrom(key, 0);
   const chance = town(meeting) ? CYCLISTS_PER_CELL.town : CYCLISTS_PER_CELL.country;
   if (uniformFrom(key, 1) >= chance) return undefined;
   const roll = uniformFrom(key, 2);
@@ -360,11 +362,10 @@ export function cyclistsInReach(
   rider: number,
 ): readonly CyclistInReach[] {
   const length = profile.totalDistance;
-  const cells = Math.max(1, Math.round(length / CYCLIST_CELL_METRES));
-  const span = length / cells;
+  const { span, shift } = sceneryGrid(profile, CYCLIST_CELL_METRES);
   if (!(span > 0)) return [];
-  const from = Math.floor((rider - ENCOUNTER_REACH_METRES) / span);
-  const to = Math.floor((rider + ENCOUNTER_REACH_METRES) / span);
+  const from = Math.floor((rider - ENCOUNTER_REACH_METRES + shift) / span);
+  const to = Math.floor((rider + ENCOUNTER_REACH_METRES + shift) / span);
   const found: CyclistInReach[] = [];
   for (let cell = from; cell <= to; cell += 1) {
     const encounter = encounterOf(profile, seed, town, cell);

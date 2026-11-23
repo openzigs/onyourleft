@@ -113,7 +113,7 @@ import {
 } from './land-class';
 import {
   ROAD_CLEARANCE_METRES,
-  fieldSpanMetres,
+  FIELD_SPAN_METRES,
   terrainHeightAt,
   type GroundedFootprint,
 } from './landform';
@@ -125,6 +125,7 @@ import {
   type StructureKind,
 } from './scatter';
 import type { ChainLinkPiece } from './chain-link';
+import { sceneryGrid, wrappedCell, type SceneryGrid } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import { leastSquaredNearRoad, squaredToSegment } from './road-grid';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -753,13 +754,14 @@ export interface Site {
   readonly side: 1 | -1;
 }
 
-/** How many sites the route is divided into, and how long each is. */
-export function siteSpacing(profile: RouteProfile): {
-  readonly sites: number;
-  readonly span: number;
-} {
-  const sites = Math.max(1, Math.round(profile.totalDistance / SETTLEMENT_SPACING_METRES));
-  return { sites, span: profile.totalDistance / sites };
+/**
+ * How many sites the route is divided into, and how long each is — and, on an
+ * open-world view, where they are counted from (#3055, `scenery-anchor.ts`):
+ * site `i` starts at profile distance `i · span − shift`.
+ */
+export function siteSpacing(profile: RouteProfile): SceneryGrid & { readonly sites: number } {
+  const grid = sceneryGrid(profile, SETTLEMENT_SPACING_METRES);
+  return { ...grid, sites: grid.count };
 }
 
 /**
@@ -767,9 +769,10 @@ export function siteSpacing(profile: RouteProfile): {
  * country, or ground that would not be built on. @see buildable
  */
 export function siteAt(profile: RouteProfile, seed: number, site: number): Site | undefined {
-  const { sites, span } = siteSpacing(profile);
-  if (!profile.loop && (site < 0 || site >= sites)) return undefined;
-  const wrappedSite = ((site % sites) + sites) % sites;
+  const grid = siteSpacing(profile);
+  const { span } = grid;
+  if (!profile.loop && (site < grid.first || site > grid.last)) return undefined;
+  const wrappedSite = wrappedCell(grid, site);
   const base = slotHash(seed, wrappedSite, SITE_KEY);
   const roll = uniformFrom(base, STREAM_KIND);
   const kind =
@@ -781,7 +784,7 @@ export function siteAt(profile: RouteProfile, seed: number, site: number): Site 
   if (kind === undefined) return undefined;
   // Where in its site, clear of the site's ends so two neighbours' plots
   // never overlap.
-  const centre = site * span + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
+  const centre = site * span - grid.shift + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
   const half = kind === 'village' ? VILLAGE_METRES / 2 : 20;
   if (!buildable(profile, seed, centre - half, centre + half, SETBACK_METRES)) return undefined;
   const side = uniformFrom(base, STREAM_SIDE) < 0.5 ? 1 : -1;
@@ -1005,15 +1008,15 @@ function settlementsAt(
   footprints: SettlementFootprint[] | undefined,
   land: LandClassMask,
 ): void {
-  const { sites, span } = siteSpacing(profile);
+  const { sites, span, shift } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
-  const first = Math.floor((fromMetres - reach) / span);
+  const first = Math.floor((fromMetres - reach + shift) / span);
   // ⚠️ **Never more sites than the route has** — `scatter.ts` §`scatterAt`'s
   // own bound, for its reason: a loop a few metres round, imported from a
   // hostile file, has a site span to match, and a 460 m view over it would be
   // tens of thousands of sites a frame — every one of them the same few,
   // placed again on top of themselves.
-  const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
+  const last = Math.min(Math.floor((toMetres + reach + shift) / span), first + sites + 1);
   for (let index = first; index <= last; index += 1) {
     const site = siteAt(profile, seed, index);
     // #1546: where map data was read, the data decides, not the seed.
@@ -1204,13 +1207,13 @@ export const LOT_SHOP_EVERY = 5;
 /** The key the lots are hashed under, outside anything else's. */
 const LOT_KEY = 0x7_0000;
 
-/** How many lot plots the route is divided into, and how long each is. */
-export function lotSpacing(profile: RouteProfile): {
-  readonly plots: number;
-  readonly span: number;
-} {
-  const plots = Math.max(1, Math.round(profile.totalDistance / PLOT_METRES));
-  return { plots, span: profile.totalDistance / plots };
+/**
+ * How many lot plots the route is divided into, and how long each is — and,
+ * on an open-world view, where they are counted from, as {@link siteSpacing}.
+ */
+export function lotSpacing(profile: RouteProfile): SceneryGrid & { readonly plots: number } {
+  const grid = sceneryGrid(profile, PLOT_METRES);
+  return { ...grid, plots: grid.count };
 }
 
 /**
@@ -1267,20 +1270,21 @@ export function lotsAt(
   found: ScatterItem[],
 ): void {
   if (mask.bytes === 0) return;
-  const { plots, span } = lotSpacing(profile);
+  const grid = lotSpacing(profile);
+  const { plots, span, shift } = grid;
   const lotTurn = Math.floor(
     uniformFrom(slotHash(seed, 0, LOT_KEY + 3), STREAM_TURN_VARIANT) * SCATTER_VARIANT_SLOTS,
   );
-  const first = Math.floor(fromMetres / span) - 1;
+  const first = Math.floor((fromMetres + shift) / span) - 1;
   // Never more plots than the route has. @see settlementsAt's bound.
-  const last = Math.min(Math.floor(toMetres / span), first + plots + 1);
+  const last = Math.min(Math.floor((toMetres + shift) / span), first + plots + 1);
   for (let plot = first; plot <= last; plot += 1) {
-    if (!profile.loop && (plot < 0 || plot >= plots)) continue;
-    const along = (plot + 0.5) * span;
+    if (!profile.loop && (plot < grid.first || plot > grid.last)) continue;
+    const along = (plot + 0.5) * span - shift;
     if (along < fromMetres || along >= toMetres) continue;
     // #1637: a city centre's lots are its terraced blocks, planned at the press.
     if (mapped.urban?.classAt(distanceOnRoute(profile, along)) === 'city-centre') continue;
-    const wrappedPlot = ((plot % plots) + plots) % plots;
+    const wrappedPlot = wrappedCell(grid, plot);
     const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
     if (frame === undefined) continue;
     for (let side = 1; side >= -1; side -= 2) {
@@ -1676,14 +1680,15 @@ function fieldEdgesAt(
   countryside: Countryside,
   houses: MappedFootprintIndex | null,
 ): void {
-  const total = profile.totalDistance;
-  // The ground's own field grid, so the patchwork and the walls agree (#425).
-  const span = fieldSpanMetres(profile);
-  const fields = Math.max(1, Math.round(total / span));
+  // The ground's own field grid, so the patchwork and the walls agree (#425),
+  // counted in ride distance on an open-world view (#3055).
+  const grid = sceneryGrid(profile, FIELD_SPAN_METRES);
+  const { span, shift } = grid;
+  const fields = grid.count;
   const ways = waterways(profile, seed, land);
-  const first = Math.floor(fromMetres / span) - 1;
+  const first = Math.floor((fromMetres + shift) / span) - 1;
   // Never more fields than the route has. @see settlementsAt's bound.
-  const last = Math.min(Math.floor(toMetres / span), first + fields + 1);
+  const last = Math.min(Math.floor((toMetres + shift) / span), first + fields + 1);
   const inVillage = (along: number): boolean =>
     villages.some(([from, to]) => along >= from && along <= to);
   // #1542: whether a piece reads the mask at all. Off, or with no mask, the
@@ -1691,9 +1696,9 @@ function fieldEdgesAt(
   const mapped = countryside.boundaries && land !== NO_LAND_CLASS;
   const onFarmland = (x: number, z: number): boolean => mapped && land.classAt(x, z) === 'farmland';
   for (let field = first; field <= last; field += 1) {
-    if (!profile.loop && (field < 0 || field >= fields)) continue;
-    const wrappedField = ((field % fields) + fields) % fields;
-    const start = field * span;
+    if (!profile.loop && (field < grid.first || field > grid.last)) continue;
+    const wrappedField = wrappedCell(grid, field);
+    const start = field * span - shift;
     const middle = distanceOnRoute(profile, start + span / 2);
     const latitude = Math.abs(positionAt(profile, middle).latitude);
     const treeLine = treeLineMetres(latitude);
