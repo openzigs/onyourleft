@@ -226,7 +226,7 @@ export const HILL_PRESET: DemoPreset = {
       segments: [
         {
           untilSeconds: 900,
-          wattsPerKilogram: 3.6,
+          wattsPerKilogram: 3.7,
           cadenceRpm: 78,
           heartRateBpm: 158,
           easeSeconds: 4,
