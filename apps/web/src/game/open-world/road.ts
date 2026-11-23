@@ -81,7 +81,7 @@ import {
 
 import { drawnLine, type DrawnLine } from '../drawn-line';
 import { routeSeed } from '../scatter';
-import { anchorScenery } from '../scenery-anchor';
+import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
 
@@ -146,6 +146,8 @@ export class OpenWorldRoad {
   readonly #hooks: OpenWorldRoadHooks;
   /** The ride's scenery seed, from its first view (#3055). */
   readonly #seed: number;
+  /** The ride's elevation range, from its first view (#3065). */
+  readonly #band: ElevationBand;
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
@@ -161,6 +163,7 @@ export class OpenWorldRoad {
     this.#graphVersion = hooks.graphVersion?.();
     const profile = route.view();
     this.#seed = routeSeed(profile);
+    this.#band = elevationBand(profile);
     this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
 
@@ -206,9 +209,9 @@ export class OpenWorldRoad {
     return this.#view;
   }
 
-  /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
+  /** `view`, its scenery keyed on the ride's seed, distance (#3055) and elevation range (#3065). */
   #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
-    anchorScenery(view.profile, { seed: this.#seed, origin: view.origin });
+    anchorScenery(view.profile, { seed: this.#seed, origin: view.origin, band: this.#band });
     return view;
   }
 

@@ -46,6 +46,33 @@ export interface SceneryAnchor {
   readonly seed: number;
   /** The ride distance of the profile's distance zero (`RollingRoute.origin`). */
   readonly origin: number;
+  /**
+   * The ride's elevation range, fixed when it started: the lowest and highest
+   * of its first view, in metres above sea level — #3065. A route stands its
+   * horizon's hills on the middle of its whole profile's range (`landform.ts`
+   * §`horizonRelief`); an open-world view stands them on this, because a
+   * view's own range moves as road is added ahead and dropped behind, and the
+   * distant hills rose or sank with it. Distant hills do not move as a rider
+   * climbs, so a ride that climbs above them looks down on them.
+   */
+  readonly band: ElevationBand;
+}
+
+/** An elevation range, metres above sea level. */
+export interface ElevationBand {
+  readonly lowest: number;
+  readonly highest: number;
+}
+
+/** The lowest and highest of `profile`'s elevations. */
+export function elevationBand(profile: RouteProfile): ElevationBand {
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  for (const elevation of profile.elevations) {
+    lowest = Math.min(lowest, elevation);
+    highest = Math.max(highest, elevation);
+  }
+  return { lowest, highest };
 }
 
 const anchors = new WeakMap<RouteProfile, SceneryAnchor>();

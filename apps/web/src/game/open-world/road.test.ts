@@ -27,7 +27,7 @@ import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
 import { drawnLine, drawnLineAt } from '../drawn-line';
 import { routeSeed } from '../scatter';
-import { sceneryAnchor } from '../scenery-anchor';
+import { elevationBand, sceneryAnchor } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
 import { LINE_EASE_METRES } from './line-ease';
@@ -116,17 +116,22 @@ describe('the open-world road past its first view — #2982', () => {
     expect(road.follow(later)?.turned).toBe(false);
   });
 
-  it('keys every view it hands on to the ride: the first view seed, and its own origin — #3055', () => {
+  it('keys every view it hands on to the ride: the first view seed and range, and its own origin — #3055, #3065', () => {
     const road = grid();
     const seed = routeSeed(road.view.profile);
-    expect(sceneryAnchor(road.view.profile)).toEqual({ seed, origin: 0 });
+    const band = elevationBand(road.view.profile);
+    expect(sceneryAnchor(road.view.profile)).toEqual({ seed, origin: 0, band });
     let views = 0;
     for (let rider = 0; rider <= 6_000; rider += 50) {
       if (rider === 3_000) road.route.uTurn(rider);
       const next = road.follow(rider);
       if (next === undefined) continue;
       views += 1;
-      expect(sceneryAnchor(next.profile), `at ${rider} m`).toEqual({ seed, origin: next.origin });
+      expect(sceneryAnchor(next.profile), `at ${rider} m`).toEqual({
+        seed,
+        origin: next.origin,
+        band,
+      });
       // The view's own seed is not the ride's: it is the view that changed.
       expect(routeSeed(next.profile)).not.toBe(seed);
     }
