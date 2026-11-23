@@ -93,6 +93,7 @@ import {
   type TileId,
 } from '@onyourleft/map-features';
 
+import type { LandClassMask } from '../land-class';
 import { sceneryAnchor } from '../scenery-anchor';
 import { createAreaReader, type HeldBlock } from '../world-data/area';
 import type { CorridorArchive, WorldCorridor } from '../world-data/corridor';
@@ -118,6 +119,7 @@ import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
 import type { TileBlockFeatures } from './tile-plan';
 import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
 import { tilesToPlan } from './tiles-ahead';
+import { WaterMaskKeeper } from './water-mask';
 
 /**
  * How long the start may take before the session gives up on the map:
@@ -173,6 +175,8 @@ function featuresOf(block: HeldBlock): TileBlockFeatures {
     features = {
       buildings: block.features.buildings,
       landUse: block.features.landUse,
+      // #3105: and its rivers, streams and canals, which each tile plans its own of.
+      waterLines: block.features.waterLines ?? [],
       tiles: block.streets,
     };
     blockFeatures.set(block, features);
@@ -494,6 +498,20 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       ...(anchor === undefined ? {} : { scenery: { seed: anchor.seed, origin: anchor.origin } }),
     });
   }
+  /**
+   * #3105: the real water of the tiles planned so far, as the scene's land
+   * mask — looked for again only when the planner's plans changed, and the
+   * same object until a tile that holds water is planned or let go.
+   */
+  const waterKeeper = new WaterMaskKeeper();
+  let water: { readonly version: number; readonly mask: LandClassMask | undefined } | undefined;
+  const waterMask = (): LandClassMask | undefined => {
+    if (planner === undefined) return undefined;
+    if (water?.version !== planner.version) {
+      water = { version: planner.version, mask: waterKeeper.of(planner.plans()) };
+    }
+    return water.mask;
+  };
   /** What the buildings were last planned for. @see planAhead */
   let buildingsAsked:
     | { readonly view: unknown; readonly tiles: number; readonly x: number; readonly z: number }
@@ -600,6 +618,8 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
           // #2902: the whole ride drawn in the start's frame, the tiles' own.
           frame: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
           buildings: () => planner?.buildings,
+          // #3105: the tiles' real water, which the scene draws and bridges.
+          water: waterMask,
           // #2903: every held street, drawn to the fog as road.
           streets: () => streetCorridor,
           // #3052: and where each named one's name is painted on it.

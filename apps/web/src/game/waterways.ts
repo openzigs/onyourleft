@@ -33,6 +33,13 @@
  * - **No invented lake or stream in a stretch the map covers**: there the map
  *   says where water is and is not, so a seeded lake on mapped farmland, or a
  *   seeded bridge over a mapped field, is a lie.
+ * - **A mapped river at its own width, on an open-world ride** — #3105,
+ *   {@link waterUnderRoad}: where the mask's `water` lies under the road and
+ *   on both sides of it, one {@link Crossing} as wide as that water
+ *   ({@link Crossing.halfWidth}), so the bridge spans the river the map
+ *   draws, not a stream's eight metres. An open-world ride's mask is its
+ *   tiles' water and a buffer round it (`open-world/water-mask.ts`), so
+ *   "covered" there is "beside real water".
  * - **Everywhere the map was not read** — no corridor, outside the archive,
  *   offline, a privacy zone — the world is exactly the one below, from the
  *   route and a seed (ADR 0054 D-4).
@@ -102,6 +109,7 @@ import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyou
 import { BRIDGED_WATER_LINE_KINDS, type WaterLineFeature } from '@onyourleft/map-features';
 
 import type { LandClassMask } from './land-class';
+import { sceneryAnchor } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   ROAD_WIDTH_METRES,
@@ -412,6 +420,25 @@ export interface Crossing {
   readonly distance: number;
   /** The water's surface, as an elevation — the same datum as the profile's. */
   readonly waterElevation: number;
+  /**
+   * #3105: half the water's width along the road, in metres, where the map
+   * measured it ({@link waterUnderRoad}). Absent on every other crossing,
+   * whose water is {@link STREAM_HALF_WIDTH_METRES} either side: an invented
+   * stream, and a mapped line with no width (#2659). @see crossingWiden
+   */
+  readonly halfWidth?: number;
+}
+
+/**
+ * #3105: how far past a stream's own every measure of a crossing lies, along
+ * the road either side, in metres: its {@link Crossing.halfWidth} less
+ * {@link STREAM_HALF_WIDTH_METRES}, and nought on a crossing with none. The
+ * bed, the banks, the surface, the bridge's span and its approaches all lie
+ * this much further from the crossing's middle, so a river 80 m across is 80 m
+ * of water under an 96 m deck, shaped at each bank exactly as a stream's is.
+ */
+export function crossingWiden(crossing: Crossing): number {
+  return Math.max(0, (crossing.halfWidth ?? STREAM_HALF_WIDTH_METRES) - STREAM_HALF_WIDTH_METRES);
 }
 
 /** A lake beside a stretch of the route. */
@@ -535,14 +562,18 @@ function besideTheMap(profile: RouteProfile, invented: Waterways, land: LandClas
   const mapped = mappedLakes(profile, origin, land);
   const channels = mappedChannels(profile, origin, land, mapped);
   const kept = invented.lakes.filter((lake) => !lakeMapped(profile, origin, land, lake));
-  const bridged = mappedCrossings(profile, origin, land);
+  const lines = mappedCrossings(profile, origin, land);
+  // #3105: on an open-world view, the water the map draws under the road too,
+  // at its own width. A route's crossings are its water lines' alone, as before.
+  const bridged =
+    sceneryAnchor(profile) === undefined ? lines : waterUnderRoad(profile, origin, land, lines);
   const unmapped = invented.crossings.filter(
     (crossing) =>
       !crossingMapped(profile, origin, land, crossing) &&
       !bridged.some(
         (mappedCrossing) =>
           Math.abs(routeOffset(profile, mappedCrossing.distance, crossing.distance)) <
-          MAPPED_CROSSING_SPACING_METRES,
+          MAPPED_CROSSING_SPACING_METRES + crossingWiden(mappedCrossing),
       ),
   );
   if (
@@ -689,6 +720,106 @@ function mappedCrossings(
     });
   }
   return crossings;
+}
+
+/**
+ * #3105: how far either side of the centreline the map's water must also lie
+ * for the road to be over it, in metres: **12**. Water under the road and on
+ * both sides of it is a river crossed; water under the centreline alone, or
+ * on one side, is a shore the map draws a few metres off (#2754), and is the
+ * lakes' ({@link mappedLakes}).
+ */
+export const WATER_UNDER_ROAD_ASIDE_METRES = 12;
+
+/**
+ * #3105: the widest water under the road that is one crossing, in metres:
+ * **300**, {@link LAKE_MIN_LENGTH_METRES}. Past it the water beside the road
+ * runs long enough to be a mapped lake on each side ({@link mappedLakes}),
+ * which draws it from the road's edge out, and no channel is cut across it.
+ */
+export const WATER_UNDER_ROAD_MAX_METRES = LAKE_MIN_LENGTH_METRES;
+
+/**
+ * The crossings of an open-world view, with the water the map draws under the
+ * road — #3105. The drawn road is stepped every {@link CROSSING_SAMPLE_METRES}
+ * and each run of steps with the mask's open `water` under the centreline and
+ * {@link WATER_UNDER_ROAD_ASIDE_METRES} either side of it is one
+ * {@link Crossing} at the run's middle, {@link Crossing.halfWidth} half the
+ * run; runs nearer than {@link MAPPED_CROSSING_SPACING_METRES} are one, and a
+ * run past {@link WATER_UNDER_ROAD_MAX_METRES} is left to the lakes. A water
+ * line's crossing (`lines`, #2659) within such a river is the river's own
+ * centre line and is dropped; every other is kept. At most
+ * {@link MAXIMUM_WATERWAYS}, and at most {@link WATERWAY_SAMPLE_LIMIT} steps of
+ * three mask lookups each.
+ */
+function waterUnderRoad(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+  lines: readonly Crossing[],
+): readonly Crossing[] {
+  if (land.bytes === 0) return lines;
+  const total = profile.totalDistance;
+  const steps = Math.max(
+    2,
+    Math.min(WATERWAY_SAMPLE_LIMIT, Math.round(total / CROSSING_SAMPLE_METRES)),
+  );
+  const spacing = total / steps;
+  const wet = (at: number): boolean => {
+    const frame = drawnRoadFrame(profile, origin, at);
+    if (frame === undefined) return false;
+    for (const aside of [0, WATER_UNDER_ROAD_ASIDE_METRES, -WATER_UNDER_ROAD_ASIDE_METRES]) {
+      const x = frame.x + frame.normalX * aside;
+      const z = frame.z + frame.normalZ * aside;
+      if (land.classAt(x, z) !== 'water' || land.wetlandAt(x, z)) return false;
+    }
+    return true;
+  };
+  const runs: { from: number; to: number }[] = [];
+  let open: { from: number; to: number } | undefined;
+  for (let index = 0; index <= steps; index += 1) {
+    const at = Math.min(total, index * spacing);
+    if (!wet(at)) {
+      open = undefined;
+      continue;
+    }
+    if (open !== undefined) {
+      open.to = at;
+      continue;
+    }
+    const before = runs[runs.length - 1];
+    if (before !== undefined && at - before.to < MAPPED_CROSSING_SPACING_METRES) {
+      // The same river past an island or a pier's worth of land: one crossing.
+      before.to = at;
+      open = before;
+    } else {
+      open = { from: at, to: at };
+      runs.push(open);
+    }
+  }
+  const rivers: Crossing[] = [];
+  for (const run of runs) {
+    if (rivers.length >= MAXIMUM_WATERWAYS) break;
+    // Each step stands for the road half a step either side of it.
+    const width = run.to - run.from + spacing;
+    if (width > WATER_UNDER_ROAD_MAX_METRES) continue;
+    const distance = distanceOnRoute(profile, (run.from + run.to) / 2);
+    rivers.push({
+      distance,
+      waterElevation: elevationAt(profile, distance) - BRIDGE_CLEARANCE_METRES,
+      halfWidth: Math.max(STREAM_HALF_WIDTH_METRES, width / 2),
+    });
+  }
+  if (rivers.length === 0) return lines;
+  const kept = lines.filter(
+    (line) =>
+      !rivers.some(
+        (river) =>
+          Math.abs(routeOffset(profile, line.distance, river.distance)) <
+          MAPPED_CROSSING_SPACING_METRES + crossingWiden(river),
+      ),
+  );
+  return [...rivers, ...kept].slice(0, MAXIMUM_WATERWAYS);
 }
 
 /**
@@ -1329,7 +1460,7 @@ export function waterShaping(
   };
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
-    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    const u = alongFromChannel(profile, wrapped, crossing);
     if (u > STREAM_ALONG_REACH_METRES || lateral > STREAM_REACH_METRES + CHANNEL_BANK_METRES) {
       continue;
     }
@@ -1408,7 +1539,7 @@ function nearBank(lake: Lake, near: number): number {
  */
 export function waterNearRoute(ways: Waterways, profile: RouteProfile, wrapped: number): boolean {
   for (const crossing of ways.crossings) {
-    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    const u = alongFromChannel(profile, wrapped, crossing);
     if (!(u > STREAM_ALONG_REACH_METRES)) {
       return true;
     }
@@ -1433,7 +1564,7 @@ export function inWater(
 ): boolean {
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
-    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    const u = alongFromChannel(profile, wrapped, crossing);
     // ⚠️ **The whole channel, banks included** — not just the water and its
     // clearance. The banks fall about four metres over twenty-two, and the
     // ground's rows are ten metres apart, so a tree placed on one stood up to a
@@ -1496,7 +1627,7 @@ export function onOpenWater(
 ): boolean {
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
-    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    const u = alongFromChannel(profile, wrapped, crossing);
     if (u <= STREAM_SURFACE_HALF_WIDTH_METRES && lateral <= STREAM_REACH_METRES) {
       return true;
     }
@@ -1751,7 +1882,8 @@ export function waterSurface(
     // ⚠️ **Once, however many laps of a short loop the corridor spans**: every
     // lap's crossing is the same place, and two copies of one strip would
     // fight for the same depth.
-    if (occurrences(profile, crossing.distance, first.along, last.along).length > 0) {
+    const widen = crossingWiden(crossing);
+    if (occurrences(profile, crossing.distance, first.along, last.along, widen).length > 0) {
       // ⚠️ On the DRAWN road, not the route's centreline — #543's review. The
       // strip runs under the bridge and across the carriageway, and in a bend
       // the ribbon is drawn up to ~1.9 m inside the route's vertex.
@@ -1776,8 +1908,8 @@ export function waterSurface(
           here.z + tx * lateral,
           tx,
           tz,
-          -STREAM_SURFACE_HALF_WIDTH_METRES,
-          STREAM_SURFACE_HALF_WIDTH_METRES,
+          -STREAM_SURFACE_HALF_WIDTH_METRES - widen,
+          STREAM_SURFACE_HALF_WIDTH_METRES + widen,
         );
       }
       strip(base);
@@ -1984,6 +2116,86 @@ export function bridgeParts(
   const parts: BridgePart[] = [];
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
+  const { under } = roadUnder(profile, origin, corridor);
+  for (const crossing of ways.crossings) {
+    // #3105: a mapped river's bridge is its water's width longer, each end.
+    const widen = crossingWiden(crossing);
+    const halfSpan = BRIDGE_HALF_SPAN_METRES + widen;
+    // Once, for the reason `waterSurface` gives: every lap's bridge is the
+    // same bridge, and `roadAt` wraps an odometer onto it.
+    for (const centre of occurrences(
+      profile,
+      crossing.distance,
+      first.along,
+      last.along,
+      widen,
+    ).slice(0, 1)) {
+      deckPieces(profile, origin, corridor, centre - halfSpan, centre + halfSpan, parts);
+      const bed = crossing.waterElevation - STREAM_DEPTH_METRES - origin.elevation;
+      const bottom = bed - 1;
+      /** From the top of a block under the road down into the bed, at its middle. */
+      const toBed = (top: BlockTop): number => (top.near.y + top.far.y) / 2 - bottom;
+      for (const end of [-1, 1]) {
+        // ⚠️ **Along the road's own slope, not level** — #501. This box was
+        // level until then, three metres long under a road sloping down into
+        // the valley, so its top stood above the road over the downhill half
+        // of it: 4.5 cm on a 5 % approach, 9 cm on the soak route's 8 %. A lit
+        // stone face through tarmac is the *"light seam across the road where
+        // the bridge deck starts"* validation 0002 Z10 found on the tablet.
+        // `waterways.test.ts` §"the road is continuous across the bridge".
+        const abutment = centre + end * halfSpan;
+        const top = under(
+          abutment - ABUTMENT_HALF_LENGTH_METRES,
+          abutment + ABUTMENT_HALF_LENGTH_METRES,
+        );
+        const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
+        if (block !== undefined) parts.push(block);
+        // ⚠️ **The approach: solid under the road from the abutment to where
+        // the bank meets it.** #468's review, B2. The channel lowers the ground
+        // at the road's edge for {@link CHANNEL_BANK_METRES} either side of the
+        // stream, and the bridge spans only {@link BRIDGE_HALF_SPAN_METRES} of
+        // that: on the first head the road was 3.7 m over the ground 10 m out
+        // and 1.9 m at 20 m, a strip of tarmac over an open trench for fifteen
+        // metres past each abutment. Pieces that follow the road's slope, as
+        // the deck's do, from the deck's top down into the bed — a causeway
+        // with stone sides, which is what carries a lane down to a small bridge.
+        const approach = CHANNEL_BANK_METRES - BRIDGE_HALF_SPAN_METRES;
+        const steps = Math.ceil(approach / BRIDGE_PIECE_METRES);
+        for (let piece = 0; piece < steps; piece += 1) {
+          const top = under(
+            centre + end * (halfSpan + (piece * approach) / steps),
+            centre + end * (halfSpan + ((piece + 1) * approach) / steps),
+          );
+          const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
+          if (block !== undefined) parts.push(block);
+        }
+      }
+      if (parts.length >= MAXIMUM_BRIDGE_PARTS) {
+        return parts.slice(0, MAXIMUM_BRIDGE_PARTS);
+      }
+    }
+  }
+  return parts;
+}
+
+/**
+ * The most pieces one deck is built from: **16** — #3105. A stream's bridge is
+ * six pieces of {@link BRIDGE_PIECE_METRES}; a mapped river's is longer, and
+ * past sixteen pieces each piece is longer instead, so the longest bridge is
+ * 80 boxes of the belt's {@link MAXIMUM_BRIDGE_PARTS} and its abutments and
+ * approaches still fit.
+ */
+export const BRIDGE_MAX_PIECES = 16;
+
+/** The road at an odometer reading, and a block's top under a stretch of it. */
+function roadUnder(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  corridor: RoadCorridor,
+): {
+  readonly roadAt: (distance: number) => { x: number; y: number; z: number };
+  readonly under: (from: number, to: number) => BlockTop;
+} {
   const roadAt = (distance: number): { x: number; y: number; z: number } => {
     const wrapped = distanceOnRoute(profile, distance);
     // ⚠️ The DRAWN road — #543's review. Until then this was the route's own
@@ -2017,119 +2229,90 @@ export function bridgeParts(
       far: { x: far.x, y: far.y - sink - 0.03, z: far.z },
     };
   };
-  for (const crossing of ways.crossings) {
-    // Once, for the reason `waterSurface` gives: every lap's bridge is the
-    // same bridge, and `roadAt` wraps an odometer onto it.
-    for (const centre of occurrences(profile, crossing.distance, first.along, last.along).slice(
-      0,
-      1,
-    )) {
-      const pieces = Math.ceil((BRIDGE_HALF_SPAN_METRES * 2) / BRIDGE_PIECE_METRES);
-      const step = (BRIDGE_HALF_SPAN_METRES * 2) / pieces;
-      for (let piece = 0; piece < pieces; piece += 1) {
-        const from = roadAt(centre - BRIDGE_HALF_SPAN_METRES + piece * step);
-        const to = roadAt(centre - BRIDGE_HALF_SPAN_METRES + (piece + 1) * step);
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const dz = to.z - from.z;
-        const length = Math.hypot(dx, dy, dz);
-        if (!(length > 0)) continue;
-        const flat = Math.hypot(dx, dz);
-        const ax = dx / length;
-        const ay = dy / length;
-        const az = dz / length;
-        // The normal in plan: `terrain.ts`'s convention — the road's right
-        // since #583, called its left before.
-        const nx = -dz / flat;
-        const nz = dx / flat;
-        const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, z: (from.z + to.z) / 2 };
-        for (const side of [1, -1]) {
-          const out = ROAD_HALF_WIDTH_METRES + PARAPET_THICKNESS_METRES / 2;
-          parts.push({
-            x: mid.x + nx * out * side,
-            y: mid.y + PARAPET_HEIGHT_METRES / 2 - 0.05,
-            z: mid.z + nz * out * side,
-            axisX: ax,
-            axisY: ay,
-            axisZ: az,
-            length,
-            width: PARAPET_THICKNESS_METRES,
-            height: PARAPET_HEIGHT_METRES + 0.1,
-          });
-          // #501: the coping along its top, a little proud of its outer face.
-          const coping = out + COPING_OVERHANG_METRES / 2;
-          parts.push({
-            x: mid.x + nx * coping * side,
-            y: mid.y + PARAPET_HEIGHT_METRES - COPING_DEPTH_METRES / 2,
-            z: mid.z + nz * coping * side,
-            axisX: ax,
-            axisY: ay,
-            axisZ: az,
-            length,
-            width: PARAPET_THICKNESS_METRES + COPING_OVERHANG_METRES,
-            height: COPING_DEPTH_METRES,
-          });
-        }
-        // ⚠️ **Under the road, not under the chord** — #501. A piece is
-        // straight between its two ends; where the valley's slope meets its
-        // floor it spans the bend, and its middle stood above the road there —
-        // 1.25 cm over the 5 % valley's floor, with the 3 cm clearance spent.
-        // `under` sinks it by however far it stands over the road between.
-        const slab = hung(
-          under(
-            centre - BRIDGE_HALF_SPAN_METRES + piece * step,
-            centre - BRIDGE_HALF_SPAN_METRES + (piece + 1) * step,
-          ),
-          ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 2,
-          DECK_DEPTH_METRES,
-        );
-        if (slab !== undefined) parts.push(slab);
-      }
-      const bed = crossing.waterElevation - STREAM_DEPTH_METRES - origin.elevation;
-      const bottom = bed - 1;
-      /** From the top of a block under the road down into the bed, at its middle. */
-      const toBed = (top: BlockTop): number => (top.near.y + top.far.y) / 2 - bottom;
-      for (const end of [-1, 1]) {
-        // ⚠️ **Along the road's own slope, not level** — #501. This box was
-        // level until then, three metres long under a road sloping down into
-        // the valley, so its top stood above the road over the downhill half
-        // of it: 4.5 cm on a 5 % approach, 9 cm on the soak route's 8 %. A lit
-        // stone face through tarmac is the *"light seam across the road where
-        // the bridge deck starts"* validation 0002 Z10 found on the tablet.
-        // `waterways.test.ts` §"the road is continuous across the bridge".
-        const abutment = centre + end * BRIDGE_HALF_SPAN_METRES;
-        const top = under(
-          abutment - ABUTMENT_HALF_LENGTH_METRES,
-          abutment + ABUTMENT_HALF_LENGTH_METRES,
-        );
-        const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
-        if (block !== undefined) parts.push(block);
-        // ⚠️ **The approach: solid under the road from the abutment to where
-        // the bank meets it.** #468's review, B2. The channel lowers the ground
-        // at the road's edge for {@link CHANNEL_BANK_METRES} either side of the
-        // stream, and the bridge spans only {@link BRIDGE_HALF_SPAN_METRES} of
-        // that: on the first head the road was 3.7 m over the ground 10 m out
-        // and 1.9 m at 20 m, a strip of tarmac over an open trench for fifteen
-        // metres past each abutment. Pieces that follow the road's slope, as
-        // the deck's do, from the deck's top down into the bed — a causeway
-        // with stone sides, which is what carries a lane down to a small bridge.
-        const approach = CHANNEL_BANK_METRES - BRIDGE_HALF_SPAN_METRES;
-        const steps = Math.ceil(approach / BRIDGE_PIECE_METRES);
-        for (let piece = 0; piece < steps; piece += 1) {
-          const top = under(
-            centre + end * (BRIDGE_HALF_SPAN_METRES + (piece * approach) / steps),
-            centre + end * (BRIDGE_HALF_SPAN_METRES + ((piece + 1) * approach) / steps),
-          );
-          const block = hung(top, ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4, toBed(top));
-          if (block !== undefined) parts.push(block);
-        }
-      }
-      if (parts.length >= MAXIMUM_BRIDGE_PARTS) {
-        return parts.slice(0, MAXIMUM_BRIDGE_PARTS);
-      }
+  return { roadAt, under };
+}
+
+/**
+ * A deck's own pieces along the road from odometer `from` to `to`, pushed
+ * onto `parts`: a parapet along each edge with its coping (#501), and the slab
+ * under the road — a stream's bridge between its abutments, and since #3105 a
+ * mapped bridge's whole span (`mapped-spans.ts`). At most
+ * {@link BRIDGE_MAX_PIECES} pieces, each {@link BRIDGE_PIECE_METRES} or longer
+ * (`options.pieceMetres` where a caller cuts its own), and no slab where
+ * `options.slab` is `false`: a deck with the ground under it.
+ */
+export function deckPieces(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  corridor: RoadCorridor,
+  from: number,
+  to: number,
+  parts: BridgePart[],
+  options: { readonly pieceMetres?: number; readonly slab?: boolean } = {},
+): void {
+  const { roadAt, under } = roadUnder(profile, origin, corridor);
+  const span = to - from;
+  if (!(span > 0)) return;
+  const pieceMetres = Math.max(BRIDGE_PIECE_METRES, options.pieceMetres ?? BRIDGE_PIECE_METRES);
+  const pieces = Math.min(BRIDGE_MAX_PIECES, Math.ceil(span / pieceMetres));
+  const step = span / pieces;
+  for (let piece = 0; piece < pieces; piece += 1) {
+    const start = roadAt(from + piece * step);
+    const end = roadAt(from + (piece + 1) * step);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dz = end.z - start.z;
+    const length = Math.hypot(dx, dy, dz);
+    if (!(length > 0)) continue;
+    const flat = Math.hypot(dx, dz);
+    const ax = dx / length;
+    const ay = dy / length;
+    const az = dz / length;
+    // The normal in plan: `terrain.ts`'s convention — the road's right
+    // since #583, called its left before.
+    const nx = -dz / flat;
+    const nz = dx / flat;
+    const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, z: (start.z + end.z) / 2 };
+    for (const side of [1, -1]) {
+      const out = ROAD_HALF_WIDTH_METRES + PARAPET_THICKNESS_METRES / 2;
+      parts.push({
+        x: mid.x + nx * out * side,
+        y: mid.y + PARAPET_HEIGHT_METRES / 2 - 0.05,
+        z: mid.z + nz * out * side,
+        axisX: ax,
+        axisY: ay,
+        axisZ: az,
+        length,
+        width: PARAPET_THICKNESS_METRES,
+        height: PARAPET_HEIGHT_METRES + 0.1,
+      });
+      // #501: the coping along its top, a little proud of its outer face.
+      const coping = out + COPING_OVERHANG_METRES / 2;
+      parts.push({
+        x: mid.x + nx * coping * side,
+        y: mid.y + PARAPET_HEIGHT_METRES - COPING_DEPTH_METRES / 2,
+        z: mid.z + nz * coping * side,
+        axisX: ax,
+        axisY: ay,
+        axisZ: az,
+        length,
+        width: PARAPET_THICKNESS_METRES + COPING_OVERHANG_METRES,
+        height: COPING_DEPTH_METRES,
+      });
     }
+    // ⚠️ **Under the road, not under the chord** — #501. A piece is
+    // straight between its two ends; where the valley's slope meets its
+    // floor it spans the bend, and its middle stood above the road there —
+    // 1.25 cm over the 5 % valley's floor, with the 3 cm clearance spent.
+    // `under` sinks it by however far it stands over the road between.
+    if (options.slab === false) continue;
+    const slab = hung(
+      under(from + piece * step, from + (piece + 1) * step),
+      ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 2,
+      DECK_DEPTH_METRES,
+    );
+    if (slab !== undefined) parts.push(slab);
   }
-  return parts;
 }
 
 /** How long an abutment is along the road, either side of its middle: 1.5 m. */
@@ -2220,6 +2403,18 @@ export function sinkUnderDrawnRoad(
  * Where on the route a point is from `target`, both wrapped: signed, the short
  * way round on a loop.
  */
+/**
+ * How far along the road `wrapped` is from where a stream's channel would
+ * begin at `crossing` — #3105: its distance from the crossing's middle, less
+ * {@link crossingWiden}, and never less than nought. On a crossing with no
+ * mapped width it is the distance itself, as it was.
+ */
+function alongFromChannel(profile: RouteProfile, wrapped: number, crossing: Crossing): number {
+  const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+  const widen = crossingWiden(crossing);
+  return widen === 0 ? u : Math.max(0, u - widen);
+}
+
 function routeOffset(profile: RouteProfile, wrapped: number, target: number): number {
   const offset = wrapped - target;
   if (!profile.loop) {
@@ -2239,8 +2434,10 @@ function occurrences(
   wrapped: number,
   from: number,
   to: number,
+  widen = 0,
 ): readonly number[] {
-  const margin = CHANNEL_BANK_METRES;
+  // #3105: and by a mapped river's own width past a stream's.
+  const margin = CHANNEL_BANK_METRES + widen;
   if (!profile.loop) {
     return wrapped >= from - margin && wrapped <= to + margin ? [wrapped] : [];
   }

@@ -96,7 +96,7 @@
  * Pure, cached per corridor, and names no rendering library.
  */
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { elevationAt, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, StreetFeature } from '@onyourleft/map-features';
 
 import {
@@ -117,6 +117,7 @@ import {
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, TERRAIN_COLUMN_OFFSETS, terrainHeightAt } from './landform';
 import { distanceToDrawnRoad, nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
+import { sceneryAnchor } from './scenery-anchor';
 import {
   APPROACH_METRES,
   EMBANKMENT_MAX_RUN_METRES,
@@ -228,6 +229,12 @@ export interface NearbyStreetPiece {
   readonly maxX: number;
   readonly minZ: number;
   readonly maxZ: number;
+  /**
+   * #3105: a piece of a street on a mapped bridge, on an open-world ride:
+   * drawn as a deck ({@link deckGround}), over water too. Absent on a street
+   * on the ground.
+   */
+  readonly deck?: true;
 }
 
 /** A corridor's nearby streets: what {@link nearbyStreets} finds once a corridor. */
@@ -532,8 +539,13 @@ export function nearbyStreets(
   const bridges = mappedGradeCrossings(corridor, profile, origin).filter(
     (crossing) => crossing.grade === 'bridge',
   );
+  // #3105: an open-world ride draws a side street's bridge too, as a deck. A
+  // route ride leaves every bridge to `overpasses.ts`, as before, and a
+  // tunnel is under the ground on both.
+  const decks = sceneryAnchor(profile) !== undefined;
   for (const street of corridor.streets) {
-    if (street.grade !== 'ground') continue;
+    const deck = decks && street.grade === 'bridge';
+    if (street.grade !== 'ground' && !deck) continue;
     const widthClass = widthClassOf(street);
     const half = SIDE_ROAD_WIDTHS[widthClass] / 2;
     const clearOfRoad = touchesRoute(street, corridor, profile, origin, touchBudget)
@@ -573,7 +585,7 @@ export function nearbyStreets(
       if (metres >= NEARBY_STREET_MIN_METRES) {
         for (let from = start; from < end; from += NEARBY_STREET_PIECE_STEPS) {
           const to = Math.min(end, from + NEARBY_STREET_PIECE_STEPS);
-          pieces.push(pieceOf(widthClass, stations.slice(from * 2, to * 2 + 2)));
+          pieces.push(pieceOf(widthClass, stations.slice(from * 2, to * 2 + 2), deck));
         }
       }
       start = end + 1;
@@ -584,7 +596,7 @@ export function nearbyStreets(
   return streets;
 }
 
-function pieceOf(widthClass: WidthClass, line: number[]): NearbyStreetPiece {
+function pieceOf(widthClass: WidthClass, line: number[], deck = false): NearbyStreetPiece {
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -595,7 +607,15 @@ function pieceOf(widthClass: WidthClass, line: number[]): NearbyStreetPiece {
     minZ = Math.min(minZ, line[at + 1] as number);
     maxZ = Math.max(maxZ, line[at + 1] as number);
   }
-  return { widthClass, line: Float32Array.from(line), minX, maxX, minZ, maxZ };
+  return {
+    widthClass,
+    line: Float32Array.from(line),
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    ...(deck ? { deck: true as const } : {}),
+  };
 }
 
 /** The pieces, with their segments flat and in a grid for {@link onNearbyStreet}. */
@@ -846,6 +866,35 @@ export function routeGround(
   };
 }
 
+/**
+ * The level a side street's bridge is drawn at — #3105: the ridden road's own
+ * height at the point of it nearest each station, lifted as a nearby street
+ * is, whatever is under the deck; so it is drawn across the water a street on
+ * the ground stops at ({@link routeGround}). None past the drawn ground's
+ * reach, as a street on the ground has none.
+ *
+ * ⚠️ **The road's level, because an open-world ride is flat until #2899**:
+ * the ground beside every held street is levelled to it (#3094), so a deck at
+ * the road's level meets the street at each end. Once real heights are read
+ * the deck's grade is to be interpolated across its span, as #2899 asks of the
+ * trainer's side.
+ */
+export function deckGround(profile: RouteProfile, origin: CorridorOrigin): StreetGround {
+  return {
+    about(x, z) {
+      let near: NearestOnRoad | undefined;
+      for (let reach = FIRST_REACH_METRES; near === undefined; reach *= 2) {
+        near = nearestOnDrawnRoad(profile, origin, x, z, reach);
+        if (reach > GROUND_LATERAL_METRES * 2) break;
+      }
+      if (near === undefined || near.distance > GROUND_LATERAL_METRES) return undefined;
+      const level =
+        elevationAt(profile, near.along) - origin.elevation + nearbyStreetLift(near.distance);
+      return () => level;
+    },
+  };
+}
+
 /** Each piece's side road on a land mask, built the first time it is in view. */
 const built = new WeakMap<LandClassMask, WeakMap<NearbyStreetPiece, SideRoad>>();
 
@@ -866,7 +915,7 @@ function sideRoadOf(
   const ribbon = streetRibbon(
     piece.line,
     SIDE_ROAD_WIDTHS[piece.widthClass] / 2,
-    routeGround(profile, origin, seed, land),
+    piece.deck === true ? deckGround(profile, origin) : routeGround(profile, origin, seed, land),
   );
   let first: NearestOnRoad | undefined;
   for (let reach = FIRST_REACH_METRES; first === undefined; reach *= 2) {
@@ -885,6 +934,7 @@ function sideRoadOf(
     mesh: ribbon.mesh,
     segments: ribbon.segments,
     halfWidths: ribbon.halfWidths,
+    ...(piece.deck === true ? { deck: true as const } : {}),
   };
   byPiece.set(piece, road);
   return road;
