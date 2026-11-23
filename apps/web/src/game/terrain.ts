@@ -433,6 +433,13 @@ export interface RoadCorridor {
    */
   readonly centre: readonly CorridorPoint[];
   /**
+   * The same points where they are in plan, before any was moved — #3061's
+   * review: given only where {@link centre} moved one. `scene.ts` §`markerAt`
+   * moves a rider drawn on the far pass's own line by as much as the road
+   * under them was moved, so a bot already round the turn stays on the road.
+   */
+  readonly unmoved?: readonly CorridorPoint[];
+  /**
    * Every vertex of the road, three floats each.
    *
    * A flat `Float32Array` rather than an array of objects because this is what a
@@ -675,6 +682,7 @@ export function roadCorridor(
 
   return {
     centre: drawn,
+    ...(drawn === centre ? {} : { unmoved: centre }),
     vertices,
     colours,
     indices: withoutRetraced(roadIndices(centre.length, slots, surfaceVertices), surface.retraced),

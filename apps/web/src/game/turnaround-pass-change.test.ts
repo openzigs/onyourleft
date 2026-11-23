@@ -154,6 +154,42 @@ describe('the pass change before a one-point turnaround — #3061', () => {
     },
   );
 
+  it.each([
+    ['to the right, as the owner’s', 'right'],
+    ['to the left', 'left'],
+  ] as const)(
+    'draws a bot already on the way back on the moved road, turning 172° %s',
+    (_name, hand) => {
+      // #3073's review: the road is moved for the rider coming up to the
+      // turn, and a bot already round it is drawn on the way back's drawn
+      // line, which is where that pass is recorded. It must be moved with it.
+      const profile = reversalRoute(172, hand);
+      const origin = corridorOrigin(profile);
+      const start = atStartLine(profile);
+      let furthestOff = 0;
+      let frames = 0;
+      for (let before = 1; before <= 24; before += 1) {
+        for (let past = 3; past <= 20; past += 1) {
+          const frame = sceneFrame({
+            profile,
+            origin,
+            state: {
+              ...start,
+              ride: { ...start.ride, distance: metres(REVERSAL_AT_METRES - before) },
+            },
+            botDistance: REVERSAL_AT_METRES + past,
+          });
+          const bot = frame.markers.find((marker) => marker.kind === 'bot');
+          if (bot === undefined) continue;
+          frames += 1;
+          furthestOff = Math.max(furthestOff, distanceTo(drawnCentreline(frame), bot.x, bot.z));
+        }
+      }
+      expect(frames).toBe(24 * 18);
+      expect(furthestOff).toBeLessThan(ROAD_WIDTH_METRES / 2);
+    },
+  );
+
   it('lays the ground beside the road where it is moved, to the bit', () => {
     // ⚠️ The ground is built on the corridor's points and their own normals
     // (`landform.ts` §`terrainCorridor`). Laid across the normals of the
