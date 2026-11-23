@@ -190,16 +190,27 @@ const PRESS_AT_METRES = JUNCTION_METRES - 110;
 const WATCH_FROM_METRES = JUNCTION_METRES - 40;
 const WATCH_TO_METRES = JUNCTION_METRES + 30;
 
-/** The frame rate the turn is watched at. The cap and the damping are by the wall clock. */
+/** The frame rate the bounds below are stated at. The cap and the damping are by the wall clock. */
 const FPS = 30;
 
+/**
+ * The frame rate the turn is watched at: **20**, the grid ride's below
+ * ({@link GRID_FPS}) — #3096: at {@link FPS} the first of these cases ran at
+ * a test's 5 s on CI. A rate's change over one frame is held to its bound
+ * scaled to the frame's length, as there; a jump is not scaled, and over the
+ * longer frame the same smooth motion reads the larger, so that bound is the
+ * stricter, while a switch onto another road is still metres.
+ */
+const WATCH_FPS = 20;
+
 /** The frames before the watch: long, so the ride gets there inside a test's time. */
-const APPROACH_FRAME_MS = 500;
+const APPROACH_FRAME_MS = 1000;
 
 /**
  * The most the drawn rider's or the eye's move may change from one frame to
  * the next, metres: **0.05**. Measured on 2026-11-22 at 30 fps through either
- * turn: 1.1 mm for the rider and 3.6 mm for the eye. Drawn on `scene.ts`'
+ * turn: 1.1 mm for the rider and 3.6 mm for the eye; on 2026-11-23 at
+ * {@link WATCH_FPS} (#3096), 2.4 mm and 6.5 mm. Drawn on `scene.ts`'
  * `uneased` line beside the road, which snapped round a junction before
  * #2422, the eye's is 0.11 m; a switch onto another road is metres.
  */
@@ -213,10 +224,11 @@ const BACK_TURN_RADIANS = (0.2 * Math.PI) / 180;
 
 /**
  * The most the camera's or the drawn rider's turn rate may change from one
- * frame to the next, radians a second: **8°/s**. Measured at 30 fps: 1.6°/s
- * for the camera and 0.24°/s for the rider; on the `uneased` line, 16.7°/s
- * and 36.7°/s. A heading that snapped would be a whole turn's rate in one
- * frame.
+ * frame to the next, radians a second: **8°/s** at {@link FPS}, scaled to the
+ * frame's length. Measured at 30 fps: 1.6°/s for the camera and 0.24°/s for
+ * the rider; on the `uneased` line, 16.7°/s and 36.7°/s. At
+ * {@link WATCH_FPS} (#3096), held to 12°/s: 2.3°/s and 0.36°/s. A heading
+ * that snapped would be a whole turn's rate in one frame.
  */
 const YAW_RATE_STEP = (8 * Math.PI) / 180;
 
@@ -416,7 +428,7 @@ interface Watched {
 
 /**
  * Rides the real game screen to the junction, presses `key` there, and
- * watches the turn at {@link FPS}: every frame the renderer was handed
+ * watches the turn at {@link WATCH_FPS}: every frame the renderer was handed
  * from {@link WATCH_FROM_METRES} to {@link WATCH_TO_METRES}.
  */
 async function rideTheTurn(
@@ -448,7 +460,7 @@ async function rideTheTurn(
   const watchFrom = (): void => {
     if (watchedFrom !== undefined || odometer() < watch.from) return;
     watchedFrom = drawn.length;
-    frameMs = 1000 / FPS;
+    frameMs = 1000 / WATCH_FPS;
   };
   for (let frame = 0; frame < 200 && odometer() < PRESS_AT_METRES; frame += 1) {
     await pump();
@@ -499,7 +511,7 @@ interface Turned {
   readonly arc: number;
 }
 
-function turned(frames: readonly Watched[], fps: number = FPS): Turned {
+function turned(frames: readonly Watched[], fps: number = WATCH_FPS): Turned {
   const seconds = 1 / fps;
   const first = frames[0] as Watched;
   const last = frames[frames.length - 1] as Watched;
@@ -560,7 +572,7 @@ function expectRoundTheCorner(
   ridden: Turned,
   side: 'left' | 'right',
   cap: number = CAMERA_MAXIMUM_YAW_RATE,
-  fps: number = FPS,
+  fps: number = WATCH_FPS,
 ): void {
   const facts = JSON.stringify(ridden);
   // The whole quarter turn, the right way round, the camera and the rider both.
