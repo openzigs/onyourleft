@@ -220,9 +220,14 @@ const tileKey = (tile: TileId): number => tile.y * TILES_AT_Z15 + tile.x;
 export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
   const { frame } = options;
   const schedule = options.schedule ?? ownTask;
+  // No `Worker` on the platform is a failure like any other: said once, then reduced detail here.
   const make =
     options.make ??
-    (typeof Worker === 'undefined' ? () => inlineTilePlanWorker(schedule) : realTilePlanWorker);
+    (typeof Worker === 'undefined'
+      ? (): TilePlanWorkerLike => {
+          throw new Error('no Worker');
+        }
+      : realTilePlanWorker);
   /** The blocks held, and which held block each decoded tile is in. */
   let held: ReadonlyMap<string, TileBlockFeatures> = new Map();
   const blockOfTile = new Map<number, string>();

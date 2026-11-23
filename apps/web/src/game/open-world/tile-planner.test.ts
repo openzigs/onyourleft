@@ -336,6 +336,46 @@ describe('the tile planner — #2901', () => {
     planner.stop();
   });
 
+  it('plans on here at reduced detail, and says so once, where the platform has no Worker', async () => {
+    vi.stubGlobal('Worker', undefined);
+    const lines: string[] = [];
+    const planner = createTilePlanner({
+      frame: FIXTURE_FRAME,
+      log: (line) => lines.push(line),
+      schedule: (run) => {
+        queueMicrotask(run);
+      },
+    });
+    planner.hold(blocks());
+    planner.want([TILE]);
+    await settle();
+    expect(lines).toStrictEqual([describeTilePlanFailure()]);
+    expect(planner.inWorker).toBe(false);
+    expect(planner.plan(TILE)?.detail).toBe('reduced');
+    planner.stop();
+  });
+
+  it('sends the worker a block held after it started, and plans that block’s tile there', async () => {
+    const SOUTH: TileId = { z: 15, x: TILE.x, y: TILE.y + 1 };
+    const later: TileBlockFeatures = {
+      buildings: [],
+      landUse: [],
+      tiles: [{ tile: SOUTH, streets: [] }],
+    };
+    const { worker, asked } = recordingWorker();
+    const planner = createTilePlanner({ frame: FIXTURE_FRAME, make: () => worker });
+    const first = blocks();
+    planner.hold(first);
+    planner.hold(new Map([...first, ['c', later]]));
+    expect(asked).toContainEqual({ kind: 'hold', block: 'c', features: later });
+    planner.want([SOUTH]);
+    await settle();
+    // Planned in the worker, at full detail: the worker held the block.
+    expect(planner.inWorker).toBe(true);
+    expect(planner.plan(SOUTH)?.detail).toBe('full');
+    planner.stop();
+  });
+
   it('makes the real worker where the platform has one', () => {
     const made: unknown[][] = [];
     vi.stubGlobal(
