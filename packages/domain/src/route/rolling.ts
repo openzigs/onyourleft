@@ -157,6 +157,12 @@ export interface RollingEdge {
   readonly points: readonly RollingPoint[];
   /** Higher is the bigger road. Breaks a tie in ADR 0088 D-1.4's default. */
   readonly roadClass: number;
+  /**
+   * #3052, ADR 0096: the street's mapped name, as the map has it, for the
+   * junction prompt to name the way by. Absent where the street has none:
+   * nothing invents one.
+   */
+  readonly name?: string | undefined;
 }
 
 /** What the rolling route reads of the street graph (#2894). */
@@ -245,6 +251,7 @@ function reversed(edge: RollingEdge): RollingEdge {
     to: edge.from,
     points: [...edge.points].reverse(),
     roadClass: edge.roadClass,
+    ...(edge.name === undefined ? {} : { name: edge.name }),
   };
 }
 

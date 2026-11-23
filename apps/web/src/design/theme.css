@@ -9146,6 +9146,16 @@ select.oyl-input {
   align-items: center;
 }
 
+/* #3052: the street a way is, under its turn, as mapped — "onto Third
+   Avenue". Smaller, and allowed to wrap, so a long name widens no way past
+   the pop-up. */
+.oyl-hud__junction-street {
+  max-width: 12rem;
+  font-size: var(--oyl-font-size-sm);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 /* *Default* and *Chosen* on one line under the way's name, smaller, so a way
    that is both is no taller than one that is either. */
 .oyl-hud__junction-marks {

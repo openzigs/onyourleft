@@ -25,7 +25,7 @@ import { TOUCH_LOCK_NAME } from '../../design/TouchLockButton';
 import { CONTRAST_REQUIREMENTS, paletteColours, THEMES } from '../../design/tokens';
 import { activateWithKeyboard, mount, type Mounted } from '../../testing/mount';
 import type { JunctionChoice } from '../open-world/junction-choice';
-import { newRide, theJunction } from '../open-world/junction-ride-testing';
+import { newRide, starRide, theJunction } from '../open-world/junction-ride-testing';
 import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './announce';
 import { DEFAULT_ANNOUNCEMENTS } from './announce-preference';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
@@ -332,5 +332,64 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
         expect(contrastRatio(palette[ink], palette.hudSurface)).toBeGreaterThanOrEqual(AA_TEXT);
       }
     }
+  });
+});
+
+describe('the junction prompt names each way’s street, as mapped — #3052, ADR 0096', () => {
+  /** A crossroads 200 m ahead: left onto Oak Street, straight on along Main Street, right onto a way with no name. */
+  function namedCrossroads() {
+    return starRide([-90, 0, 90], [], ['Oak Street', 'Main Street', undefined], 'Main Street');
+  }
+
+  it('shows each named way’s street under its turn, in its accessible name, and nothing for a way the map does not name', async () => {
+    const { choice, rider } = namedCrossroads();
+    mounted = await mount(<JunctionHud choice={choice} rider={rider} />);
+    expect(wayButtons().map(nameOf)).toEqual([
+      'Left onto Oak Street, key left arrow, pad left button',
+      'Straight on along Main Street Default Chosen, key up arrow, pad bottom button',
+      'Right, key right arrow, pad right button',
+    ]);
+    // The unnamed way draws no street line at all: no invented name, no blank.
+    const unnamed = wayButtons()[2] as HTMLButtonElement;
+    expect(unnamed.querySelector('.oyl-hud__junction-street')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('says the street names in the HUD’s one region, as the prompt appears and as the choice changes', async () => {
+    const { choice, rider } = namedCrossroads();
+    let announced: JunctionAnnounced = NO_JUNCTION_ANNOUNCED;
+    let announcer: AnnouncerState = INITIAL_ANNOUNCER;
+    let now = 0;
+    const region = (): string =>
+      document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+    /** One frame as `GameView` runs it: the prompt's event offered, the sentence said rendered into the HUD. */
+    const frame = async (): Promise<string> => {
+      now += 10;
+      const step = junctionEvent(announced, choice.prompt(rider));
+      const said = announce(announcer, {
+        now,
+        readings: [],
+        events: step.event === undefined ? [] : [step.event],
+        preference: DEFAULT_ANNOUNCEMENTS,
+      });
+      announcer = said.state;
+      announced = junctionSpoken(step.announced, said.kind);
+      const sentence = said.sentence ?? '';
+      if (mounted === undefined) {
+        mounted = await mount(
+          <JunctionHud choice={choice} rider={rider} announcement={sentence} />,
+        );
+      } else {
+        await mounted.rerender(
+          <JunctionHud choice={choice} rider={rider} announcement={sentence} />,
+        );
+      }
+      return region();
+    };
+    expect(await frame()).toBe(
+      'Junction ahead: left onto Oak Street, straight on along Main Street or right. The default is straight on along Main Street.',
+    );
+    choice.press('left', rider);
+    expect(await frame()).toBe('Chosen: left onto Oak Street.');
   });
 });
