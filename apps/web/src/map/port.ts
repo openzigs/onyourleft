@@ -184,9 +184,8 @@ export interface MapCreateOptions extends MapViewOptions {
    *   keyboard handler, rotation off);
    * - the wheel and a trackpad zoom it, a mouse drag pans it with inertia, a
    *   double click or double tap zooms in;
-   * - on touch, a pinch zooms and TWO fingers pan, so one finger still scrolls
-   *   the page — MapLibre's cooperative rule for touch, without its rule for
-   *   the wheel;
+   * - on touch, one finger drags it and a pinch zooms it (#3014), and a tap
+   *   still reaches {@link MapPointerHandlers.tap};
    * - a waypoint of kind `pin` is a focusable pin whose arrow keys reach
    *   {@link MapPointerHandlers.nudgeWaypoint}.
    */

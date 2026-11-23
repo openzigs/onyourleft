@@ -68,7 +68,7 @@
  * | `not-recording` | `GameView` | `GameTrainerPort.recordGameRide` answering `false` or throwing at the press of *Ride* (#2381) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
- * | `junction` | nothing yet: the open-world ride session (#2896) feeds it | `hud/junction-announce.ts` §`junctionEvent` (#2898) |
+ * | `junction` | `GameView`, on an open-world ride (#3013) | `hud/junction-text.ts` §`junctionEvent` (#2898) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
  * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
