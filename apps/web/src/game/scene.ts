@@ -50,10 +50,17 @@ import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics'
 import {
   countrysideWithout,
   NO_LAND_CLASS,
+  type Countryside,
   type CountrysideLever,
   type LandClassMask,
 } from './land-class';
-import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
+import {
+  ROAD_CLEARANCE_METRES,
+  horizonRelief,
+  standingOnGround,
+  terrainCorridor,
+  type TerrainMesh,
+} from './landform';
 import { poolsInView } from './mapped-pools';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import {
@@ -78,7 +85,14 @@ import type {
   SceneFrame,
   WaterFrame,
 } from './port';
-import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import {
+  SCATTER_MAX_ITEMS,
+  scatterAt,
+  scatterSeed,
+  type ScatterItem,
+  type ScatterWay,
+  type StructureKind,
+} from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
 import {
@@ -115,12 +129,16 @@ import {
   type RoadCorridor,
 } from './terrain';
 import {
+  BOUNDARY_KINDS,
   NO_MAPPED_TOWN,
   STRUCTURE_MAX_ITEMS,
   clearOfBuildings,
   clearOfSettlements,
   groundedFootprintOf,
+  structureClearance,
   structuresAt,
+  structuresOnWay,
+  structuresWithin,
   type MappedTown,
   type SettlementFootprint,
 } from './settlements';
@@ -158,6 +176,7 @@ import {
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
+import { sceneryAnchor } from './scenery-anchor';
 import { streetsAt, type VillageStreet } from './streets';
 import {
   bridgeParts,
@@ -290,6 +309,21 @@ export interface SceneInput {
    * ride, which names no street.
    */
   readonly streetNames?: readonly StreetNameLabel[] | undefined;
+  /**
+   * #3051: in an open-world ride, the ways out of the junctions in view that
+   * the route does not take (`open-world/road.ts` §`OpenWorldRoad.waysOut`),
+   * each as the view the route would hand out were it taken. The scenery is
+   * placed along each as it is along the road, under the same budgets, so a
+   * junction choice replaces nothing that stands past the junction: it swaps
+   * which view is the road and which a way out. Absent on every other ride.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link drawnPath}: a `GameView`
+   * that stopped handing it over would compile, and every press would again
+   * move the scenery past the junction from one street to another on that
+   * frame. `open-world/junction-corner.test.tsx` reads it back off the frames
+   * the renderer was handed.
+   */
+  readonly waysOut?: readonly ScatterWay[] | undefined;
   /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
@@ -1240,6 +1274,8 @@ function scenery(
     { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
     land,
     countryside,
+    // #3051: and along every way out the route does not take, in the one budget.
+    input.waysOut,
   );
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
@@ -1275,12 +1311,26 @@ function scenery(
     input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN),
     countryside,
   );
+  // #3051: and those along every way out the route does not take, under the
+  // one budget: the road's and the ways' together, so what a frame carries
+  // does not turn on which of them the route takes.
+  const structures = withStructuresOnWays(
+    placed,
+    input,
+    seed,
+    placeOnCorridor(corridor, riderDistance),
+    last.along,
+    structureBudget - billboards.length,
+    footprints,
+    land,
+    countryside,
+  );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
   // #2428: and none across a mapped building's driveway, a roadside hedge
   // row the likeliest.
   const built = clearOfDriveways(
-    clearOfSideRoads(placed, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
+    clearOfSideRoads(structures, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
     input.mappedBuildings,
   );
   // #1549: and off every mapped building's ground, by #1534's rule — whose
@@ -1303,6 +1353,88 @@ function scenery(
     billboards,
   };
 }
+
+/**
+ * `placed`, the road's own structures, with those along an open-world ride's
+ * ways out (#3051, {@link SceneInput.waysOut}) that a frame carries: the
+ * ways' as far along each as the view reaches through its junction, which is
+ * `toMetres` on the road, and off the road. Each way's ground is appended to
+ * `footprints`, after the road's own, so the natural scenery keeps off both.
+ *
+ * **One budget, and no say in it for which is the road.** Where the road's
+ * and the ways' together pass `most`, the buildings are kept before the field
+ * boundaries (`settlements.ts` §`BOUNDARY_KINDS`), as `structuresAt` keeps a
+ * house before a far wall, and within each the nearest the rider, wherever
+ * they stand. Had the road's own been kept first, a junction choice would
+ * take the houses off the street it left and stand them along the one it
+ * took. `placed` itself where there is no way out: every ride but an
+ * open-world one, and a frame of one with no junction in view.
+ */
+function withStructuresOnWays(
+  placed: readonly ScatterItem[],
+  input: SceneInput,
+  seed: number,
+  rider: { readonly x: number; readonly z: number },
+  toMetres: number,
+  most: number,
+  footprints: SettlementFootprint[],
+  land: LandClassMask,
+  countryside: Countryside,
+): readonly ScatterItem[] {
+  const ways = input.waysOut;
+  if (ways === undefined || ways.length === 0) return placed;
+  const town = input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN);
+  // Both views count ride distance from their own first sample.
+  const rides = sceneryAnchor(input.profile)?.origin ?? 0;
+  const onWays: ScatterItem[] = [];
+  const boundaries: boolean[] = [];
+  for (const way of ways) {
+    const built = structuresOnWay(way, input.origin, seed, land, town, countryside);
+    // As far along the way as this frame's view reaches through its junction.
+    const reach = toMetres - ((sceneryAnchor(way.profile)?.origin ?? 0) - rides);
+    const within = structuresWithin(built, reach);
+    for (let index = 0; index < within.items; index += 1) {
+      onWays.push(built.items[index] as ScatterItem);
+      boundaries.push(built.boundaries[index] as boolean);
+    }
+    for (let index = 0; index < within.footprints; index += 1) {
+      footprints.push(built.footprints[index] as SettlementFootprint);
+    }
+  }
+  if (onWays.length === 0) return placed;
+  // The budget first, and only then each of the ways' held off THIS road by
+  // the clearance its own structures keep, since a way leaves the road at its
+  // junction. `sceneFrame` stands them all on the frame's ground.
+  const clear = (item: ScatterItem): boolean =>
+    structureClearance(input.profile, input.origin, item) >= ROAD_CLEARANCE_METRES;
+  if (placed.length + onWays.length <= most) return [...placed, ...onWays.filter(clear)];
+  // A building before a field boundary, and the nearest the rider of each.
+  const all = [...placed, ...onWays];
+  const order = new Float64Array(all.length);
+  for (let index = 0; index < all.length; index += 1) {
+    const item = all[index] as ScatterItem;
+    const boundary =
+      index < placed.length
+        ? BOUNDARY_KINDS.has(item.kind as StructureKind)
+        : (boundaries[index - placed.length] as boolean);
+    order[index] =
+      Math.hypot(item.x - rider.x, item.z - rider.z) + (boundary ? FIELD_BOUNDARIES_AFTER : 0);
+  }
+  const kept: ScatterItem[] = [];
+  for (const index of Array.from(order.keys())
+    .sort((first, second) => (order[first] as number) - (order[second] as number))
+    .slice(0, Math.max(0, most))) {
+    const item = all[index] as ScatterItem;
+    if (index < placed.length || clear(item)) kept.push(item);
+  }
+  return kept;
+}
+
+/**
+ * What {@link withStructuresOnWays} adds to a field boundary's distance from
+ * the rider to order it after every building: further than any frame reaches.
+ */
+const FIELD_BOUNDARIES_AFTER = 1e6;
 
 /**
  * The mapped buildings, with the rider's chunk and drawn place, and since

@@ -216,6 +216,83 @@ describe('a junction choice swaps the tail past the junction', () => {
     );
   });
 
+  it('hands out the route a choice would give without taking it, and is left as it was — #3051', () => {
+    const { route } = eastAlongRow3();
+    // Past the first trim, and not on a sample: the road held starts at 530 m.
+    const rider = 1_534;
+    route.advance(rider);
+    const { junction, other } = firstJunctionWithAnotherWay(route, rider);
+    const before = route.view();
+    const held = {
+      origin: route.origin,
+      end: route.end,
+      legs: route.legs,
+      junctions: route.junctionsAfter(rider),
+    };
+
+    const took = route.taking(junction.distance, other.edge.id);
+    if (took === undefined) throw new Error('no route');
+    const taking = took.view();
+
+    // Nothing of the route moved: the same view object, legs, ends and junctions.
+    expect(route.view()).toBe(before);
+    expect(route.origin).toBe(held.origin);
+    expect(route.end).toBe(held.end);
+    expect(route.legs).toEqual(held.legs);
+    expect(route.junctionsAfter(rider)).toEqual(held.junctions);
+    // And a route that goes on from there goes on as one never asked does.
+    const { route: unasked } = eastAlongRow3();
+    unasked.advance(rider);
+    route.advance(rider + 700);
+    unasked.advance(rider + 700);
+    expect(route.view()).toEqual(unasked.view());
+    expect(route.legs).toEqual(unasked.legs);
+
+    // The view is the one the choice gives, sample for sample, as far as it reaches.
+    const { route: chosen } = eastAlongRow3();
+    chosen.advance(rider);
+    expect(chosen.choose(junction.distance, other.edge.id, rider)).toBe('swapped');
+    const swapped = chosen.view();
+    expect(taking).not.toBe(before);
+    expect(taking.positions.length).toBeGreaterThanOrEqual(swapped.positions.length - 1);
+    const count = Math.min(taking.positions.length, swapped.positions.length);
+    expect(taking.positions.slice(0, count)).toEqual(swapped.positions.slice(0, count));
+    // The grade's window runs 70 m past a sample, so the last of a shorter view are provisional.
+    expect(taking.elevations.slice(0, count - 2)).toEqual(swapped.elevations.slice(0, count - 2));
+    expect(taking.grades.slice(0, count - 7)).toEqual(swapped.grades.slice(0, count - 7));
+    // It leaves the road the route takes at the junction, and not before it.
+    const split = Math.floor((junction.distance - held.origin) / 10);
+    expect(taking.positions.slice(0, split + 1)).toEqual(before.positions.slice(0, split + 1));
+    expect(taking.positions[split + 2]).not.toEqual(before.positions[split + 2]);
+    // The other route is one of its own: the same origin and U-turns, the
+    // way taken at the junction, and its own junctions on from there.
+    expect(took.origin).toBe(held.origin);
+    expect(took.uTurns).toBe(route.uTurns);
+    expect(took.junctionsAfter(rider).find((j) => j.distance === junction.distance)?.taken).toBe(
+      other.edge.id,
+    );
+    expect(took.legs.map((leg) => leg.edge.id)).toEqual(chosen.legs.map((leg) => leg.edge.id));
+    // And riding IT on changes nothing of the route it was taken from.
+    const mine = route.view();
+    took.advance(rider + 1_500);
+    took.uTurn(rider + 1_500);
+    expect(route.view()).toBe(mine);
+    expect(route.legs).toEqual(unasked.legs);
+  });
+
+  it('hands out no route for a junction that is not on the route, or a way that is not one of its ways on — #3051', () => {
+    const { route } = eastAlongRow3();
+    const { junction, other } = firstJunctionWithAnotherWay(route, 0);
+    const before = route.view();
+    expect(route.taking(junction.distance + 1, other.edge.id)).toBeUndefined();
+    expect(route.taking(junction.distance, 'no-such-street')).toBeUndefined();
+    expect(route.view()).toBe(before);
+    // The way already taken is a way on: its route's road is this route's own.
+    const own = route.taking(junction.distance, junction.taken)?.view();
+    if (own === undefined) throw new Error('no route');
+    expect(own.positions.slice(0, -1)).toEqual(before.positions.slice(0, own.positions.length - 1));
+  });
+
   it('swaps between ways of different lengths with no grade the rider was sent changing', () => {
     const { route } = eastAlongRow3();
     const rider = 900;

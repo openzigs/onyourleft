@@ -69,6 +69,22 @@
  * distance. So a view change keeps every tree, house and field short of the
  * change where it was, rather than regenerating the world on that frame.
  *
+ * ## The ways out of a junction that the route does not take (#3051)
+ *
+ * A view's scenery is placed along the view's own road, so the road past a
+ * junction carried scenery on the way the route took and none on any other:
+ * a choice moved every tree and house past the junction from the old way to
+ * the new one, on the frame of the press, in plain view 100 m and more ahead
+ * of the rider. {@link OpenWorldRoad.waysOut} hands the scene each way out
+ * not taken, of every junction in view, as the view the route would hand out
+ * were it taken (`RollingRoute.taking`), framed and anchored as every view
+ * is. So the scenery along a way is the same whether the route takes it or
+ * not: a choice swaps which view is the road and which a way out, and what
+ * stands along them stays where it was. And the ways out of the junctions
+ * along each of those ways too ({@link WAYS_OUT_DEPTH}): the road has its
+ * junctions' ways, so the street a choice makes the road must already have
+ * its own, or they would all appear on the frame of the press.
+ *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
@@ -90,6 +106,8 @@ import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
 import type { WorldCorridor } from '../world-data/corridor';
 import {
+  VIEW_AHEAD_METRES,
+  VIEW_BEHIND_METRES,
   corridorOrigin,
   drawProfileIn,
   localGroundPosition,
@@ -105,6 +123,68 @@ const NO_LABELS: readonly StreetNameLabel[] = [];
  * **1 km**. *#2982's choice*, above.
  */
 export const OPEN_WORLD_REACH_FLOOR_METRES = 1_000;
+
+/**
+ * How far ahead of the rider a junction's ways out are handed to the scene:
+ * the view's own reach ahead, so a way's scenery comes into view in the fog
+ * as the road's own does.
+ */
+export const WAYS_OUT_AHEAD_METRES = VIEW_AHEAD_METRES;
+
+/**
+ * How far behind the rider a junction's ways out are still handed on: the
+ * view's own reach behind, so what stood along the way not taken is dropped
+ * only once the road beside it is.
+ */
+export const WAYS_OUT_BEHIND_METRES = VIEW_BEHIND_METRES;
+
+/**
+ * How far the rider rides between two looks for the junctions in view,
+ * metres: **20**. A look walks the graph at every junction of the 2 km held
+ * (`RollingRoute.junctionsAfter`), which is not a frame's work; a view change
+ * is looked at at once. So a junction's ways come into reach, and fall out of
+ * it behind, up to this much late: both where the view shows neither.
+ */
+export const WAYS_OUT_LOOK_METRES = 20;
+
+/**
+ * How many junctions from the road a way out is handed on: **2**. The ways
+ * out of the road's junctions, and the ways out of the junctions along those.
+ * A junction three from the road is two streets' length past the first, which
+ * on the shortest town block is past where the fog has taken most of a view.
+ */
+export const WAYS_OUT_DEPTH = 2;
+
+/**
+ * One way out of a junction that the route does not take, as the scene reads
+ * it (`scene.ts` §`SceneInput.waysOut`). @see OpenWorldRoad.waysOut
+ */
+export interface OpenWorldWayOut {
+  /**
+   * The view the route would hand out were this way taken, in the ride's
+   * frame and keyed on the ride as every view is. The same object for as long
+   * as the way is handed on.
+   */
+  readonly profile: RouteProfile;
+  /** The junction's distance on {@link profile}. */
+  readonly fromMetres: number;
+}
+
+interface HeldWayOut extends OpenWorldWayOut {
+  /** The junction's ride distance. */
+  readonly junction: number;
+  /** The ride distance of the profile's distance zero. */
+  readonly origin: number;
+  /** The route that takes the way, which {@link profile} is the view of: its junctions' ways are read off it. */
+  readonly route: RollingRoute;
+  /**
+   * How many junctions from the road it is: 1 for a way out of the road
+   * itself. A choice changes it, and nothing a reader is handed.
+   */
+  depth: number;
+}
+
+const NO_WAYS_OUT: readonly OpenWorldWayOut[] = [];
 
 /** The road, as every reader in the ride loop reads it. */
 export interface OpenWorldRoadView {
@@ -269,6 +349,103 @@ export class OpenWorldRoad {
     return line;
   }
 
+  /** The ways out held, by junction and way. @see waysOut */
+  #waysOut = new Map<string, HeldWayOut>();
+  /** What {@link waysOut} last handed on, and the view and rider it was for. */
+  #waysOutFor:
+    | {
+        readonly of: RouteProfile;
+        readonly at: number;
+        readonly ways: readonly OpenWorldWayOut[];
+      }
+    | undefined;
+
+  /**
+   * The ways out not taken, of every junction from
+   * {@link WAYS_OUT_BEHIND_METRES} behind a rider at ride distance `rider` to
+   * {@link WAYS_OUT_AHEAD_METRES} ahead, and of the junctions along each of
+   * those ways within the same reach of the rider, to
+   * {@link WAYS_OUT_DEPTH} junctions from the road — #3051, the file's
+   * header. Each way keeps its profile for as long as it is handed on,
+   * through a choice that makes another view the road, and the array is the
+   * same one until the ways change, so a reader may key what it builds on
+   * either. A junction behind the rider keeps the ways it had as the rider
+   * passed it; a U-turn drops them all, since the road under the rider
+   * changed. None for a rider distance that is not a finite number.
+   */
+  waysOut(rider: number): readonly OpenWorldWayOut[] {
+    if (!Number.isFinite(rider)) return NO_WAYS_OUT;
+    const view = this.#view;
+    const last = this.#waysOutFor;
+    if (last?.of === view.profile && Math.abs(rider - last.at) < WAYS_OUT_LOOK_METRES) {
+      return last.ways;
+    }
+    const origin = this.route.origin;
+    // Without a frame a view is drawn about its own first point, which a trim
+    // moves: a way is kept only while it is drawn about the same one.
+    const fixed = this.#hooks.frame !== undefined;
+    const held = new Map<string, HeldWayOut>();
+    /** The ways out of `route`'s junctions past ride distance `after`, `depth` junctions from the road. */
+    const look = (route: RollingRoute, after: number, depth: number): void => {
+      for (const junction of route.junctionsAfter(after)) {
+        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) break;
+        for (const way of junction.ways) {
+          if (way.edge.id === junction.taken) continue;
+          // A way is where it leaves and along which street: the same way
+          // through every choice that keeps it in reach, whichever road it
+          // is counted from.
+          const key = `${String(junction.distance)}:${way.edge.id}`;
+          if (held.has(key)) continue;
+          let out = this.#waysOut.get(key);
+          if (out === undefined || !(fixed || out.origin === origin)) {
+            const taking = route.taking(junction.distance, way.edge.id);
+            if (taking === undefined) continue;
+            const profile = this.#framed(taking.view());
+            anchorScenery(profile, { seed: this.#seed, origin: taking.origin });
+            out = {
+              profile,
+              fromMetres: junction.distance - taking.origin,
+              junction: junction.distance,
+              origin: taking.origin,
+              route: taking,
+              depth,
+            };
+          } else {
+            out.depth = depth;
+          }
+          held.set(key, out);
+          if (depth < WAYS_OUT_DEPTH) look(out.route, junction.distance, depth + 1);
+        }
+      }
+    };
+    // Behind the rider: what each junction of the road had as the rider
+    // passed it, and the ways out along those.
+    for (const [key, way] of this.#waysOut) {
+      if (
+        way.depth === 1 &&
+        way.junction <= rider &&
+        way.junction >= rider - WAYS_OUT_BEHIND_METRES &&
+        (fixed || way.origin === origin)
+      ) {
+        held.set(key, way);
+        look(way.route, way.junction, 2);
+      }
+    }
+    look(this.route, rider, 1);
+    const ways: readonly OpenWorldWayOut[] = [...held.values()];
+    const same =
+      last !== undefined &&
+      last.ways.length === ways.length &&
+      ways.every((way, index) => way === last.ways[index]);
+    this.#waysOut = held;
+    this.#waysOutFor = {
+      of: view.profile,
+      at: rider,
+      ways: same ? last.ways : ways.length === 0 ? NO_WAYS_OUT : ways,
+    };
+    return this.#waysOutFor.ways;
+  }
+
   /** The view last handed on. */
   get view(): OpenWorldRoadView {
     return this.#view;
@@ -309,6 +486,8 @@ export class OpenWorldRoad {
         ? undefined
         : { from: heldLine(drawn, this.#view.origin), at: rider };
     this.#drawn = undefined;
+    // #3051: after a U-turn no junction behind is one the rider passed on this road.
+    if (turned) this.#waysOut.clear();
     this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;
   }

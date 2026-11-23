@@ -4559,6 +4559,9 @@ function GameScreen({
                 // #3052: and where each named street's name is painted on it.
                 streetNames: road.follower.streetNames(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
+                // #3051: and the ways out the route does not take, so the
+                // scenery stands along each before a choice and after it.
+                waysOut: road.follower.waysOut(simulation.state.ride.distance),
               }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
           // #1853: where the round has steered the rider, the place the
