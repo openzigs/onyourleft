@@ -109,7 +109,7 @@
 import { Blob as NodeBlob } from 'node:buffer';
 
 import { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   RollingRoute,
@@ -256,7 +256,8 @@ let wallMs = 0;
 let mounted: Mounted | undefined;
 const drawn: { readonly frame: SceneFrame; readonly input: SceneInput }[] = [];
 
-beforeEach(() => {
+/** A ride from nothing: no frame drawn or asked for, the clocks at nought. */
+function freshRide(): void {
   inputs.length = 0;
   drawn.length = 0;
   pending = [];
@@ -268,14 +269,49 @@ beforeEach(() => {
     return pending.length;
   });
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
-});
+}
 
-afterEach(() => {
+function endRide(): void {
   mounted?.unmount();
   mounted = undefined;
   localStorage.clear();
   vi.unstubAllGlobals();
+}
+
+/**
+ * #3096: the game screen, the scene and what they load on a ride's first
+ * frames, loaded and run once before the first case rather than inside its
+ * 5 s: on CI that case ran a second longer than the same ride in the next
+ * one. A few frames of a ride on {@link sessions}' grid, thrown away; every
+ * case still mounts its own game screen and rides from the start.
+ */
+beforeAll(async () => {
+  freshRide();
+  mounted = await mount(
+    <GameView
+      port={port()}
+      trainer={trainer([])}
+      renderer={() => Promise.resolve(capturingRenderer())}
+      now={() => nowMs}
+    />,
+  );
+  for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+    await settle();
+  }
+  await act(async () => {
+    rideButton()?.click();
+    await Promise.resolve();
+  });
+  await settle();
+  for (let frame = 0; frame < 10; frame += 1) await pump();
+  endRide();
 });
+
+afterAll(endRide);
+
+beforeEach(freshRide);
+
+afterEach(endRide);
 
 async function pump(): Promise<void> {
   const next = pending.shift();
