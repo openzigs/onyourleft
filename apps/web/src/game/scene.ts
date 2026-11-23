@@ -87,6 +87,7 @@ import type {
 } from './port';
 import {
   SCATTER_MAX_ITEMS,
+  SCATTER_WAY_REACH_METRES,
   scatterAt,
   scatterSeed,
   type ScatterItem,
@@ -122,7 +123,9 @@ import {
 import {
   ROAD_WIDTH_METRES,
   corridorOrigin,
+  BEND_SMOOTHING_METRES,
   drawnRoadFrame,
+  localGroundPosition,
   roadCorridor,
   type CorridorOrigin,
   type CorridorPoint,
@@ -203,10 +206,11 @@ import {
   cyclistLook,
   cyclistsInReach,
   townAt,
+  type CyclistInReach,
   type SceneryCyclist,
 } from './scenery-cyclists';
 import { NO_URBAN_CLASS } from './urban-class';
-import type { RouteProfile } from '@onyourleft/domain';
+import { positionAt, type RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
 export interface SceneInput {
@@ -315,7 +319,10 @@ export interface SceneInput {
    * each as the view the route would hand out were it taken. The scenery is
    * placed along each as it is along the road, under the same budgets, so a
    * junction choice replaces nothing that stands past the junction: it swaps
-   * which view is the road and which a way out. Absent on every other ride.
+   * which view is the road and which a way out. Since #3095 so are the
+   * villages' streets and crossroads, the billboards, the people on those
+   * streets and the other cyclists ({@link waysReached}). Absent on every
+   * other ride.
    *
    * ⚠️ Optional the unsafe way round, like {@link drawnPath}: a `GameView`
    * that stopped handing it over would compile, and every press would again
@@ -686,7 +693,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
           seed,
           input.landClass ?? NO_LAND_CLASS,
         );
-  const crossSideRoads = sideRoadsAt(
+  // #3095: the ways out the route does not take that this frame's view
+  // reaches, each as far along it as the view reaches through its junction.
+  const reached = waysReached(
+    input,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+  );
+  const roadSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
     seed,
@@ -719,6 +732,15 @@ export function sceneFrame(input: SceneInput): SceneFrame {
         ),
     input.landClass ?? NO_LAND_CLASS,
   );
+  // #3095: and each village's crossroads along every way out, as the way's own
+  // view lays it, so a choice moves none of them from one street to another.
+  const crossSideRoads = withVillageCrossroadsOnWays(
+    roadSideRoads,
+    reached,
+    input,
+    seed,
+    riderDistance,
+  );
   // #459, #2661: the streams' bridges and the mapped overpasses and
   // underpasses in view, before the scenery too — since #2699 an overpass's
   // road runs on off both ends of its deck, and is a side road: drawn in the
@@ -743,11 +765,18 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     crossings.roads.length === 0 && nearby.length === 0
       ? crossSideRoads
       : [...crossSideRoads, ...crossings.roads, ...nearby];
-  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
+  const { scatter: items, billboards } = scenery(
+    corridor,
+    input,
+    riderDistance,
+    seed,
+    sideRoads,
+    reached,
+  );
   // #1535: the village streets along exactly the stretch of road this frame
   // drew, for `scenery`'s reason — and outside the structures' budget,
   // because a street is one mesh rather than items a rung could thin.
-  const streets = streetsAt(
+  const roadStreets = streetsAt(
     input.profile,
     input.origin,
     seed,
@@ -763,7 +792,12 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // so this too is a lookup on every later frame.
     input.mappedTown?.urban,
     junctions,
+    // #3095: in pieces either side of every junction of the road in view.
+    junctionsOn(input.profile, input),
   );
+  // #3095: and each village's street along every way out, so its pavements,
+  // and the people on them, stay where they were through a choice.
+  const streets = withVillageStreetsOnWays(roadStreets, reached, input, seed);
   const camera = cameraPose(
     corridor,
     riderDistance,
@@ -862,7 +896,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       ground,
     ),
     // #2722: and the other cyclists on the road, kept clear of the rider.
-    ...cyclistsOf(placedCyclists(input, corridor, riders)),
+    // #3095: and along every way out, as the way's own view places them.
+    ...cyclistsOf(withCyclistsOnWays(placedCyclists(input, corridor, riders), reached, input)),
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
@@ -1117,34 +1152,46 @@ export function placedCyclists(
       BICYCLE_LENGTH_METRES,
     );
     placed.push({ along: each.along, lateral });
-    const oncoming = encounter.kind === 'oncoming';
-    const speed = encounter.pace * input.state.ride.speed;
-    const bend = line === undefined ? 0 : leanAt(line, each.along, speed);
-    const marker = markerAt(
-      corridor,
-      each.along,
-      'bot',
-      { metres: lateral, rate: 0 },
-      { bicycle: 0, body: 0 },
-      line,
-      { pedalling: 0, rideSeconds: 0 },
-    );
-    cyclists.push({
-      kind: encounter.kind,
-      x: marker.x,
-      y: marker.y,
-      z: marker.z,
-      headingX: oncoming ? -marker.headingX : marker.headingX,
-      headingZ: oncoming ? -marker.headingZ : marker.headingZ,
-      // Into the bend on the road, which is the other way by an oncoming one's own right.
-      lean: oncoming ? -bend : bend,
-      crankAngle: simulatedCrankAngle(each.ridden),
-      lateral,
-      along: each.along,
-      look: cyclistLook(encounter.key),
-    });
+    cyclists.push(cyclistOn(corridor, line, each, lateral, input.state.ride.speed));
   }
   return cyclists;
+}
+
+/** One encounter's cyclist, drawn on `corridor` at `lateral` across it. @see placedCyclists */
+function cyclistOn(
+  corridor: RoadCorridor,
+  line: RacingLine | undefined,
+  each: CyclistInReach,
+  lateral: number,
+  rideSpeed: number,
+): SceneryCyclist {
+  const { encounter } = each;
+  const oncoming = encounter.kind === 'oncoming';
+  const speed = encounter.pace * rideSpeed;
+  const bend = line === undefined ? 0 : leanAt(line, each.along, speed);
+  const marker = markerAt(
+    corridor,
+    each.along,
+    'bot',
+    { metres: lateral, rate: 0 },
+    { bicycle: 0, body: 0 },
+    line,
+    { pedalling: 0, rideSeconds: 0 },
+  );
+  return {
+    kind: encounter.kind,
+    x: marker.x,
+    y: marker.y,
+    z: marker.z,
+    headingX: oncoming ? -marker.headingX : marker.headingX,
+    headingZ: oncoming ? -marker.headingZ : marker.headingZ,
+    // Into the bend on the road, which is the other way by an oncoming one's own right.
+    lean: oncoming ? -bend : bend,
+    crankAngle: simulatedCrankAngle(each.ridden),
+    lateral,
+    along: each.along,
+    look: cyclistLook(encounter.key),
+  };
 }
 
 /**
@@ -1258,6 +1305,8 @@ function scenery(
   riderDistance: number,
   seed: number,
   sideRoads: readonly SideRoad[],
+  /** #3095: the ways out this frame reaches. @see waysReached */
+  reached: readonly ReachedWay[],
 ): { readonly scatter: readonly ScatterItem[]; readonly billboards: readonly Billboard[] } {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
@@ -1281,9 +1330,16 @@ function scenery(
   // takes structures away takes them too, and none is ever extra.
   const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
   // #1565: and none on a side road.
+  // #3095: and those along every way out, the nearest of all of them kept.
   const billboards = boardsClearOfSideRoads(
     nearestBillboards(
-      billboardsAt(input.profile, input.origin, seed, first.along, last.along, land),
+      withBillboardsOnWays(
+        billboardsAt(input.profile, input.origin, seed, first.along, last.along, land),
+        reached,
+        input,
+        seed,
+        land,
+      ),
       riderDistance,
       structureBudget,
     ),
@@ -1352,6 +1408,308 @@ function scenery(
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,
   };
+}
+
+/**
+ * One way out of a junction that this frame's view reaches — #3095. @see waysReached
+ */
+interface ReachedWay {
+  readonly way: ScatterWay;
+  /** How far along the way's own view this frame's view reaches through its junction. */
+  readonly toMetres: number;
+  /** What a distance on the way's view is short of the same ride distance on the road's. */
+  readonly shift: number;
+}
+
+const NO_REACHED: readonly ReachedWay[] = [];
+
+/**
+ * The ways out of an open-world ride's junctions that this frame's view
+ * reaches (#3051, {@link SceneInput.waysOut}), each as far along it as the
+ * view reaches through its junction, which is `toMetres` on the road — the
+ * reach {@link withStructuresOnWays} reads the houses to. None on every
+ * other ride.
+ *
+ * ⚠️ **What a way carries is what lies past its junction, and nothing short
+ * of it.** Short of the junction a way's view is the road itself, which the
+ * frame draws already. So a choice swaps which view carries what past the
+ * junction, and the set the frame draws there is the same before and after.
+ */
+function waysReached(input: SceneInput, toMetres: number): readonly ReachedWay[] {
+  const ways = input.waysOut;
+  if (ways === undefined || ways.length === 0) return NO_REACHED;
+  // Both views count ride distance from their own first sample.
+  const rides = sceneryAnchor(input.profile)?.origin ?? 0;
+  const reached: ReachedWay[] = [];
+  for (const way of ways) {
+    const shift = (sceneryAnchor(way.profile)?.origin ?? 0) - rides;
+    const reach = toMetres - shift;
+    if (reach > way.fromMetres) reached.push({ way, toMetres: reach, shift });
+  }
+  return reached;
+}
+
+/**
+ * `road`'s side roads, with the crossroads of every village along each way
+ * out `reached` past its junction — #3095: `cross-streets.ts`
+ * §`sideRoadsAt` on the way's own view, with no mapped junction (the road's
+ * mapped ones are the held streets', which the frame draws already).
+ */
+function withVillageCrossroadsOnWays(
+  road: readonly SideRoad[],
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+  seed: number,
+  riderDistance: number,
+): readonly SideRoad[] {
+  if (reached.length === 0) return road;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const onWays: SideRoad[] = [];
+  for (const { way, toMetres, shift } of reached) {
+    for (const each of sideRoadsAt(
+      way.profile,
+      input.origin,
+      seed,
+      way.fromMetres,
+      toMetres,
+      riderDistance - shift,
+      [],
+      land,
+    )) {
+      if (each.junction.along >= way.fromMetres && !onWays.includes(each)) onWays.push(each);
+    }
+  }
+  return onWays.length === 0 ? road : [...road, ...onWays];
+}
+
+/**
+ * Where the junctions of the ways out `reached` are on `profile`, a view
+ * whose distances are `shift` short of the road's: each junction that stands
+ * on it, at its distance there — #3095, the cuts `streets.ts` §`streetsAt`
+ * lays a village's street in pieces at. The road's own junctions on the road,
+ * and on a way out its own junction and those along it.
+ */
+function junctionsOn(profile: RouteProfile, input: SceneInput): readonly number[] {
+  const ways = input.waysOut;
+  if (ways === undefined || ways.length === 0) return NO_JUNCTION_CUTS;
+  // The same while the ways are: `road.ts` hands the same array until they change.
+  let byProfile = cutsFound.get(ways);
+  if (byProfile === undefined) {
+    byProfile = new WeakMap();
+    cutsFound.set(ways, byProfile);
+  }
+  const known = byProfile.get(profile);
+  if (known !== undefined) return known;
+  const { origin } = input;
+  const mine = sceneryAnchor(profile)?.origin ?? 0;
+  const cuts: number[] = [];
+  for (const way of ways) {
+    // Its junction's distance on `profile`: both count ride distance.
+    const at = way.fromMetres + (sceneryAnchor(way.profile)?.origin ?? 0) - mine;
+    if (!(at >= 0 && at <= profile.totalDistance) || cuts.includes(at)) continue;
+    // On the route's own line through the junction, not the drawn road,
+    // which rounds the corner a different way on each view.
+    const here = localGroundPosition(origin, positionAt(profile, at));
+    const there = localGroundPosition(origin, positionAt(way.profile, way.fromMetres));
+    if (Math.hypot(here.x - there.x, here.z - there.z) > JUNCTION_ON_METRES) continue;
+    cuts.push(at);
+    // And short of it by the corner the drawn road rounds there, which is
+    // another corner on every view: what lies short of that is the same.
+    if (at - JUNCTION_CORNER_METRES >= 0) cuts.push(at - JUNCTION_CORNER_METRES);
+  }
+  const found = cuts.length === 0 ? NO_JUNCTION_CUTS : cuts;
+  byProfile.set(profile, found);
+  return found;
+}
+
+const NO_JUNCTION_CUTS: readonly number[] = [];
+
+/** {@link junctionsOn}'s answers, by the ways out and the profile. */
+const cutsFound = new WeakMap<readonly ScatterWay[], WeakMap<RouteProfile, readonly number[]>>();
+
+/**
+ * How far short of a junction a village's street is cut a second time,
+ * metres: **20** — twice `terrain.ts` §`BEND_SMOOTHING_METRES`, over which the
+ * drawn road rounds a corner (and a normal's own step), so the street short
+ * of it is laid alike on every view through the junction. Between the two
+ * cuts it follows the corner the route takes: the stretch of a village a
+ * press still redraws.
+ */
+const JUNCTION_CORNER_METRES = 2 * BEND_SMOOTHING_METRES;
+
+/**
+ * How near a way's junction must stand to a view's own line at the same ride
+ * distance to be one of that view's junctions, metres: **3**, inside the
+ * narrowest street's half-width.
+ */
+const JUNCTION_ON_METRES = 3;
+
+/**
+ * `road`'s village streets, with every village's street along each way out
+ * `reached` that starts past its junction — #3095: `streets.ts` §`streetsAt`
+ * on the way's own view, read as the road reads its own, so a street the
+ * route takes and the same street as a way out are laid the same.
+ *
+ * ⚠️ **A street that starts short of the junction is the road's alone.** It
+ * runs on from the approach along whichever way the route takes, so its
+ * pavements past the junction follow the street a choice takes: the one part
+ * of a village a press still moves, and only for a village whose street
+ * reaches across a junction.
+ */
+function withVillageStreetsOnWays(
+  road: readonly VillageStreet[],
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+  seed: number,
+): readonly VillageStreet[] {
+  if (reached.length === 0) return road;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const onWays: VillageStreet[] = [];
+  for (const { way, toMetres } of reached) {
+    for (const street of streetsAt(
+      way.profile,
+      input.origin,
+      seed,
+      way.fromMetres,
+      toMetres,
+      input.worldCorridor === undefined
+        ? NO_PAVEMENT_DATA
+        : pavementSides(input.worldCorridor, way.profile, input.origin),
+      land,
+      undefined,
+      undefined,
+      junctionsOn(way.profile, input),
+    )) {
+      if (street.from >= way.fromMetres && !onWays.includes(street)) onWays.push(street);
+    }
+  }
+  return onWays.length === 0 ? road : [...road, ...onWays];
+}
+
+/**
+ * `road`'s billboards, with every one along each way out `reached` past its
+ * junction — #3095: `billboards.ts` §`billboardsAt` on the way's own view.
+ * Each carries the road's odometer for the same ride distance, so the nearest
+ * are kept of all of them, whichever is the road; and none stands on the road
+ * itself, which a board beside a way may near its junction.
+ */
+function withBillboardsOnWays(
+  road: readonly Billboard[],
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+  seed: number,
+  land: LandClassMask,
+): readonly Billboard[] {
+  if (reached.length === 0) return road;
+  const onWays: Billboard[] = [];
+  for (const { way, toMetres, shift } of reached) {
+    for (const board of boardsOnWay(way, input.origin, seed, land)) {
+      if (board.along >= toMetres) break;
+      if (
+        distanceToDrawnRoad(
+          input.profile,
+          input.origin,
+          board.x,
+          board.z,
+          BOARD_ROAD_CLEARANCE_METRES,
+        ) < BOARD_ROAD_CLEARANCE_METRES
+      ) {
+        continue;
+      }
+      const along = board.along + shift;
+      if (!onWays.some((other) => other.x === board.x && other.z === board.z)) {
+        onWays.push({ ...board, along });
+      }
+    }
+  }
+  return onWays.length === 0 ? road : [...road, ...onWays];
+}
+
+/**
+ * The billboards along `way` past its junction, for
+ * `scatter.ts` §`SCATTER_WAY_REACH_METRES`, in order along it — #3095:
+ * found once a way, and kept for as long as its view is, as
+ * `settlements.ts` §`structuresOnWay` keeps its houses.
+ */
+function boardsOnWay(
+  way: ScatterWay,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
+): readonly Billboard[] {
+  const held = boardsAlongWays.get(way.profile);
+  if (
+    held?.origin === origin &&
+    held.seed === seed &&
+    held.land === land &&
+    held.fromMetres === way.fromMetres
+  ) {
+    return held.boards;
+  }
+  const boards = billboardsAt(
+    way.profile,
+    origin,
+    seed,
+    way.fromMetres,
+    way.fromMetres + SCATTER_WAY_REACH_METRES,
+    land,
+  ).filter((board) => board.along >= way.fromMetres);
+  boardsAlongWays.set(way.profile, { origin, seed, land, fromMetres: way.fromMetres, boards });
+  return boards;
+}
+
+/** {@link boardsOnWay}'s, by the way's view. */
+const boardsAlongWays = new WeakMap<
+  RouteProfile,
+  {
+    readonly origin: CorridorOrigin;
+    readonly seed: number;
+    readonly land: LandClassMask;
+    readonly fromMetres: number;
+    readonly boards: readonly Billboard[];
+  }
+>();
+
+/**
+ * How far from the road's centreline a board along a way out must stand,
+ * metres — #3095: the road's half and its verge, and a board's own half-width
+ * (`logo-board.ts` §`BILLBOARD_FOOTPRINT`), so none stands in the road.
+ */
+const BOARD_ROAD_CLEARANCE_METRES = ROAD_CLEARANCE_METRES + BILLBOARD_FOOTPRINT.x;
+
+/**
+ * `road`'s other cyclists, with those riding each way out `reached` past its
+ * junction — #3095: `scenery-cyclists.ts` §`cyclistsInReach` on the way's own
+ * view, for a rider as far along it as along the road, placed on the way's
+ * own corridor and drawn line as the road's are on the road's. An encounter
+ * is the ride's, so the one past the junction rides whichever street the
+ * route takes and every other, and a choice moves none of them.
+ */
+function withCyclistsOnWays(
+  road: readonly SceneryCyclist[],
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+): readonly SceneryCyclist[] {
+  if (reached.length === 0 || !sceneryCyclistsAllowed(input)) return road;
+  const riderDistance = drawnRider(input).distance;
+  const seed = scatterSeed(input.profile);
+  const onWays: SceneryCyclist[] = [];
+  for (const { way, shift } of reached) {
+    const rider = riderDistance - shift;
+    const town = townAt(way.profile, seed, input.mappedTown?.urban ?? NO_URBAN_CLASS);
+    const past = cyclistsInReach(way.profile, seed, town, rider).filter(
+      (each) => each.along >= way.fromMetres,
+    );
+    if (past.length === 0) continue;
+    const corridor = roadCorridor(way.profile, input.origin, rider);
+    const last = corridor.centre[corridor.centre.length - 1];
+    const line = input.centreline === true ? undefined : drawnLine(way.profile);
+    for (const each of past) {
+      if (last === undefined || each.along > last.along) continue;
+      onWays.push(cyclistOn(corridor, line, each, each.encounter.lane, input.state.ride.speed));
+    }
+  }
+  return onWays.length === 0 ? road : [...road, ...onWays];
 }
 
 /**

@@ -515,6 +515,18 @@ const NO_CLASS = Object.freeze({});
 /** No mapped junction: the key {@link built} files a street laid without any under. */
 const NO_JUNCTIONS: readonly Junction[] = Object.freeze([]);
 
+/** No cut: a village's street whole, as every ride but an open-world one lays it. */
+const NO_CUTS: readonly number[] = Object.freeze([]);
+
+/** The whole of the road: a street laid with no cut. @see streetOf */
+const WHOLE = Object.freeze({ from: Number.NEGATIVE_INFINITY, to: Number.POSITIVE_INFINITY });
+
+/**
+ * The pieces of each cut street, by the map of whole streets they were cut
+ * from, under `site:from:to` — #3095. @see streetsAt
+ */
+const pieces = new WeakMap<Map<number, Known>, Map<string, Known>>();
+
 /** `map`'s entry for `key`, made on first ask. */
 function entryOf<K extends object, V>(map: WeakMap<K, V>, key: K, made: () => V): V {
   let found = map.get(key);
@@ -546,6 +558,15 @@ export function streetsAt(
   land: LandClassMask = NO_LAND_CLASS,
   urban?: UrbanClassMap,
   junctions: readonly Junction[] = NO_JUNCTIONS,
+  /**
+   * #3095: where an open-world ride's junctions are on this profile: a
+   * village's street that reaches across one is laid as a piece either side
+   * of it, each from the one cut to the next. The street on from a junction
+   * runs along whichever way the route takes, so the scene draws the pieces
+   * past one along every way out (`scene.ts` §`withVillageStreetsOnWays`),
+   * and a choice moves none of them. None on every other ride.
+   */
+  cuts: readonly number[] = NO_CUTS,
 ): readonly VillageStreet[] {
   // #3055: counted in ride distance on an open-world view. @see siteSpacing
   const { sites, span, shift } = siteSpacing(profile);
@@ -572,7 +593,30 @@ export function streetsAt(
     if (street === null || found.includes(street)) continue;
     // Where THIS lap's copy of it lies on the odometer.
     const lap = (index - site.wrappedSite) * span;
-    if (street.from + lap < toMetres && street.to + lap >= fromMetres) found.push(street);
+    const whole = street;
+    const across = cuts.filter((cut) => cut > whole.from + lap && cut < whole.to + lap);
+    if (across.length === 0) {
+      if (street.from + lap < toMetres && street.to + lap >= fromMetres) found.push(street);
+      continue;
+    }
+    // #3095: in pieces, one between every two cuts.
+    const bounds = [
+      Number.NEGATIVE_INFINITY,
+      ...across.sort((a, b) => a - b).map((cut) => cut - lap),
+      Number.POSITIVE_INFINITY,
+    ];
+    const cutFrom = entryOf(pieces, known, () => new Map<string, Known>());
+    for (let at = 0; at + 1 < bounds.length; at += 1) {
+      const clip = { from: bounds[at] as number, to: bounds[at + 1] as number };
+      const key = `${String(site.wrappedSite)}:${String(clip.from)}:${String(clip.to)}`;
+      let piece = cutFrom.get(key);
+      if (piece === undefined) {
+        piece = streetOf(profile, origin, seed, site.wrappedSite, index, sides, land, urban, clip);
+        cutFrom.set(key, piece);
+      }
+      if (piece === null || found.includes(piece)) continue;
+      if (piece.from + lap < toMetres && piece.to + lap >= fromMetres) found.push(piece);
+    }
   }
   if (urban !== undefined) {
     cityStreetsAt(
@@ -751,6 +795,12 @@ function streetOf(
   sides: PavementSides,
   land: LandClassMask,
   urban: UrbanClassMap | undefined,
+  /**
+   * #3095: the stretch of the first lap's odometer it is laid within: the
+   * whole road, but between two of an open-world ride's junctions where the
+   * street reaches across one. @see streetsAt
+   */
+  clip: { readonly from: number; readonly to: number } = WHOLE,
 ): Known {
   const site = siteAt(profile, seed, index);
   if (site === undefined) return null;
@@ -765,12 +815,13 @@ function streetOf(
   let to = Number.NEGATIVE_INFINITY;
   const spans = ([1, -1] as const).map((side) => {
     const mine = plots.filter((plot) => plot.side === side).map((plot) => plot.along - lap);
-    return mine.length === 0
-      ? undefined
-      : {
-          start: Math.min(...mine) - PLOT_METRES / 2 + PAVEMENT_END_INSET_METRES,
-          end: Math.max(...mine) + PLOT_METRES / 2 - PAVEMENT_END_INSET_METRES,
-        };
+    if (mine.length === 0) return undefined;
+    const start = Math.max(
+      clip.from,
+      Math.min(...mine) - PLOT_METRES / 2 + PAVEMENT_END_INSET_METRES,
+    );
+    const end = Math.min(clip.to, Math.max(...mine) + PLOT_METRES / 2 - PAVEMENT_END_INSET_METRES);
+    return start < end ? { start, end } : undefined;
   });
   const street = streetSpan(spans);
   if (street === undefined) return null;

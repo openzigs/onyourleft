@@ -92,9 +92,12 @@
  *   their own vertices and are flat between them, so where their triangles
  *   differ the ground drawn differs by up to {@link FAR_GROUND_MOST_METRES}
  *   (#3094's residual, all of it past 200 m on these presses).
- * - **What is not scenery items.** Village streets and pavements,
- *   billboards, people and the other cyclists are placed along the road
- *   alone. None stands near these three junctions. That is #3095.
+ * - **What is not scenery items, at these three junctions.** None stands
+ *   near them. Since #3095 a village's streets and crossroads, the
+ *   billboards, the people and the other cyclists are placed along every way
+ *   out too: the last describe below rides the real game screen past a
+ *   village and past billboards on a level grid, and
+ *   `ways-out-villages.test.ts` holds all five through a press.
  *
  * ⚠️ **Every frame held here is a copy** (`frame-testing.ts`
  * §`retainedFrame`). A frame's ground is lent storage that the next build
@@ -117,7 +120,12 @@ import {
   watts,
   type RollingEdge,
 } from '@onyourleft/domain';
-import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
+import {
+  gridGraph,
+  placeAt,
+  roughGround,
+  type SyntheticGround,
+} from '@onyourleft/domain/rolling-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
@@ -279,12 +287,18 @@ function capturingRenderer(): GameRenderer {
 }
 
 /** The grid, ridden east from its corner along row 3, the major road: straight on is its default. */
-function gridRoute(): RollingRoute {
-  const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+function gridRoute(
+  ground: SyntheticGround = roughGround,
+  rows: readonly number[] = ROWS,
+): RollingRoute {
+  const { graph, edges } = gridGraph(COLUMNS, rows, ground, 3);
   return new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
 }
 
-function sessions(): OpenWorldSessions {
+function sessions(
+  ground: SyntheticGround = roughGround,
+  rows: readonly number[] = ROWS,
+): OpenWorldSessions {
   let start = fixtureStart(START_COLUMN, START_ROW) as ReturnType<typeof fixtureStart> | undefined;
   return {
     take: () => {
@@ -298,10 +312,10 @@ function sessions(): OpenWorldSessions {
         route: {
           id: OPEN_WORLD_ROUTE_ID,
           name: 'Open world',
-          profile: gridRoute().view(),
+          profile: gridRoute(ground, rows).view(),
           attempts: 0,
         },
-        road: () => new OpenWorldRoad(gridRoute()),
+        road: () => new OpenWorldRoad(gridRoute(ground, rows)),
       }),
       stop: () => undefined,
     }),
@@ -1197,5 +1211,151 @@ describe('the owner’s ruling of 2026-11-23: three turns through the real sessi
 
   it('turn 3, right again: round the corner, the scene kept, every way out drawn', async () => {
     expectTheRuling(await rideTheGridTo(2));
+  });
+});
+
+// --- #3095: a village and its billboards past the junction, on the real game screen ---
+
+/** `ways-out.test.ts`' lowland grid: the same columns, and rows on to 2 150 m. */
+const LOWLAND_ROWS = [0, 230, 400, 650, 820, 1_090, 1_280, 1_510, 1_700, 1_960, 2_150];
+
+/** Low, level ground: villages stand on it. */
+const LOWLAND: SyntheticGround = () => 120;
+
+/** How far either side of the junction the corner the route takes is drawn, metres. */
+const VILLAGE_CORNER_METRES = 20;
+
+/** A place on the frame's ground, as a frame's pieces hold it. */
+type Plan = { readonly x: number; readonly z: number };
+
+/** Every vertex of a frame's village pavements. */
+function villagePavements(frame: SceneFrame): Plan[] {
+  return frame.streets.flatMap((street) => {
+    const out: Plan[] = [];
+    for (let at = 0; at + 2 < street.pavement.positions.length; at += 3) {
+      out.push({
+        x: street.pavement.positions[at] as number,
+        z: street.pavement.positions[at + 2] as number,
+      });
+    }
+    return out;
+  });
+}
+
+/** Every point of a frame's village crossroads' arms. */
+function villageCrossroads(frame: SceneFrame): Plan[] {
+  return frame.sideRoads
+    .filter((road) => road.junction.source === 'village')
+    .flatMap((road) => {
+      const out: Plan[] = [];
+      for (let at = 0; at + 1 < road.segments.length; at += 2) {
+        out.push({ x: road.segments[at] as number, z: road.segments[at + 1] as number });
+      }
+      return out;
+    });
+}
+
+/**
+ * Rides the real game screen over the lowland grid to 110 m short of the
+ * junction at `column` along Main street, turns left there, and returns the
+ * last frame before the press and the first of the view it gave, with the
+ * junction's place in the first's frame.
+ */
+async function rideTheLowlandTo(column: number) {
+  const junctionAt = (COLUMNS[column] as number) - (COLUMNS[0] as number);
+  mounted = await mount(
+    <GameView
+      port={{ ...port(), openWorld: sessions(LOWLAND, LOWLAND_ROWS) }}
+      renderer={() => Promise.resolve(capturingRenderer())}
+      now={() => nowMs}
+    />,
+  );
+  for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+    await settle();
+  }
+  await act(async () => {
+    rideButton()?.click();
+    await Promise.resolve();
+  });
+  await settle();
+  frameMs = 1000;
+  const pressAt = junctionAt - 110;
+  for (let frame = 0; frame < 400 && odometer() < pressAt - 15; frame += 1) await pump();
+  frameMs = 1000 / 30;
+  for (let frame = 0; frame < 400 && odometer() < pressAt; frame += 1) await pump();
+  // Inside the prompt, short of the lock, as a rider's press would be.
+  expect(odometer()).toBeLessThan(junctionAt - 100);
+  const pressed = drawn.length;
+  await act(async () => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true }),
+    );
+    await Promise.resolve();
+  });
+  for (let frame = 0; frame < 3; frame += 1) await pump();
+  const before = drawn[pressed - 1];
+  const after = drawn.slice(pressed).find(({ input }) => input.profile !== before?.input.profile);
+  if (before === undefined || after === undefined) throw new Error('the press changed no view');
+  const common = corridorOrigin(before.input.profile);
+  return {
+    before,
+    after,
+    common,
+    junction: localGroundPosition(common, placeAt(junctionAt, LOWLAND_ROWS[3] as number)),
+  };
+}
+
+/**
+ * What of `read` stands past the junction's corner and within reach of the
+ * rider, before the press and after it, each in the frame the press was made
+ * in, to 10 cm; and the share of each the other still has.
+ */
+function heldThroughThePress(
+  ridden: Awaited<ReturnType<typeof rideTheLowlandTo>>,
+  read: (frame: SceneFrame) => readonly Plan[],
+): { readonly was: number; readonly kept: number; readonly added: number } {
+  const rider = ridden.before.frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) throw new Error('no rider drawn');
+  const past = (frame: GridFrame | (typeof drawn)[number]): string[] =>
+    read(frame.frame)
+      .map((place) => reframed(corridorOrigin(frame.input.profile), ridden.common, place))
+      .filter(
+        (place) =>
+          Math.hypot(place.x - ridden.junction.x, place.z - ridden.junction.z) >
+            VILLAGE_CORNER_METRES &&
+          Math.hypot(place.x - rider.x, place.z - rider.z) <= SCENERY_FAR_METRES + 100,
+      )
+      .map((place) => `${place.x.toFixed(1)},${place.z.toFixed(1)}`);
+  const was = past(ridden.before);
+  const now = past(ridden.after);
+  const share = (of: readonly string[], within: readonly string[]): number =>
+    of.length === 0 ? 1 : of.filter((each) => within.includes(each)).length / of.length;
+  return { was: was.length, kept: share(was, now), added: 1 - share(now, was) };
+}
+
+describe('#3095: a village and its billboards past the junction stay through the press, on the real game screen', () => {
+  // A village's people and the other cyclists are held through a press in
+  // `ways-out-villages.test.ts`: both are drawn only on the realistic world's
+  // top rung, which this file's renderer does not load.
+  it('lays the village’s pavements and its crossroads past the fourth junction where they were', async () => {
+    const ridden = await rideTheLowlandTo(4);
+    for (const [what, read] of [
+      ['pavements', villagePavements],
+      ['crossroads', villageCrossroads],
+    ] as const) {
+      const held = heldThroughThePress(ridden, read);
+      expect(held.was, what).toBeGreaterThan(10);
+      expect({ what, kept: held.kept, added: held.added }).toStrictEqual({
+        what,
+        kept: 1,
+        added: 0,
+      });
+    }
+  });
+
+  it('stands the billboards past the sixth junction where they were', async () => {
+    const held = heldThroughThePress(await rideTheLowlandTo(6), (frame) => frame.billboards);
+    expect(held.was).toBeGreaterThanOrEqual(1);
+    expect({ kept: held.kept, added: held.added }).toStrictEqual({ kept: 1, added: 0 });
   });
 });
