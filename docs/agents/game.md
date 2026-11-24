@@ -1148,6 +1148,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
                         which hands it a pad's turns), named as roots, with
                         the prompt importing `gradient.ts` a red case
+    src/game/open-world/turn-limits.ts
+                        where an open-world ride offers NO turn, on purpose
+                        (#3124), and the words the open-world start screen's
+                        help says it in (`shell/routes.ts`, drafts for the
+                        owner). Each limit is an accepted ADR decision:
+                        service ways, i.e. driveways, car parks and alleys
+                        (ADR 0091 D-3, D-9 Q2); `access` `no`/`private` and
+                        motorways (D-3); footways, cycleways, paths, tracks
+                        (D-3, D-9 Q1); a street mapped to stop more than 3 m
+                        short of the road (D-4, `T_SNAP_METRES`); and a
+                        junction under 100 m after the last one, after a
+                        U-turn, or round a roundabout, which takes its
+                        default because the choice is final 100 m before it
+                        (ADR 0088 D-1.2, D-1.5; ADR 0087 D-6.2). A one-way
+                        street is offered BOTH ways (ADR 0091 D-5): not a
+                        limit. `junction-limits.test.tsx` rides each through
+                        the real game screen and holds its words in the help.
+                        ⚠️ A new reason a junction offers no turn goes in this
+                        list and that test, or it is a defect
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
