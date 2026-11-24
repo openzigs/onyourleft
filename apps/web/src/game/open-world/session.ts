@@ -463,12 +463,17 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   function planAhead(route: RollingRoute, rider: number): void {
     if (planner === undefined || !Number.isFinite(rider)) return;
     const view = route.view();
-    if (asked?.view === view && Math.abs(rider - asked.rider) < TILE_ASK_METRES) return;
-    asked = { view, rider };
-    planner.want(tilesToPlan(route, rider));
+    if (asked?.view !== view || Math.abs(rider - asked.rider) >= TILE_ASK_METRES) {
+      asked = { view, rider };
+      planner.want(tilesToPlan(route, rider));
+    } else if (buildingsAsked !== undefined) {
+      return;
+    }
     // #2902: and the mapped buildings round the rider, against this view,
     // whenever the view or the tiles planned changed, or the rider has ridden
-    // on far enough that the reach planned no longer covers the belt's.
+    // on far enough that the reach planned no longer covers the belt's. Until
+    // they are first asked for, every call looks, so a standing start asks as
+    // soon as its first tile is planned rather than 25 m on.
     const along = rider - route.origin;
     if (!(along >= 0 && along <= route.end - route.origin)) return;
     const tiles = [...planner.plans()].length;
