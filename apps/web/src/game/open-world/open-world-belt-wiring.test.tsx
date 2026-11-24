@@ -24,6 +24,7 @@ import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { GameView, type GamePort } from '../GameView';
+import { NO_LAND_CLASS, type LandClassMask } from '../land-class';
 import { mappedBuildingsOf } from '../mapped-buildings';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
@@ -52,6 +53,8 @@ const ROWS = [0, 230, 400, 650];
 const RIDE_FRAME = { latitude: 40, longitude: -105, elevation: 0 };
 const BUILDINGS = mappedBuildingsOf([]);
 const STREETS = openWorldStreetCorridor(RIDE_FRAME, []);
+/** #3105: the road's water mask — an object of its own, holding nothing, read back by identity. */
+const WATER: LandClassMask = { ...NO_LAND_CLASS };
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -127,6 +130,7 @@ function port(): GamePort {
             frame: RIDE_FRAME,
             buildings: () => BUILDINGS,
             streets: () => STREETS,
+            water: () => WATER,
           }),
       }),
       stop: () => undefined,
@@ -170,6 +174,8 @@ describe('an open-world ride hands the scene its planned buildings — #2902', (
       expect(input.mappedBuildings).toBe(BUILDINGS);
       // #2903: and its streets, as the corridor the scene draws them from.
       expect(input.worldCorridor).toBe(STREETS);
+      // #3105: and its real water, as the land mask the scene draws water from.
+      expect(input.landClass).toBe(WATER);
       // The whole ride is drawn in the road's frame, whatever its view.
       expect(corridorOrigin(input.profile)).toBe(RIDE_FRAME);
     }
