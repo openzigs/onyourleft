@@ -1158,7 +1158,9 @@ export const WAYS_PLACED_A_FRAME = 2;
  *   junction along it, as it did before the junction came into reach.
  * - **The ride's first call hands on every way**, behind the ride's first
  *   frame, which the loading screen covers: a ride does not start with the
- *   scenery along its ways out coming in one by one.
+ *   scenery along its ways out coming in one by one. The scene calls it on
+ *   every open-world frame, one with no ways too, so the first call is the
+ *   ride's first frame and not the first frame that has ways.
  *
  * Keyed on the way's view, which `open-world/road.ts` §`waysOut` keeps the
  * same object for as long as the way is handed on.
@@ -1190,9 +1192,12 @@ export class WaysOutPlacing {
       fresh.push(way);
     }
     this.#waiting = 0;
-    if (fresh === undefined) return ways;
-    const most = this.#first ? fresh.length : WAYS_PLACED_A_FRAME;
+    // PR #3125's review: the first call is spent here whether or not it has
+    // ways, or a ride whose first frames hand none places its first junction whole.
+    const first = this.#first;
     this.#first = false;
+    if (fresh === undefined) return ways;
+    const most = first ? fresh.length : WAYS_PLACED_A_FRAME;
     if (fresh.length > most) {
       const away = (way: ScatterWay): number =>
         Math.abs(way.fromMetres + (sceneryAnchor(way.profile)?.origin ?? 0) - riderMetres);

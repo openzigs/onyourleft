@@ -9,9 +9,16 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { metres } from '@onyourleft/domain';
+
+import { JunctionScan } from './cross-streets';
+import { NearbyStreetScan } from './nearby-streets';
 import { northRoute } from './route-fixtures-testing';
 import { WAYS_PLACED_A_FRAME, WaysOutPlacing, type ScatterWay } from './scatter';
+import { sceneFrame } from './scene';
 import { anchorScenery } from './scenery-anchor';
+import { atStartLine } from './simulation';
+import { corridorOrigin } from './terrain';
 
 /** A way whose junction is `junctionMetres` of ride from the start, on a view that starts `startsAt` on the ride. */
 function wayAt(junctionMetres: number, startsAt = 0): ScatterWay {
@@ -85,5 +92,38 @@ describe('the ways out an open-world frame places — #3119', () => {
     const news = [wayAt(200), wayAt(300), wayAt(400)];
     // Handed again with three new ones: it is placed, and two of them are.
     expect(placing.placing([kept, ...news], 0)).toStrictEqual([kept, news[0], news[1]]);
+  });
+
+  it('spends the first call on a frame with no ways too, so a later junction is placed a few a frame', () => {
+    // PR #3125's review: a ride whose first frames hand no ways (a countryside
+    // start, or streets that come late) placed its first junction whole.
+    const placing = new WaysOutPlacing();
+    for (let frame = 0; frame < 100; frame += 1) expect(placing.placing([], 0)).toStrictEqual([]);
+    const ways = Array.from({ length: 20 }, (_, index) => wayAt(100 * index));
+    expect(placing.placing(ways, 0)).toHaveLength(WAYS_PLACED_A_FRAME);
+    expect(placing.waiting).toBe(20 - WAYS_PLACED_A_FRAME);
+  });
+
+  it('is called by the scene on an open-world frame that hands no ways', () => {
+    // The scene's half of the same review finding: its first frames with no
+    // ways out are the ride's first frames, and they spend the first call.
+    const profile = northRoute(2_000, () => 0);
+    const streetScans = {
+      nearby: new NearbyStreetScan(),
+      junctions: new JunctionScan(),
+      ways: new WaysOutPlacing(),
+    };
+    const start = atStartLine(profile);
+    for (const waysOut of [undefined, []]) {
+      sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: { ...start, ride: { ...start.ride, distance: metres(10) } },
+        streetScans,
+        waysOut,
+      });
+    }
+    const ways = Array.from({ length: 20 }, (_, index) => wayAt(100 * index));
+    expect(streetScans.ways.placing(ways, 0)).toHaveLength(WAYS_PLACED_A_FRAME);
   });
 });

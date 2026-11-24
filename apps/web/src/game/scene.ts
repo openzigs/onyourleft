@@ -728,8 +728,9 @@ export interface StreetScans {
  * other ride's as handed. The same object where that is every way.
  */
 function withWaysPlaced(input: SceneInput): SceneInput {
-  const ways = input.waysOut;
-  if (ways === undefined || ways.length === 0 || input.streetScans === undefined) return input;
+  // Called on a frame with no ways too: that spends the ride's first call (PR #3125's review).
+  if (input.streetScans === undefined) return input;
+  const ways = input.waysOut ?? [];
   const placed = input.streetScans.ways.placing(
     ways,
     (input.state.ride.distance as number) + (sceneryAnchor(input.profile)?.origin ?? 0),
