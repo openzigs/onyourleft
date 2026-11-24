@@ -118,7 +118,7 @@ import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
-import { dampedHeading, turnedPose, type GroundHeading } from './camera';
+import { dampedHeading, dampedLookAhead, turnedPose, type GroundHeading } from './camera';
 import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -3048,8 +3048,11 @@ function GameScreen({
         openRoad === undefined ? { profile, origin: 0 } : { ...openRoad.view, follower: openRoad };
       setRideRoad(rideRoadRef.current);
       // #3013: and its junctions, chosen on the same rolling route.
+      // #3058: on the ride's own clock, which a pause stops, as it stops the picture.
       junctionRef.current =
-        openRoad === undefined ? undefined : createJunctionChoice(openRoad.route);
+        openRoad === undefined
+          ? undefined
+          : createJunctionChoice(openRoad.route, () => simulation.state.elapsed);
       junctionSaidRef.current = NO_JUNCTION_ANNOUNCED;
       // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
       // rider switched it on and consented — never in a room, a race or a
@@ -3549,6 +3552,9 @@ function GameScreen({
     // the first, which takes the road's own: a resumed ride starts afresh.
     let cameraHeading: GroundHeading | undefined;
     let cameraHeadingAt = 0;
+    // #3045: and how far ahead it looked, which `camera.ts` §`dampedLookAhead`
+    // eases toward the frame's, so a turnaround's exit does not pitch the view.
+    let cameraLookAhead: number | undefined;
     // #2456: how fast the steered rider is DRAWN moving across the road, and
     // when it was last drawn, which `lane-change-lean.ts` §`dampedSway` follows
     // the steering toward by the wall clock, as the camera's heading is: a
@@ -4191,9 +4197,11 @@ function GameScreen({
       // #3013: an open-world ride's next junction — its ways as the prompt
       // appears, each change of choice, the lock — owed until said
       // (`hud/junction-text.ts`). Nothing on every other ride.
+      // #3058: and what a turn press, or a dead end, says beside it.
       const junctionOffered = junctionEvent(
         junctionSaidRef.current,
         junctionRef.current?.prompt(simulation.state.ride.distance),
+        junctionRef.current?.notice(simulation.state.ride.distance),
       );
       junctionSaidRef.current = junctionOffered.announced;
       if (junctionOffered.event !== undefined) events.push(junctionOffered.event);
@@ -4625,8 +4633,19 @@ function GameScreen({
           (at - cameraHeadingAt) / 1000,
           reducedMotionRef.current,
         );
+        // #3045: the look-ahead by the same clock, and the same rule for a
+        // length: coming out of a turnaround it grows over a second rather
+        // than in two frames. `GameView.test.tsx` reads it back off the frames.
+        cameraLookAhead = dampedLookAhead(
+          cameraLookAhead,
+          unturned.camera.targetAheadMetres,
+          (at - cameraHeadingAt) / 1000,
+        );
         cameraHeadingAt = at;
-        const scene = { ...unturned, camera: turnedPose(unturned.camera, cameraHeading) };
+        const scene = {
+          ...unturned,
+          camera: turnedPose(unturned.camera, cameraHeading, cameraLookAhead),
+        };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
@@ -5385,6 +5404,8 @@ function GameScreen({
             ? undefined
             : {
                 prompt: choice.prompt(state.ride.distance),
+                // #3058: a U-turn, a dead end or a press with no junction near.
+                notice: choice.notice(state.ride.distance),
                 press: (turn: TurnPress) => {
                   choice.press(
                     turn,
