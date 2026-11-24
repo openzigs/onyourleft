@@ -5,7 +5,8 @@
 import { metres, RoutingError, type HeightProfile } from '@onyourleft/domain';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PUBLISHED_TERRAIN_URL, readTerrainConfig } from './config';
+import { PUBLISHED_BASEMAP_URL } from '../map/basemap';
+import { browserTerrainConfig, PUBLISHED_TERRAIN_URL, readTerrainConfig } from './config';
 import {
   ELEVATION_NOT_DOWNLOADED_TEXT,
   ELEVATION_NOT_READABLE_TEXT,
@@ -168,10 +169,38 @@ describe('readTerrainConfig', () => {
         VITE_TERRAIN_PMTILES_URL: 'https://tiles.example.org/t.pmtiles',
       }),
     ).toBeUndefined();
-    // A self-hoster's own basemap keeps the terrain.
+  });
+
+  it('is no archive for a self-hosted basemap unless its operator sets one (owner, 2026-11-24)', () => {
+    const own = 'https://tiles.example.org/b.pmtiles';
+    expect(readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: own })).toBeUndefined();
     expect(
-      readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: 'https://tiles.example.org/b.pmtiles' }),
-    ).toStrictEqual({ archiveUrl: PUBLISHED_TERRAIN_URL });
+      readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: own, VITE_TERRAIN_PMTILES_URL: ' ' }),
+    ).toBeUndefined();
+    expect(
+      readTerrainConfig({
+        VITE_BASEMAP_PMTILES_URL: own,
+        VITE_TERRAIN_PMTILES_URL: 'https://tiles.example.org/t.pmtiles',
+      }),
+    ).toStrictEqual({ archiveUrl: 'https://tiles.example.org/t.pmtiles' });
+    // The published basemap named outright is still the published build.
+    expect(readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: PUBLISHED_BASEMAP_URL })).toStrictEqual({
+      archiveUrl: PUBLISHED_TERRAIN_URL,
+    });
+  });
+
+  it('reads the bundler environment the same way: a self-hosted basemap alone reads no heights', () => {
+    vi.stubEnv('VITE_BASEMAP_PMTILES_URL', 'https://tiles.example.org/b.pmtiles');
+    vi.stubEnv('VITE_TERRAIN_PMTILES_URL', '');
+    try {
+      expect(browserTerrainConfig()).toBeUndefined();
+      vi.stubEnv('VITE_TERRAIN_PMTILES_URL', 'https://tiles.example.org/t.pmtiles');
+      expect(browserTerrainConfig()).toStrictEqual({
+        archiveUrl: 'https://tiles.example.org/t.pmtiles',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('publishes its default on the host the basemap is on, as a dated object', () => {

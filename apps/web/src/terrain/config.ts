@@ -14,9 +14,16 @@
  *
  * As the basemap's is, and for its reasons: `release.yml` builds the APK with
  * no environment of its own, and a self-hoster points a build at their own
- * archive. Unset or blank is {@link PUBLISHED_TERRAIN_URL}; `none`, or anything
- * else that is not an `https:` URL, is a build that reads no heights, and a
- * drawn route then saves flat, as it did before #2013.
+ * archive. Unset or blank is {@link PUBLISHED_TERRAIN_URL} **only for a build
+ * whose basemap is the published one**; `none`, or anything else that is not
+ * an `https:` URL, is a build that reads no heights, and a drawn route then
+ * saves flat, as it did before #2013.
+ *
+ * ⚠️ **A build whose basemap is not the published one reads no heights unless
+ * `VITE_TERRAIN_PMTILES_URL` is set** (the owner's ruling of 2026-11-24, on
+ * #3114's review). Such a build's operator chose the one host its map may
+ * reach; an upgrade must not start sending its riders' requests to this
+ * project's host without that operator opting in.
  *
  * ⚠️ **The published object must never be deleted or renamed while a shipped
  * build names it** — the basemap's rule, for the basemap's reason. A newer
@@ -34,7 +41,7 @@
  * disclosed host" fails if this default ever names another one.
  */
 
-import { readBasemapConfig, type BasemapEnvironment } from '../map/basemap';
+import { PUBLISHED_BASEMAP_URL, readBasemapConfig, type BasemapEnvironment } from '../map/basemap';
 
 /** The environment name this module reads. Documentation, as `BASEMAP_URL_VARIABLE` is: `ENV001` greps for the literal read below. */
 export const TERRAIN_URL_VARIABLE = 'VITE_TERRAIN_PMTILES_URL';
@@ -63,14 +70,20 @@ export interface TerrainEnvironment extends BasemapEnvironment {
 /**
  * The configured terrain archive, or `undefined` when there is none.
  *
- * `readBasemapConfig`'s rules: unset or blank is the published archive; a
+ * `readBasemapConfig`'s rules: unset or blank is the published archive, when
+ * the basemap is the published one and otherwise no archive at all; a
  * value that is set and is not an `https:` URL is no archive at all, never the
  * default, because somebody who set it meant a particular host. And no
  * archive at all for a build with no basemap (this file's header).
  */
 export function readTerrainConfig(environment: TerrainEnvironment): TerrainConfig | undefined {
-  if (readBasemapConfig(environment) === undefined) return undefined;
+  const basemap = readBasemapConfig(environment);
+  if (basemap === undefined) return undefined;
   const configured = environment.VITE_TERRAIN_PMTILES_URL?.trim() ?? '';
+  if (configured === '' && basemap.archiveUrl !== new URL(PUBLISHED_BASEMAP_URL).toString()) {
+    // A self-hosted basemap and no terrain URL: no heights (this file's header).
+    return undefined;
+  }
   const raw = configured === '' ? PUBLISHED_TERRAIN_URL : configured;
   let parsed: URL;
   try {

@@ -38,6 +38,12 @@ basemap's first box) at **zoom 12 only**, by the owner's ruling of
 alone keeps the credited sources exact (§"Data, licences and credit").
 Upstream's lower zooms are not hosted.
 
+**Which builds read it.** A build with the published basemap reads this
+archive unless `VITE_TERRAIN_PMTILES_URL` says otherwise. A build whose
+basemap is anything else reads **no heights** unless that variable is set,
+by the owner's ruling of 2026-11-24: a self-hoster's build reaches only the
+tile host its operator chose (`src/terrain/config.ts`, `.env.example`).
+
 ## The steps
 
 ### 1. Plan it (run on 2026-11-24)

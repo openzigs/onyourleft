@@ -270,7 +270,9 @@ own computer, which travels unencrypted when your computer's address starts with
   its waypoints and every coordinate stay on your device. It reads near your privacy zones the same
   way as anywhere else, so the requests do not show where a zone is. Cloudflare's record of each of
   these requests is the same as for a map tile, and names the terrain file. With map tiles off the
-  app requests no heights, and a drawn route is saved flat.
+  app requests no heights, and a drawn route is saved flat. A copy of the app built to use a
+  map host other than `tiles.openzigs.com` requests no heights from `tiles.openzigs.com`: it reads
+  them only from an archive whoever built it chose.
   **An open-world ride.** An open-world ride has no route chosen in advance, so it reads the map
   as you go, from the same file on the same host. When it starts, your device requests the tiles of
   the block your start is in and of the eight blocks round it; a block is a fixed square of the map's
