@@ -518,3 +518,66 @@ describe('a height tile that arrives late — refill', () => {
     expect(route.gradeKnownAt(800)).toBe(true);
   });
 });
+
+describe('the route a choice would give takes the same heights — #3051 with #2899', () => {
+  it('hands out a way on with the height source’s grade, the one choosing it gives', () => {
+    const perDegreeLatitude = (placeAt(0, 1_000).latitude - ORIGIN.latitude) / 1_000;
+    // Level going east, with no height known for 40 m of it; 6 % up going
+    // north, so only the way north climbs.
+    const heights: RollingHeights = (place) => {
+      const east = eastOf(place);
+      if (east > 2_940 && east < 2_980) return undefined;
+      return 100 + ((place.latitude - ORIGIN.latitude) / perDegreeLatitude) * 0.06;
+    };
+    const north: RollingEdge = {
+      id: 'c',
+      from: 'n3000',
+      to: 'north-end',
+      points: streetThrough(
+        [
+          [3_000, 0],
+          [3_000, 3_000],
+        ],
+        () => 0,
+      ),
+      roadClass: 1,
+    };
+    // The bigger road east is the default way on, so the way north is the other.
+    const east = { ...street('b', 3_000, 6_000), roadClass: 2 };
+    const edges = [street('a', 0, 3_000), east, north];
+    const route = routeOver(heights, edges);
+    // Far enough on that the road behind is trimmed: a new route of its own
+    // would hold other samples than this one does.
+    const rider = 2_004;
+    route.advance(rider);
+    expect(route.origin).toBeGreaterThan(0);
+    const junction = route.junctionsAfter(rider)[0];
+    if (junction === undefined) throw new Error('no junction');
+    expect(junction.distance).toBeCloseTo(3_000, 1);
+    expect(junction.taken).toBe('b');
+
+    const took = route.taking(junction.distance, 'c');
+    if (took === undefined) throw new Error('no route');
+    const chosen = routeOver(heights, edges);
+    chosen.advance(rider);
+    expect(chosen.choose(junction.distance, 'c', rider)).toBe('swapped');
+    for (const at of [3_300, 3_600]) {
+      expect(gradeAt(took.view(), metres(at - took.origin))).toBeCloseTo(6, 3);
+      expect(took.gradeKnownAt(at)).toBe(true);
+      expect(gradeAt(took.view(), metres(at - took.origin))).toBeCloseTo(
+        gradeAt(chosen.view(), metres(at - chosen.origin)),
+        6,
+      );
+    }
+    // Before the junction the road is level, and known where its heights are.
+    for (const at of [rider - 500, rider, 2_500, 2_800]) {
+      expect(gradeAt(took.view(), metres(at - took.origin))).toBeCloseTo(0, 6);
+      expect(took.gradeKnownAt(at)).toBe(true);
+    }
+    expect(took.gradeKnownAt(2_960)).toBe(false);
+    // Known and unknown at the same places as on the route that chose it.
+    for (let at = took.origin; at < 3_900; at += 10) {
+      expect(took.gradeKnownAt(at), `at ${String(at)} m`).toBe(chosen.gradeKnownAt(at));
+    }
+  });
+});

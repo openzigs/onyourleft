@@ -123,6 +123,13 @@ export interface StreetMapProps {
   readonly profile: HudInput['profile'];
   /** The rider's own odometer, unwrapped. @see streetMapCentre */
   readonly distance: number;
+  /**
+   * An open-world ride — #3106 (`fields.ts` §`HudInput.openEnded`): the
+   * corridor is the streets the ride holds round the rider and the profile is
+   * the view of the road, which goes nowhere in particular. So the sentence
+   * names the road ahead and no share of a route ridden.
+   */
+  readonly openEnded?: boolean | undefined;
 }
 
 /**
@@ -133,6 +140,9 @@ export interface StreetMapProps {
 function describe(props: StreetMapProps, units: UnitSystem): string {
   const span = formatDistance(metres(STREET_MAP_METRES), units).value;
   const across = `${span} ${spokenDistanceUnit(units)}`;
+  if (props.openEnded === true) {
+    return `Street map around you, north up, about ${across} from top to bottom, with the road ahead on it.`;
+  }
   return (
     `Street map around you, north up, about ${across} from top to bottom, with the route on ` +
     `it. ${planWhere(props.profile, props.distance)}`
@@ -166,6 +176,8 @@ const MARK_VIEW_BOX = [
 export function StreetMap(props: StreetMapProps): JSX.Element {
   const units = useUnits();
   // Once per ride: the corridor and the route are both fixed at the press.
+  // #3106: on an open-world ride, once a view of the road, and the corridor's
+  // own shapes once a corridor (`street-map.ts` §`StreetMapIndex.cells`).
   const index = useMemo(
     () => streetMapIndex(props.corridor, props.profile),
     [props.corridor, props.profile],

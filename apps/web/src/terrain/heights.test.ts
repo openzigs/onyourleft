@@ -5,9 +5,12 @@
 import { metres, RoutingError, type HeightProfile } from '@onyourleft/domain';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PUBLISHED_TERRAIN_URL, readTerrainConfig } from './config';
+import { PUBLISHED_BASEMAP_URL } from '../map/basemap';
+import { browserTerrainConfig, PUBLISHED_TERRAIN_URL, readTerrainConfig } from './config';
 import {
-  ELEVATION_NOT_LOADED_TEXT,
+  ELEVATION_NOT_DOWNLOADED_TEXT,
+  ELEVATION_NOT_READABLE_TEXT,
+  elevationFailureText,
   ELEVATION_TILES_OFF_TEXT,
   lazyRouteHeights,
   TERRAIN_SAMPLE_INTERVAL_METRES,
@@ -90,7 +93,9 @@ describe('lazyRouteHeights', () => {
     const heights = lazyRouteHeights({ config: CONFIG, mapTilesOn: () => true }, load);
     const failed = await heights.heights(REQUEST).catch((e: unknown) => e);
     expect((failed as RoutingError).code).toBe('unavailable');
-    expect((failed as RoutingError).message).toBe(ELEVATION_NOT_LOADED_TEXT);
+    expect((failed as RoutingError).message).toBe(
+      "This copy of the app can't read the elevation data. The route is saved flat.",
+    );
     expect(await heights.heights(REQUEST)).toBe(ANSWER);
     expect(load).toHaveBeenCalledTimes(2);
   });
@@ -104,6 +109,35 @@ describe('lazyRouteHeights', () => {
       }),
     );
     await expect(heights.heights(REQUEST)).rejects.toBe(failure);
+  });
+});
+
+describe('what the rider is told when the terrain cannot be read', () => {
+  it('is the owner’s two sentences, word for word', () => {
+    expect(ELEVATION_NOT_DOWNLOADED_TEXT).toBe(
+      "Elevation couldn't be downloaded right now. The route is saved flat; try again later.",
+    );
+    expect(ELEVATION_NOT_READABLE_TEXT).toBe(
+      "This copy of the app can't read the elevation data. The route is saved flat.",
+    );
+  });
+
+  it('says it could not be downloaded for every network, HTTP, range, size or changed-file failure', () => {
+    for (const failure of [
+      { kind: 'aborted' },
+      { kind: 'network' },
+      { kind: 'http', status: 503 },
+      { kind: 'not-a-range' },
+      { kind: 'changed' },
+      { kind: 'too-large', limit: 4_194_304 },
+    ] as const) {
+      expect(elevationFailureText(failure)).toBe(ELEVATION_NOT_DOWNLOADED_TEXT);
+    }
+  });
+
+  it('says this copy cannot read it for an archive of the wrong kind or compression', () => {
+    expect(elevationFailureText({ kind: 'wrong-archive' })).toBe(ELEVATION_NOT_READABLE_TEXT);
+    expect(elevationFailureText({ kind: 'compression' })).toBe(ELEVATION_NOT_READABLE_TEXT);
   });
 });
 
@@ -135,10 +169,38 @@ describe('readTerrainConfig', () => {
         VITE_TERRAIN_PMTILES_URL: 'https://tiles.example.org/t.pmtiles',
       }),
     ).toBeUndefined();
-    // A self-hoster's own basemap keeps the terrain.
+  });
+
+  it('is no archive for a self-hosted basemap unless its operator sets one (owner, 2026-11-24)', () => {
+    const own = 'https://tiles.example.org/b.pmtiles';
+    expect(readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: own })).toBeUndefined();
     expect(
-      readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: 'https://tiles.example.org/b.pmtiles' }),
-    ).toStrictEqual({ archiveUrl: PUBLISHED_TERRAIN_URL });
+      readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: own, VITE_TERRAIN_PMTILES_URL: ' ' }),
+    ).toBeUndefined();
+    expect(
+      readTerrainConfig({
+        VITE_BASEMAP_PMTILES_URL: own,
+        VITE_TERRAIN_PMTILES_URL: 'https://tiles.example.org/t.pmtiles',
+      }),
+    ).toStrictEqual({ archiveUrl: 'https://tiles.example.org/t.pmtiles' });
+    // The published basemap named outright is still the published build.
+    expect(readTerrainConfig({ VITE_BASEMAP_PMTILES_URL: PUBLISHED_BASEMAP_URL })).toStrictEqual({
+      archiveUrl: PUBLISHED_TERRAIN_URL,
+    });
+  });
+
+  it('reads the bundler environment the same way: a self-hosted basemap alone reads no heights', () => {
+    vi.stubEnv('VITE_BASEMAP_PMTILES_URL', 'https://tiles.example.org/b.pmtiles');
+    vi.stubEnv('VITE_TERRAIN_PMTILES_URL', '');
+    try {
+      expect(browserTerrainConfig()).toBeUndefined();
+      vi.stubEnv('VITE_TERRAIN_PMTILES_URL', 'https://tiles.example.org/t.pmtiles');
+      expect(browserTerrainConfig()).toStrictEqual({
+        archiveUrl: 'https://tiles.example.org/t.pmtiles',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('publishes its default on the host the basemap is on, as a dated object', () => {

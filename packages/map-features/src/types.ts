@@ -185,7 +185,24 @@ export interface StreetRoadFields {
  * road fields. A corridor's packed streets (`apps/web` §`world-data/corridor.ts`)
  * keep the {@link StreetFeature} alone, which is why the fields are not on it.
  */
-export interface DecodedStreetFeature extends StreetFeature, StreetRoadFields {}
+export interface DecodedStreetFeature extends StreetFeature, StreetRoadFields {
+  /**
+   * #3052, ADR 0096: its OSM `name`, as mapped, when the caller asked for
+   * names (`decodeTile`'s `streetNames`) and the tile carried one: at most
+   * `schema.ts` §`STREET_NAME_MAX_CHARS` characters, with no control or
+   * bidirectional-override character. Absent otherwise — never `''`.
+   */
+  readonly name?: string;
+}
+
+/** What {@link decodeTile} is asked to read beyond its default. */
+export interface DecodeOptions {
+  /**
+   * #3052, ADR 0096: read each street's `name` onto it. Off by default: a
+   * route ride's corridor reads no name (ADR 0054 D-2.2 stands for it).
+   */
+  readonly streetNames?: boolean;
+}
 
 /**
  * A point from `places` (#1632, ADR 0055 D-2): what kind of settlement stands

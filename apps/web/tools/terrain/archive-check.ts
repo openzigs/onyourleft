@@ -9,7 +9,7 @@
  * {@link main}.
  *
  * - **`plan`** walks an archive's directories and prints how many tiles, and
- *   how many bytes, lie inside the extract's box at zoom 0 to 12. Run against
+ *   how many bytes, lie inside the extract's box at zoom 12. Run against
  *   upstream it is the size of the extract before anything is downloaded; run
  *   against the extract it is the check that the extract holds what upstream
  *   has there. It reads directories only, never a tile.
@@ -46,6 +46,13 @@ export const TERRAIN_EXTRACT_BOX = { west: -125, south: 24, east: -66, north: 50
 /** The deepest zoom the extract holds, and the one the app reads. */
 export const TERRAIN_EXTRACT_MAX_ZOOM = 12;
 
+/**
+ * The shallowest zoom the extract holds: 12 as well, by the owner's ruling of
+ * 2026-11-24. The app reads zoom 12 only, and an extract of zoom 12 alone keeps
+ * the credited sources to the ones that cover the box (`README.md`).
+ */
+export const TERRAIN_EXTRACT_MIN_ZOOM = 12;
+
 /** How many ranges {@link sampleRanges} spreads over a file, and how long each is. */
 export const VERIFY_RANGES = 8;
 export const VERIFY_RANGE_BYTES = 64 * 1024;
@@ -73,7 +80,7 @@ export function tileRange(
 }
 
 export interface ExtractPlan {
-  /** Tiles addressed inside the box, zoom 0 to `maxZoom`. */
+  /** Tiles addressed inside the box, zoom `minZoom` to `maxZoom`. */
   readonly tiles: number;
   /** Distinct tile contents among them: tiles that share bytes are counted once. */
   readonly contents: number;
@@ -81,13 +88,14 @@ export interface ExtractPlan {
   readonly bytes: number;
   /** The longest single tile. */
   readonly largestTile: number;
-  /** Tiles and bytes by zoom, index 0 to `maxZoom`. */
+  /** Tiles and bytes by zoom, index 0 to `maxZoom`; a zoom below `minZoom` is all zeros. */
   readonly perZoom: readonly { readonly tiles: number; readonly bytes: number }[];
 }
 
 /**
- * What an extract of `box` at zoom 0 to `maxZoom` holds, read from the
- * archive's directories.
+ * What an extract of `box` at zoom `minZoom` to `maxZoom` holds, read from the
+ * archive's directories. Upstream's file holds zoom 0 to 12; the extract is
+ * zoom 12 only, so both are counted at zoom 12 and the two plans compare.
  *
  * `PMTiles`' own cache reads each directory (`cache.getDirectory`), so the
  * header's compression and the varint layout are the package's and not a
@@ -98,10 +106,13 @@ export async function planExtract(
   source: Source,
   box: Box = TERRAIN_EXTRACT_BOX,
   maxZoom: number = TERRAIN_EXTRACT_MAX_ZOOM,
+  minZoom: number = TERRAIN_EXTRACT_MIN_ZOOM,
 ): Promise<ExtractPlan> {
   const reader = new PMTiles(source);
   const header = await reader.getHeader();
-  const ranges = Array.from({ length: maxZoom + 1 }, (_, z) => tileRange(z, box));
+  const ranges = Array.from({ length: maxZoom + 1 }, (_, z) =>
+    z < minZoom ? undefined : tileRange(z, box),
+  );
   const perZoom = ranges.map(() => ({ tiles: 0, bytes: 0 }));
   const seen = new Map<number, number>();
   let tiles = 0;
@@ -291,12 +302,13 @@ export async function main(
       const plan = await planExtract(reader);
       const box = TERRAIN_EXTRACT_BOX;
       out(
-        `box ${String(box.west)},${String(box.south)},${String(box.east)},${String(box.north)}, zoom 0 to ${String(TERRAIN_EXTRACT_MAX_ZOOM)}`,
+        `box ${String(box.west)},${String(box.south)},${String(box.east)},${String(box.north)}, zoom ${String(TERRAIN_EXTRACT_MAX_ZOOM)}`,
       );
       out(`tiles: ${String(plan.tiles)} (${String(plan.contents)} distinct contents)`);
       out(`tile bytes: ${String(plan.bytes)} (${(plan.bytes / 1e9).toFixed(2)} GB)`);
       out(`largest tile: ${String(plan.largestTile)} bytes`);
       plan.perZoom.forEach((zoom, z) => {
+        if (z < TERRAIN_EXTRACT_MIN_ZOOM) return;
         out(`z${String(z)}: ${String(zoom.tiles)} tiles, ${String(zoom.bytes)} bytes`);
       });
       return 0;
@@ -313,7 +325,9 @@ export async function main(
         return 1;
       }
       const result = await verifyUpload(local, await httpReader(second));
-      result.lines.forEach(out);
+      // Not `forEach(out)`: that hands `out` the index and the array as well,
+      // and `console.log` prints all three.
+      for (const line of result.lines) out(line);
       out(result.ok ? 'verified: the uploaded object is the local file' : 'NOT verified');
       return result.ok ? 0 : 1;
     } finally {

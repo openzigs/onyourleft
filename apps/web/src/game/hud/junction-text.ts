@@ -23,22 +23,32 @@
  * and a junction passed owes nothing, because a sentence about a junction
  * behind the rider is noise.
  *
- * ## No place in words
+ * ## No position in words; a street by its mapped name
  *
- * A way is named by how it turns from the rider's heading, never by a street
- * name, a node or a position (ADR 0004 D, #2880's hard rules): nothing here is
- * handed anything else.
+ * A way is named by how it turns from the rider's heading, and since #3052
+ * (ADR 0096) by the street's mapped name beside it where the map gives one —
+ * "Right onto Third Avenue" — never by a node, a coordinate or a position
+ * (ADR 0004 D). A way with no name is named by its turn alone: nothing here
+ * invents one. The name is shown and said, and never logged.
  *
  * ## The words are new, for the owner's approval
  *
  * Every word and sentence below is new rider-facing wording, listed in
- * #2898's pull request.
+ * #2898's pull request, and {@link TURN_NOTICE_WORDS} in #3058's.
+ *
+ * ## Turn notices — #3058
+ *
+ * A U-turn, a dead end's turn-round and a left or right pressed with no
+ * junction near each begin a notice (`junction-choice.ts` §`TurnNotice`),
+ * whose sentence is owed until said beside the junction's own, and said first:
+ * it answers what just happened.
  */
 
+import type { RollingWay } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatSmallDistance } from '../../units/format';
-import type { JunctionPrompt } from '../open-world/junction-choice';
+import type { JunctionPrompt, TurnNotice, TurnNoticeKind } from '../open-world/junction-choice';
 import type { AnnouncementEvent, AnnouncementKind } from './announce';
 
 /** The prompt's title, and the name of its group. */
@@ -62,6 +72,18 @@ export const JUNCTION_LOCKED_LINE = 'Choice locked';
 export const JUNCTION_BY_KEY_SENTENCE = 'Screen locked: choose with a key, a pad or a remote.';
 
 /**
+ * What the pop-up shows, and the region says, for each turn notice — #3058.
+ * New wording, for the owner's approval.
+ */
+export const TURN_NOTICE_WORDS: Readonly<
+  Record<TurnNoticeKind, { readonly shown: string; readonly said: string }>
+> = {
+  'turning-round': { shown: 'Turning round', said: 'Turning round.' },
+  'dead-end': { shown: 'Dead end: turning round', said: 'Dead end: turning round.' },
+  'no-junction': { shown: 'No junction yet', said: 'No junction yet.' },
+};
+
+/**
  * A way's name, by its turn from the rider's heading, in degrees with
  * negative left (`RollingWay.turnDegrees`): within 15° either side is
  * straight on, to 60° a bear, to 135° a turn, and past that a sharp turn.
@@ -76,6 +98,33 @@ export function wayWord(turnDegrees: number): string {
   return `Sharp ${side}`;
 }
 
+/**
+ * The street a way is, as mapped (#3052, ADR 0096), or `undefined` where the
+ * map names none.
+ */
+export function wayStreet(way: Pick<RollingWay, 'edge'>): string | undefined {
+  const name = way.edge.name;
+  return name === undefined || name.length === 0 ? undefined : name;
+}
+
+/**
+ * The words under a way's turn that name its street — "onto Third Avenue",
+ * or "along Main Street" for the way straight on — or `undefined` with no
+ * name (#3052).
+ */
+export function wayStreetLine(way: Pick<RollingWay, 'edge' | 'turnDegrees'>): string | undefined {
+  const street = wayStreet(way);
+  if (street === undefined) return undefined;
+  return `${Math.abs(way.turnDegrees) <= 15 ? 'along' : 'onto'} ${street}`;
+}
+
+/** A way in a sentence: its turn, and its street where it has one — "right onto Third Avenue". */
+export function wayPhrase(way: Pick<RollingWay, 'edge' | 'turnDegrees'>): string {
+  const line = wayStreetLine(way);
+  const word = wayWord(way.turnDegrees).toLowerCase();
+  return line === undefined ? word : `${word} ${line}`;
+}
+
 /** The line the prompt shows until the choice is final: how far until it is, in tens of the rider's unit. */
 export function lockLine(toLock: number, units: UnitSystem): string {
   const measured = formatSmallDistance(toLock, units);
@@ -85,7 +134,7 @@ export function lockLine(toLock: number, units: UnitSystem): string {
 
 function wordOf(shown: JunctionPrompt, id: string): string {
   const way = shown.ways.find((each) => each.edge.id === id);
-  return wayWord(way?.turnDegrees ?? 0).toLowerCase();
+  return way === undefined ? wayWord(0).toLowerCase() : wayPhrase(way);
 }
 
 /** "a, b or c". */
@@ -96,7 +145,7 @@ function listed(words: readonly string[]): string {
 
 /** The sentence said as a junction's prompt appears: its ways, and the default. */
 function aheadSentence(shown: JunctionPrompt): string {
-  const ways = listed(shown.ways.map((way) => wayWord(way.turnDegrees).toLowerCase()));
+  const ways = listed(shown.ways.map(wayPhrase));
   return `${JUNCTION_PROMPT_TITLE}: ${ways}. The default is ${wordOf(shown, shown.defaultWay)}.`;
 }
 
@@ -124,8 +173,18 @@ export interface JunctionAnnounced {
   readonly chosen: string | undefined;
   /** Whether it was locked when last seen. */
   readonly locked: boolean;
-  /** The one sentence owed, until the announcer says it. */
+  /** The one sentence owed about the junction, until the announcer says it. */
   readonly owed: string | undefined;
+  /** When the last turn notice seen began (`TurnNotice.since`), so each is said once (#3058). */
+  readonly noticeSince: number | undefined;
+  /**
+   * The turn notice's sentence owed, until the announcer says it (#3058). Kept
+   * apart from {@link owed}: a notice is not about the junction, and outlives
+   * a junction passed or none prompted.
+   */
+  readonly noticeOwed: string | undefined;
+  /** Which of the two this frame's event offered, so the one said is the one let go. */
+  readonly offered: 'junction' | 'notice' | undefined;
 }
 
 /** Nothing said yet: `GameView` starts each open-world ride from it (#3013). */
@@ -134,6 +193,9 @@ export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
   chosen: undefined,
   locked: false,
   owed: undefined,
+  noticeSince: undefined,
+  noticeOwed: undefined,
+  offered: undefined,
 });
 
 /**
@@ -147,24 +209,38 @@ export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
 export function junctionEvent(
   announced: JunctionAnnounced,
   shown: JunctionPrompt | undefined,
+  notice?: TurnNotice,
 ): { readonly event: AnnouncementEvent | undefined; readonly announced: JunctionAnnounced } {
-  if (shown === undefined) return { event: undefined, announced: NO_JUNCTION_ANNOUNCED };
+  // #3058: a new turn notice owes its sentence, junction or none.
+  const fresh = notice !== undefined && notice.since !== announced.noticeSince;
+  const noticeSince = notice?.since ?? announced.noticeSince;
+  const noticeOwed =
+    notice !== undefined && fresh ? TURN_NOTICE_WORDS[notice.kind].said : announced.noticeOwed;
   let owed = announced.owed;
-  if (shown.distance !== announced.junction) {
+  if (shown === undefined) {
+    owed = undefined;
+  } else if (shown.distance !== announced.junction) {
     owed = shown.locked ? tooCloseSentence(shown) : aheadSentence(shown);
   } else if (shown.locked && !announced.locked) {
     owed = lockedSentence(shown);
   } else if (shown.chosen !== announced.chosen) {
     owed = chosenSentence(shown);
   }
+  // The notice first: it answers a press the rider has just made, or a turn
+  // the road made under them; the junction's sentence is said the frame after.
+  const offered = noticeOwed !== undefined ? 'notice' : owed !== undefined ? 'junction' : undefined;
   const next: JunctionAnnounced = {
-    junction: shown.distance,
-    chosen: shown.chosen,
-    locked: shown.locked,
+    junction: shown?.distance,
+    chosen: shown?.chosen,
+    locked: shown?.locked ?? false,
     owed,
+    noticeSince,
+    noticeOwed,
+    offered,
   };
+  const text = offered === 'notice' ? noticeOwed : owed;
   return {
-    event: owed === undefined ? undefined : { kind: 'junction', text: owed },
+    event: text === undefined ? undefined : { kind: 'junction', text },
     announced: next,
   };
 }
@@ -179,5 +255,8 @@ export function junctionSpoken(
   announced: JunctionAnnounced,
   kind: AnnouncementKind | undefined,
 ): JunctionAnnounced {
-  return kind === 'junction' ? { ...announced, owed: undefined } : announced;
+  if (kind !== 'junction') return announced;
+  return announced.offered === 'notice'
+    ? { ...announced, noticeOwed: undefined }
+    : { ...announced, owed: undefined };
 }

@@ -308,6 +308,7 @@ It has the same authority as the root file. Where the text below says "this file
 | Why scenery beyond 400 m to the side is dropped however wide the view is | `apps/web/src/game/three-renderer.ts` §`FOGGED_OUT_METRES`, `apps/web/src/game/world.ts` §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the scenery is a hash of where you are rather than a generator that walks forward | `apps/web/src/game/scatter.ts` §`scatterAt`, §`scatterSeed` |
 | Why an open-world ride's scenery does not regenerate when its view changes (#3055) | `apps/web/src/game/scenery-anchor.ts` |
+| Why a junction choice moves no scenery past the junction: the ways out the route does not take (#3051) | `apps/web/src/game/open-world/road.ts` §`waysOut`, `apps/web/src/game/open-world/ways-out.test.ts` |
 | Why the scenery's shapes will come from a pack when its placement does not, and which one kind is excluded | [ADR 0022](../adr/0022-game-scenery-model-pack.md) D-3, D-4 |
 | Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
 | Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |

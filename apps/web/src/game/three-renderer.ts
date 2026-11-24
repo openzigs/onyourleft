@@ -152,6 +152,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CanvasTexture,
   CircleGeometry,
   Color,
   type CompressedTexture,
@@ -574,6 +575,12 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import {
+  STREET_NAME_ATLAS_COLUMNS,
+  STREET_NAME_ATLAS_ROWS,
+  STREET_NAME_CHARSET,
+  type StreetNamesInView,
+} from './street-names';
 import { NO_FOOTWAYS, type FootwayPiece } from './footway-surfaces';
 import type { Embankment } from './overpasses';
 import {
@@ -11047,6 +11054,170 @@ export class SideRoadBelt {
   dispose(): void {
     this.#mesh.geometry.dispose();
   }
+}
+
+/** The paint a street's name is drawn in: a warm white that holds against tarmac in either world. */
+export const STREET_NAME_PAINT = 0xf3f1e8;
+
+/** How many pixels a glyph atlas cell is, square. */
+const STREET_NAME_CELL_PIXELS = 64;
+
+/**
+ * The glyph atlas — #3052: every character of `street-names.ts`
+ * §`STREET_NAME_CHARSET`, white on clear, one to a cell, drawn once into an
+ * `OffscreenCanvas`. `undefined` where there is none to draw into (the jsdom
+ * suite): the belt then draws its quads unmapped, which nobody sees.
+ */
+function streetNameAtlas(): CanvasTexture<OffscreenCanvas> | undefined {
+  if (typeof OffscreenCanvas === 'undefined') return undefined;
+  const canvas = new OffscreenCanvas(
+    STREET_NAME_ATLAS_COLUMNS * STREET_NAME_CELL_PIXELS,
+    STREET_NAME_ATLAS_ROWS * STREET_NAME_CELL_PIXELS,
+  );
+  const context = canvas.getContext('2d');
+  if (context === null) return undefined;
+  context.fillStyle = '#ffffff';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.font = `bold ${String(Math.round(STREET_NAME_CELL_PIXELS * 0.8))}px sans-serif`;
+  for (const [cell, character] of Array.from(STREET_NAME_CHARSET).entries()) {
+    const column = cell % STREET_NAME_ATLAS_COLUMNS;
+    const row = Math.floor(cell / STREET_NAME_ATLAS_COLUMNS);
+    context.fillText(
+      character,
+      (column + 0.5) * STREET_NAME_CELL_PIXELS,
+      (row + 0.55) * STREET_NAME_CELL_PIXELS,
+      STREET_NAME_CELL_PIXELS,
+    );
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  // Read at a grazing angle from the chase camera: the most the GPU allows of
+  // eight, so a name 60 m on is not a smear.
+  texture.anisotropy = 8;
+  return texture;
+}
+
+/**
+ * The street names painted on the open world's roads — #3052, ADR 0096:
+ * every letter in view as one quad of ONE mesh, in one material with one
+ * texture, the glyph atlas. **One draw call** however many streets are named,
+ * and none on a frame that names none: the mesh is hidden. Built by
+ * `ThreeGameView` on the first frame of a ride that MAY name a street — one
+ * whose frames carry `SceneFrame.streetNames`, an open-world ride's, with or
+ * without a name in sight — so a ride that names no street never makes it.
+ *
+ * ⚠️ **On the ride's first frame, not the first that carries a name** —
+ * #3107. Built when the first name came into view, its program was linked
+ * inside that frame: one of the 0.9 s to 1.2 s stalls on the owner's tablet
+ * (2026-11-23). Built with the first frame, it is in the scene `prepare`
+ * compiles, hidden, before the ride draws anything.
+ *
+ * ⚠️ **Rebuilt only when the names in view change**, which `street-names.ts`
+ * §`streetNamesInView` does at most once every
+ * `STREET_NAME_REFRESH_METRES` ridden: it hands every frame between the same
+ * object.
+ *
+ * Unlit paint, alpha-tested rather than blended so it sorts with nothing; in
+ * the realistic world it breathes the realistic air (#622), and in the
+ * stylised one it takes the scene's fog, so a far name fades as the road does.
+ */
+export class StreetNameBelt {
+  readonly #mesh: Mesh;
+  readonly #atlas: CanvasTexture<OffscreenCanvas> | undefined;
+  readonly #materials: { readonly stylised: Material; readonly realistic: Material };
+  #held: StreetNamesInView | undefined;
+
+  constructor(atlas: CanvasTexture<OffscreenCanvas> | undefined = streetNameAtlas()) {
+    this.#atlas = atlas;
+    const paint = (): MeshBasicMaterial =>
+      constructed(
+        new MeshBasicMaterial({
+          color: STREET_NAME_PAINT,
+          map: atlas ?? null,
+          alphaTest: 0.5,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        }),
+      );
+    this.#materials = { stylised: paint(), realistic: withAtmosphere(paint()) };
+    // #3107: with the attributes a named frame's geometry has, none of them
+    // holding a letter yet. @see streetNameGeometry
+    this.#mesh = new Mesh(streetNameGeometry(undefined), this.#materials.stylised);
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the jsdom suite's count of calls, and the browser gate. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** This frame's names, in the world `drawing` draws. */
+  update(names: StreetNamesInView | undefined, drawing: 'stylised' | 'realistic'): void {
+    this.#mesh.material = this.#materials[drawing];
+    if (names !== this.#held) {
+      this.#held = names;
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = streetNameGeometry(names);
+    }
+    this.#mesh.visible = names !== undefined && names.cells.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.stylised.dispose();
+    this.#materials.realistic.dispose();
+    this.#atlas?.dispose();
+  }
+}
+
+/**
+ * Every letter of `names` as one geometry: four corners and two triangles a
+ * letter, its cell's corner of the atlas each.
+ *
+ * ⚠️ **The same attributes with no letter as with a hundred** — #3107. Three
+ * keys a program on the attributes its geometry carries, so a belt whose
+ * geometry had none while it named nothing was compiled, in `prepare`, as a
+ * program no named frame draws with: the first name in view linked another,
+ * inside its frame. An unnamed frame's geometry carries the same three
+ * attributes and an index, each empty.
+ */
+function streetNameGeometry(names: StreetNamesInView | undefined): BufferGeometry {
+  const geometry = new BufferGeometry();
+  const letters = names?.cells.length ?? 0;
+  const uvs = new Float32Array(letters * 8);
+  const normals = new Float32Array(letters * 12);
+  const index = new Uint32Array(letters * 6);
+  const across = 1 / STREET_NAME_ATLAS_COLUMNS;
+  const down = 1 / STREET_NAME_ATLAS_ROWS;
+  for (let letter = 0; letter < letters; letter += 1) {
+    const cell = names?.cells[letter] as number;
+    const u0 = (cell % STREET_NAME_ATLAS_COLUMNS) * across;
+    // The canvas is drawn top row first and uploaded flipped: row 0 is at the top.
+    const v1 = 1 - Math.floor(cell / STREET_NAME_ATLAS_COLUMNS) * down;
+    const v0 = v1 - down;
+    uvs.set([u0, v0, u0 + across, v0, u0 + across, v1, u0, v1], letter * 8);
+    for (let corner = 0; corner < 4; corner += 1) normals[letter * 12 + corner * 3 + 1] = 1;
+    const first = letter * 4;
+    index.set([first, first + 1, first + 2, first, first + 2, first + 3], letter * 6);
+  }
+  geometry.setAttribute(
+    'position',
+    new BufferAttribute(
+      names === undefined || letters === 0 ? new Float32Array(0) : names.corners,
+      3,
+    ),
+  );
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  return geometry;
 }
 
 /** No side roads: what a belt that is off holds. */
@@ -24135,10 +24306,115 @@ export interface DrawnMappedBuilding {
  * - **Never culled as a whole** (`frustumCulled` off): the buildings in reach
  *   stand all round the rider, so a sphere about them always holds the camera.
  */
+/**
+ * The materials the mapped buildings are drawn in: one a footprint surface,
+ * and the house models' — #3107. @see mappedBuildingMaterials
+ */
+export interface MappedBuildingMaterials {
+  readonly surfaces: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
+  readonly models: MeshStandardMaterial;
+}
+
+/**
+ * The mapped buildings' materials, made ONCE for a world and handed to every
+ * {@link MappedBuildingBelt} it builds — #3107.
+ *
+ * A belt is one set of buildings' (`MappedBuildings`), and is built again
+ * when the set is another: once a ride on a route, whose buildings are planned
+ * at the press, and **on every plan of an open-world ride**, which plans the
+ * buildings round the rider again as they go. Until #3107 each belt made its
+ * own materials and disposed of them with itself. Three keeps a program only
+ * while a material uses it, so each new belt's first frame linked every one
+ * of its programs again, with the ride under way: the 0.9 s to 1.2 s frames
+ * on the owner's tablet as a new area loaded (2026-11-23), and none on a
+ * route ride of the same build. Made once and kept by whoever builds the
+ * belts, a new set of buildings is new geometry in the same materials, and
+ * introduces no program.
+ */
+export function mappedBuildingMaterials(
+  textures: RealisticWorld['structures'],
+  houses?: RealisticHouses,
+): MappedBuildingMaterials {
+  return {
+    surfaces: new Map(
+      FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
+    ),
+    models: houseModelMaterial(houses?.atlas),
+  };
+}
+
+/** Disposes of {@link mappedBuildingMaterials}' materials: by whoever made them, when no belt draws in them. */
+export function disposeMappedBuildingMaterials(materials: MappedBuildingMaterials): void {
+  for (const material of materials.surfaces.values()) material.dispose();
+  materials.models.dispose();
+}
+
+/**
+ * Two meshes that draw nothing, in every one of the mapped buildings'
+ * materials: what `prepare` compiles their programs from — #3107, PR #3117's
+ * review. @see RealisticDrawing.readyMapped
+ *
+ * An open-world ride asks for its buildings once its tiles are planned, so
+ * its first frame carries none and no belt is in the scene `prepare`
+ * compiles: every surface's program, and the house models', was linked
+ * inside the frame the first plan arrived on. And a belt's mesh wears only
+ * the surfaces its last refill opened, six of the eight at most, so even a
+ * ride that starts with buildings linked a program on the refill that first
+ * opened another.
+ *
+ * ⚠️ **Each geometry carries a belt's attributes, by name and size, with no
+ * vertex in them**: three keys a program on the material and on what its
+ * geometry carries, so these are compiled as the programs a belt draws with
+ * (`mapped-building-materials.test.ts` holds the two to the same attributes).
+ * Hidden, as a belt with nothing to draw is: `compile` reads hidden objects,
+ * and nothing is ever drawn from them.
+ */
+export function mappedBuildingWarmUp(materials: MappedBuildingMaterials): {
+  readonly surfaces: Mesh;
+  readonly models: Mesh;
+} {
+  const empty = (attributes: readonly (readonly [string, number])[]): BufferGeometry => {
+    const geometry = new BufferGeometry();
+    for (const [name, size] of attributes) {
+      geometry.setAttribute(name, new BufferAttribute(new Float32Array(0), size));
+    }
+    geometry.setDrawRange(0, 0);
+    return geometry;
+  };
+  const hidden = (mesh: Mesh): Mesh => {
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    return mesh;
+  };
+  const shared: readonly (readonly [string, number])[] = [
+    ['position', 3],
+    ['normal', 3],
+    ['uv', 2],
+    ['color', 3],
+    ['oylTint', 1],
+  ];
+  return {
+    surfaces: hidden(
+      new Mesh(
+        empty([
+          ...shared,
+          ['oylFacade', FACADE_FLOATS],
+          ['oylTrim', 3],
+          ['oylStyle', STYLE_FLOATS],
+        ]),
+        [...materials.surfaces.values()],
+      ),
+    ),
+    models: hidden(new Mesh(empty(shared), materials.models)),
+  };
+}
+
 export class MappedBuildingBelt {
   readonly mesh: Mesh;
   readonly buildings: MappedBuildings;
   readonly #materials: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
+  /** Whether the materials are this belt's own, to dispose of with it. @see mappedBuildingMaterials */
+  readonly #ownsMaterials: boolean;
   /** The mesh's material list: the surface each group draws, by its place. */
   readonly #slots: Material[];
   readonly #position: BufferAttribute;
@@ -24209,21 +24485,26 @@ export class MappedBuildingBelt {
    * @param textures the world's structure surfaces. @see RealisticWorld.structures
    * @param houses the house models and their atlas (#1585); without them every
    * plan is its extrusion
+   * @param materials #3107: the materials to draw in, kept by the caller and
+   * shared by every belt it builds ({@link mappedBuildingMaterials}); without
+   * them the belt makes its own from `textures` and `houses`, and disposes of
+   * them with itself
    */
   constructor(
     buildings: MappedBuildings,
     textures: RealisticWorld['structures'],
     houses?: RealisticHouses,
+    materials?: MappedBuildingMaterials,
   ) {
     this.buildings = buildings;
     this.#houses = houses;
+    this.#ownsMaterials = materials === undefined;
+    const drawnIn = materials ?? mappedBuildingMaterials(textures, houses);
     this.#selection = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
-    this.#materials = new Map(
-      FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
-    );
+    this.#materials = drawnIn.surfaces;
     const first = this.#materials.get(FOOTPRINT_SURFACES[0] as StructureSurface) as Material;
     this.#slots = Array.from({ length: MAPPED_BUILDING_DRAW_CALLS }, () => first);
     const attribute = (size: number): BufferAttribute =>
@@ -24268,7 +24549,7 @@ export class MappedBuildingBelt {
     models.setAttribute('color', this.#modelColour);
     models.setAttribute('oylTint', this.#modelTint);
     models.setDrawRange(0, 0);
-    this.modelMesh = new Mesh(models, houseModelMaterial(houses?.atlas));
+    this.modelMesh = new Mesh(models, drawnIn.models);
     this.modelMesh.frustumCulled = false;
     this.modelMesh.visible = false;
   }
@@ -24729,9 +25010,12 @@ export class MappedBuildingBelt {
 
   dispose(): void {
     this.mesh.geometry.dispose();
-    for (const material of this.#materials.values()) material.dispose();
     this.modelMesh.geometry.dispose();
-    (this.modelMesh.material as Material).dispose();
+    // #3107: its own materials only. Shared ones are their maker's to dispose of.
+    if (this.#ownsMaterials) {
+      for (const material of this.#materials.values()) material.dispose();
+      (this.modelMesh.material as Material).dispose();
+    }
   }
 }
 
@@ -25421,6 +25705,10 @@ class RealisticDrawing {
   #procedural: readonly ScatterItem[] = [];
   /** The ride's buildings from map data, once a frame has carried them — #1549. */
   #mapped: MappedBuildingBelt | undefined;
+  /** #3107: the materials every {@link #mapped} belt of this world draws in. @see readyMapped */
+  #mappedMaterials: MappedBuildingMaterials | undefined;
+  /** #3107: what `prepare` compiles those materials' programs from. @see readyMapped */
+  #mappedWarmUp: ReturnType<typeof mappedBuildingWarmUp> | undefined;
   /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
   #mappedOn = true;
   #shown = true;
@@ -25571,6 +25859,8 @@ class RealisticDrawing {
 
   addTo(scene: Scene): void {
     this.#scene = scene;
+    if (this.#mappedWarmUp !== undefined)
+      scene.add(this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models);
     this.#mapped?.addTo(scene);
     this.vegetation.addTo(scene);
     this.structures.addTo(scene);
@@ -25691,10 +25981,13 @@ class RealisticDrawing {
       this.#mapped?.mesh.removeFromParent();
       this.#mapped?.modelMesh.removeFromParent();
       this.#mapped?.dispose();
+      // #3107: every belt this world builds draws in the one set of
+      // materials, so a new set of buildings links no program.
       this.#mapped = new MappedBuildingBelt(
         view.buildings,
         this.#world.structures,
         this.#world.houses,
+        this.readyMapped(),
       );
       this.#mapped.setShown(this.#shown);
       if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
@@ -25710,6 +26003,28 @@ class RealisticDrawing {
     if (cap !== undefined) this.#mappedCap = cap;
     this.#capStructures(this.#mappedCap);
     this.#mapped.clearOf(near);
+  }
+
+  /**
+   * Makes the mapped buildings' materials, and puts their programs in the
+   * scene `prepare` compiles — #3107, PR #3117's review. Called on every frame
+   * of a ride that carries mapped buildings **or may come to** (an open-world
+   * ride, whose first frames carry none: `ThreeGameView` §`#stage`), so by
+   * the frame a view is prepared with; it makes them once.
+   *
+   * Not made with the drawing: a ride with no map data draws no mapped
+   * building, and would link nine programs for nothing behind its loading
+   * screen.
+   *
+   * @see mappedBuildingWarmUp
+   */
+  readyMapped(): MappedBuildingMaterials {
+    if (this.#mappedMaterials === undefined) {
+      this.#mappedMaterials = mappedBuildingMaterials(this.#world.structures, this.#world.houses);
+      this.#mappedWarmUp = mappedBuildingWarmUp(this.#mappedMaterials);
+      this.#scene?.add(this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models);
+    }
+    return this.#mappedMaterials;
   }
 
   /** Holds the procedural structures to `cap` items. @see updateMapped */
@@ -25779,6 +26094,13 @@ class RealisticDrawing {
 
   dispose(): void {
     this.#mapped?.dispose();
+    for (const mesh of this.#mappedWarmUp === undefined
+      ? []
+      : [this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models]) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
+    if (this.#mappedMaterials !== undefined) disposeMappedBuildingMaterials(this.#mappedMaterials);
     this.vegetation.dispose();
     this.structures.dispose();
     this.primitives.dispose();
@@ -26505,6 +26827,22 @@ export function sideRoadMeshOf(
 }
 
 /**
+ * The programs a view's renderer holds — three's name for each and its place
+ * in the renderer's list — and whether the renderer checks each program's
+ * info log as it links (`renderer.debug.checkShaderErrors`) — #3107. A
+ * program not in the list after the ride's first frame, and in it later, was
+ * built inside a frame of the ride: the stall the owner's tablet showed.
+ * `undefined` for a view with no context.
+ *
+ * @test-facing read by `browser/open-world-harness.tsx`
+ */
+export function programsOf(
+  view: GameView,
+): { readonly names: readonly string[]; readonly checked: boolean } | undefined {
+  return view instanceof ThreeGameView ? view.programs() : undefined;
+}
+
+/**
  * Turns a view's street furniture off, or on again — #1536. The browser
  * gate's control: with it off, the frame must change by the pixels the
  * furniture covered, and lose one draw call a surface (#1689).
@@ -27161,6 +27499,8 @@ class ThreeGameView implements GameView {
    * handed none. @see #updateParkDressing
    */
   #parkDressing: ParkDressingBelt | undefined;
+  /** #3052: the open world's street names, once a frame has carried one. */
+  #streetNames: StreetNameBelt | undefined;
   /**
    * A lap race's pick-up points, puddles and hit effects — #1902, built on
    * the first frame that carries a lap race and dropped when the world
@@ -27217,6 +27557,13 @@ class ThreeGameView implements GameView {
       // See the header: a missing context is an ordinary condition, not a bug.
       renderer = undefined;
     }
+    // #3107: a production build does not read each program's info log as it
+    // links. With it read (three's default), the first draw of a program
+    // waits on the driver for the log: on the owner's tablet about 640 ms of
+    // each 0.9 s to 1.2 s frame a program was first drawn in (2026-11-23).
+    // A development build and the test suite keep it, where a shader that
+    // does not compile must say why.
+    if (renderer !== undefined) renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.#renderer = renderer;
     this.hasContext = renderer !== undefined;
 
@@ -27393,6 +27740,8 @@ class ThreeGameView implements GameView {
     // #1565: the cross streets, in whatever the road wears this frame.
     this.#sideRoads.setMaterial(this.#road.material as Material);
     this.#sideRoads.update(frame.sideRoads);
+    // #3052: an open-world ride's street names, painted on those roads.
+    this.#updateStreetNames(frame.streetNames);
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
@@ -27419,6 +27768,12 @@ class ThreeGameView implements GameView {
       this.#clearOfTheCamera && this.#drawing === 'realistic'
         ? nearPyramid(rig, this.#camera.aspect)
         : undefined;
+    // #3107: an open-world ride's buildings are planned after its first frame.
+    // Its frames say which ride it is by carrying its street names, named or
+    // not, so the buildings' programs are in the scene `prepare` compiles.
+    if (frame.mappedBuildings !== undefined || frame.streetNames !== undefined) {
+      this.#realistic?.readyMapped();
+    }
     // #1549: the buildings from map data, refilled only at a chunk — before
     // the structures, whose share of the rung it may change.
     this.#realistic?.updateMapped(
@@ -27502,6 +27857,24 @@ class ThreeGameView implements GameView {
       this.#parkDressing.addTo(this.#scene);
     }
     this.#parkDressing?.update(pieces);
+  }
+
+  /**
+   * The street names — #3052: the belt built on the first frame that names a
+   * street, and handed every frame after; a frame with none hides it.
+   */
+  #updateStreetNames(names: StreetNamesInView | undefined): void {
+    // #3107: on the first frame that carries the names at all, named or not.
+    if (names !== undefined && this.#streetNames === undefined) {
+      this.#streetNames = new StreetNameBelt();
+      this.#streetNames.addTo(this.#scene);
+    }
+    this.#streetNames?.update(names, this.#drawing);
+  }
+
+  /** The street names' belt, once a frame has built it. For the jsdom suite. */
+  get streetNameBelt(): StreetNameBelt | undefined {
+    return this.#streetNames;
   }
 
   /** The park dressing's belt, once a frame has built it. For the jsdom suite. */
@@ -28047,6 +28420,18 @@ class ThreeGameView implements GameView {
     return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
   }
 
+  /** @see programsOf */
+  programs(): { readonly names: readonly string[]; readonly checked: boolean } | undefined {
+    const renderer = this.#renderer;
+    if (renderer === undefined) return undefined;
+    return {
+      names: (renderer.info.programs ?? []).map(
+        (program, index) => `${String(index)}:${program.name === '' ? 'unnamed' : program.name}`,
+      ),
+      checked: renderer.debug.checkShaderErrors,
+    };
+  }
+
   /** @see sideRoadsShownOf */
   sideRoadsShown(on: boolean): void {
     this.#sideRoads.switchOn(on);
@@ -28403,6 +28788,7 @@ class ThreeGameView implements GameView {
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
     this.#parkDressing?.dispose();
+    this.#streetNames?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();

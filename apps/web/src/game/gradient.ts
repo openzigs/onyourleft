@@ -110,7 +110,9 @@ import {
   type SimulationDriver,
 } from '@onyourleft/domain';
 import {
+  controlRefusalOf,
   createSimulationWriter,
+  type ControlRefusal,
   type SimulationSink,
   type SimulationWriter,
 } from '@onyourleft/sensors/protocol';
@@ -285,8 +287,8 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
   };
 
   const writer: SimulationWriter = createSimulationWriter(sink, {
-    onError: (error: unknown) => {
-      fault = faultText(error);
+    onError: (error: unknown, parameters) => {
+      fault = faultText(error, parameters.grade);
       // ⚠️ **The half that is easy to leave out, and the one that matters.**
       // The driver believes it wrote the gradient it was refused, so its
       // deadband would suppress the identical value for as long as the road
@@ -504,7 +506,7 @@ const HELD_AFTER_DISCONNECT =
  * than for a target — a rider reading "the trainer refused that target" while
  * looking at a hill would go looking for a workout they are not riding.
  */
-function faultText(error: unknown): string {
+function faultText(error: unknown, grade?: number): string {
   // `ride/controller.ts` §`mustWaitForForget` (#718's second review, #721):
   // the app, not the machine, held the gradient back, so this does not say the
   // trainer refused anything. By class and first, never by the reason's words
@@ -539,5 +541,30 @@ function faultText(error: unknown): string {
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next gradient will be sent again.';
   }
+  // #3104: and which gradient, and what refused it, where the protocol client
+  // says. The owner's tablet showed this sentence just after a one-point
+  // turnaround with nothing to tell a machine's answer from Bluetooth's.
+  const refusal = controlRefusalOf(error);
+  if (refusal !== undefined && grade !== undefined && Number.isFinite(grade)) {
+    return `The trainer refused that gradient, ${grade.toFixed(1)} % (${refusalWords(refusal)}). The next one will be sent again.`;
+  }
   return 'The trainer refused that gradient. The next one will be sent again.';
+}
+
+/**
+ * What refused a gradient, in words — #3104. The machine's FTMS result by
+ * name, so a screenshot says which; never the GATT characteristic.
+ */
+function refusalWords(refusal: ControlRefusal): string {
+  if (refusal.by === 'attribute-protocol') return 'Bluetooth refused the write';
+  switch (refusal.result) {
+    case 'invalid-parameter':
+      return 'it answered “invalid parameter”';
+    case 'operation-failed':
+      return 'it answered “operation failed”';
+    case 'op-code-not-supported':
+      return 'it answered “not supported”';
+    default:
+      return 'it answered with a code FTMS does not define';
+  }
 }

@@ -108,7 +108,12 @@ import type { StreetFeature } from '@onyourleft/map-features';
 
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
-import { nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
+import {
+  nearestOnDrawnRoad,
+  roadNeighbourhood,
+  type NearestOnRoad,
+  type RoadNeighbourhood,
+} from './road-grid';
 import type { ScatterItem } from './scatter';
 import {
   siteAt,
@@ -285,6 +290,13 @@ export interface SideRoad {
  * decoded tile bounds vertices, not length, so a hostile tile of long segments
  * would otherwise become hundreds of millions of points; past this the rest of
  * the streets are not read, as `FOOTWAY_MAX_METRES` stops the footways.
+ *
+ * ⚠️ #3106: {@link mappedJunctions} and `nearby-streets.ts` count only the
+ * segments near the drawn road against it (`road-grid.ts`
+ * §`RoadNeighbourhood`). Counted over every street held, an open-world ride's
+ * nine blocks, where they hold more street than this, spent it on blocks a
+ * kilometre from the road, in the order they were read, and the blocks read
+ * last, the ones ahead of the rider, were not read at all.
  */
 export const STREET_MAX_METRES = 400_000;
 
@@ -297,10 +309,30 @@ export function meetsAtGrade(street: Pick<StreetFeature, 'kind' | 'grade'>): boo
 }
 
 /**
+ * How far from the drawn road a street's points can matter to a junction, in
+ * metres: **72** — a point on the route is within
+ * {@link JUNCTION_TOLERANCE_METRES} of it, and an arm is read
+ * {@link SIDE_ROAD_METRES} and a step along the street from there, and a step
+ * more. #3106: {@link mappedJunctions} resamples nothing farther off
+ * (`road-grid.ts` §`roadNeighbourhood`).
+ */
+export const ARM_REACH_METRES =
+  JUNCTION_TOLERANCE_METRES + SIDE_ROAD_METRES + 2 * SIDE_ROAD_STEP_METRES;
+
+/**
  * A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`.
  * `overpasses.ts` resamples the streets that cross the route over or under it with it — #2661.
+ *
+ * #3106: with `near`, a segment off the road's neighbourhood
+ * (`road-grid.ts` §`RoadNeighbourhood`) is left as its two ends and takes
+ * nothing from `budget`: the bound is spent on the streets that can matter to
+ * this road, never on the order a corridor's blocks were read in.
  */
-export function resampled(line: Float32Array, budget: { metres: number }): number[] {
+export function resampled(
+  line: Float32Array,
+  budget: { metres: number },
+  near?: RoadNeighbourhood,
+): number[] {
   const out: number[] = [];
   for (let at = 0; at + 1 < line.length; at += 2) {
     const ax = line[at] as number;
@@ -311,6 +343,13 @@ export function resampled(line: Float32Array, budget: { metres: number }): numbe
     const bx = line[at + 2] as number;
     const bz = line[at + 3] as number;
     if (!Number.isFinite(bx) || !Number.isFinite(bz)) return out;
+    if (
+      near !== undefined &&
+      !near.near(Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz))
+    ) {
+      out.push(bx, bz);
+      continue;
+    }
     const length = Math.hypot(bx - ax, bz - az);
     if (length > budget.metres) {
       budget.metres = 0;
@@ -354,6 +393,47 @@ function roadAt(
     normalX: frame.normalX,
     normalZ: frame.normalZ,
   };
+}
+
+/**
+ * Whether the street through `points` (`x, z` pairs), leaving the route at
+ * `points[start]` in direction `step` (`+2` or `−2` floats), leaves it at an
+ * angle an arm is taken at: {@link armFrom}'s own heading — from the point on
+ * the route to the first point {@link HEADING_METRES} along the street — at
+ * least {@link JUNCTION_MIN_ANGLE_DEGREES} from the road's, either way. #3106:
+ * `nearby-streets.ts` asks it, so a street that only forks off the route,
+ * which has no stub, is not drawn as though it had one.
+ */
+export function leavesAtJunctionAngle(
+  points: readonly number[],
+  start: number,
+  step: number,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): boolean {
+  const x0 = points[start] as number;
+  const z0 = points[start + 1] as number;
+  const leaves = nearestOnDrawnRoad(profile, origin, x0, z0, JUNCTION_TOLERANCE_METRES);
+  if (leaves === undefined) return false;
+  let metres = 0;
+  let px = x0;
+  let pz = z0;
+  for (let at = start + step; at >= 0 && at + 1 < points.length; at += step) {
+    const x = points[at] as number;
+    const z = points[at + 1] as number;
+    metres += Math.hypot(x - px, z - pz);
+    px = x;
+    pz = z;
+    if (metres >= HEADING_METRES) break;
+  }
+  const length = Math.hypot(px - x0, pz - z0);
+  if (!(length > 0)) return false;
+  const there = roadAt(profile, origin, leaves.along);
+  const cosine = ((px - x0) * there.forwardX + (pz - z0) * there.forwardZ) / length;
+  const angleDegrees = (Math.acos(Math.max(-1, Math.min(1, cosine))) * 180) / Math.PI;
+  return (
+    angleDegrees >= JUNCTION_MIN_ANGLE_DEGREES && angleDegrees <= 180 - JUNCTION_MIN_ANGLE_DEGREES
+  );
 }
 
 /** Whether a point is on another stretch of the route than the one at `along`. */
@@ -523,14 +603,196 @@ export function mappedJunctions(
   if (cached?.profile === profile && cached.land === land) return cached.junctions;
   const candidates: Candidate[] = [];
   const budget = { metres: STREET_MAX_METRES };
+  // #3106: only what an arm can be made of is resampled, and counted.
+  const near = roadNeighbourhood(profile, origin, ARM_REACH_METRES);
   for (const street of corridor.streets) {
     if (!meetsAtGrade(street)) continue;
-    const points = resampled(street.line, budget);
+    const points = resampled(street.line, budget, near);
     armsLeaving(points, widthClassOf(street), corridor, profile, origin, seed, land, candidates);
   }
   const junctions = grouped(candidates, 'mapped');
   junctionsFound.set(corridor, { profile, land, junctions });
   return junctions;
+}
+
+/**
+ * How much of a corridor's streets one frame reads for its junctions, in
+ * units — a point resampled is one, a vertex passed over a sixteenth
+ * (`nearby-streets.ts` §`StreetWork`): **1 000**. *#3107's choice*, as
+ * `nearby-streets.ts` §`NEARBY_STREET_SLICE_UNITS`.
+ */
+export const JUNCTION_SLICE_UNITS = 1_000;
+
+/**
+ * How far ahead of the rider two views must be the same road for the
+ * junctions of one to stand for the other's, in metres: **60** — inside the
+ * 100 m before a junction at which a choice is final, so a choice, which
+ * changes the road only past its junction, leaves it the same road here.
+ */
+const SAME_ROAD_AHEAD_METRES = 60;
+
+/** Where a view is on the ride, and the rider on it. @see JunctionScan.junctions */
+export interface JunctionScanAt {
+  /** The ride distance of the view's distance zero (`scenery-anchor.ts`); 0 where the view is the whole ride. */
+  readonly rideOrigin: number;
+  /** The rider's distance on the view. */
+  readonly riderMetres: number;
+}
+
+/** Whether two junctions are the same one: where they are, and the arms that leave them. */
+function sameJunction(a: Junction, b: Junction): boolean {
+  if (Math.abs(a.along - b.along) > 0.05 || a.arms.length !== b.arms.length) return false;
+  return a.arms.every((arm, index) => {
+    const other = b.arms[index] as SideRoadArm;
+    if (arm.side !== other.side || arm.widthClass !== other.widthClass) return false;
+    if (arm.line.length !== other.line.length) return false;
+    for (let at = 0; at < arm.line.length; at += 1) {
+      if (Math.abs((arm.line[at] as number) - (other.line[at] as number)) > 0.05) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * **One ride's mapped junctions, read a slice a frame** — #3107, as
+ * `nearby-streets.ts` §`NearbyStreetScan` reads its nearby streets, and for
+ * its reason: {@link mappedJunctions} reads every street of the corridor
+ * against the road in one call, and an open-world ride's road and corridor
+ * are replaced as it goes.
+ *
+ * At most {@link JUNCTION_SLICE_UNITS} a call. Until a reading is whole it
+ * hands on the junctions of **the last whole one, carried onto the new
+ * view**: each at the same place on the ride, which is its distance on the
+ * old view moved by how far the view's start moved. That holds while the two
+ * views are the same road ahead of the rider ({@link SAME_ROAD_AHEAD_METRES})
+ * — a junction choice, an extension, a trim behind. Where they are not (a
+ * U-turn, which changes the road under the rider at once), there are none to
+ * carry, and the junctions' stubs are back when the reading is whole, a few
+ * frames on. The first reading of a ride is read whole.
+ *
+ * ⚠️ **A junction found again is the same object**, so the side road built
+ * on it (`sideRoadOf`) and the mesh the renderer holds are kept.
+ */
+export class JunctionScan {
+  #whole:
+    | {
+        readonly corridor: WorldCorridor;
+        readonly profile: RouteProfile;
+        readonly land: LandClassMask;
+        readonly junctions: readonly Junction[];
+        readonly rideOrigin: number;
+      }
+    | undefined;
+  #reading:
+    | {
+        readonly corridor: WorldCorridor;
+        readonly profile: RouteProfile;
+        readonly land: LandClassMask;
+        readonly near: RoadNeighbourhood;
+        readonly budget: { metres: number };
+        readonly candidates: Candidate[];
+        /** What is handed on until the reading is whole. */
+        readonly meanwhile: readonly Junction[];
+        next: number;
+      }
+    | undefined;
+  /** The units the last call read: at most a slice, but for a ride's first reading. */
+  lastUnits = 0;
+
+  /** The ride's junctions on `profile`: the reading of it once whole, and the last whole one's, carried over, until then. */
+  junctions(
+    corridor: WorldCorridor,
+    profile: RouteProfile,
+    origin: CorridorOrigin,
+    seed: number,
+    land: LandClassMask,
+    at: JunctionScanAt,
+  ): readonly Junction[] {
+    this.lastUnits = 0;
+    const whole = this.#whole;
+    if (whole?.corridor === corridor && whole.profile === profile && whole.land === land) {
+      return whole.junctions;
+    }
+    let reading = this.#reading;
+    if (reading?.corridor !== corridor || reading.profile !== profile || reading.land !== land) {
+      reading = {
+        corridor,
+        profile,
+        land,
+        near: roadNeighbourhood(profile, origin, ARM_REACH_METRES),
+        budget: { metres: STREET_MAX_METRES },
+        candidates: [],
+        meanwhile: whole === undefined ? [] : carriedOnto(whole, profile, origin, at),
+        next: 0,
+      };
+      this.#reading = reading;
+    }
+    const most = whole === undefined ? Number.POSITIVE_INFINITY : JUNCTION_SLICE_UNITS;
+    const streets = corridor.streets;
+    let units = 0;
+    while (reading.next < streets.length && units < most) {
+      const street = streets[reading.next] as StreetFeature;
+      reading.next += 1;
+      if (!meetsAtGrade(street)) continue;
+      const points = resampled(street.line, reading.budget, reading.near);
+      const vertices = street.line.length / 2;
+      units += Math.max(0, points.length / 2 - vertices) + vertices / 16;
+      armsLeaving(
+        points,
+        widthClassOf(street),
+        corridor,
+        profile,
+        origin,
+        seed,
+        land,
+        reading.candidates,
+      );
+    }
+    this.lastUnits = units;
+    if (reading.next < streets.length) return reading.meanwhile;
+    // Whole. A junction that is one handed on meanwhile is that object still.
+    const { meanwhile } = reading;
+    const junctions = grouped(reading.candidates, 'mapped').map(
+      (junction) => meanwhile.find((known) => sameJunction(known, junction)) ?? junction,
+    );
+    this.#whole = { corridor, profile, land, junctions, rideOrigin: at.rideOrigin };
+    this.#reading = undefined;
+    junctionsFound.set(corridor, { profile, land, junctions });
+    return junctions;
+  }
+}
+
+/**
+ * The junctions of `whole` as they stand on `profile`: each moved by how far
+ * the view's start moved on the ride, and none where the two views are not
+ * the same road ahead of the rider. @see JunctionScan
+ */
+function carriedOnto(
+  whole: {
+    readonly profile: RouteProfile;
+    readonly junctions: readonly Junction[];
+    readonly rideOrigin: number;
+  },
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  at: JunctionScanAt,
+): readonly Junction[] {
+  const shift = whole.rideOrigin - at.rideOrigin;
+  const ahead = at.riderMetres + SAME_ROAD_AHEAD_METRES;
+  const total: number = profile.totalDistance;
+  const before: number = whole.profile.totalDistance;
+  if (!(ahead >= 0 && ahead <= total && ahead - shift >= 0 && ahead - shift <= before)) return [];
+  const here = drawnRoadFrame(profile, origin, ahead);
+  const there = drawnRoadFrame(whole.profile, origin, ahead - shift);
+  if (here === undefined || there === undefined) return [];
+  if (Math.hypot(here.x - there.x, here.z - there.z) > 1) return [];
+  const carried: Junction[] = [];
+  for (const junction of whole.junctions) {
+    const along = junction.along + shift;
+    if (along < 0 || along > total) continue;
+    carried.push(shift === 0 ? junction : { ...junction, along });
+  }
+  return carried;
 }
 
 /**

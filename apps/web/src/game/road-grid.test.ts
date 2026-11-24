@@ -18,6 +18,7 @@ import {
   nearestOnRoadSegments,
   nearestOnWholeRoad,
   otherRoadWithin,
+  roadNeighbourhood,
   roadSegmentsNear,
   squaredToSegment,
   type BesideTheRoad,
@@ -252,5 +253,67 @@ describe('the whole road from its tree of boxes — #1696', () => {
     // 994 m is exactly 6 m from 1 000 m: not strictly within, so not its own.
     expect(otherRoadWithin(road, x, z, 0.6, 1_000, 6)).toBe(true);
     expect(otherRoadWithin(road, x, z, 0.6, 1_000, 6.5)).toBe(false);
+  });
+});
+
+describe('the land within a reach of the drawn road — #3106', () => {
+  // Two kilometres due north: local `z` is the distance along, `x` the offset.
+  const road = northRoute(2_000, () => 20);
+  const origin = corridorOrigin(road);
+  const at = (along: number, lateral: number): readonly [number, number] => {
+    // Past either end, straight on from it: the road's heading is its normal turned back a quarter.
+    const on = Math.max(0, Math.min(1_990, along));
+    const frame = drawnRoadFrame(road, origin, on);
+    if (frame === undefined) throw new Error('no road there');
+    const past = along - on;
+    return [
+      frame.x + frame.normalX * lateral + frame.normalZ * past,
+      frame.z + frame.normalZ * lateral - frame.normalX * past,
+    ];
+  };
+  /** Whether a 10 m box about the place `lateral` off the road at `along` is near it. */
+  const near = (reach: number, along: number, lateral: number): boolean => {
+    const [x, z] = at(along, lateral);
+    return roadNeighbourhood(road, origin, reach).near(x - 5, x + 5, z - 5, z + 5);
+  };
+
+  it('never rules out land within the reach, either side, along the whole road', () => {
+    for (const reach of [8, 72, 440]) {
+      for (let along = 0; along <= 2_000; along += 37) {
+        for (const lateral of [-reach, -reach / 2, 0, reach / 2, reach]) {
+          expect(near(reach, along, lateral), `${String(reach)} ${String(lateral)}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('rules out land well past the reach, and past either end of the road', () => {
+    // A short reach is read in 64 m cells and a long one in 256 m cells, so
+    // it may answer for land up to a cell and its diagonal past the reach.
+    for (const [reach, clear] of [
+      [8, 8 + 2 * 64 * Math.SQRT2],
+      [72, 72 + 2 * 64 * Math.SQRT2],
+      [440, 440 + 2 * 256 * Math.SQRT2],
+    ] as const) {
+      for (let along = 0; along <= 2_000; along += 100) {
+        expect(near(reach, along, clear + 10), String(reach)).toBe(false);
+        expect(near(reach, along, -clear - 10), String(reach)).toBe(false);
+      }
+      expect(near(reach, -clear - 10, 0), String(reach)).toBe(false);
+      expect(near(reach, 2_000 + clear + 10, 0), String(reach)).toBe(false);
+    }
+  });
+
+  it('reads a box that is not one, or too wide to look up, as near: a caller then reads the segment', () => {
+    const neighbourhood = roadNeighbourhood(road, origin, 8);
+    expect(neighbourhood.near(Number.NaN, 0, 0, 0)).toBe(true);
+    expect(neighbourhood.near(9e5, 9e5 + 8e5, 9e5, 9e5)).toBe(true);
+    // The same far place as a small box is not.
+    expect(neighbourhood.near(9e5, 9e5 + 10, 9e5, 9e5 + 10)).toBe(false);
+  });
+
+  it('is built once a road and reach', () => {
+    expect(roadNeighbourhood(road, origin, 72)).toBe(roadNeighbourhood(road, origin, 72));
+    expect(roadNeighbourhood(road, origin, 72)).not.toBe(roadNeighbourhood(road, origin, 440));
   });
 });

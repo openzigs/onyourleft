@@ -177,13 +177,13 @@ describe('a route drawn with no instance and no engine — #2013', () => {
     expect(route.elevation?.resolution).toBeCloseTo(PIXEL_METRES, 1);
   });
 
-  it('offline: says elevation is unavailable, and the route still saves, flat', async () => {
+  it('offline: says elevation could not be downloaded, and the route still saves, flat', async () => {
     const open = await openSeeded();
     const { heights, source } = await slopeReader();
     source.offline = true;
     const view = await drawn(open, heights);
     expect(view.container.textContent).toContain(
-      'Elevation is unavailable. The terrain archive could not be reached. The route can still be saved, and is saved flat.',
+      "Elevation couldn't be downloaded right now. The route is saved flat; try again later.",
     );
     await save(view);
     expect(view.container.textContent).toContain('Saved “Up the slope” to your routes.');

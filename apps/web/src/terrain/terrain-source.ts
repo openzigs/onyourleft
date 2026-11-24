@@ -25,14 +25,16 @@
  *
  * **Untrusted bytes.** A response that is not the range asked for is refused
  * rather than read (a host that ignores `Range` would otherwise send the whole
- * 19 GB file); a directory is decompressed inside {@link MAX_TILE_BYTES}; and
+ * 14 GB file); a directory is decompressed inside {@link MAX_TILE_BYTES}; and
  * an archive that is not WebP tiles reaching zoom 12, stored uncompressed, is
  * not read at all. A tile's own bytes are checked and decoded by
  * `terrain/decode.ts`.
  *
  * ⚠️ **No failure names a tile, a coordinate or the URL** (ADR 0004 D,
  * ADR 0090 R-2): {@link describeTerrainFailure} is the one place a failure
- * becomes words.
+ * becomes detailed words, a `TerrainError`'s own message for a developer. The
+ * rider is told one of two plain sentences instead (`heights.ts`
+ * §`elevationFailureText`, the owner's ruling of 2026-11-24).
  */
 
 import { HEIGHT_TILE_ZOOM, MAX_TILE_BYTES, type HeightTileId } from '@onyourleft/map-features';

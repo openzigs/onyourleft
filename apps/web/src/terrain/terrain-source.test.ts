@@ -79,6 +79,17 @@ describe('terrainArchiveFrom reads a height tile through PMTiles', () => {
     ).toStrictEqual({ kind: 'wrong-archive' });
   });
 
+  it('reads an archive of zoom 12 only, as the hosted extract is', async () => {
+    const tile = flatHeightTile();
+    const bytes = await buildTerrainArchive([{ tile: FIXTURE_HEIGHT_TILE, bytes: tile }], {
+      minZoom: 12,
+      maxZoom: 12,
+    });
+    expect(
+      sameBytes(await terrainArchiveFrom(countingSource(bytes)).tile(FIXTURE_HEIGHT_TILE), tile),
+    ).toBe(true);
+  });
+
   it('refuses an archive that stops short of zoom 12, and one that starts past it', async () => {
     const tiles = [{ tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() }];
     const shallow = await buildTerrainArchive(tiles, { maxZoom: 11 });

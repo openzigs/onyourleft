@@ -9074,17 +9074,27 @@ html:has(.oyl-open-world__go) {
   color: var(--oyl-color-hud-ink-muted);
 }
 
-/* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT, under *Pause* and *End ride*
-   where a round's throws stand: every way on from the next junction as a
-   ride-time control at #94's 72 px floor (set inline from
+/* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT: every way on from the next
+   junction as a ride-time control at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own
    direction, its name, *Default* and *Chosen* in words, and its key and pad
-   hints; over them its title and how far until the choice is final, and the
-   U-turn beside them. The ways wrap, as the throws do,
-   rather than overflow a landscape phone's narrow actions panel. In the
-   HUD's own ink on the panel's opaque surface: no backing of its own.
-   `junction-prompt.browser.spec.ts` measures its targets on a tablet; no ride
-   shows it until #2896, which measures where it lands on the stage. */
+   hints; over them its title and how far until the choice is final. The ways
+   wrap rather than overflow a narrow screen.
+
+   #3053, the owner's ruling of 2026-11-22: the ways are a POP-UP in the upper
+   middle of the view (`.oyl-game--riding` below places it), no longer under
+   *Pause* and *End ride*, whose panel fades and is clipped with no touch.
+   Nothing here carries `data-oyl-hides`, so no fade reaches it. The U-turn
+   stays with the controls (`.oyl-hud__junction`), and fades with them.
+
+   ⚠️ **"Semi-transparent" is read as no panel of its own, not a see-through
+   one.** The owner asked for a semi-transparent pop-up; a translucent surface
+   over a scene that changes every metre cannot have its contrast checked
+   (`hud-surface.a11y.test.ts`, ADR 0063, #423 makes translucency an ADR).
+   So the pop-up paints nothing between its parts and the road shows through
+   there, while each part a rider reads — the title line, each way, the touch
+   lock's sentence — is on the HUD's opaque surface, which is what #94's
+   contrast is checked against. The owner is asked on #3053's pull request. */
 .oyl-hud__junction {
   display: flex;
   flex-wrap: wrap;
@@ -9093,9 +9103,25 @@ html:has(.oyl-open-world__go) {
   margin-block-start: var(--oyl-space-sm);
 }
 
+.oyl-hud__junction-popup {
+  display: grid;
+  justify-items: center;
+  margin-block: var(--oyl-space-sm);
+  animation: oyl-hud-junction-in var(--oyl-motion-medium) var(--oyl-motion-ease-standard);
+}
+
+/* It appears by growing to its size from a little under it: a movement, not a
+   fade, so it is never see-through while drawn. The reduced-motion and
+   `update: slow` blocks collapse it, so there it appears at once. */
+@keyframes oyl-hud-junction-in {
+  from {
+    transform: scale(0.94);
+  }
+}
+
 .oyl-hud__junction-prompt {
   display: grid;
-  justify-items: start;
+  justify-items: center;
   gap: var(--oyl-space-xs);
 }
 
@@ -9103,7 +9129,27 @@ html:has(.oyl-open-world__go) {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
+  justify-content: center;
   column-gap: var(--oyl-space-sm);
+  background: var(--oyl-color-hud-surface);
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+/* The touch lock's sentence under the ways, on its own surface likewise. */
+.oyl-hud__junction-popup .oyl-hud__junction-note {
+  background: var(--oyl-color-hud-surface);
+  border-radius: var(--oyl-radius);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  text-align: center;
+}
+
+/* A way's focus ring is drawn INSIDE it, on its own opaque surface: outside,
+   between the pop-up's parts, it would land on the road, against no colour
+   the ring's pair (`hudInk` on `hudSurface`) is checked for. */
+.oyl-hud__junction-popup .oyl-hud__control:focus-visible {
+  outline-offset: -6px;
 }
 
 .oyl-hud__junction-note {
@@ -9137,6 +9183,7 @@ html:has(.oyl-open-world__go) {
 .oyl-hud__junction-ways {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--oyl-space-sm);
   margin: 0;
   padding: 0;
@@ -9147,6 +9194,16 @@ html:has(.oyl-open-world__go) {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* #3052: the street a way is, under its turn, as mapped — "onto Third
+   Avenue". Smaller, and allowed to wrap, so a long name widens no way past
+   the pop-up. */
+.oyl-hud__junction-street {
+  max-width: 12rem;
+  font-size: var(--oyl-font-size-sm);
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 /* *Default* and *Chosen* on one line under the way's name, smaller, so a way
@@ -9886,6 +9943,23 @@ html:has(.oyl-open-world__go) {
 
   .oyl-game--riding .oyl-hud > * {
     pointer-events: auto;
+  }
+
+  /* #3053: the junction's pop-up, over the road in the upper middle of the
+     view, its bottom edge just above the screen's middle. The rider is drawn
+     from about 52 % of the height down (`camera.ts` §`riderFrameBox`, at the
+     lean cap, at every overlay viewport the gate measures), so the pop-up
+     never covers the rider or the road just ahead of them, and
+     `junction-prompt.browser.spec.ts` measures that at 1280×800 and 800×1280.
+     On top of the panels, should a narrow screen bring them together. */
+  .oyl-game--riding .oyl-hud > .oyl-hud__junction-popup {
+    position: absolute;
+    inset-inline: 0;
+    bottom: calc(50% + var(--oyl-space-sm));
+    z-index: 1;
+    width: max-content;
+    max-width: calc(100% - 2 * var(--oyl-space-md));
+    margin: 0 auto;
   }
 
   .oyl-game--riding .oyl-hud__fields--primary {

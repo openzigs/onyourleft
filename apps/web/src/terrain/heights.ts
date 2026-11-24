@@ -25,6 +25,7 @@ import {
 } from '@onyourleft/domain';
 
 import type { TerrainConfig } from './config';
+import type { TerrainFailure } from './terrain-source';
 
 /**
  * The distance between height samples along a drawn route: **15 metres**.
@@ -61,18 +62,47 @@ export interface RouteHeights {
   heights(request: TerrainHeightRequest): Promise<HeightProfile>;
 }
 
-/** What follows every reason elevation is unavailable: the route is not lost. */
+/** What follows the map-tiles-off sentence: the route is not lost. */
 export const ROUTE_STILL_SAVES_TEXT = 'The route can still be saved, and is saved flat.';
 
 /** Said when map tiles are off (ADR 0054 D-6.4: one switch for everything the tile host is asked). */
 export const ELEVATION_TILES_OFF_TEXT = `Elevation is unavailable while map tiles are turned off in Settings. ${ROUTE_STILL_SAVES_TEXT}`;
 
-/** Said when the reader itself could not be loaded on this device. */
-export const ELEVATION_NOT_LOADED_TEXT = `Elevation is unavailable: the terrain reader could not be loaded. ${ROUTE_STILL_SAVES_TEXT}`;
+/**
+ * Said when the archive could not be downloaded: offline, an HTTP error, a
+ * host that did not answer with the range, a part over the size limit, or a
+ * file that changed while it was read. The owner's wording of 2026-11-24.
+ */
+export const ELEVATION_NOT_DOWNLOADED_TEXT =
+  "Elevation couldn't be downloaded right now. The route is saved flat; try again later.";
 
-/** A reason elevation is unavailable, as the planner says it. */
-export function elevationUnavailableText(reason: string): string {
-  return `Elevation is unavailable. ${reason} ${ROUTE_STILL_SAVES_TEXT}`;
+/**
+ * Said when this build cannot read the archive: the wrong format, compression
+ * or zoom, or the reader itself failed to load. The owner's wording of
+ * 2026-11-24.
+ */
+export const ELEVATION_NOT_READABLE_TEXT =
+  "This copy of the app can't read the elevation data. The route is saved flat.";
+
+/**
+ * What the rider is told for a failed read. Two plain sentences, by the
+ * owner's ruling of 2026-11-24; the detailed reason stays on the
+ * `TerrainError`'s own message (`terrain-source.ts` §`describeTerrainFailure`),
+ * which names no coordinate, tile or URL, and is not shown.
+ */
+export function elevationFailureText(failure: TerrainFailure): string {
+  switch (failure.kind) {
+    case 'compression':
+    case 'wrong-archive':
+      return ELEVATION_NOT_READABLE_TEXT;
+    case 'aborted':
+    case 'network':
+    case 'http':
+    case 'not-a-range':
+    case 'changed':
+    case 'too-large':
+      return ELEVATION_NOT_DOWNLOADED_TEXT;
+  }
 }
 
 /**
@@ -104,7 +134,7 @@ export function lazyRouteHeights(
       try {
         reader = await loaded;
       } catch {
-        throw new RoutingError('unavailable', ELEVATION_NOT_LOADED_TEXT);
+        throw new RoutingError('unavailable', ELEVATION_NOT_READABLE_TEXT);
       }
       return reader.heights(request);
     },
