@@ -63,6 +63,16 @@
  *   it all off the road straight on and stood it along the street turned
  *   into: `road.ts` §`waysOut` places it along every way out before the
  *   press, and `ways-out.test.ts` holds that on its own;
+ * - **nor the ground past the junction** (#3094): at every change of view
+ *   the ground from {@link SCENERY_NEAR_METRES} to {@link SCENERY_FAR_METRES}
+ *   stays where it was, to {@link FAR_GROUND_MOST_METRES} at any place, and
+ *   what stands on it with it. A view's ground was its own road's
+ *   (`landform.ts` §`terrainHeightAt`), so a press redrew the hills past the
+ *   junction from the street turned into: half the ground from 60 m to 300 m
+ *   moved by more than 25 cm, by up to 29 m, and the scenery standing on it
+ *   by up to 18 m. An open-world view's relief is the place's now, levelled
+ *   beside every street the ride holds (`street-levels.ts`), and
+ *   `ground-of-place.test.ts` holds that on its own;
  * - **the junction is drawn before the rider reaches it, on every way out**,
  *   before the press and after it: the road or a side street runs out along
  *   each way the ride did not come in by.
@@ -78,15 +88,10 @@
  *   and the junction's way out the route will come back along is drawn as
  *   neither the road nor a side street until the road reaches it. The grid
  *   closes every street on another for that reason. That is #3091.
- * - **The ground past the junction.** A view's ground is built from its own
- *   road (`landform.ts` §`terrainHeightAt`), so a press redraws the hills
- *   past the junction from the street turned into: measured on these three
- *   presses, a third to a half of the ground from 110 m to 300 m ahead moves
- *   by more than 25 cm, and by up to 32 m. What stands there is held to its
- *   place in plan, and moves up or down with the ground under it. The
- *   ground within {@link SCENERY_NEAR_METRES} is held; the nearest of the
- *   redrawn ground reaches it on the third press
- *   ({@link GROUND_MOVED_MOST}). That is #3094.
+ * - **The ground exactly.** Two views' meshes sample the one surface at
+ *   their own vertices and are flat between them, so where their triangles
+ *   differ the ground drawn differs by up to {@link FAR_GROUND_MOST_METRES}
+ *   (#3094's residual, all of it past 200 m on these presses).
  * - **What is not scenery items.** Village streets and pavements,
  *   billboards, people and the other cyclists are placed along the road
  *   alone. None stands near these three junctions. That is #3095.
@@ -731,10 +736,10 @@ const GROUND_MOVED_METRES = 0.1;
  * The most of the ground near the rider that may move by more than
  * {@link GROUND_MOVED_METRES} from one frame to the next, as a share of the
  * places compared: **0.02**. Measured on 2026-11-23: 0.001, 0.010 and 0.011
- * at the worst pair of each ride. ⚠️ The worst of all is the third press:
- * 9 of 797 places, 58 m and 59 m from the rider, drawn 1.5 m lower. That is
- * the nearest of the ground past the junction, which a choice still redraws
- * (this file's header, "What this file does not hold").
+ * at the worst pair of each ride. The worst of all was the third press:
+ * 9 of 797 places, 58 m and 59 m from the rider, drawn 1.5 m lower, the
+ * nearest of the ground past the junction, which a choice redrew until
+ * #3094; none since.
  */
 const GROUND_MOVED_MOST = 0.02;
 
@@ -927,6 +932,39 @@ const SCENERY_FAR_METRES = 300;
  */
 const SCENERY_ADDED_MOST = 0.25;
 
+/**
+ * How far the ground at a place from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES} may be drawn higher or lower across a change of
+ * view and still count as unmoved, metres: **0.25** — #3094's own measure,
+ * the verge's drop (`landform.ts` §`VERGE_DROP_METRES`), which the edge of a
+ * street that stops being the road takes.
+ */
+const FAR_GROUND_MOVED_METRES = 0.25;
+
+/**
+ * The most of the ground from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES} that a change of view may move by more than
+ * {@link FAR_GROUND_MOVED_METRES}, as a share of the places compared:
+ * **0.2** — #3094. Measured on 2026-11-23 on the three presses: 0.47, 0.49
+ * and 0.56 with each view's ground its own road's; 0.085, 0.106 and 0.068
+ * with it the place's (`landform.ts` §`placeFields`), levelled beside every
+ * street held (`street-levels.ts`). What is left is two meshes drawing one
+ * surface: each samples it at its own vertices and is flat between them, and
+ * past 200 m a triangle is 65 to 120 m across.
+ */
+const FAR_GROUND_MOVED_MOST = 0.2;
+
+/**
+ * The most the ground at any place from {@link SCENERY_NEAR_METRES} to
+ * {@link SCENERY_FAR_METRES}, or an item standing there, may move on a change
+ * of view, metres: **4** — #3094. Measured on 2026-11-23 on the three
+ * presses: the ground 17, 27 and 29 m and the scenery 7.4, 14 and 18 m with
+ * each view's ground its own road's; the ground 2.0, 2.6 and 1.5 m and the
+ * scenery 0.5, 2.3 and 1.2 m with it the place's, all of it more than 200 m
+ * from the rider, where the fog has taken half of what stands there.
+ */
+const FAR_GROUND_MOST_METRES = 4;
+
 /** What changed in the scene round the rider between two frames drawn one after the other. */
 interface SceneChange {
   /** How many scenery items stood within {@link SCENERY_NEAR_METRES} of the rider, and the share still there, in place. */
@@ -948,6 +986,20 @@ interface SceneChange {
    */
   readonly groundKept: number;
   readonly groundMoved: number;
+  /**
+   * #3094, compared only where asked (`far`): of the places the frame drew
+   * ground at from {@link SCENERY_NEAR_METRES} to {@link SCENERY_FAR_METRES},
+   * the share whose ground the next frame draws more than
+   * {@link FAR_GROUND_MOVED_METRES} higher or lower, and the most any of
+   * them moved, metres.
+   */
+  readonly farGroundMoved: number;
+  readonly farGroundMost: number;
+  /**
+   * #3094: the most an item from there to {@link SCENERY_FAR_METRES} that
+   * is still there in plan was stood higher or lower, metres.
+   */
+  readonly farHeightMost: number;
 }
 
 /**
@@ -957,10 +1009,15 @@ interface SceneChange {
  * each frame's own mesh draws at that place (`landform.ts`
  * §`standingOnGround`, the highest triangle there, which is the one seen).
  * Two frames' meshes share no vertex, since each is built round its own
- * rider, and at a corner one mesh lies over itself. `ground` is whether to
- * compare it at all: it walks both meshes for every vertex.
+ * rider, and at a corner one mesh lies over itself. `ground` is how far to
+ * compare it: not at all, `near` the rider, or `far` as well, out to
+ * {@link SCENERY_FAR_METRES} (#3094); it walks both meshes for every vertex.
  */
-function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): SceneChange {
+function sceneChange(
+  before: GridFrame,
+  after: GridFrame,
+  ground: 'none' | 'near' | 'far',
+): SceneChange {
   const rider = before.frame.markers.find((marker) => marker.kind === 'rider');
   if (rider === undefined) throw new Error('no rider drawn');
   const from = (x: number, z: number): number => Math.hypot(x - rider.x, z - rider.z);
@@ -975,26 +1032,36 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
   const kept = scenery.filter((item) =>
     after.frame.scatter.some((other) => inPlan(item, other) && Math.abs(other.y - item.y) < 0.01),
   ).length;
-  // Past the junction the ground itself is another view's after a choice
-  // (this file's header), so there an item is held to its place in plan.
+  // Past the junction an item is held to its place in plan, and how far it
+  // was stood up or down there is read beside it (#3094).
   const farBefore = before.frame.scatter.filter((item) => far(item.x, item.z));
   const farAfter = after.frame.scatter.filter((item) => far(item.x, item.z));
-  const farKept = farBefore.filter((item) =>
-    after.frame.scatter.some((other) => inPlan(item, other)),
-  ).length;
+  let farKept = 0;
+  let farHeightMost = 0;
+  for (const item of farBefore) {
+    const other = after.frame.scatter.find((each) => inPlan(item, each));
+    if (other === undefined) continue;
+    farKept += 1;
+    farHeightMost = Math.max(farHeightMost, Math.abs(other.y - item.y));
+  }
   const farAdded = farAfter.filter(
     (item) => !before.frame.scatter.some((other) => inPlan(item, other)),
   ).length;
   let vertices = 0;
   let groundKept = 0;
   let groundMoved = 0;
-  if (ground) {
+  let farVertices = 0;
+  let farGroundMoved = 0;
+  let farGroundMost = 0;
+  if (ground !== 'none') {
     const last = before.frame.terrain.mesh.vertices;
-    const drawn: { x: number; y: number; z: number }[] = [];
+    const drawn: { x: number; y: number; z: number; far: boolean }[] = [];
     for (let at = 0; at + 2 < last.length; at += 3) {
       const x = last[at] as number;
       const z = last[at + 2] as number;
-      if (near(x, z)) drawn.push({ x, y: last[at + 1] as number, z });
+      const y = last[at + 1] as number;
+      if (near(x, z)) drawn.push({ x, y, z, far: false });
+      else if (ground === 'far' && far(x, z)) drawn.push({ x, y, z, far: true });
     }
     const place = (point: { x: number; z: number }): string =>
       `${String(point.x)},${String(point.z)}`;
@@ -1002,9 +1069,18 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
       new Map(standingOnGround(drawn, mesh).map((point) => [place(point), point.y]));
     const was = tops(before.frame.terrain.mesh);
     const now = tops(after.frame.terrain.mesh);
-    vertices = was.size;
+    const farPlaces = new Set(drawn.filter((point) => point.far).map(place));
     for (const [at, y] of was) {
       const next = now.get(at);
+      if (farPlaces.has(at)) {
+        if (next === undefined) continue;
+        farVertices += 1;
+        const moved = Math.abs(next - y);
+        farGroundMost = Math.max(farGroundMost, moved);
+        if (moved > FAR_GROUND_MOVED_METRES) farGroundMoved += 1;
+        continue;
+      }
+      vertices += 1;
       if (next === undefined) continue;
       groundKept += 1;
       if (Math.abs(next - y) > GROUND_MOVED_METRES) groundMoved += 1;
@@ -1018,6 +1094,9 @@ function sceneChange(before: GridFrame, after: GridFrame, ground: boolean): Scen
     farAdded: farAfter.length === 0 ? 0 : farAdded / farAfter.length,
     groundKept: vertices === 0 ? 1 : groundKept / vertices,
     groundMoved: vertices === 0 ? 0 : groundMoved / vertices,
+    farGroundMoved: farVertices === 0 ? 0 : farGroundMoved / farVertices,
+    farGroundMost,
+    farHeightMost,
   };
 }
 
@@ -1106,8 +1185,13 @@ function expectTheRuling(junction: RiddenJunction): void {
     pairs += 1;
     const viewChanged = before.input.profile !== after.input.profile;
     if (viewChanged) viewChanges += 1;
-    // The ground at every change of view, and on every tenth pair between.
-    const change = sceneChange(before, after, viewChanged || pairs % 10 === 0);
+    // The ground at every change of view, out to the far places then, and
+    // near the rider on every tenth pair between.
+    const change = sceneChange(
+      before,
+      after,
+      viewChanged ? 'far' : pairs % 10 === 0 ? 'near' : 'none',
+    );
     const facts = `at ${String(after.input.state.ride.distance)} m: ${JSON.stringify(change)}`;
     if (change.scenery >= SCENERY_COUNTED) {
       expect(change.sceneryKept, facts).toBeGreaterThanOrEqual(SCENERY_KEPT_LEAST);
@@ -1121,6 +1205,10 @@ function expectTheRuling(junction: RiddenJunction): void {
       expect(change.far, facts).toBeGreaterThanOrEqual(SCENERY_COUNTED);
       expect(change.farKept, facts).toBeGreaterThanOrEqual(SCENERY_KEPT_LEAST);
       expect(change.farAdded, facts).toBeLessThanOrEqual(SCENERY_ADDED_MOST);
+      // #3094: and the ground there stays where it was, and so what stands on it.
+      expect(change.farGroundMoved, facts).toBeLessThanOrEqual(FAR_GROUND_MOVED_MOST);
+      expect(change.farGroundMost, facts).toBeLessThanOrEqual(FAR_GROUND_MOST_METRES);
+      expect(change.farHeightMost, facts).toBeLessThanOrEqual(FAR_GROUND_MOST_METRES);
     }
   }
   // Every frame of the ride was handed the ways out the route does not take.

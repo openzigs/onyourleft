@@ -93,6 +93,7 @@ import {
   type TileId,
 } from '@onyourleft/map-features';
 
+import { sceneryAnchor } from '../scenery-anchor';
 import { createAreaReader, type HeldBlock } from '../world-data/area';
 import type { CorridorArchive, WorldCorridor } from '../world-data/corridor';
 import {
@@ -489,7 +490,14 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       return;
     }
     buildingsAsked = { view, tiles, x, z };
-    planner.planBuildings({ profile: view, x, z });
+    // #3094: and what the road keyed the view on, which a worker's copy lacks.
+    const anchor = sceneryAnchor(view);
+    planner.planBuildings({
+      profile: view,
+      x,
+      z,
+      ...(anchor === undefined ? {} : { scenery: { seed: anchor.seed, origin: anchor.origin } }),
+    });
   }
   /** What the buildings were last planned for. @see planAhead */
   let buildingsAsked:

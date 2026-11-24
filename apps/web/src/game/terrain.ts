@@ -554,6 +554,28 @@ export function localGroundPosition(
 }
 
 /**
+ * `(x, z)` in `from`'s local metres, written into `out` in `to`'s — #3094:
+ * {@link localGroundPosition}'s inverse for `from`, then it for `to`. Exact,
+ * so a place read in two frames is one place.
+ */
+export function reframedGround(
+  from: CorridorOrigin,
+  to: CorridorOrigin,
+  x: number,
+  z: number,
+  out: { x: number; z: number },
+): void {
+  const latitude = from.latitude + z / METRES_PER_DEGREE_LATITUDE;
+  const longitude =
+    from.longitude - x / (METRES_PER_DEGREE_LATITUDE * Math.cos((from.latitude * Math.PI) / 180));
+  out.x =
+    (to.longitude - longitude) *
+    METRES_PER_DEGREE_LATITUDE *
+    Math.cos((to.latitude * Math.PI) / 180);
+  out.z = (latitude - to.latitude) * METRES_PER_DEGREE_LATITUDE;
+}
+
+/**
  * The frames profiles are drawn in where that is not their first point —
  * #2902. @see drawProfileIn
  */

@@ -39,10 +39,17 @@
  * `tile-planner.test.ts` holds it.
  */
 
-import { TILES_AT_Z15, type CorridorFrame, type TileId } from '@onyourleft/map-features';
+import {
+  TILES_AT_Z15,
+  type CorridorFrame,
+  type StreetFeature,
+  type TileId,
+} from '@onyourleft/map-features';
 
 import type { FootprintPlan } from '../footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from '../mapped-buildings';
+import { StreetLevels } from '../street-levels';
+import { openWorldStreetCorridor } from './street-corridor';
 import {
   footprintPlanBuffers,
   planBuildingsNear,
@@ -99,6 +106,17 @@ export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | 
   const blocks = new Map<string, TileBlockFeatures>();
   /** #2902: what each tile planned owns, kept here: the plan's own buffers leave with it. */
   const owned = new Map<string, OwnedFootprints>();
+  /**
+   * #3094: the held blocks' streets, found again only once a block is held or
+   * dropped, and how far a place is from them, kept across requests.
+   */
+  let streets: readonly StreetFeature[] | undefined;
+  const levels = new StreetLevels(() => {
+    if (streets === undefined && frame !== undefined) {
+      streets = openWorldStreetCorridor(frame, blocks.values()).streets;
+    }
+    return streets;
+  });
   return {
     handle: (data) => {
       if (typeof data !== 'object' || data === null) return undefined;
@@ -106,12 +124,15 @@ export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | 
       switch (request.kind) {
         case 'frame':
           frame = request.frame;
+          streets = undefined;
           return undefined;
         case 'hold':
           blocks.set(request.block, request.features);
+          streets = undefined;
           return undefined;
         case 'drop':
           blocks.delete(request.block);
+          streets = undefined;
           for (const [key, tile] of owned) if (tile.block === request.block) owned.delete(key);
           return undefined;
         case 'buildings': {
@@ -125,6 +146,7 @@ export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | 
               owned.values(),
               request.request,
               request.detail,
+              levels,
             );
             // A copy, so what is transferred is the reply's alone and never a
             // buffer a planner's cache here still holds.

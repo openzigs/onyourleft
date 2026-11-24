@@ -85,6 +85,15 @@
  * junctions' ways, so the street a choice makes the road must already have
  * its own, or they would all appear on the frame of the press.
  *
+ * ## The ground past a junction (#3094)
+ *
+ * A view's ground was its own road's, so a choice redrew the hills along every
+ * way out. Every view of the ride is anchored with the same
+ * `street-levels.ts` §`StreetLevels` over the streets the ride holds
+ * ({@link OpenWorldRoadHooks.streets}), and `landform.ts` reads an anchored
+ * view's relief at the place and levels it beside every one of them: the same
+ * ground whichever street is the road.
+ *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
@@ -104,6 +113,7 @@ import { routeSeed } from '../scatter';
 import { anchorScenery } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
+import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
 import {
   VIEW_AHEAD_METRES,
@@ -268,6 +278,13 @@ export class OpenWorldRoad {
   readonly #hooks: OpenWorldRoadHooks;
   /** The ride's scenery seed, from its first view (#3055). */
   readonly #seed: number;
+  /**
+   * #3094: the streets the ride holds, which every view's ground is levelled
+   * beside — one for the ride, so every view reads the same ground.
+   */
+  readonly #levels: StreetLevels;
+  /** #3094: the frame the ride's places are read in: the session's, or the first view's. */
+  readonly #placeFrame: CorridorOrigin;
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
@@ -281,8 +298,10 @@ export class OpenWorldRoad {
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
+    this.#levels = new StreetLevels(() => hooks.streets?.()?.streets);
     const profile = this.#framed(route.view());
     this.#seed = routeSeed(profile);
+    this.#placeFrame = corridorOrigin(profile);
     this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
 
@@ -401,7 +420,7 @@ export class OpenWorldRoad {
             const taking = route.taking(junction.distance, way.edge.id);
             if (taking === undefined) continue;
             const profile = this.#framed(taking.view());
-            anchorScenery(profile, { seed: this.#seed, origin: taking.origin });
+            this.#keyed(profile, taking.origin);
             out = {
               profile,
               fromMetres: junction.distance - taking.origin,
@@ -471,6 +490,9 @@ export class OpenWorldRoad {
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);
       if (at >= 0 && at <= route.end - route.origin) this.#hooks.at?.(positionAt(route.view(), at));
+      // #3094: the view keyed before the session plans buildings against it,
+      // so they are planned on the ground the scene will draw under them.
+      this.#keyed(this.#framed(route.view()), route.origin);
       this.#hooks.ahead?.(route, rider);
     }
     const profile = route.view();
@@ -494,8 +516,18 @@ export class OpenWorldRoad {
 
   /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
   #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
-    anchorScenery(view.profile, { seed: this.#seed, origin: view.origin });
+    this.#keyed(view.profile, view.origin);
     return view;
+  }
+
+  /** Keys `profile`, at ride distance `origin`, on the ride (#3055) and its places (#3094). */
+  #keyed(profile: RouteProfile, origin: number): void {
+    anchorScenery(profile, {
+      seed: this.#seed,
+      origin,
+      levels: this.#levels,
+      frame: this.#placeFrame,
+    });
   }
 
   /**
