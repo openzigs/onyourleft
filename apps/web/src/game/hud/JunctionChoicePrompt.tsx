@@ -106,6 +106,7 @@ import {
   lockLine,
   TURN_NOTICE_WORDS,
   U_TURN_NAME,
+  wayStreetLine,
   wayWord,
 } from './junction-text';
 
@@ -338,6 +339,7 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
             if (shown.locked && !isChosen) return null;
             const own = presses.get(id) ?? [];
             const isDefault = id === shown.defaultWay;
+            const street = wayStreetLine(way);
             // A way with a press of its own takes that press; with more than
             // three ways on, one with none is a step toward it; the chosen way
             // with none is already where the ride goes.
@@ -360,6 +362,12 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
                 >
                   <WayArrow turnDegrees={way.turnDegrees} />
                   <span className="oyl-hud__junction-word">{wayWord(way.turnDegrees)}</span>
+                  {/* #3052: the street, as mapped, under its turn; none where the map names none. */}
+                  {street === undefined ? null : (
+                    // A leading space, as the marks have, so the accessible name reads
+                    // "Right onto Third Avenue" and never "Rightonto".
+                    <span className="oyl-hud__junction-street">{` ${street}`}</span>
+                  )}
                   {isDefault || isChosen ? (
                     <span className="oyl-hud__junction-marks">
                       {isDefault ? ` ${JUNCTION_DEFAULT_WORD}` : null}

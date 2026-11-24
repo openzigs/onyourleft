@@ -443,6 +443,11 @@ export interface CorridorReadOptions {
   readonly log?: ((line: string) => void) | undefined;
   /** Checked before each request: `true` abandons the read (ADR 0054 D-2.4, never while recording). */
   readonly mustStop?: (() => boolean) | undefined;
+  /**
+   * #3052, ADR 0096: decode each street's mapped name onto it. The open
+   * world's area reader asks for it; nothing else does (ADR 0054 D-2.2).
+   */
+  readonly streetNames?: boolean | undefined;
   /** Test seams for the two timeouts. */
   readonly tileTimeoutMs?: number | undefined;
   readonly readTimeoutMs?: number | undefined;
@@ -527,7 +532,9 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
           return;
         }
         await yieldToIdle();
-        const decoded = decodeTile(bytes, tile, plan.frame);
+        const decoded = decodeTile(bytes, tile, plan.frame, undefined, {
+          streetNames: options.streetNames === true,
+        });
         if ('reason' in decoded) {
           states.set(key(tile), 'refused');
           log(describeCorridorFailure({ kind: 'refusal', refusal: decoded }));

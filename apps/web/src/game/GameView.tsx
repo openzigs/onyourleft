@@ -4578,6 +4578,8 @@ function GameScreen({
                 // #2903: and its streets, drawn to the fog as road, with a
                 // stub at each junction (`open-world/street-corridor.ts`).
                 worldCorridor: road.follower.streets(),
+                // #3052: and where each named street's name is painted on it.
+                streetNames: road.follower.streetNames(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
                 // #3051: and the ways out the route does not take, so the
                 // scenery stands along each before a choice and after it.

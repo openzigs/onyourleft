@@ -90,25 +90,57 @@ export const GRID_ROWS: readonly number[] = [
 ];
 
 /**
+ * #3052: each street of {@link GRID_ROWS} and {@link GRID_COLUMNS}' name, in
+ * their order, as a map would carry it. **The column at 0 has none**, and
+ * neither has the row at 3148: a street the map does not name.
+ */
+export const GRID_ROW_NAMES: readonly (string | undefined)[] = [
+  'North Ring Road',
+  'First Avenue',
+  'Main Street',
+  undefined,
+  'Third Avenue',
+  'Fourth Avenue',
+  'Fifth Avenue',
+  'Sixth Avenue',
+  'South Ring Road',
+];
+export const GRID_COLUMN_NAMES: readonly (string | undefined)[] = [
+  'West Ring Road',
+  'Oak Street',
+  'Elm Street',
+  undefined,
+  'Pine Street',
+  'Cedar Street',
+  'East Ring Road',
+];
+
+/**
  * #3051: a town of crossroads — every street of {@link GRID_ROWS} and
  * {@link GRID_COLUMNS} running the block's width, so a ride from the start
  * pin meets a four-way junction every 230–260 m and can turn left and right
  * at three in a row without reaching a dead end. Residential streets, with
- * Main street a secondary road.
+ * Main street a secondary road. #3052: named by {@link GRID_ROW_NAMES} and
+ * {@link GRID_COLUMN_NAMES}, two of them not at all.
  */
 export const OPEN_WORLD_GRID_STREETS: readonly GraphFixtureStreet[] = [
-  ...GRID_ROWS.map((row) => ({
+  ...GRID_ROWS.map((row, index) => ({
     tags: {
       kind: row === MAIN_STREET_ROW ? 'major_road' : 'minor_road',
       kind_detail: row === MAIN_STREET_ROW ? 'secondary' : 'residential',
+      ...(GRID_ROW_NAMES[index] === undefined ? {} : { name: GRID_ROW_NAMES[index] }),
     },
     line: [
       [-4000, row],
       [3500, row],
     ] as const,
   })),
-  ...GRID_COLUMNS.map((column) => ({
-    tags: { kind: 'minor_road', kind_detail: 'residential' },
+  ...GRID_COLUMNS.map((column, index) => ({
+    tags: {
+      kind: 'minor_road',
+      kind_detail: 'residential',
+      ...(GRID_COLUMN_NAMES[index] === undefined ? {} : { name: GRID_COLUMN_NAMES[index] }),
+    },
     line: [
       [column, 300],
       [column, 7900],

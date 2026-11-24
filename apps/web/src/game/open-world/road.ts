@@ -103,6 +103,7 @@ import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
 import { routeSeed } from '../scatter';
 import { anchorScenery } from '../scenery-anchor';
 import type { GameState } from '../simulation';
+import type { StreetNameLabel } from '../street-names';
 import type { WorldCorridor } from '../world-data/corridor';
 import {
   VIEW_AHEAD_METRES,
@@ -113,6 +114,9 @@ import {
   type CorridorOrigin,
 } from '../terrain';
 import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
+
+/** No street names: what a road with no names hook paints. */
+const NO_LABELS: readonly StreetNameLabel[] = [];
 
 /**
  * How little road may be held ahead of the rider before the route is advanced:
@@ -249,6 +253,12 @@ export interface OpenWorldRoadHooks {
    * stubs at each junction; `undefined` until a block is held.
    */
   readonly streets?: (() => WorldCorridor | undefined) | undefined;
+  /**
+   * #3052, ADR 0096: where to paint the held streets' names, in {@link frame}
+   * (`street-names.ts` §`streetNameLabels`, from the street graph); the same
+   * array while the graph is unchanged, and empty while no street is named.
+   */
+  readonly streetNames?: (() => readonly StreetNameLabel[]) | undefined;
 }
 
 /** One open-world ride's road, from its start. See the file's header. */
@@ -290,6 +300,11 @@ export class OpenWorldRoad {
   /** The streets round the rider as a corridor (#2903), or `undefined` while none are held. */
   streets(): WorldCorridor | undefined {
     return this.#hooks.streets?.();
+  }
+
+  /** The held streets' names, where to paint each (#3052), or none. */
+  streetNames(): readonly StreetNameLabel[] {
+    return this.#hooks.streetNames?.() ?? NO_LABELS;
   }
 
   /** @see branchesAhead */

@@ -240,3 +240,12 @@ to merge after #2949. Each answer follows its question.
   revisited with those numbers.
 - **The owner wants roundabouts entered the right way round, or "the third exit"** (D-9 Q4). Then
   #2893 adds a roundabout flag under ADR 0062, and D-5's second point changes.
+
+## Amendments
+
+- **2026-11-23** — **D-2's *"Never read: `name`"* is superseded in part by
+  [ADR 0096](0096-the-open-world-names-its-streets-on-the-road-and-in-the-junction-prompt.md)**
+  ([#3052](https://github.com/openzigs/onyourleft/issues/3052)): the graph's edges carry a street's
+  mapped `name`, read bounded and cleaned only when the area reader asks, for the junction prompt
+  and the painted names. **Status: proposed**, in force only once the owner accepts ADR 0096.
+  `name:*`, `ref`, `network*`, `shield_text*`, `service` and `min_zoom` stay unread.

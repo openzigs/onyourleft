@@ -68,8 +68,14 @@ vi.mock('../scene', async (importOriginal) => {
   };
 });
 
-/** Half a second a frame: the ride is long, and the simulation's fixed step is not the frame. */
-const FRAME_MS = 2_000;
+/**
+ * Four seconds a frame: the ride is long, and the simulation's fixed step is
+ * not the frame. #3096: at two, the first case ran at a test's 5 s on CI.
+ * The step the rider may move in a frame is bounded by the frame's length,
+ * and is still tens of metres against the kilometres between two views'
+ * origins.
+ */
+const FRAME_MS = 4_000;
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;

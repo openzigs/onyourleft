@@ -110,6 +110,7 @@ import {
   type OpenWorldSession,
 } from './ride';
 import { OpenWorldRoad } from './road';
+import { streetNameLabels, type NamedStreetLine, type StreetNameLabel } from '../street-names';
 import type { OpenWorldStart } from './start';
 import { openWorldStreetCorridor } from './street-corridor';
 import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
@@ -316,6 +317,8 @@ class GraphStreets implements RollingStreetGraph {
       to: String(forward ? edge.to : edge.from),
       points,
       roadClass: ROAD_CLASS[edge.kind] ?? 0,
+      // #3052: the mapped name, for the junction prompt (ADR 0096).
+      ...(edge.name === undefined ? {} : { name: edge.name }),
     };
     this.#oriented.set(key, oriented);
     return oriented;
@@ -357,6 +360,7 @@ function startWays(
     line.map(([x, z]) => pointAt(frame, x, z));
   const id = String(edge.id);
   const roadClass = ROAD_CLASS[edge.kind] ?? 0;
+  const named = edge.name === undefined ? {} : { name: edge.name };
   // The way the ride begins carries the street's id, so the way back at the
   // node it reaches is the whole street and is never the way on. The other
   // half has its own id: the way on from the start if the route turns round
@@ -368,6 +372,7 @@ function startWays(
     to: String(forwards ? edge.to : edge.from),
     points: points(forwards ? ahead : behind),
     roadClass,
+    ...named,
   };
   const other: RollingEdge = {
     id: `${id}:behind`,
@@ -375,6 +380,7 @@ function startWays(
     to: String(forwards ? edge.from : edge.to),
     points: points(forwards ? behind : ahead),
     roadClass,
+    ...named,
   };
   return [first, other];
 }
@@ -402,6 +408,19 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   };
   const schedule = options.schedule ?? defaultSchedule;
   const mirror = new StreetMirror();
+  /** #3052: the graph's street names, where to paint each, built again only when the graph changes. */
+  let named: { readonly version: number; readonly labels: readonly StreetNameLabel[] } | undefined;
+  const streetNames = (): readonly StreetNameLabel[] => {
+    if (named?.version !== mirror.version) {
+      const streets: NamedStreetLine[] = [];
+      for (const edge of mirror.edges()) {
+        if (edge.name !== undefined)
+          streets.push({ id: String(edge.id), line: edge.line, name: edge.name });
+      }
+      named = { version: mirror.version, labels: streetNameLabels(streets) };
+    }
+    return named.labels;
+  };
   let builder: GraphBuilder | undefined;
   /** Whether the graph could not be built: the ride rides on what it has. */
   let graphFailed = false;
@@ -580,6 +599,8 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
           buildings: () => planner?.buildings,
           // #2903: every held street, drawn to the fog as road.
           streets: () => streetCorridor,
+          // #3052: and where each named one's name is painted on it.
+          streetNames,
         }),
     };
   })();

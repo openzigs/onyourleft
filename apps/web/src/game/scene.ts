@@ -157,7 +157,8 @@ import {
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
-import { nearbyStreets, nearbyStreetsAt } from './nearby-streets';
+import { nearbyStreets, nearbyStreetsAt, routeGround } from './nearby-streets';
+import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
@@ -300,6 +301,14 @@ export interface SceneInput {
    * road ahead alone, as since #2429.
    */
   readonly mappedBranches?: Float32Array | undefined;
+  /**
+   * #3052, ADR 0096: an open-world ride's street names, where to paint each
+   * (`street-names.ts` §`streetNameLabels`, from the session's street graph),
+   * in the frame's local metres. The scene draws the nearest on their
+   * streets' surfaces ({@link SceneFrame.streetNames}). Absent on every other
+   * ride, which names no street.
+   */
+  readonly streetNames?: readonly StreetNameLabel[] | undefined;
   /**
    * #3051: in an open-world ride, the ways out of the junctions in view that
    * the route does not take (`open-world/road.ts` §`OpenWorldRoad.waysOut`),
@@ -812,6 +821,17 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     billboards,
     sideRoads,
     streets,
+    // #3052: an open-world ride's street names, on their streets' surfaces.
+    ...(input.streetNames === undefined || input.streetNames.length === 0
+      ? {}
+      : {
+          streetNames: streetNamesInView(
+            input.streetNames,
+            (riders[0] as PlacedRider).marker,
+            riderDistance,
+            streetSurfaceAt(input, seed),
+          ),
+        }),
     // #2972: the corridor's mapped footways drawn as surfaces round the camera,
     // off those streets' pavements (#1620), and a zebra where one crosses the road.
     footways:
@@ -1981,6 +2001,19 @@ function drawnRider(input: SceneInput): EasedPlace {
 }
 
 /** A rider on the road, and how far across it they were drawn. */
+/**
+ * The height of a street's surface at `(x, z)`, as the side streets stand
+ * (`nearby-streets.ts` §`routeGround`) — #3052's names are painted on it —
+ * or `undefined` off the drawn ground.
+ */
+function streetSurfaceAt(
+  input: SceneInput,
+  seed: number,
+): (x: number, z: number) => number | undefined {
+  const ground = routeGround(input.profile, input.origin, seed, input.landClass ?? NO_LAND_CLASS);
+  return (x, z) => ground.about(x, z)?.(x, z);
+}
+
 export interface PlacedRider {
   readonly marker: RiderMarker;
   /** Metres across the road from the centreline, positive on the normal's side. */
