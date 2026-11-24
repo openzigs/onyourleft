@@ -791,6 +791,15 @@ export interface GameViewProps {
 
 type Phase = 'choosing' | 'riding' | 'paused';
 
+/**
+ * #3131: an open-world ride's mapped town as the scene's input takes it
+ * (`open-world/road.ts` §`town`), or nothing while no building is planned.
+ */
+function openWorldTownOf(road: OpenWorldRoad): { readonly mappedTown?: MappedTown } {
+  const town = road.town();
+  return town === undefined ? {} : { mappedTown: town };
+}
+
 /** Whether the instance last said AI bots are offered and this rider's consent names its model (#2710). */
 function aiBotsConsented(status: TacticsStatus | undefined): boolean {
   return status?.kind === 'offered' && status.consented;
@@ -4608,6 +4617,9 @@ function GameScreen({
                 landClass: road.follower.water(),
                 // #3052: and where each named street's name is painted on it.
                 streetNames: road.follower.streetNames(),
+                // #3131: and the mapped town round the rider, how built-up each
+                // street is with it, so a city street is dressed as one.
+                ...openWorldTownOf(road.follower),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
                 // #3051: and the ways out the route does not take, so the
                 // scenery stands along each before a choice and after it.

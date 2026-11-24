@@ -119,6 +119,7 @@ import {
 } from '../drawn-line';
 import type { LandClassMask } from '../land-class';
 import type { MappedBuildings } from '../mapped-buildings';
+import type { MappedTown } from '../settlements';
 import { NearbyStreetScan } from '../nearby-streets';
 import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
@@ -140,6 +141,7 @@ import {
 } from '../terrain';
 import { TURNED_OFF_REACH_METRES } from '../way-roads';
 import { easeWeight, easedLine, heldLine, reframing, type HeldLine } from './line-ease';
+import { openWorldTown } from './urban-stretch';
 
 /** No street names: what a road with no names hook paints. */
 const NO_LABELS: readonly StreetNameLabel[] = [];
@@ -564,6 +566,21 @@ export class OpenWorldRoad {
   /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
   buildings(): MappedBuildings | undefined {
     return this.#hooks.buildings?.();
+  }
+
+  /**
+   * #3131: what the scene's lots, field boundaries and streets read of the
+   * mapped town round the rider — its planned footprints and how built-up
+   * each view and way out is (`urban-stretch.ts`) — or `undefined` while no
+   * building is planned or none is in reach, which is today's world. The same object while the plans are.
+   */
+  town(): MappedTown | undefined {
+    const buildings = this.buildings();
+    const streets = this.streets();
+    if (buildings === undefined || buildings.plans.length === 0 || streets === undefined) {
+      return undefined;
+    }
+    return openWorldTown(buildings, streets);
   }
 
   /** The real water round the rider as a land mask (#3105), or `undefined` while none is planned. */
