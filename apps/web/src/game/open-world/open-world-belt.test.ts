@@ -34,7 +34,7 @@ import {
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
 } from '../realistic-budget';
-import { scatterSeed } from '../scatter';
+import { routeSeed } from '../scatter';
 import { sceneFrame } from '../scene';
 import { atStartLine } from '../simulation';
 import { corridorOrigin, localGroundPosition } from '../terrain';
@@ -308,10 +308,11 @@ describe('an open-world ride fills its belt from its tiles — #2902', () => {
     const first = plannedRound(road, rider);
     let changed = false;
     for (let at = 0; at <= rider && !changed; at += 25) changed = road.follow(at) !== undefined;
-    // Control: the view did change, and with it the view's own seed.
+    // Control: the view did change, and with it the seed the view's own route
+    // gives (#3055 anchors the scatter seed on the ride, so read the route's).
     expect(changed).toBe(true);
     expect(road.view.profile).not.toBe(before);
-    expect(scatterSeed(road.view.profile)).not.toBe(scatterSeed(before));
+    expect(routeSeed(road.view.profile)).not.toBe(routeSeed(before));
     const second = plannedRound(road, rider);
     // Its base and eaves are not among them: it stands on the ground the scene
     // draws, which is the view's (`landform.ts` §`terrainHeightAt`), so they
