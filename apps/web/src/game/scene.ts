@@ -2716,8 +2716,12 @@ function markerAt(
     const on = drawnLineAt(line, clampedTo(corridor, atDistance));
     const aside = across.metres - lineOffsetAt(line, atDistance);
     const facing = turnedBy(on, facingTurn(Math.atan(across.rate - lineSlopeAt(line, atDistance))));
-    const x = on.x - on.headingZ * aside;
-    const z = on.z + on.headingX * aside;
+    // #3061's review: moved with the road where the road was moved, so a bot
+    // already round a turnaround is drawn on the road laid along the rider's
+    // pass, not on its own pass's place beside it.
+    const shift = movedBy(corridor, atDistance);
+    const x = on.x - on.headingZ * aside + shift.x;
+    const z = on.z + on.headingX * aside + shift.z;
     return {
       kind,
       x,
@@ -2928,7 +2932,28 @@ interface CorridorPlacement {
  * {@link markerAt} promises and what keeps a bot far up the road on the road.
  */
 function placeOnCorridor(corridor: RoadCorridor, atDistance: number): CorridorPlacement {
-  const centre = corridor.centre;
+  return placeAlong(corridor.centre, atDistance);
+}
+
+/**
+ * How far the road at a distance was moved in plan from its own place, metres
+ * — #3061's review: none unless {@link RoadCorridor.unmoved} is given, where
+ * `terrain.ts` §`towardTheRidersPass` laid the far pass along the rider's.
+ */
+function movedBy(
+  corridor: RoadCorridor,
+  atDistance: number,
+): { readonly x: number; readonly z: number } {
+  if (corridor.unmoved === undefined) return NOT_MOVED;
+  const drawn = placeAlong(corridor.centre, atDistance);
+  const own = placeAlong(corridor.unmoved, atDistance);
+  return { x: drawn.x - own.x, z: drawn.z - own.z };
+}
+
+const NOT_MOVED = { x: 0, z: 0 } as const;
+
+/** {@link placeOnCorridor} on a list of corridor points. */
+function placeAlong(centre: readonly CorridorPoint[], atDistance: number): CorridorPlacement {
   const last = centre.length - 1;
   if (last <= 0) {
     // A one-point corridor has nothing to interpolate along. `cameraPose`'s own
