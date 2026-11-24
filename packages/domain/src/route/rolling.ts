@@ -50,6 +50,40 @@
  * path walks them at 1 % a second (D-6.4), which is the app's job, not this
  * module's.
  *
+ * ## Real heights (#2899, ADR 0087 D-3, D-4, D-7)
+ *
+ * A route may be given a {@link RollingHeights}: the ground's height at a
+ * place, read from height tiles the rider did not choose. Each sample then
+ * takes its height from it, at the sample's own place on the 10 m grid, and an
+ * edge's own `elevation`s are not read. Three things follow, and none applies
+ * to a route with no such source:
+ *
+ * 1. **A height may be unknown.** Where the source has none (no tile held yet,
+ *    outside the archive, a tile that was refused) the sample is no-data. It
+ *    holds the height before it, so the road is drawn level there, and **a
+ *    grade whose median or slope window holds any no-data sample is itself
+ *    unavailable** (ADR 0087's amendment of 2026-11-20): its grade reads 0 %
+ *    and {@link RollingRoute.gradeKnownAt} says so, and the app walks the
+ *    grade it sends there to 0 % at 1 % a second (D-7).
+ * 2. **Two neighbouring samples more than {@link ROLLING_MOST_STEP_METRES}
+ *    apart are both no-data** (D-3's last row): the ±40 % a trainer is ever
+ *    sent. A hostile tile whose heights all sit inside the valid range could
+ *    otherwise take the grade to the clamp from one second to the next.
+ * 3. **A bridge or a tunnel is level between its ends** (D-4.3). A run of
+ *    {@link RollingEdge.span} streets takes the straight line between the
+ *    ground where it starts and the ground where it ends, never the valley
+ *    under it. Until the road past the run is known, its samples are no-data.
+ *    ⚠️ **Only an end of the bridge closes a run**: where a street that is not
+ *    a span meets it. The place a ride starts on a bridge, and the place the
+ *    route turns round on one (a U-turn, a dead end, the edge of the map held),
+ *    are over the valley, so the deck up to them stays no-data: level, and
+ *    0 % (D-7). The way back from a turn takes the heights the way out took,
+ *    sample for sample, and no-data where the way out had none.
+ *
+ * {@link RollingRoute.refill} asks again for every sample that had no height,
+ * for a tile that arrived late. That changes heights the rider may be on, so
+ * it is one of the changes the app walks at 1 % a second (D-6.4).
+ *
  * ## What it knows of the street graph
  *
  * Only {@link RollingStreetGraph}: the edges that leave a node. The graph is
@@ -79,6 +113,14 @@ import {
   type RouteProfile,
 } from './profile';
 
+/**
+ * The steepest grade a trainer is ever sent, in percent: **40**. The same
+ * number as `trainer/simulation.ts` §`MAX_SIMULATED_GRADE_PERCENT`, written
+ * again here because that module imports this directory;
+ * `rolling.heights.test.ts` holds the two equal.
+ */
+const MOST_GRADE_PERCENT = 40;
+
 /** The spacing, exactly: `routeProfile`'s target, never stretched (ADR 0087 D-4.1). */
 export const ROLLING_RESOLUTION_METRES = PROFILE_RESOLUTION_METRES;
 
@@ -93,6 +135,27 @@ export const ROLLING_DESPIKE_SAMPLES =
 /** The slope's window, in samples: **11**, as {@link ROLLING_DESPIKE_SAMPLES} is 5. */
 export const ROLLING_SLOPE_SAMPLES =
   2 * Math.round(GRADIENT_WINDOW_METRES / ROLLING_RESOLUTION_METRES / 2) + 1;
+
+/**
+ * The most two neighbouring samples of a height source may differ by:
+ * **4 m**, the ±40 % grade a trainer is ever sent over one 10 m sample
+ * (ADR 0087 D-3's last row). A bigger step makes both samples no-data.
+ */
+export const ROLLING_MOST_STEP_METRES = (MOST_GRADE_PERCENT / 100) * ROLLING_RESOLUTION_METRES;
+
+/**
+ * The ground's height at a place, in metres, or `undefined` where it is not
+ * known: no height tile is held there yet, the place is outside the archive,
+ * or its tile was refused. Read from untrusted tiles, so the route holds what
+ * it answers to {@link ROLLING_MOST_STEP_METRES}.
+ */
+export type RollingHeights = (position: GeographicPosition) => number | undefined;
+
+/** What a {@link RollingRoute} may be given beside its graph and its start. */
+export interface RollingRouteOptions {
+  /** Where the road's heights come from. Absent: each edge's own `elevation`s. */
+  readonly heights?: RollingHeights | undefined;
+}
 
 /**
  * A junction's choice is final when the rider is this close to it: **100 m**
@@ -157,6 +220,13 @@ export interface RollingEdge {
   readonly points: readonly RollingPoint[];
   /** Higher is the bigger road. Breaks a tie in ADR 0088 D-1.4's default. */
   readonly roadClass: number;
+  /**
+   * That the street is on a bridge or in a tunnel (the map's `is_bridge` and
+   * `is_tunnel`). With a {@link RollingHeights}, its height is the straight
+   * line between the ground at the two ends of the run of such streets it is
+   * part of (ADR 0087 D-4.3).
+   */
+  readonly span?: boolean | undefined;
   /**
    * #3052, ADR 0096: the street's mapped name, as the map has it, for the
    * junction prompt to name the way by. Absent where the street has none:
@@ -258,6 +328,7 @@ function reversed(edge: RollingEdge): RollingEdge {
     to: edge.from,
     points: [...edge.points].reverse(),
     roadClass: edge.roadClass,
+    ...(edge.span === true ? { span: true } : {}),
     ...(edge.name === undefined ? {} : { name: edge.name }),
   };
 }
@@ -354,6 +425,22 @@ const SLOPE_HALF = (ROLLING_SLOPE_SAMPLES - 1) / 2;
 // Σ t² over t = -half..half, as `routeProfile`'s `slopes` takes it.
 const SLOPE_SQUARES = (SLOPE_HALF * (SLOPE_HALF + 1) * (2 * SLOPE_HALF + 1)) / 3;
 
+/** How many samples either side of a grade's own its height samples lie: 7, 70 m. */
+const GRADE_REACH_SAMPLES = DESPIKE_HALF + SLOPE_HALF;
+
+/** How far from a grid sample a distance may be and still be that sample: rounding, not road. */
+const GRID_SLACK_METRES = 1e-6;
+
+/** Whether the leg is the route turned round on the street before it: a U-turn, or a dead end's. */
+function turnsRound(leg: RollingLeg): boolean {
+  return leg.kind === 'turn-round' || leg.kind === 'u-turn';
+}
+
+/** A sample's height: read; not known yet, and asked for again; or refused by the step rule, for good. */
+const HEIGHT_KNOWN = 0;
+const HEIGHT_UNKNOWN = 1;
+const HEIGHT_REFUSED = 2;
+
 /**
  * A street-following profile that grows ahead of the rider, swaps its tail at
  * a junction, and drops the road far behind. See the file's header.
@@ -370,6 +457,11 @@ export class RollingRoute {
   readonly #heights: number[] = [];
   readonly #despiked: number[] = [];
   readonly #grades: number[] = [];
+  /** Each sample's {@link HEIGHT_KNOWN}, {@link HEIGHT_UNKNOWN} or {@link HEIGHT_REFUSED}. */
+  readonly #state: number[] = [];
+  /** Whether each grade's windows hold only known heights. */
+  readonly #available: boolean[] = [];
+  readonly #source: RollingHeights | undefined;
   #view: RouteProfile | undefined;
   #uTurns = 0;
 
@@ -380,7 +472,7 @@ export class RollingRoute {
    * @throws {RouteError} `too-few-points` or `no-distance` for a start street
    * with no length.
    */
-  constructor(graph: RollingStreetGraph, start: RollingEdge) {
+  constructor(graph: RollingStreetGraph, start: RollingEdge, options: RollingRouteOptions = {}) {
     if (start.points.length < 2) {
       throw new RouteError(
         'too-few-points',
@@ -396,6 +488,7 @@ export class RollingRoute {
       );
     }
     this.#graph = graph;
+    this.#source = options.heights;
     this.#legs.push({
       edge: start,
       kind: 'start',
@@ -533,7 +626,11 @@ export class RollingRoute {
     if (way === undefined) return undefined;
     // A route of its own, on any street this one holds, then given what this
     // one holds: every leg and sample is a value no method changes in place.
-    const other = new RollingRoute(this.#graph, (this.#legs[0] as Leg).edge);
+    // The same height source (#2899), so the way's samples take the heights
+    // `choose` would give them.
+    const other = new RollingRoute(this.#graph, (this.#legs[0] as Leg).edge, {
+      heights: this.#source,
+    });
     const put = <T>(into: T[], from: readonly T[]): void => {
       into.length = 0;
       for (const each of from) into.push(each);
@@ -541,8 +638,10 @@ export class RollingRoute {
     put(other.#legs, this.#legs);
     put(other.#positions, this.#positions);
     put(other.#heights, this.#heights);
+    put(other.#state, this.#state);
     put(other.#despiked, this.#despiked);
     put(other.#grades, this.#grades);
+    put(other.#available, this.#available);
     other.#first = this.#first;
     other.#uTurns = this.#uTurns;
     other.#view = undefined;
@@ -640,6 +739,38 @@ export class RollingRoute {
   }
 
   /**
+   * Whether the grade at ride distance `rider` rests on known heights: false
+   * where the median or the slope window of either grid sample round it holds
+   * a no-data sample, and false off the road held. Always true on it for a
+   * route with no height source.
+   *
+   * Where it is false the view's grade reads 0 %, and the app sends 0 %,
+   * walked to at 1 % a second (ADR 0087 D-7).
+   */
+  gradeKnownAt(rider: number): boolean {
+    const at = (rider - this.origin) / ROLLING_RESOLUTION_METRES;
+    const last = this.#available.length - 1;
+    if (!(at >= 0 && at <= last)) return false;
+    const before = Math.floor(at);
+    return this.#available[before] === true && this.#available[Math.min(last, before + 1)] === true;
+  }
+
+  /**
+   * Ask the height source again for every sample that had no height, and fit
+   * the grades they reach. True when any was filled, which is a new view.
+   *
+   * For a height tile that arrived after its road was sampled. ⚠️ It may
+   * change the heights under the rider, so the app walks the grade it sends
+   * to the new one at 1 % a second (ADR 0087 D-6.4).
+   */
+  refill(): boolean {
+    const first = this.#fill();
+    if (first === undefined) return false;
+    this.#refit(this.#levelStart() ? 0 : Math.max(0, first - 1));
+    return true;
+  }
+
+  /**
    * The route as the game reads a profile: a new object after every change,
    * the same one otherwise. Its distance zero is {@link origin}.
    */
@@ -708,8 +839,10 @@ export class RollingRoute {
     if (keep < this.#positions.length) {
       this.#positions.length = keep;
       this.#heights.length = keep;
+      this.#state.length = keep;
       this.#despiked.length = keep;
       this.#grades.length = keep;
+      this.#available.length = keep;
       this.#view = undefined;
     }
   }
@@ -732,10 +865,196 @@ export class RollingRoute {
       const leg = this.#legs[legIndex] as Leg;
       const { position, elevation } = pointAlong(leg, leg.enter + (distance - leg.start));
       this.#positions.push(position);
-      this.#heights.push(elevation);
+      this.#take(legIndex, distance, position, elevation);
     }
-    if (this.#positions.length > firstNew) this.#refit(firstNew);
+    // A run of bridge streets is sampled before the road past it is known:
+    // its samples, and any other with no height yet, are asked for again.
+    const filled = this.#fill();
+    const taken = this.#positions.length > firstNew ? firstNew : undefined;
+    const levelled = this.#levelStart() ? 0 : Infinity;
+    const from = Math.min(taken ?? Infinity, filled ?? Infinity, levelled);
+    // With a height source the step rule may have made the sample before the
+    // first new one no-data, so the fit starts one sample earlier.
+    if (Number.isFinite(from))
+      this.#refit(this.#source === undefined ? from : Math.max(0, from - 1));
     this.#trim(rider);
+  }
+
+  /** One new sample's height: the edge's own, or the height source's. */
+  #take(legIndex: number, distance: number, position: GeographicPosition, elevation: number): void {
+    const index = this.#heights.length;
+    const ground =
+      this.#source === undefined ? elevation : this.#ground(legIndex, distance, position);
+    if (ground === undefined) {
+      // No-data: level with the height before it, so the road is drawn flat there.
+      this.#heights.push(index > 0 ? (this.#heights[index - 1] as number) : 0);
+      this.#state.push(HEIGHT_UNKNOWN);
+      return;
+    }
+    this.#heights.push(ground);
+    this.#state.push(HEIGHT_KNOWN);
+    if (this.#source !== undefined) this.#holdStep(index);
+  }
+
+  /**
+   * ADR 0087 D-3's last row: sample `index` and the one before it, both read
+   * from the height source, may differ by {@link ROLLING_MOST_STEP_METRES} at
+   * most. Further apart, both are no-data, for good.
+   */
+  #holdStep(index: number): void {
+    if (index < 1) return;
+    if (this.#state[index] !== HEIGHT_KNOWN || this.#state[index - 1] !== HEIGHT_KNOWN) return;
+    const here = this.#heights[index] as number;
+    const before = this.#heights[index - 1] as number;
+    if (Math.abs(here - before) <= ROLLING_MOST_STEP_METRES) return;
+    this.#state[index - 1] = HEIGHT_REFUSED;
+    this.#state[index] = HEIGHT_REFUSED;
+  }
+
+  /**
+   * The height source's answer for the sample at `distance` on leg
+   * `legIndex`: the ground there, or, on a bridge or in a tunnel, the straight
+   * line between the ground at the two ends of its run of span legs.
+   * `undefined` where it is not known.
+   *
+   * ⚠️ The two ends must be ends of the BRIDGE, where a leg that is no span
+   * meets the run. A run that begins with the legs held began at the ride's
+   * start (or its first end was trimmed), and a run that holds a turn was
+   * turned round on: each of those places is over the valley, and its ground
+   * read as an end would send the valley's grade as a known one.
+   */
+  #ground(legIndex: number, distance: number, position: GeographicPosition): number | undefined {
+    const source = this.#source as RollingHeights;
+    const at = (place: GeographicPosition): number | undefined => {
+      const height = source(place);
+      return height !== undefined && Number.isFinite(height) ? height : undefined;
+    };
+    const legs = this.#legs;
+    if ((legs[legIndex] as Leg).edge.span !== true) return at(position);
+    let first = legIndex;
+    while (first > 0 && (legs[first - 1] as Leg).edge.span === true) first -= 1;
+    // Past a turn on the deck: the same deck ridden back.
+    let turn = legIndex;
+    while (turn > first && !turnsRound(legs[turn] as Leg)) turn -= 1;
+    if (turn > first) return this.#riddenBack(first, turn, distance);
+    // No street before the run: where it starts is not known to be its end.
+    if (first === 0) return undefined;
+    let last = legIndex;
+    while (last + 1 < legs.length && (legs[last + 1] as Leg).edge.span === true) {
+      // The route turns round before the deck's far end.
+      if (turnsRound(legs[last + 1] as Leg)) return undefined;
+      last += 1;
+    }
+    // The run may go on past the road held: its far end is not known yet.
+    if (last === legs.length - 1) return undefined;
+    const from = legs[first] as Leg;
+    const to = legs[last] as Leg;
+    const start = at(pointAlong(from, from.enter).position);
+    const end = at(pointAlong(to, to.enter + (to.end - to.start)).position);
+    if (start === undefined || end === undefined) return undefined;
+    const length = to.end - from.start;
+    return length > 0 ? start + ((end - start) * (distance - from.start)) / length : start;
+  }
+
+  /**
+   * The height at `distance`, past the turn that leg `turn` is, on a run of
+   * span legs that begins at leg `first`: the height the way out took at the
+   * same place, which is the sample as far before the turn as this one is
+   * after it. `undefined` where the way out had none, where it is no longer
+   * held, and past the stretch the way back retraces.
+   *
+   * A U-turn is made on a sample, so the two samples are one place. A dead
+   * end's turn-round is made at a node, which need not be: there the way out
+   * has no height to take in any case, its far end not being the bridge's.
+   */
+  #riddenBack(first: number, turn: number, distance: number): number | undefined {
+    const legs = this.#legs;
+    const at = (legs[turn] as Leg).start;
+    // How far before the turn the way back is the way out, street for street.
+    let retraced = at;
+    for (let step = 0; turn - 1 - step >= first && turn + step < legs.length; step += 1) {
+      const out = legs[turn - 1 - step] as Leg;
+      const back = legs[turn + step] as Leg;
+      if (step > 0 && turnsRound(back)) break;
+      if (
+        back.edge.id !== out.edge.id ||
+        back.edge.from !== out.edge.to ||
+        back.edge.to !== out.edge.from
+      ) {
+        break;
+      }
+      retraced = out.start;
+      // A way out joined part-way, or itself a turn, is not retraced past its start.
+      if (out.enter !== 0 || turnsRound(out)) break;
+    }
+    const mirrored = 2 * at - distance;
+    if (mirrored < retraced - GRID_SLACK_METRES) return undefined;
+    const sample = mirrored / ROLLING_RESOLUTION_METRES;
+    const index = Math.round(sample);
+    if (Math.abs(sample - index) * ROLLING_RESOLUTION_METRES > GRID_SLACK_METRES) return undefined;
+    const held = index - this.#first;
+    if (held < 0 || this.#state[held] !== HEIGHT_KNOWN) return undefined;
+    return this.#heights[held];
+  }
+
+  /**
+   * A ride that starts where no height is known has no height before it to
+   * hold, so its first samples take the first height the road does have: the
+   * road is drawn level into it, never as a step of the place's whole
+   * altitude. True when a height changed. Only while the ride's first sample
+   * is held: after a trim the first sample holds the height before it.
+   */
+  #levelStart(): boolean {
+    if (this.#source === undefined || this.#first !== 0) return false;
+    let known = 0;
+    while (known < this.#state.length && this.#state[known] === HEIGHT_UNKNOWN) known += 1;
+    if (known === 0 || known === this.#state.length) return false;
+    const height = this.#heights[known] as number;
+    if (this.#heights[0] === height) return false;
+    this.#heights.fill(height, 0, known);
+    return true;
+  }
+
+  /**
+   * Ask the height source again for every sample still unknown. The index of
+   * the first one filled, or `undefined` when none was.
+   */
+  #fill(): number | undefined {
+    if (this.#source === undefined) return undefined;
+    let first: number | undefined;
+    let legIndex = 0;
+    const legs = this.#legs;
+    for (let index = 0; index < this.#heights.length; index += 1) {
+      if (this.#state[index] !== HEIGHT_UNKNOWN) continue;
+      const distance = (this.#first + index) * ROLLING_RESOLUTION_METRES;
+      while (legIndex < legs.length - 1 && (legs[legIndex] as Leg).end < distance) legIndex += 1;
+      const ground = this.#ground(legIndex, distance, this.#positions[index] as GeographicPosition);
+      if (ground === undefined) continue;
+      this.#heights[index] = ground;
+      this.#state[index] = HEIGHT_KNOWN;
+      first ??= index;
+    }
+    if (first === undefined) return undefined;
+    // A sample still unknown holds the height before it, which may have changed.
+    for (let index = Math.max(1, first); index < this.#heights.length; index += 1) {
+      if (this.#state[index] === HEIGHT_UNKNOWN) {
+        this.#heights[index] = this.#heights[index - 1] as number;
+      }
+    }
+    for (let index = Math.max(1, first); index < this.#heights.length; index += 1) {
+      this.#holdStep(index);
+    }
+    return first;
+  }
+
+  /** Whether every height sample grade `index` reads is known. */
+  #knownAround(index: number): boolean {
+    const last = this.#state.length - 1;
+    for (let offset = -GRADE_REACH_SAMPLES; offset <= GRADE_REACH_SAMPLES; offset += 1) {
+      const at = Math.min(last, Math.max(0, index + offset));
+      if (this.#state[at] !== HEIGHT_KNOWN) return false;
+    }
+    return true;
   }
 
   /** Appends the default way on from `last`'s end, or turns round at a dead end. */
@@ -764,12 +1083,16 @@ export class RollingRoute {
     }
     const slopeFrom = Math.max(0, despikeFrom - SLOPE_HALF);
     this.#grades.length = Math.min(this.#grades.length, slopeFrom);
+    this.#available.length = Math.min(this.#available.length, slopeFrom);
     for (let index = slopeFrom; index < count; index += 1) {
       let weighted = 0;
       for (let offset = -SLOPE_HALF; offset <= SLOPE_HALF; offset += 1) {
         weighted += offset * clamped(this.#despiked, index + offset);
       }
-      this.#grades.push((weighted / (ROLLING_RESOLUTION_METRES * SLOPE_SQUARES)) * 100);
+      // A grade that reads a no-data height is unavailable, and reads 0 %.
+      const known = this.#knownAround(index);
+      this.#available.push(known);
+      this.#grades.push(known ? (weighted / (ROLLING_RESOLUTION_METRES * SLOPE_SQUARES)) * 100 : 0);
     }
   }
 
@@ -780,8 +1103,10 @@ export class RollingRoute {
     if (drop <= 0) return;
     this.#positions.splice(0, drop);
     this.#heights.splice(0, drop);
+    this.#state.splice(0, drop);
     this.#despiked.splice(0, drop);
     this.#grades.splice(0, drop);
+    this.#available.splice(0, drop);
     this.#first = first;
     this.#view = undefined;
     const origin = this.origin;

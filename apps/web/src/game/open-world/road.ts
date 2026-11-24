@@ -359,6 +359,14 @@ export interface OpenWorldRoadHooks {
    */
   readonly graphVersion?: (() => number) | undefined;
   /**
+   * How many height tiles have arrived (`heights.ts` §`RoadHeights.version`):
+   * a change since the last follow means the route may now know heights it
+   * lacked, so it asks again (`RollingRoute.refill`) — #2899.
+   */
+  readonly heightsVersion?: (() => number) | undefined;
+  /** That the road's heights are read from the terrain archive: the corner credits it (ADR 0087 D-8). */
+  readonly realHeights?: boolean | undefined;
+  /**
    * #2901: the route and the rider, after each follow has advanced it, so the
    * session can ask for the map tiles ahead and on every way on from the next
    * junction to be planned (`tiles-ahead.ts`).
@@ -527,6 +535,7 @@ export class OpenWorldRoad {
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
+  #heightsVersion: number | undefined;
   /** The path last handed out by {@link drawnPath}, on {@link view}: what the screen drew. */
   #drawn: DrawnLine | undefined;
   /** The path being eased from, and the ride distance the ease began at. @see drawnPath */
@@ -547,6 +556,7 @@ export class OpenWorldRoad {
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
+    this.#heightsVersion = hooks.heightsVersion?.();
     this.#levels = new StreetLevels(() => hooks.streets?.()?.streets);
     const profile = this.#framed(route.view());
     this.#seed = routeSeed(profile);
@@ -827,6 +837,22 @@ export class OpenWorldRoad {
     return this.#view;
   }
 
+  /** That the road's heights are read from the terrain archive (ADR 0087 D-8's credit). */
+  get realHeights(): boolean {
+    return this.#hooks.realHeights === true;
+  }
+
+  /**
+   * Whether the grade at ride distance `rider` rests on known heights
+   * (`RollingRoute.gradeKnownAt`) — #2899. Where it does not, the road reads
+   * 0 %, and the ride loop hands the gradient session its bounded path, so
+   * the grade sent walks to 0 % at 1 % a second and back up once the heights
+   * are known (ADR 0087 D-7).
+   */
+  heightsKnownAt(rider: number): boolean {
+    return this.route.gradeKnownAt(rider);
+  }
+
   /**
    * The road for a rider at ride distance `rider`: a new view when it changed
    * since the last call, and `undefined` when it did not. Advances the route
@@ -843,6 +869,14 @@ export class OpenWorldRoad {
       if (version !== this.#graphVersion) {
         this.#graphVersion = version;
         route.reopen(rider);
+      }
+      // #2899: a height tile arrived since, so the road asks again for the
+      // heights it lacked. A grade this changes under the rider is walked at
+      // 1 % a second (`gradient.ts` §`follow`, ADR 0087 D-6.4).
+      const heights = this.#hooks.heightsVersion?.();
+      if (heights !== this.#heightsVersion) {
+        this.#heightsVersion = heights;
+        route.refill();
       }
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);

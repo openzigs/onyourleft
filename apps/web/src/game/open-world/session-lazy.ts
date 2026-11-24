@@ -17,6 +17,7 @@
  */
 
 import type { BasemapConfig } from '../../map/basemap';
+import type { TerrainConfig } from '../../terrain/config';
 import type { OpenWorldEntry } from './entry';
 import type { OpenWorldReady, OpenWorldSession, OpenWorldSessions } from './ride';
 import type { OpenWorldStart } from './start';
@@ -28,6 +29,11 @@ interface LazyOpenWorldOptions {
   readonly basemap: () => BasemapConfig | undefined;
   /** The map-tiles switch (ADR 0090 D-7.1), read before every request. */
   readonly mapTilesOn: () => boolean;
+  /**
+   * The configured terrain archive (#2899), read when a session opens;
+   * `undefined` when none is, and the open-world road is then flat.
+   */
+  readonly terrain?: (() => TerrainConfig | undefined) | undefined;
 }
 
 /** What opens one session, once the modules are loaded. */
@@ -47,12 +53,16 @@ export function lazyOpenWorldSessions(
     // (§`namespaceBindings`).
     const session = await import('./session');
     const source = await import('../../world-data/corridor-source');
+    // #2899: the road's heights, through #2013's one module (ADR 0087 D-2.3).
+    const heights = await import('../../terrain/terrain-source');
     return (start) => {
       const config = options.basemap();
+      const terrain = options.terrain?.();
       return session.createOpenWorldSession({
         start,
         archive: config === undefined ? undefined : source.corridorArchive(config),
         mapTilesOn: options.mapTilesOn,
+        terrain: terrain === undefined ? undefined : heights.terrainArchive(terrain),
       });
     };
   },
