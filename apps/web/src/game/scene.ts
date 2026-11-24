@@ -167,7 +167,7 @@ import {
   routeGround,
   type NearbyStreetScan,
 } from './nearby-streets';
-import { wayRoads } from './way-roads';
+import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
 import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -225,6 +225,14 @@ export interface JunctionSeen {
   readonly distance: number;
   /** Where it is. */
   readonly position: GeographicPosition;
+}
+
+/** A junction where an open-world ride's route turns off the road it came along. @see SceneInput.turnedOff */
+export interface TurnedOffRoad {
+  /** Its ride distance. */
+  readonly junction: number;
+  /** The way the route would have taken there: the road turned off, on past the junction. */
+  readonly way: ScatterWay;
 }
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -362,6 +370,24 @@ export interface SceneInput {
    * reads the pavements back off the renderer's frames through a press.
    */
   readonly junctionsSeen?: readonly JunctionSeen[] | undefined;
+  /**
+   * #3123: in an open-world ride, each junction near the rider where the
+   * route turns off the road it came along (`open-world/road.ts`
+   * §`OpenWorldRoad.turnedOff`), at its ride distance, with the way the
+   * route would have taken there. Once the rider has passed one, the road
+   * turned off is drawn on past the junction along that way and back from
+   * it along the road, to `open-world/road.ts` §`TURNED_OFF_REACH_METRES`
+   * each way, wherever nothing else draws it (`way-roads.ts`): the road
+   * the frame draws stops `terrain.ts` §`VIEW_BEHIND_METRES` behind the
+   * rider, and a way out is handed on no further behind. Absent on every
+   * other ride.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link waysOut}: with it gone the
+   * road turned off is cut off at the junction again.
+   * `open-world/turned-off-road.test.tsx` reads it back off the frames the
+   * renderer was handed.
+   */
+  readonly turnedOff?: readonly TurnedOffRoad[] | undefined;
   /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
@@ -834,7 +860,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.nearbyStreetsOff === true
       ? NO_SIDE_ROADS
       : wayRoads(
-          reached,
+          // #3123: and the road the rider turned off, each way from the junction.
+          withTurnedOff(reached, input, riderDistance),
           {
             profile: input.profile,
             origin: input.origin,
@@ -842,6 +869,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
             land: input.landClass ?? NO_LAND_CLASS,
             // The next junction's ways are read first, and those behind the rider last.
             riderMetres: riderDistance,
+            drawnFromMetres: (corridor.centre[0] as CorridorPoint).along,
           },
           streetRoads,
         );
@@ -1533,6 +1561,48 @@ function waysReached(input: SceneInput, toMetres: number): readonly ReachedWay[]
     if (reach > way.fromMetres) reached.push({ way, toMetres: reach, shift });
   }
   return reached;
+}
+
+/**
+ * `reached`, with the road the rider turned off at each junction of
+ * {@link SceneInput.turnedOff} they have passed — #3123: the way the route
+ * would have taken, from the junction on, and the road itself from the
+ * junction back, each to `way-roads.ts` §`TURNED_OFF_REACH_METRES`. A way
+ * so handed is not handed again as a way out. `reached` itself where no
+ * junction turned off at is behind the rider.
+ */
+function withTurnedOff(
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+  riderDistance: number,
+): readonly WayReached[] {
+  const turnedOff = input.turnedOff;
+  if (turnedOff === undefined || turnedOff.length === 0) return reached;
+  // Both views count ride distance from their own first sample.
+  const rides = sceneryAnchor(input.profile)?.origin ?? 0;
+  const passed = turnedOff.filter(({ junction }) => junction - rides <= riderDistance);
+  if (passed.length === 0) return reached;
+  const out: WayReached[] = reached.filter(
+    ({ way }) => !passed.some((each) => each.way.profile === way.profile),
+  );
+  for (const { junction, way } of passed) {
+    const junctionMetres = junction - rides;
+    out.push(
+      {
+        way,
+        toMetres: way.fromMetres + TURNED_OFF_REACH_METRES,
+        shift: (sceneryAnchor(way.profile)?.origin ?? 0) - rides,
+        turnedOff: { junctionMetres, back: false },
+      },
+      {
+        way: { profile: input.profile, fromMetres: junctionMetres },
+        toMetres: junctionMetres - TURNED_OFF_REACH_METRES,
+        shift: 0,
+        turnedOff: { junctionMetres, back: true },
+      },
+    );
+  }
+  return out;
 }
 
 /**

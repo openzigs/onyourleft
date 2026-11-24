@@ -4608,6 +4608,9 @@ function GameScreen({
                 // #3051: and the ways out the route does not take, so the
                 // scenery stands along each before a choice and after it.
                 waysOut: road.follower.waysOut(simulation.state.ride.distance),
+                // #3123: and each junction where the route turns off the road
+                // it came along, so that road is drawn on past it once passed.
+                turnedOff: road.follower.turnedOff(simulation.state.ride.distance),
                 // #3095: and every junction it has seen, where a village's
                 // street is cut so the piece past one is laid alike on each way.
                 junctionsSeen: road.follower.junctionsSeen(),
