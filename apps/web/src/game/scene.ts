@@ -840,6 +840,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
             origin: input.origin,
             seed,
             land: input.landClass ?? NO_LAND_CLASS,
+            // The next junction's ways are read first, and those behind the rider last.
+            riderMetres: riderDistance,
           },
           streetRoads,
         );

@@ -33,8 +33,13 @@
  * (`scene.ts` §`SceneInput.waysOut`, the view the rolling route would hand
  * out were the way taken), every stretch from its junction to the view's
  * reach that neither the road nor any side road of the frame covers is drawn
- * here. Where the streets' own drawing is whole — a town of crossroads —
- * this adds nothing: not a triangle.
+ * here. Where the streets' own drawing is whole this adds nothing: not a
+ * triangle. ⚠️ That is a town of crossroads a fixture block (232 m) apart,
+ * and not every town of crossroads: with a crossroads every 100 m or less
+ * the streets in view pass `nearby-streets.ts` §`NEARBY_STREETS_PER_FRAME`,
+ * and what that leaves out of a way is drawn here, 100–400 m from the rider
+ * (the review of PR #3113 measured up to 15 way roads a frame at 100 m and
+ * 35 at 60 m, and none with that cap lifted).
  *
  * ## What is drawn
  *
@@ -54,12 +59,38 @@
  *
  * ## Cost
  *
- * Worked out again only when the ways handed on, the side roads drawn or the
- * reach — counted in steps of {@link WAY_ROAD_REFRESH_METRES} — change: about
- * once every 40 m ridden, as the streets in view are chosen. Every other
- * frame is handed the same array, of the same objects. At most
- * {@link WAY_ROAD_STATIONS_PER_FRAME} stations a frame, the ways whose
- * junctions are nearest first, two triangles a station.
+ * Worked out again only when the ways handed on, the side roads drawn, the
+ * reach — counted in steps of {@link WAY_ROAD_REFRESH_METRES} — or how many
+ * junctions the rider has passed change. Every other frame is handed the
+ * same array, of the same objects. ⚠️ How often that is depends on the town:
+ * every 40 m ridden or so where the junctions are a fixture block (232 m)
+ * apart, as the streets in view are chosen, and every 10–15 m where they are
+ * 40–100 m apart, since a junction's stub or a way comes into view or leaves
+ * it that often — 28 workings-out in 300 m of `open-world/fixture-testing.ts`
+ * §`OPEN_WORLD_DENSE_STREETS`, and the review of PR #3113 timed one at up to
+ * 2.5–3.3 ms on a desktop. A working-out that changes the ribbons has the
+ * side roads' one mesh merged again. Not measured on the tablet.
+ *
+ * At most {@link WAY_ROAD_STATIONS_PER_FRAME} stations a frame, every
+ * station read counted whether or not anything is drawn there, two
+ * triangles a station drawn.
+ *
+ * ## Which ways are read first
+ *
+ * A town of short blocks holds more way in view than the bound reads, so the
+ * order decides what the rider sees ({@link readingOrder}):
+ *
+ * 1. the ways out of the road's own junctions ahead of the rider, the
+ *    nearest junction first — **the next junction's, which the prompt is
+ *    offering, before anything else**;
+ * 2. the ways out of the junctions along those, ahead, nearest first;
+ * 3. the ways out of junctions behind the rider, which the chase camera
+ *    looks away from, the nearest first.
+ *
+ * ⚠️ Not "the nearest junction first" over all of them, as it was: a
+ * junction up to 60 m behind and the junctions along ITS ways came before
+ * the next junction's own, and with a crossroads every 40 m the offered way
+ * went unread from 40 m short of its junction to 20 m short of it.
  *
  * ⚠️ **Location data** (ADR 0004 D): nothing here formats a message, and it
  * reads no name.
@@ -88,8 +119,10 @@ export const WAY_ROAD_REFRESH_METRES = NEARBY_STREET_REFRESH_METRES;
 
 /**
  * The most stations a frame's way roads are read at: **1 024**, 4 km of ways
- * — every way out of a town's junctions in a 400 m view — and at most 2 048
- * triangles were none of it drawn by anything else.
+ * and at most 2 048 triangles were none of it drawn by anything else. Every
+ * way out of the junctions in a 400 m view where they are a fixture block
+ * apart; the ways out of the road's next five junctions where they are 40 m
+ * apart, which is why the order matters ({@link readingOrder}).
  */
 export const WAY_ROAD_STATIONS_PER_FRAME = 1_024;
 
@@ -114,14 +147,18 @@ export interface WayReached {
     readonly fromMetres: number;
   };
   readonly toMetres: number;
+  /** What a distance on the way's view is short of the same ride distance on the road's. */
+  readonly shift: number;
 }
 
-/** The road the frame draws, and the ground it draws beside it. */
+/** The road the frame draws, the ground it draws beside it, and where the rider is on it. */
 export interface WayRoadsRoad {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly seed: number;
   readonly land: LandClassMask;
+  /** The rider's distance on {@link profile}: a junction short of it is behind them. */
+  readonly riderMetres: number;
 }
 
 const NO_WAY_ROADS: readonly SideRoad[] = [];
@@ -176,7 +213,7 @@ function onOneOf(roads: readonly SideRoad[], x: number, z: number): boolean {
 interface Held {
   readonly land: LandClassMask;
   readonly seed: number;
-  /** Each way's view, its junction on it, and its reach in whole refreshes. */
+  /** How many ways' junctions were behind the rider, then each way's view, its junction on it, and its reach in whole refreshes. */
   readonly ways: readonly (RouteProfile | number)[];
   readonly drawn: readonly SideRoad[];
   readonly roads: readonly SideRoad[];
@@ -190,12 +227,41 @@ const held = new WeakMap<RouteProfile, Held>();
 /** The most ribbons kept for one way before they are let go and made again. */
 const RIBBONS_KEPT_PER_WAY = 32;
 
+/** How far ahead of the rider a way's junction is, in ride metres: negative behind them. */
+function aheadOf(road: WayRoadsRoad, { way, shift }: WayReached): number {
+  return way.fromMetres + shift - road.riderMetres;
+}
+
+/**
+ * `ways` in the order they are read, so that what
+ * {@link WAY_ROAD_STATIONS_PER_FRAME} leaves unread is what the rider sees
+ * least — the header's "Which ways are read first". A way is out of the
+ * road's own junction when its junction lies on the drawn road, and out of a
+ * junction along another way otherwise.
+ */
+function readingOrder(ways: readonly WayReached[], road: WayRoadsRoad): WayReached[] {
+  const ranked = ways.map((each) => {
+    const ahead = aheadOf(road, each);
+    let rank = 2;
+    if (ahead >= 0) {
+      const { x, z } = localGroundPosition(
+        road.origin,
+        positionAt(each.way.profile, each.way.fromMetres),
+      );
+      rank = toRoad(road, x, z) <= ROAD_WIDTH_METRES ? 0 : 1;
+    }
+    return { each, rank, near: Math.abs(ahead) };
+  });
+  ranked.sort((a, b) => a.rank - b.rank || a.near - b.near);
+  return ranked.map(({ each }) => each);
+}
+
 /**
  * The way roads of a frame — #3106: for each of `ways`, every stretch from
  * its junction to its reach that neither `road`'s surface nor any of `drawn`
  * covers, as side roads. The same array, of the same objects, while the ways,
- * their reaches in whole {@link WAY_ROAD_REFRESH_METRES} and `drawn` are the
- * same. @see the header
+ * their reaches in whole {@link WAY_ROAD_REFRESH_METRES}, how many of their
+ * junctions are behind the rider and `drawn` are the same. @see the header
  */
 export function wayRoads(
   ways: readonly WayReached[],
@@ -203,7 +269,10 @@ export function wayRoads(
   drawn: readonly SideRoad[],
 ): readonly SideRoad[] {
   if (ways.length === 0) return NO_WAY_ROADS;
-  const key: (RouteProfile | number)[] = [];
+  // A junction passed changes the order the ways are read in, and so what is drawn.
+  let behind = 0;
+  for (const each of ways) if (aheadOf(road, each) < 0) behind += 1;
+  const key: (RouteProfile | number)[] = [behind];
   for (const { way, toMetres } of ways) {
     key.push(way.profile, way.fromMetres, Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES));
   }
@@ -223,13 +292,9 @@ export function wayRoads(
     last !== undefined && last.land === road.land && last.seed === road.seed
       ? last.ribbons
       : new WeakMap<RouteProfile, Map<string, SideRoad>>();
-  // The ways whose junctions are nearest first: the most of its view left.
-  const nearestFirst = [...ways].sort(
-    (a, b) => b.toMetres - b.way.fromMetres - (a.toMetres - a.way.fromMetres),
-  );
   const roads: SideRoad[] = [];
   let left = WAY_ROAD_STATIONS_PER_FRAME;
-  for (const { way, toMetres } of nearestFirst) {
+  for (const { way, toMetres } of readingOrder(ways, road)) {
     const total: number = way.profile.totalDistance;
     const to = Math.min(
       total,

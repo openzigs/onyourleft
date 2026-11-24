@@ -48,7 +48,7 @@ import type { SceneFrame } from '../port';
 import { scatterSeed } from '../scatter';
 import type { SceneInput } from '../scene';
 import { sceneryAnchor } from '../scenery-anchor';
-import { OPEN_WORLD_DENSE_STREETS, START_COLUMN, START_ROW } from './fixture-testing';
+import { OPEN_WORLD_TOWN_STREETS, START_COLUMN, START_ROW } from './fixture-testing';
 import { sceneInputs, startOfferedWaysRide, type OfferedWaysRide } from './offered-ways-testing';
 
 /** How many times the corridor was asked whether a point is on land that was read. */
@@ -147,7 +147,7 @@ beforeAll(async () => {
   resumed.clear();
   building.on = true;
   handedOn = undefined;
-  ride = await startOfferedWaysRide(OPEN_WORLD_DENSE_STREETS, START_COLUMN, START_ROW, 2);
+  ride = await startOfferedWaysRide(OPEN_WORLD_TOWN_STREETS, START_COLUMN, START_ROW, 2);
   // The ride's first frames: the first reads whole.
   await ride.ridePumped(3, 1_000);
   // Through the view's change 1 km on, a frame a second of ride.

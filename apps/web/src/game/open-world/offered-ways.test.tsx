@@ -22,6 +22,9 @@
  *   first metres are a way of their own, and at a crossroads. A way is read
  *   from the ride's own rolling route, the question the prompt asks, and
  *   "drawn" is a triangle of a side road's mesh, or the road's surface.
+ * - **In a town of 40 m blocks**, where the ways in view are many times what
+ *   `way-roads.ts` reads in a frame, the offered ways are still drawn: the
+ *   next junction's are read first.
  * - **With more street than a corridor's bound** read before the town's own
  *   — an open-world ride's far blocks — the town's streets are still drawn.
  * - **No scenery item stands on a street the graph holds.**
@@ -43,8 +46,14 @@ import { NEARBY_STREET_REFRESH_METRES, NEARBY_STREET_VIEW_METRES } from '../near
 import type { SceneInput } from '../scene';
 import { corridorOrigin, localGroundPosition } from '../terrain';
 import {
+  WAY_ROAD_REFRESH_METRES,
+  WAY_ROAD_STATIONS_PER_FRAME,
+  WAY_ROAD_STEP_METRES,
+} from '../way-roads';
+import {
   fixturePosition,
   OPEN_WORLD_AWKWARD_STREETS,
+  OPEN_WORLD_DENSE_STREETS,
   OPEN_WORLD_FAR_SERVICE_ROADS,
   OPEN_WORLD_GRID_STREETS,
   START_COLUMN,
@@ -74,6 +83,9 @@ vi.mock('../scene', async (importOriginal) => {
 /** What `wayRoads` handed each frame's scene, in order. */
 const wayRoadsHanded: (readonly SideRoad[])[] = [];
 
+/** How many stations each frame's ways out would be read at were there no bound, in order. */
+const stationsAsked: number[] = [];
+
 vi.mock('../way-roads', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../way-roads')>();
   return {
@@ -81,6 +93,15 @@ vi.mock('../way-roads', async (importOriginal) => {
     wayRoads: (...args: Parameters<typeof actual.wayRoads>) => {
       const roads = actual.wayRoads(...args);
       wayRoadsHanded.push(roads);
+      let asked = 0;
+      for (const { way, toMetres } of args[0]) {
+        const to = Math.min(
+          way.profile.totalDistance,
+          Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES) * WAY_ROAD_REFRESH_METRES,
+        );
+        asked += Math.max(0, Math.floor((to - way.fromMetres) / WAY_ROAD_STEP_METRES) + 1);
+      }
+      stationsAsked.push(asked);
       return roads;
     },
   };
@@ -92,6 +113,7 @@ let ride: OfferedWaysRide | undefined;
 function ridden(streets: Parameters<typeof startOfferedWaysRide>[0], metres: number): void {
   beforeAll(async () => {
     wayRoadsHanded.length = 0;
+    stationsAsked.length = 0;
     ride = await startOfferedWaysRide(streets, START_COLUMN, START_ROW);
     await ride.rideTo(metres);
   });
@@ -366,5 +388,26 @@ describe('a town of crossroads — #3106', () => {
     expect(queryAll<HTMLElement>(document, '.oyl-hud__attribution')[0]?.textContent).toContain(
       'OpenStreetMap',
     );
+  });
+});
+
+describe('a town of short blocks, with more way in view than a frame reads — #3106', () => {
+  ridden(OPEN_WORLD_DENSE_STREETS, 300);
+
+  it('draws every way the pop-up offers as road, the bridge street among them', () => {
+    const frames = framesRidden();
+    // Not vacuous: the frames' ways out asked for more than a frame reads, so
+    // some way went unread on them; and a junction was prompted every block.
+    expect(Math.max(...stationsAsked)).toBeGreaterThan(WAY_ROAD_STATIONS_PER_FRAME);
+    const prompted = frames.filter((frame) => frame.junction !== undefined);
+    expect(new Set(prompted.map((frame) => frame.junction?.distance)).size).toBeGreaterThan(5);
+    // The bridge street is drawn by the way roads and by nothing else.
+    expect(wayRoadsHanded.some((roads) => roads.length > 0)).toBe(true);
+    const undrawn = prompted.flatMap((frame) =>
+      undrawnOfferedWays(frame, NEARBY_STREET_VIEW_METRES).map(
+        (way) => `${way} from ${frame.odometer.toFixed(0)} m`,
+      ),
+    );
+    expect(undrawn).toStrictEqual([]);
   });
 });
