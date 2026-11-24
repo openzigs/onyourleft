@@ -40,7 +40,11 @@ import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
 import { rideBack, RideBackContext, type RideBack } from '../shell/ride-back';
 import type { GameRenderer, RiderMarker, SceneFrame } from './port';
 import { pacerBodyFor } from './rider-body';
-import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
+import {
+  CAMERA_LOOK_AHEAD_RATE,
+  CAMERA_MAXIMUM_YAW_RATE,
+  REDUCED_MOTION_MAXIMUM_YAW_RATE,
+} from './camera';
 import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
@@ -2610,8 +2614,7 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     return { id: 'route-u', name: 'Turnaround', profile: routeProfile(points), attempts: 0 };
   }
 
-  async function rideTheTurnaround(): Promise<readonly number[]> {
-    const frames: SceneFrame[] = [];
+  async function rideTheTurnaround(frames: SceneFrame[] = []): Promise<readonly number[]> {
     mounted = await mount(
       <GameView
         port={pedallingPort(turnaroundRoute())}
@@ -2656,6 +2659,26 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     expect(largest).toBeLessThanOrEqual(
       REDUCED_MOTION_MAXIMUM_YAW_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6,
     );
+  });
+
+  it('and raises its gaze out of the turnaround over frames, not at once — #3045', async () => {
+    // Coming out, the road 25 m on keeps the rider in the frame again and the
+    // look-ahead the frame asks for jumps back from 10 m: undamped, by more
+    // than the cap allows in one of these 250 ms frames. `camera.ts`
+    // §`dampedLookAhead` is the rule; this is the loop applying it.
+    const frames: SceneFrame[] = [];
+    await rideTheTurnaround(frames);
+    const aheads = frames.map((frame) => frame.camera.targetAheadMetres);
+    let largest = 0;
+    for (let index = 1; index < aheads.length; index += 1) {
+      largest = Math.max(
+        largest,
+        Math.abs((aheads[index] as number) - (aheads[index - 1] as number)),
+      );
+    }
+    // It did look nearer and farther again: a fixed look-ahead would pass below.
+    expect(Math.max(...aheads) - Math.min(...aheads)).toBeGreaterThan(5);
+    expect(largest).toBeLessThanOrEqual(CAMERA_LOOK_AHEAD_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6);
   });
 });
 

@@ -64,6 +64,7 @@ import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { BILLBOARDS_PER_FRAME, BILLBOARD_FOOTPRINT, LOGO_POST_ACROSS_METRES } from './logo-board';
 import { TIGHT_BEND_RADIANS_PER_METRE, type ScatterItem } from './scatter';
+import { sceneryGrid, wrappedCell } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   footprintClearance,
@@ -135,23 +136,25 @@ export function billboardsAt(
   /** #2658: the ride's mask, so a board is kept out of the map's lakes as out of invented ones. */
   land: LandClassMask = NO_LAND_CLASS,
 ): readonly Billboard[] {
-  const total = profile.totalDistance as number;
-  const sites = Math.max(1, Math.round(total / SETTLEMENT_SPACING_METRES));
-  if (sites < 2) return [];
-  const span = total / sites;
+  // #3055: on an open-world view, the sites' boundaries in ride distance,
+  // and every one past the ride's start: a view's own ends are not the ride's.
+  const grid = sceneryGrid(profile, SETTLEMENT_SPACING_METRES);
+  const { span, shift, anchored } = grid;
+  const sites = grid.count;
+  if (!anchored && sites < 2) return [];
   const jitter = Math.max(0, Math.min(BILLBOARD_JITTER_METRES, 0.3 * span - 120));
-  const first = Math.floor((fromMetres - jitter) / span);
+  const first = Math.floor((fromMetres - jitter + shift) / span);
   // Never more boundaries than the route has: `settlements.ts`' own bound.
-  const last = Math.min(Math.ceil((toMetres + jitter) / span), first + sites + 1);
+  const last = Math.min(Math.ceil((toMetres + jitter + shift) / span), first + sites + 1);
   const found: Billboard[] = [];
   for (let boundary = first; boundary <= last; boundary += 1) {
     // Inside a point-to-point route only; on a loop, never at its start line.
-    if (!profile.loop && (boundary <= 0 || boundary >= sites)) continue;
-    const wrapped = ((boundary % sites) + sites) % sites;
-    if (wrapped === 0) continue;
+    if (!profile.loop && !anchored && (boundary <= 0 || boundary >= sites)) continue;
+    const wrapped = wrappedCell(grid, boundary);
+    if (wrapped <= 0) continue;
     const hash = slotHash(seed, wrapped, BILLBOARD_KEY);
     if (uniformFrom(hash, STREAM_CHANCE) >= BILLBOARD_CHANCE) continue;
-    const along = boundary * span + (2 * uniformFrom(hash, STREAM_JITTER) - 1) * jitter;
+    const along = boundary * span - shift + (2 * uniformFrom(hash, STREAM_JITTER) - 1) * jitter;
     if (along < fromMetres || along >= toMetres) continue;
     const placed = billboardAt(
       profile,

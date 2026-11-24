@@ -130,6 +130,8 @@ describe('the junction prompt on the HUD — #2898', () => {
     mounted = await mount(<JunctionHud choice={choice} rider={junction.distance - 60} />);
 
     expect(document.body.textContent).toContain(JUNCTION_LOCKED_LINE);
+    // #3053: the way chosen, alone.
+    expect(wayButtons().map((each) => each.dataset.oylWay)).toEqual([junction.defaultWay]);
     for (const each of wayButtons()) {
       expect(each.getAttribute('aria-disabled')).toBe('true');
       // Never `disabled`: it stays focusable and still shows the way taken.
@@ -151,7 +153,9 @@ describe('reachable and operable by keyboard alone (ADR 0088 D-3)', () => {
     expect(ways).toHaveLength(3);
     for (const each of [...ways, uTurn()]) expect(at(each)).toBeGreaterThan(end);
     expect(ways.map(at)).toEqual([...ways.map(at)].sort((a, b) => a - b));
-    expect(at(uTurn())).toBeGreaterThan(at(ways[2]));
+    // #3053: the U-turn stays with the controls; the ways are the pop-up
+    // after them in the document.
+    expect(at(uTurn())).toBeLessThan(at(ways[0]));
   });
 
   it('chooses each way with Enter on it, or with its key, and the default is a key away', async () => {
@@ -179,8 +183,12 @@ describe('reachable and operable by keyboard alone (ADR 0088 D-3)', () => {
     mounted = await mount(<JunctionHud choice={choice} rider={rider} />);
     const taken = () => route.legs.find((leg) => leg.start === junction.distance)?.edge.id;
 
-    await activateWithKeyboard(wayButton(junction.ways[0]?.edge.id as string));
+    // #3053: once final the pop-up shows the way chosen alone, and Enter on it
+    // does nothing; nor does a key for another way.
+    expect(wayButtons()).toHaveLength(1);
+    await activateWithKeyboard(wayButtons()[0] as HTMLButtonElement);
     pressKey('ArrowRight');
+    pressKey('ArrowLeft');
     expect(taken()).toBe(junction.defaultWay);
   });
 });
@@ -271,10 +279,18 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
     pressKey('ArrowLeft');
     expect(taken()).toBe(left);
     expect(document.body.textContent).toContain(JUNCTION_BY_KEY_SENTENCE);
-    const note = [...document.querySelectorAll('p')].find(
-      (each) => each.textContent === JUNCTION_BY_KEY_SENTENCE,
-    );
+    // Said where each is drawn (#3053): in the pop-up for its ways, and with
+    // the controls for the U-turn.
+    const noteIn = (place: Element | null | undefined): Element | undefined =>
+      [...(place?.querySelectorAll('p') ?? [])].find(
+        (each) => each.textContent === JUNCTION_BY_KEY_SENTENCE,
+      );
+    const note = noteIn(document.querySelector('.oyl-hud__junction-popup'));
+    expect(note?.id).toBeTruthy();
     for (const each of wayButtons()) expect(each.getAttribute('aria-describedby')).toBe(note?.id);
+    const uTurnNote = noteIn(uTurn()?.closest('.oyl-hud__actions'));
+    expect(uTurnNote?.id).toBeTruthy();
+    expect(uTurn()?.getAttribute('aria-describedby')).toBe(uTurnNote?.id);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
@@ -286,10 +302,26 @@ describe('ride-time targets, and the touch lock kept whole (ADR 0088 D-3.1)', ()
     ]);
     expect(declared('.oyl-hud__junction-title', 'color')).toEqual(['var(--oyl-color-hud-ink)']);
     expect(declared('.oyl-hud__panel', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
-    // No backing of its own to change the pair the panel declares.
-    for (const selector of ['.oyl-hud__junction', '.oyl-hud__junction-prompt']) {
+    // The U-turn's wrapper, in the actions panel, has no backing of its own to
+    // change the pair the panel declares; nor do the pop-up and its group,
+    // which paint nothing between their parts (#3053).
+    for (const selector of [
+      '.oyl-hud__junction',
+      '.oyl-hud__junction-popup',
+      '.oyl-hud__junction-prompt',
+    ]) {
       expect(declared(selector, 'background')).toEqual([]);
     }
+    // #3053: over the road, every line the pop-up says is on the HUD's opaque
+    // surface, the colour its pairs are checked against; each way is a
+    // control, on that surface already (`.oyl-hud__control`).
+    expect(declared('.oyl-hud__junction-head', 'background')).toEqual([
+      'var(--oyl-color-hud-surface)',
+    ]);
+    expect(declared('.oyl-hud__junction-popup .oyl-hud__junction-note', 'background')).toEqual([
+      'var(--oyl-color-hud-surface)',
+    ]);
+    expect(declared('.oyl-hud__control', 'background')).toEqual(['var(--oyl-color-hud-surface)']);
     for (const ink of ['hudInk', 'hudInkMuted'] as const) {
       const pair = CONTRAST_REQUIREMENTS.find(
         (each) => each.foreground === ink && each.background === 'hudSurface',
