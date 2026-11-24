@@ -741,6 +741,37 @@ describe('the map data — #1552, ADR 0054 D-3.6', () => {
     expect(licence?.getAttribute('rel') ?? '').toContain('noreferrer');
   });
 
+  it('names the terrain’s sources: Mapterhorn and its list, the USGS, Canada and Copernicus — #2013', async () => {
+    await render();
+    const credit = mapData()?.querySelector('[data-credit="terrain"]');
+    const words = (credit?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain('© Mapterhorn');
+    expect(words).toContain(
+      'U.S. Geological Survey’s 3D Elevation Program, which is in the public domain',
+    );
+    expect(words).toContain('Natural Resources Canada');
+    // The licence's own attribution statement, word for word.
+    expect(words).toContain(
+      'Contains information licensed under the Open Government Licence – Canada.',
+    );
+    // The notice Copernicus asks for with adapted data, word for word (ADR 0010 D-5).
+    expect(words).toContain(
+      'produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved',
+    );
+    const list = credit?.querySelector<HTMLAnchorElement>(
+      'a[href="https://mapterhorn.com/attribution"]',
+    );
+    expect(list?.textContent).toBe('Mapterhorn’s terrain tiles');
+    const licence = credit?.querySelector<HTMLAnchorElement>(
+      'a[href="https://open.canada.ca/en/open-government-licence-canada"]',
+    );
+    expect(licence?.textContent).toBe('Open Government Licence – Canada');
+    for (const link of [list, licence]) {
+      expect(link?.getAttribute('target')).toBe('_blank');
+      expect(link?.getAttribute('rel') ?? '').toContain('noreferrer');
+    }
+  });
+
   it('links the same ODbL URL, and credits in the same words, as an exported course', () => {
     expect(ODBL_LICENCE_URL).toBe(FIT_ODBL_LICENCE_URL);
     expect(OSM_ATTRIBUTION).toBe(FIT_OSM_ATTRIBUTION);

@@ -6,7 +6,9 @@
  */
 
 export * from './testing/mvt-encoder';
+export * from './testing/webp-encoder';
 export * from './fixtures/tiles';
+export * from './fixtures/height';
 export * from './fixtures/limits';
 export * from './fixtures/hostile';
 export * from './fixtures/street-graph';

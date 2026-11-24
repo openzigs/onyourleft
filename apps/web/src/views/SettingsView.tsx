@@ -205,6 +205,7 @@ import {
 } from '../ride/reading-choice';
 import { KIT_PALETTE } from '../game/bicycle';
 import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../map/basemap';
+import type { TerrainConfig } from '../terrain/config';
 import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
 
 /**
@@ -543,6 +544,12 @@ export interface SettingsViewProps {
    */
   readonly basemap?: BasemapConfig | undefined;
   /**
+   * The terrain archive this build reads a drawn route's heights from (#2013),
+   * so the map-tiles panel can say that the switch governs that read too, and
+   * name its host. `undefined` for a build that reads none.
+   */
+  readonly terrain?: TerrainConfig | undefined;
+  /**
    * Where the palette choice is kept (#672) — this DEVICE's `localStorage`
    * unless a test hands in a double, for the reason the announcements are:
    * the choice has to be read before the first paint, which the athlete row
@@ -605,6 +612,7 @@ export function SettingsView({
   storage,
   announcements,
   basemap,
+  terrain,
   themeStorage,
   maskedWords,
   calorieInputs,
@@ -880,6 +888,7 @@ export function SettingsView({
         <MapTilesPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
           basemap={basemap}
+          terrain={terrain}
         />
       </SettingsCard>
 
@@ -2617,9 +2626,11 @@ export const RIDE_READINGS_ONE_STAYS =
 function MapTilesPanel({
   storage,
   basemap,
+  terrain,
 }: {
   readonly storage: PreferenceStorage | undefined;
   readonly basemap: BasemapConfig | undefined;
+  readonly terrain: TerrainConfig | undefined;
 }): JSX.Element {
   const [drawn, setDrawn] = useState(() => readMapTilesChoice(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
@@ -2658,6 +2669,9 @@ function MapTilesPanel({
               data. With the realistic world chosen, choosing or saving a route also asks {host},
               once for that route, for the map along it, so the game can place towns where the map
               has them — but never for the map near your privacy zones.
+              {terrain === undefined
+                ? ''
+                : ` Drawing or redrawing a route also asks ${new URL(terrain.archiveUrl).host} for the heights of the ground along it, in squares several kilometres across.`}
               {ours
                 ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
                 : ''}{' '}

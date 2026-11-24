@@ -22,6 +22,13 @@ import {
   OSM_ATTRIBUTION,
   WORLDCOVER_ATTRIBUTION,
 } from '../map/basemap';
+import {
+  CANADA_OGL_NOTICE,
+  CANADA_OGL_URL,
+  COPERNICUS_DEM_NOTICE,
+  MAPTERHORN_ATTRIBUTION,
+  MAPTERHORN_ATTRIBUTION_URL,
+} from '../terrain/config';
 
 /**
  * Who made the art this app ships, generated from `ASSETS.toml` — #358.
@@ -554,6 +561,31 @@ export function CreditsView({
               Creative Commons Attribution 4.0 licence
             </a>
             . This app does not draw that layer.
+          </p>
+          {/*
+          #2013, ADR 0087 D-8: the heights of a drawn route come from this
+          project's own extract of Mapterhorn's terrain tiles. Mapterhorn's
+          data has no licence of its own: it is built from open sources, each
+          under its own terms, and its page lists every one. The sources named
+          here are the ones whose stated coverage is North America, which is
+          where the extract's zoom-12 tiles are; the Copernicus notice is the
+          one its terms ask for where the data has been adapted, word for word
+          (ADR 0010 D-5), and the Canadian statement is the licence's own.
+        */}
+          <p data-credit="terrain">
+            {MAPTERHORN_ATTRIBUTION}. The heights of a route you draw come from{' '}
+            <a href={MAPTERHORN_ATTRIBUTION_URL} target="_blank" rel="noreferrer">
+              Mapterhorn’s terrain tiles
+            </a>
+            , which are built from open elevation data; that page lists every source. This project
+            keeps a copy of them for the contiguous United States. There, the heights come from the
+            U.S. Geological Survey’s 3D Elevation Program, which is in the public domain. Along the
+            border with Canada they come from Natural Resources Canada. {CANADA_OGL_NOTICE} Where
+            neither reaches, the heights were {COPERNICUS_DEM_NOTICE}. The{' '}
+            <a href={CANADA_OGL_URL} target="_blank" rel="noreferrer">
+              Open Government Licence – Canada
+            </a>{' '}
+            is the Canadian data’s licence.
           </p>
         </div>
 
