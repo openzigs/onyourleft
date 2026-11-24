@@ -34,7 +34,7 @@ export function newRide() {
   const start = graph.edgesFrom('0,3').find((edge) => edge.id === 'h0,3');
   if (start === undefined) throw new Error('no start street');
   const route = new RollingRoute(graph, start);
-  return { route, choice: createJunctionChoice(route) };
+  return { route, choice: createJunctionChoice(route, () => 0) };
 }
 
 /**
@@ -139,7 +139,7 @@ export function starRide(turns: readonly number[], roadClasses: readonly number[
     };
   });
   const route = new RollingRoute(graphOf([approach, ...ways]), approach);
-  const choice = createJunctionChoice(route);
+  const choice = createJunctionChoice(route, () => 0);
   const junction = route.junctionsAfter(0)[0];
   if (junction === undefined || Math.abs(junction.distance - 500) > 10) {
     throw new Error('no junction at the end of the 500 m street');

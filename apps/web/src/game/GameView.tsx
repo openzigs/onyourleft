@@ -3048,8 +3048,11 @@ function GameScreen({
         openRoad === undefined ? { profile, origin: 0 } : { ...openRoad.view, follower: openRoad };
       setRideRoad(rideRoadRef.current);
       // #3013: and its junctions, chosen on the same rolling route.
+      // #3058: on the ride's own clock, which a pause stops, as it stops the picture.
       junctionRef.current =
-        openRoad === undefined ? undefined : createJunctionChoice(openRoad.route);
+        openRoad === undefined
+          ? undefined
+          : createJunctionChoice(openRoad.route, () => simulation.state.elapsed);
       junctionSaidRef.current = NO_JUNCTION_ANNOUNCED;
       // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
       // rider switched it on and consented — never in a room, a race or a
@@ -4194,9 +4197,11 @@ function GameScreen({
       // #3013: an open-world ride's next junction — its ways as the prompt
       // appears, each change of choice, the lock — owed until said
       // (`hud/junction-text.ts`). Nothing on every other ride.
+      // #3058: and what a turn press, or a dead end, says beside it.
       const junctionOffered = junctionEvent(
         junctionSaidRef.current,
         junctionRef.current?.prompt(simulation.state.ride.distance),
+        junctionRef.current?.notice(simulation.state.ride.distance),
       );
       junctionSaidRef.current = junctionOffered.announced;
       if (junctionOffered.event !== undefined) events.push(junctionOffered.event);
@@ -5379,6 +5384,8 @@ function GameScreen({
             ? undefined
             : {
                 prompt: choice.prompt(state.ride.distance),
+                // #3058: a U-turn, a dead end or a press with no junction near.
+                notice: choice.notice(state.ride.distance),
                 press: (turn: TurnPress) => {
                   choice.press(
                     turn,
