@@ -34,12 +34,20 @@ const failureOf = async (work: Promise<unknown>): Promise<TerrainFailure | 'reso
     (error: unknown) => terrainFailureOf(error),
   );
 
+/**
+ * Whether two byte arrays are the same bytes. A tile is 786 KB, and
+ * `toStrictEqual` walks it an element at a time: under the nightly coverage
+ * run that alone ran two cases here past Vitest's limit.
+ */
+const sameBytes = (read: Uint8Array | undefined, expected: Uint8Array): boolean =>
+  read !== undefined && read.length === expected.length && Buffer.from(read).equals(expected);
+
 describe('terrainArchiveFrom reads a height tile through PMTiles', () => {
   it('hands back a tile’s bytes exactly as stored', async () => {
     const tile = flatHeightTile();
     const bytes = await buildTerrainArchive([{ tile: FIXTURE_HEIGHT_TILE, bytes: tile }]);
     const read = await terrainArchiveFrom(countingSource(bytes)).tile(FIXTURE_HEIGHT_TILE);
-    expect(read).toStrictEqual(tile);
+    expect(sameBytes(read, tile)).toBe(true);
   });
 
   it('has no tile where the archive holds none', async () => {
@@ -109,7 +117,7 @@ describe('terrainArchiveFrom reads a height tile through PMTiles', () => {
     source.offline = true;
     expect(await failureOf(archive.tile(FIXTURE_HEIGHT_TILE))).toStrictEqual({ kind: 'network' });
     source.offline = false;
-    expect(await archive.tile(FIXTURE_HEIGHT_TILE)).toStrictEqual(tile);
+    expect(sameBytes(await archive.tile(FIXTURE_HEIGHT_TILE), tile)).toBe(true);
   });
 
   it('says a read that was stopped was stopped', async () => {
