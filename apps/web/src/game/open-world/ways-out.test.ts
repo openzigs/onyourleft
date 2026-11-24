@@ -417,6 +417,26 @@ describe('the ways out of the junctions in view — #3051', () => {
     expect(road.turnedOff(rider)).toHaveLength(0);
   });
 
+  it('drops a junction turned off at when the turn is undone before the lock, and through the junction on — #3123', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    const straight = junction.defaultWay;
+    expect(junction.distance - rider).toBeGreaterThan(JUNCTION_LOCK_METRES);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(1);
+    // A straight press before the lock takes the road on again: nothing was turned off.
+    expect(road.route.choose(junction.distance, straight, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(0);
+    // And it stays so as the rider rides through the junction and on.
+    for (const past of [junction.distance + 1, junction.distance + 100]) {
+      road.follow(past);
+      expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toHaveLength(0);
+    }
+  });
+
   it('without a frame, makes a way again once the trim has moved the view’s first point: both are drawn about it', () => {
     const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
     const road = new OpenWorldRoad(
