@@ -117,11 +117,12 @@ import {
   type PathPoint,
   type PressedTurn,
 } from '../drawn-line';
+import type { LandClassMask } from '../land-class';
 import type { MappedBuildings } from '../mapped-buildings';
 import { NearbyStreetScan } from '../nearby-streets';
 import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
-import { routeSeed } from '../scatter';
+import { routeSeed, WaysOutPlacing } from '../scatter';
 import type { StreetScans } from '../scene';
 import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
@@ -137,6 +138,7 @@ import {
   localGroundPosition,
   type CorridorOrigin,
 } from '../terrain';
+import { TURNED_OFF_REACH_METRES } from '../way-roads';
 import { easeWeight, easedLine, heldLine, reframing, type HeldLine } from './line-ease';
 
 /** No street names: what a road with no names hook paints. */
@@ -273,6 +275,21 @@ interface HeldWayOut extends OpenWorldWayOut {
 const NO_WAYS_OUT: readonly OpenWorldWayOut[] = [];
 
 /**
+ * A junction where the route leaves the road it came along — #3123: it takes
+ * a way that is not ADR 0088 D-1.4's default, so the road the rider came
+ * along carries on past the junction as {@link way}, and runs back from it as
+ * the road itself. `scene.ts` §`SceneInput.turnedOff`. @see OpenWorldRoad.turnedOff
+ */
+export interface OpenWorldTurnedOff {
+  /** The junction's ride distance. */
+  readonly junction: number;
+  /** The way the route would have taken there: the road turned off, on past the junction. */
+  readonly way: OpenWorldWayOut;
+}
+
+const NO_TURNED_OFF: readonly OpenWorldTurnedOff[] = [];
+
+/**
  * One junction of the ride, as the scene cuts a village's street at it
  * (`scene.ts` §`SceneInput.junctionsSeen`). @see OpenWorldRoad.junctionsSeen
  */
@@ -364,6 +381,12 @@ export interface OpenWorldRoadHooks {
   readonly frame?: CorridorOrigin | undefined;
   /** #2902: the mapped buildings planned round the rider, in {@link frame}, once there are any. */
   readonly buildings?: (() => MappedBuildings | undefined) | undefined;
+  /**
+   * #3105: the real water of the tiles planned so far, in {@link frame}, as
+   * the land mask the scene reads its water from (`water-mask.ts`);
+   * `undefined` while no tile planned holds any.
+   */
+  readonly water?: (() => LandClassMask | undefined) | undefined;
   /**
    * #2903: the held blocks' streets as a corridor in {@link frame}
    * (`street-corridor.ts`), which the scene draws to the fog as road and
@@ -501,11 +524,13 @@ export class OpenWorldRoad {
   /**
    * #3107: the ride's readings of its streets, a slice a frame
    * (`scene.ts` §`SceneInput.streetScans`). One for the ride: a reading is
-   * handed on as last read through every view and corridor change.
+   * handed on as last read through every view and corridor change. #3119:
+   * and the ways out whose scenery is placed a few a frame.
    */
   readonly streetScans: StreetScans = {
     nearby: new NearbyStreetScan(),
     junctions: new JunctionScan(),
+    ways: new WaysOutPlacing(),
   };
   #view: OpenWorldRoadView;
   #uTurns: number;
@@ -549,6 +574,11 @@ export class OpenWorldRoad {
   /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
   buildings(): MappedBuildings | undefined {
     return this.#hooks.buildings?.();
+  }
+
+  /** The real water round the rider as a land mask (#3105), or `undefined` while none is planned. */
+  water(): LandClassMask | undefined {
+    return this.#hooks.water?.();
   }
 
   /** The streets round the rider as a corridor (#2903), or `undefined` while none are held. */
@@ -613,6 +643,11 @@ export class OpenWorldRoad {
         readonly ways: readonly OpenWorldWayOut[];
       }
     | undefined;
+
+  /** Each junction where the route turns off the road it came along, by ride distance. @see turnedOff */
+  #turnedOff = new Map<number, HeldWayOut>();
+  /** What {@link turnedOff} last handed on: the same array until a junction is added, changed or dropped. */
+  #turnedOffList: readonly OpenWorldTurnedOff[] = NO_TURNED_OFF;
 
   /** Every junction seen, by ride distance and node. @see junctionsSeen */
   #junctionsSeen = new Map<string, OpenWorldJunctionSeen>();
@@ -704,6 +739,18 @@ export class OpenWorldRoad {
           held.set(key, out);
           if (depth < WAYS_OUT_DEPTH) look(out.route, junction.distance, depth + 1);
         }
+        // #3123: where the road's own route turns off the road it came along,
+        // the way it would have taken is that road on past the junction. As
+        // last looked at before the rider passes it: a choice can change it
+        // until then.
+        if (route === this.route) {
+          const onward =
+            junction.taken === junction.defaultWay
+              ? undefined
+              : held.get(`${String(junction.distance)}:${junction.defaultWay}`);
+          if (onward === undefined) this.#turnedOff.delete(junction.distance);
+          else this.#turnedOff.set(junction.distance, onward);
+        }
       }
     };
     // Behind the rider: what each junction of the road had as the rider
@@ -729,6 +776,22 @@ export class OpenWorldRoad {
     if (this.#junctionsSeenList === NO_JUNCTIONS_SEEN && this.#junctionsSeen.size > 0) {
       this.#junctionsSeenList = [...this.#junctionsSeen.values()];
     }
+    // #3123: a junction turned off at is handed on until it is past the fog behind.
+    for (const [junction, way] of this.#turnedOff) {
+      if (junction < rider - TURNED_OFF_REACH_METRES || !(fixed || way.origin === origin)) {
+        this.#turnedOff.delete(junction);
+      }
+    }
+    const listed = this.#turnedOffList;
+    if (
+      listed.length !== this.#turnedOff.size ||
+      listed.some((each) => this.#turnedOff.get(each.junction) !== each.way)
+    ) {
+      this.#turnedOffList =
+        this.#turnedOff.size === 0
+          ? NO_TURNED_OFF
+          : [...this.#turnedOff].map(([junction, way]) => ({ junction, way }));
+    }
     const ways: readonly OpenWorldWayOut[] = [...held.values()];
     const same =
       last !== undefined &&
@@ -741,6 +804,32 @@ export class OpenWorldRoad {
       ways: same ? last.ways : ways.length === 0 ? NO_WAYS_OUT : ways,
     };
     return this.#waysOutFor.ways;
+  }
+
+  /**
+   * Every junction within {@link TURNED_OFF_REACH_METRES} of a rider at ride
+   * distance `rider` where the route turns off the road it came along — #3123,
+   * the owner's tablet ride of 2026-11-24: after a turn, the road turned off
+   * stopped at the junction although it carries on.
+   *
+   * After a turn the road the rider came along is neither the road the scene
+   * draws (it draws the view's road from `terrain.ts` §`VIEW_BEHIND_METRES`
+   * behind the rider) nor a street the streets' own drawing reads (it is the
+   * route, so `nearby-streets.ts` keeps off it, and the way on past the
+   * junction was the route until the choice), and a way out is handed on only
+   * to {@link WAYS_OUT_BEHIND_METRES} behind the rider. So each is handed on
+   * here, with the way the route would have taken, until the rider is past
+   * the fog from it: `scene.ts` draws the road on past the junction and back
+   * from it (`way-roads.ts` §`WayReached.turnedOff`) once the rider has passed
+   * it. Junctions ahead are handed on too, as the route stands now, so the
+   * scene starts drawing on the frame the rider passes one. A U-turn drops
+   * them all, as it drops the ways out. The same array until one is added,
+   * changed or dropped; none for a rider distance that is not a number.
+   */
+  turnedOff(rider: number): readonly OpenWorldTurnedOff[] {
+    if (!Number.isFinite(rider)) return NO_TURNED_OFF;
+    this.waysOut(rider);
+    return this.#turnedOffList;
   }
 
   /** The view last handed on. */
@@ -829,6 +918,8 @@ export class OpenWorldRoad {
       this.#waysOut.clear();
       this.#junctionsSeen.clear();
       this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+      this.#turnedOff.clear();
+      this.#turnedOffList = NO_TURNED_OFF;
     }
     this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;

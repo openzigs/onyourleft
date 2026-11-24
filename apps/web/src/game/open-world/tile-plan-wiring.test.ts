@@ -15,7 +15,7 @@
  * its worker, is red here.
  */
 
-import type { TileId } from '@onyourleft/map-features';
+import { columnAtLongitude, rowAtLatitude, type TileId } from '@onyourleft/map-features';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
@@ -31,7 +31,7 @@ import {
 import { graphWorkerCore } from './graph-build';
 import { createOpenWorldSession, TILE_ASK_METRES } from './session';
 import { openWorldStreetCorridor } from './street-corridor';
-import type { TileBlockFeatures } from './tile-plan';
+import { planTile, type TileBlockFeatures, type TilePlan } from './tile-plan';
 import {
   createTilePlanner,
   describeTilePlanFailure,
@@ -98,6 +98,8 @@ async function openRide(
   log?: (line: string) => void,
   held?: ReadonlyMap<string, TileBlockFeatures>[],
   wrap?: (planner: TilePlanner) => TilePlanner,
+  /** #3105: plans the planner holds beside its own, as if a tile of the map had held them. */
+  beside?: () => readonly TilePlan[],
 ) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
   const session = createOpenWorldSession({
@@ -116,6 +118,10 @@ async function openRide(
         held?.push(blocks);
         hold(blocks);
       };
+      if (beside !== undefined) {
+        const plans = planner.plans.bind(planner);
+        planner.plans = () => [...plans(), ...beside()][Symbol.iterator]();
+      }
       return wrap === undefined ? planner : wrap(planner);
     },
   });
@@ -196,6 +202,71 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     // One corridor per change of what is held, and the road hands on the last.
     expect(built).toHaveBeenCalledTimes(changes.length);
     expect(road.streets()).toBe(built.mock.results.at(-1)?.value);
+    session.stop();
+  });
+
+  it('hands the road the planned tiles’ real water as one land mask — #3105', async () => {
+    stubWorkers();
+    // A tile of the session's own frame with a pond 100 m across on the start.
+    const start = fixtureStart(START_COLUMN, START_ROW).position;
+    const frame = { latitude: start.latitude, longitude: start.longitude };
+    const tile = {
+      z: 15 as const,
+      x: Math.floor(columnAtLongitude(start.longitude)),
+      y: Math.floor(rowAtLatitude(start.latitude)),
+    };
+    const pond = planTile(
+      frame,
+      {
+        buildings: [],
+        landUse: [
+          {
+            layer: 'water',
+            kind: 'pond',
+            rings: [Float32Array.from([-50, -50, 50, -50, 50, 50, -50, 50])],
+          },
+        ],
+        tiles: [{ tile, streets: [] }],
+      },
+      tile,
+      'reduced',
+    );
+    let beside: TilePlan[] = [];
+    const held: ReadonlyMap<string, TileBlockFeatures>[] = [];
+    const { session, road } = await openRide(undefined, held, undefined, () => beside);
+    // Every block is held with its water lines, which each tile plans its own of
+    // (`real-water.test.ts`); the fixture's map has none, and says so as a list.
+    expect(held.length).toBeGreaterThan(0);
+    for (const blocks of held) {
+      for (const features of blocks.values()) expect(features.waterLines).toStrictEqual([]);
+    }
+    // Before any tile is planned there is no water, and the road says so.
+    expect(road.water()).toBeUndefined();
+    beside = [pond];
+    road.follow(0);
+    await settle();
+    const mask = road.water();
+    expect(mask?.classAt(0, 0)).toBe('water');
+    expect(mask?.covered(0, 150)).toBe(true);
+    // The same object frame after frame, and after more tiles with no water are planned.
+    expect(road.water()).toBe(mask);
+    road.follow(30);
+    await settle();
+    expect(road.water()).toBe(mask);
+    session.stop();
+  });
+
+  it('hands the road no water mask where no tile planned holds water — #3105', async () => {
+    stubWorkers();
+    const { session, road } = await openRide();
+    road.follow(0);
+    await settle();
+    // Control: tiles were planned, and the fixture's map has no water on it.
+    expect(road.buildings()).toBeUndefined();
+    road.follow(30);
+    await settle();
+    expect(road.buildings()).toBeDefined();
+    expect(road.water()).toBeUndefined();
     session.stop();
   });
 

@@ -1127,6 +1127,88 @@ export const SCATTER_WAY_REACH_METRES = 400;
  */
 const SCATTER_WAY_STEP_METRES = 4 * SCATTER_CELL_METRES;
 
+/**
+ * How many ways out a frame of an open-world ride may place the scenery of
+ * for the first time — #3119: **2**. @see WaysOutPlacing
+ *
+ * A way's first frame builds its villages, farmsteads and field boundaries
+ * for {@link SCATTER_WAY_REACH_METRES} (`settlements.ts` §`structuresOnWay`),
+ * its billboards and its first cells of scenery. In a town with a street
+ * every 100 m a junction coming into reach hands on some twenty ways at once,
+ * its own and those of the junctions along them (`open-world/road.ts`
+ * §`WAYS_OUT_DEPTH`), and placing them all was 15 to 30 ms of one frame on a
+ * laptop (PR #3117's measurements, and #3119's). Two a frame is about a
+ * tenth of that, and twenty ways are placed in ten frames, a sixth of a
+ * second at 60 frames a second: a junction comes into reach at the view's
+ * far edge, so the ways are placed before the rider is near them.
+ */
+export const WAYS_PLACED_A_FRAME = 2;
+
+/**
+ * **One open-world ride's ways out, their scenery placed a few a frame** —
+ * #3119. `scene.ts` hands every way out through {@link placing} before it
+ * places anything along one.
+ *
+ * - A way whose scenery an earlier frame placed is handed on: what stands
+ *   along it is kept for as long as its view is (`placedOnWay`,
+ *   `settlements.ts` §`structuresOnWay`), so it costs a frame a lookup.
+ * - Of the others, at most {@link WAYS_PLACED_A_FRAME} are handed on a
+ *   frame, the junctions nearest the rider first, and the rest wait for the
+ *   frames after: until a way is handed on, the frame draws nothing past its
+ *   junction along it, as it did before the junction came into reach.
+ * - **The ride's first call hands on every way**, behind the ride's first
+ *   frame, which the loading screen covers: a ride does not start with the
+ *   scenery along its ways out coming in one by one. The scene calls it on
+ *   every open-world frame, one with no ways too, so the first call is the
+ *   ride's first frame and not the first frame that has ways.
+ *
+ * Keyed on the way's view, which `open-world/road.ts` §`waysOut` keeps the
+ * same object for as long as the way is handed on.
+ */
+export class WaysOutPlacing {
+  readonly #placed = new WeakSet<RouteProfile>();
+  #first = true;
+  #waiting = 0;
+
+  /** How many ways the last call held back for a later frame. */
+  get waiting(): number {
+    return this.#waiting;
+  }
+
+  /**
+   * The ways of `ways` a frame may place the scenery along: every one placed
+   * before, and at most {@link WAYS_PLACED_A_FRAME} more, the nearest the
+   * rider first; on the ride's first call, all. `ways` itself where that is
+   * every one of them.
+   *
+   * @param riderMetres the rider's ride distance, which every view counts
+   * from its own first sample (`scenery-anchor.ts`)
+   */
+  placing(ways: readonly ScatterWay[], riderMetres: number): readonly ScatterWay[] {
+    let fresh: ScatterWay[] | undefined;
+    for (const way of ways) {
+      if (this.#placed.has(way.profile)) continue;
+      fresh ??= [];
+      fresh.push(way);
+    }
+    this.#waiting = 0;
+    // PR #3125's review: the first call is spent here whether or not it has
+    // ways, or a ride whose first frames hand none places its first junction whole.
+    const first = this.#first;
+    this.#first = false;
+    if (fresh === undefined) return ways;
+    const most = first ? fresh.length : WAYS_PLACED_A_FRAME;
+    if (fresh.length > most) {
+      const away = (way: ScatterWay): number =>
+        Math.abs(way.fromMetres + (sceneryAnchor(way.profile)?.origin ?? 0) - riderMetres);
+      fresh.sort((first, second) => away(first) - away(second));
+    }
+    for (const way of fresh.slice(0, most)) this.#placed.add(way.profile);
+    this.#waiting = Math.max(0, fresh.length - most);
+    return this.#waiting === 0 ? ways : ways.filter((way) => this.#placed.has(way.profile));
+  }
+}
+
 /** Whether two frames of reference are the same one: a view with no fixed frame makes its own each time it is asked. */
 export function sameOrigin(a: CorridorOrigin, b: CorridorOrigin): boolean {
   return (
