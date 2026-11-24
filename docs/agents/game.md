@@ -1659,7 +1659,45 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `channel` set, `CHANNEL_SHAPES` by kind, its water
                         following the road), laid on the frame's drawn ground
                         where the columns cannot cut it; a ditch or drain is
-                        never bridged (`BRIDGED_WATER_LINE_KINDS`)
+                        never bridged (`BRIDGED_WATER_LINE_KINDS`).
+                        ⚠️ Since #3105, on an OPEN-WORLD view only, the
+                        map's water under the road and on both sides of it
+                        is one crossing as wide as that water
+                        (`waterUnderRoad`, `Crossing.halfWidth`): its bed,
+                        banks, surface, deck, abutments and approaches lie
+                        `crossingWiden` further out, and a deck is at most
+                        `BRIDGE_MAX_PIECES` pieces. A route's crossings are
+                        its water lines' alone, as before
+    src/game/mapped-spans.ts
+                        the mapped bridges and tunnels an open-world ride is
+                        on (#3105): the stretches of the view along a street
+                        graded `bridge` or `tunnel` (`riddenSpans`, by
+                        geometry from `WorldCorridor.streets`, parallel to
+                        the road within 30° so an overpass is not the road's
+                        own) carry the stream bridges' parapets for the whole
+                        span and a concrete portal at each tunnel mouth; a
+                        side street's bridge gets a parapet along each edge
+                        (`sideDeckParts`). ⚠️ All in `BridgeBelt`'s 128
+                        boxes, no mesh or draw call of its own; the deck is
+                        the road at the road's level (flat until #2899), so a
+                        trainer's grade there is the route's. Open-world
+                        views only (`scene.ts` asks where the profile is
+                        anchored)
+    src/game/open-world/water-mask.ts
+                        an open-world ride's real water as the land mask the
+                        scene reads water from (#3105), from the planned
+                        tiles' `water` cells and the water lines through each
+                        tile, each read once (`tile-plan.ts` §`TileWater`). ⚠️ **Water and
+                        its wetland only**: every other class reads
+                        `unknown`, so no placement rule changes; `covered`
+                        is true only within 200 m of real water
+                        (`REAL_WATER_BUFFER_METRES`), which is what drops an
+                        invented stream or lake beside it; no mask at all
+                        where no tile holds water, and the same object until
+                        a tile that holds water is planned or let go
+                        (`WaterMaskKeeper`). `session.ts` hands it to the
+                        road (`OpenWorldRoad.water`) and `GameView` to the
+                        scene as `landClass`; `real-water.test.ts` rides it
     src/game/mapped-pools.ts
                         the map's swimming pools and fountains (#2974), round
                         the camera, as lighter water and a stone coping in the
@@ -2383,7 +2421,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
                         first, all on the ride's first frame; a junction in a
                         dense town hands on ~20 at once. The way roads below
-                        still read every way handed
+                        still read every way handed on.
+                        ⚠️ Since #3105 an open-world ride draws a side
+                        street's BRIDGE too, as a deck at the road's level
+                        across the water a ground street stops at
+                        (`deckGround`, `SideRoad.deck`); a route ride still
+                        leaves every bridge to `overpasses.ts`.
     src/game/way-roads.ts
                         way roads (#3106) — every way out of an open-world
                         junction (`SceneInput.waysOut`, the views the rolling

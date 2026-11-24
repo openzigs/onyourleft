@@ -162,6 +162,7 @@ import {
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { riddenSpanParts, riddenSpans, sideDeckParts } from './mapped-spans';
 import {
   nearbyStreets,
   nearbyStreetsAt,
@@ -831,7 +832,23 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
   // road runs on off both ends of its deck, and is a side road: drawn in the
   // road's material by the same mesh and kept clear of the scenery.
   const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
-  const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  const waterBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  // #3105: and, on an open-world view, the mapped bridges and tunnels the
+  // ridden road itself is on (`mapped-spans.ts`): parapets along the whole
+  // mapped span, a portal at each tunnel mouth, in the same belt's boxes.
+  const spanParts =
+    input.worldCorridor === undefined || sceneryAnchor(input.profile) === undefined
+      ? NO_BRIDGE_PARTS
+      : riddenSpanParts(
+          input.profile,
+          input.origin,
+          corridor,
+          riddenSpans(input.worldCorridor, input.profile, input.origin),
+          ways,
+          riderDistance,
+          MAXIMUM_BRIDGE_PARTS - waterBridges.length,
+        );
+  const streamBridges = spanParts.length === 0 ? waterBridges : [...waterBridges, ...spanParts];
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
   // #2973: and the mapped streets that never touch the route, out to the fog —
   // side roads too, so the same mesh draws them and the scenery keeps off them.
@@ -1023,7 +1040,7 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     // #2661: and the mapped streets crossing over or under the route, with them.
     // #2974: and the channels beside the road laid on this frame's ground,
     // and the mapped pools round the camera.
-    water: water(input, corridor, ways, streamBridges, crossings, ground, camera, seed),
+    water: water(input, corridor, ways, streamBridges, crossings, nearby, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -1033,6 +1050,9 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     ),
   };
 }
+
+/** No boxes: a frame on no mapped bridge. */
+const NO_BRIDGE_PARTS: readonly BridgePart[] = [];
 
 /** No side roads: a frame with no nearby street. */
 const NO_SIDE_ROADS: readonly SideRoad[] = [];
@@ -1345,6 +1365,7 @@ function water(
   ways: Waterways,
   streams: readonly BridgePart[],
   crossings: CrossingsInView,
+  nearby: readonly SideRoad[],
   ground: TerrainMesh,
   camera: CameraPose,
   seed: number,
@@ -1361,9 +1382,13 @@ function water(
           camera.x,
           camera.z,
         );
+  const bridges = crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts];
+  // #3105: and the parapets of the side streets' decks in view, in what room
+  // the belt has left. None but on an open-world ride (`nearby-streets.ts`).
+  const decks = sideDeckParts(nearby, MAXIMUM_BRIDGE_PARTS - bridges.length);
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways, ground, pools),
-    bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
+    bridges: decks.length === 0 ? bridges : [...bridges, ...decks],
     seconds: input.state.elapsed,
   };
 }
