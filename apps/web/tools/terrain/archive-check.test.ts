@@ -5,13 +5,13 @@
  * an extract holds, and whether an uploaded object is the local file.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { flatHeightTile, residentialBlockTile } from '@onyourleft/map-features/testing';
 import { PMTiles } from 'pmtiles';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { buildTerrainArchive } from '../../src/terrain/terrain-testing';
 import { buildArchive, countingSource } from '../../src/world-data/archive-testing';
@@ -80,6 +80,21 @@ describe('planExtract', () => {
     expect(source.calls.every((call) => call.offset < tileDataOffset)).toBe(true);
   });
 
+  it('counts zoom 12 only: upstream’s lower zooms are not in the hosted extract', async () => {
+    // A z11 tile inside the box, in an archive that, as upstream's does, holds zoom 0 to 12.
+    const archive = await buildTerrainArchive(
+      [{ tile: { z: 12, x: 425, y: 775 }, bytes: flatHeightTile() }],
+      {
+        zoom: 11,
+        minZoom: 0,
+        maxZoom: 12,
+      },
+    );
+    const plan = await planExtract(countingSource(archive));
+    expect(plan.tiles).toBe(0);
+    expect(plan.perZoom[11]).toStrictEqual({ tiles: 0, bytes: 0 });
+  });
+
   it('counts nothing below the zoom it was asked for', async () => {
     const archive = await buildTerrainArchive([{ tile: INSIDE, bytes: flatHeightTile() }]);
     expect((await planExtract(countingSource(archive), TERRAIN_EXTRACT_BOX, 11)).tiles).toBe(0);
@@ -92,6 +107,16 @@ describe('terrainHeaderFault', () => {
   it('passes a WebP archive that reaches zoom 12, stored uncompressed', async () => {
     const archive = await buildTerrainArchive([{ tile: INSIDE, bytes: flatHeightTile() }]);
     expect(terrainHeaderFault(await headerOf(archive))).toBeUndefined();
+  });
+
+  it('passes the hosted shape: zoom 12 only, min zoom and max zoom both 12', async () => {
+    const archive = await buildTerrainArchive([{ tile: INSIDE, bytes: flatHeightTile() }], {
+      minZoom: 12,
+      maxZoom: 12,
+    });
+    const header = await headerOf(archive);
+    expect(header.minZoom).toBe(12);
+    expect(terrainHeaderFault(header)).toBeUndefined();
   });
 
   it('names what is wrong with a vector archive, a compressed one and a shallow one', async () => {
@@ -114,7 +139,7 @@ describe('terrainHeaderFault', () => {
 
 describe('sampleRanges', () => {
   it('spreads eight 64 KiB ranges from the first byte to the last', () => {
-    const length = 19_250_356_936;
+    const length = 14_438_629_218;
     const ranges = sampleRanges(length);
     expect(ranges).toHaveLength(8);
     expect(ranges[0]).toStrictEqual({ offset: 0, length: VERIFY_RANGE_BYTES });
@@ -198,12 +223,48 @@ describe('the command', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('plans a local archive and prints its tiles and bytes', async () => {
     const lines: string[] = [];
     expect(await main(['plan', archivePath], (line) => lines.push(line))).toBe(0);
-    expect(lines[0]).toBe('box -125,24,-66,50, zoom 0 to 12');
+    expect(lines[0]).toBe('box -125,24,-66,50, zoom 12');
+    // One line per zoom counted, and that is zoom 12 alone.
+    expect(lines.filter((line) => /^z\d+:/.test(line))).toStrictEqual([
+      expect.stringMatching(/^z12: 1 tiles, \d+ bytes$/),
+    ]);
     expect(lines[1]).toBe('tiles: 1 (1 distinct contents)');
     expect(lines[2]).toMatch(/^tile bytes: \d+ \(0\.00 GB\)$/);
+  });
+
+  it('verifies an upload and prints each check as one line, and only that line', async () => {
+    // The host, as R2 answers: 206 and a Content-Range carrying the total length.
+    const bytes = await readFile(archivePath);
+    vi.stubGlobal('fetch', (_url: string, init: { headers: Record<string, string> }) => {
+      const [, from, to] = /bytes=(\d+)-(\d+)/.exec(init.headers.Range ?? '') ?? [];
+      const start = Number(from);
+      const end = Math.min(Number(to), bytes.length - 1);
+      return Promise.resolve(
+        new Response(bytes.subarray(start, end + 1), {
+          status: 206,
+          headers: {
+            'content-range': `bytes ${String(start)}-${String(end)}/${String(bytes.length)}`,
+          },
+        }),
+      );
+    });
+    // Every argument `out` is handed, as `console.log` would print them all.
+    const calls: unknown[][] = [];
+    const code = await main(
+      ['verify', archivePath, 'https://tiles.example.invalid/terrain.pmtiles'],
+      (...args: unknown[]) => calls.push(args),
+    );
+    expect(code).toBe(0);
+    expect(calls.every((args) => args.length === 1)).toBe(true);
+    expect(calls[0]).toStrictEqual([`length: ${String(bytes.length)} bytes, both`]);
+    expect(calls.at(-1)).toStrictEqual(['verified: the uploaded object is the local file']);
   });
 
   it('refuses to verify a local file that is not a terrain archive, before asking any host', async () => {

@@ -4,7 +4,7 @@
  * Where the terrain archive is, and what must be credited for it — #2013.
  *
  * The archive is the project's own extract of **Mapterhorn** terrain tiles:
- * the contiguous United States, zoom 0 to 12, 19.25 GB, on the same storage
+ * the contiguous United States, zoom 12 only, 14.44 GB, on the same storage
  * and host as the basemap (`map/basemap.ts` §`PUBLISHED_BASEMAP_URL`).
  * `tools/terrain/README.md` records how it is extracted, uploaded and checked.
  * A drawn route's heights are read from it in the app, at zoom 12, with no
@@ -43,8 +43,8 @@ export const TERRAIN_URL_VARIABLE = 'VITE_TERRAIN_PMTILES_URL';
  * The archive a build reads heights from when nothing else is configured.
  *
  * Named for upstream's own date: Mapterhorn 0.0.13's `planet.pmtiles`, last
- * modified 2026-09-11, cut to the box −125°..−66° by 24°..50° at every zoom it
- * has (0 to 12).
+ * modified 2026-09-11, cut to the box −125°..−66° by 24°..50° at zoom 12 only,
+ * the one zoom the app reads (the owner's ruling of 2026-11-24).
  */
 export const PUBLISHED_TERRAIN_URL =
   'https://tiles.openzigs.com/terrain-us-mapterhorn-20260911.pmtiles';
