@@ -142,9 +142,10 @@ describe('a level round’s obstacle count — #2362, the owner’s ruling of 20
     });
   }
 
-  it('places both: 2 on level 1 at seeds 1 to 16, and 3 at seed 17', () => {
-    expect(countsOn('morning-round', SEEDS.slice(0, 16))).toEqual(new Set([2]));
-    expect(countsOn('morning-round', [17])).toEqual(new Set([3]));
+  // #3047: seeds 1 to 16 and 17 until each footprint two tiles carried was planned once.
+  it('places both: 2 on level 1 at seeds 1 to 39, and 3 at seed 40', () => {
+    expect(countsOn('morning-round', SEEDS.slice(0, 39))).toEqual(new Set([2]));
+    expect(countsOn('morning-round', [40])).toEqual(new Set([3]));
   });
 
   for (const seeds of SEED_CHUNKS) {

@@ -86,7 +86,12 @@ import { flushSync } from 'react-dom';
 
 import { viewGroupsLoaded } from './views-loaded';
 
-import { unixSeconds } from '@onyourleft/domain';
+import {
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  unixSeconds,
+} from '@onyourleft/domain';
 import { activityId, openActivityStore, routeId, type ActivityStore } from '@onyourleft/store';
 
 import { tabbableElements } from '../src/a11y/audit';
@@ -107,6 +112,7 @@ import {
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
 import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { OpenWorldStartPort } from '../src/game/open-world/start-port';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import { idleSnapshot, stubRideController } from '../src/ride/testing';
 import {
@@ -367,6 +373,8 @@ export interface FirstControl {
 
 declare global {
   interface Window {
+    /** How many times the open-world picker's *Start the ride* was pressed (`?openworld=port`, #3050). */
+    __oylOpenWorldBegun?: number;
     /**
      * A stable name for an element, for comparing a real Tab sequence with the
      * model's — #666. The probed link is `link`.
@@ -639,6 +647,34 @@ const REFUSED_RELEASE: GameTrainerPort = {
   }),
 };
 
+/**
+ * `?openworld=port` — #3050. The open-world picker with a rider's routes and
+ * rides to start from, so *Start the ride* is drawn once a start is chosen:
+ * with no port, as in every other walk, the picker says its lists cannot be
+ * read and offers no start at all. Its start is never begun: `begin` records
+ * the press and opens nothing.
+ */
+const OPEN_WORLD_START = geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12));
+const OPEN_WORLD_PORT: OpenWorldStartPort = {
+  listRouteStarts: () =>
+    Promise.resolve([
+      {
+        id: 'route-open-world',
+        name: 'The mill loop',
+        start: { kind: 'start', start: { position: OPEN_WORLD_START, source: 'route' } },
+      },
+    ]),
+  listRideStarts: () =>
+    Promise.resolve([
+      { id: 'ride-open-world', name: 'Morning ride', startedAt: 1_790_000_000, timeZone: 'UTC' },
+    ]),
+  rideStart: () =>
+    Promise.resolve({ kind: 'start', start: { position: OPEN_WORLD_START, source: 'ride' } }),
+  begin: () => {
+    window.__oylOpenWorldBegun = (window.__oylOpenWorldBegun ?? 0) + 1;
+  },
+};
+
 function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
   const release = new URLSearchParams(window.location.search).get('release');
@@ -652,6 +688,10 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   // press — with no ride on, because the populated fixture's ride is recording
   // and back does nothing during one.
   const android = new URLSearchParams(window.location.search).get('shell') === 'android';
+  const openWorld = new URLSearchParams(window.location.search).get('openworld');
+  if (openWorld !== null && openWorld !== 'port') {
+    throw new Error(`reflow harness: ?openworld must be "port", not ${openWorld}`);
+  }
   return (
     <PopulatedShell
       populated={populated}
@@ -661,6 +701,7 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
       {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
       {...(release === 'refused' ? { gameTrainer: REFUSED_RELEASE } : {})}
+      {...(openWorld === 'port' ? { openWorld: OPEN_WORLD_PORT } : {})}
       transfer={transfer}
       map={realMap}
       basemap={{

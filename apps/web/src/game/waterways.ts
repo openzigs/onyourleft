@@ -102,6 +102,7 @@ import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyou
 import { BRIDGED_WATER_LINE_KINDS, type WaterLineFeature } from '@onyourleft/map-features';
 
 import type { LandClassMask } from './land-class';
+import { sceneryAnchor } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   ROAD_WIDTH_METRES,
@@ -133,6 +134,26 @@ export const VALLEY_WINDOW_METRES = 300;
  * to climb to meet it.
  */
 export const VALLEY_DEPTH_METRES = 8;
+
+/**
+ * How far either side of a valley floor the road is looked along to tell a
+ * turnaround from a valley, in metres: **30** — #3064. Where the road that
+ * far before the floor and that far after it are nearer each other than
+ * that, the road turned back at the floor rather than crossing it.
+ *
+ * ⚠️ **Why a low point is not always a valley.** A route that turns back on
+ * itself — an open-world U-turn (`RollingRoute.uTurn`), whose road past the
+ * rider is the road they came along, ridden back, or the far end of an
+ * out-and-back — mirrors its profile about the turn. Turned on a descent, the
+ * turn is the lowest point for a kilometre each way, and was read as a
+ * valley floor: a stream, its banks and a bridge were put at the rider's
+ * feet where there is no water, and the scenery round the turn was moved for
+ * them. Measured on `rolling-testing`'s grid, a U-turn at 640 m on a descent
+ * put a crossing at 640 m. A road that crosses a valley goes on across it: its
+ * two ends are about twice this apart. A hairpin tighter than 15 m in radius
+ * at a valley floor is read as a turnaround, and its stream is not drawn.
+ */
+export const TURNAROUND_REACH_METRES = 30;
 
 /** The most elevation samples the valley and lake search reads, whatever the route's length. */
 export const WATERWAY_SAMPLE_LIMIT = 4_096;
@@ -2332,6 +2353,55 @@ function surfacePastShore(lake: Lake): number {
 }
 
 /** The search itself. @see waterways */
+/**
+ * How low each sample must be for a lake beside it, on an open-world view —
+ * #3065: {@link LAKE_LOW_SHARE} of the way up, at least
+ * {@link LAKE_LOW_METRES}, from the lowest to the highest of the samples
+ * within `reach` of it, as a route reads its whole profile.
+ *
+ * ⚠️ **Why round each sample, and why that far.** A view's lowest and
+ * highest samples move as road is added ahead and dropped behind, and a
+ * level read off them moved every lake at a view change, or made one or took
+ * one away. Read within `reach`, the lake enclosure's own distance, a lake
+ * is decided by the road within that much of it, which a lake needs on the
+ * view to be found at all (the road must climb out of it either side): so
+ * any two views that can find a lake read it the same way. And it is still
+ * the land round the lake that says how low is low, on a ride that climbs
+ * a long way from where it started.
+ */
+function lowAround(elevation: Float64Array, reach: number): Float64Array {
+  const count = elevation.length;
+  const low = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    let lowest = Number.POSITIVE_INFINITY;
+    let highest = Number.NEGATIVE_INFINITY;
+    const last = Math.min(count - 1, index + reach);
+    for (let near = Math.max(0, index - reach); near <= last; near += 1) {
+      const each = elevation[near] as number;
+      lowest = Math.min(lowest, each);
+      highest = Math.max(highest, each);
+    }
+    low[index] = lowest + Math.max(LAKE_LOW_METRES, (highest - lowest) * LAKE_LOW_SHARE);
+  }
+  return low;
+}
+
+/**
+ * Whether the road turns back on itself at route distance `at`: the drawn
+ * road {@link TURNAROUND_REACH_METRES} before it and as far after it are
+ * nearer each other than that — #3064. On a point-to-point route, a point
+ * nearer an end than that is not judged, and does not turn back.
+ */
+function turnsBackAt(profile: RouteProfile, at: number): boolean {
+  const before = at - TURNAROUND_REACH_METRES;
+  const after = at + TURNAROUND_REACH_METRES;
+  if (!profile.loop && (before < 0 || after > profile.totalDistance)) return false;
+  const origin = corridorOrigin(profile);
+  const from = drawnRoadPosition(profile, origin, before);
+  const to = drawnRoadPosition(profile, origin, after);
+  return Math.hypot(to.x - from.x, to.z - from.z) < TURNAROUND_REACH_METRES;
+}
+
 function findWaterways(profile: RouteProfile, seed: number): Waterways {
   const total = profile.totalDistance;
   const count = Math.max(2, Math.min(WATERWAY_SAMPLE_LIMIT, Math.round(total / 10)));
@@ -2384,14 +2454,27 @@ function findWaterways(profile: RouteProfile, seed: number): Waterways {
     while (end + 1 < samples + (profile.loop ? index : 0) && at(end + 1) === here) {
       end += 1;
     }
+    const floor = ((index + end) / 2) * spacing;
+    // #3064: a low point the road turns back at is not a valley it crosses.
+    if (turnsBackAt(profile, floor)) continue;
     crossings.push({
-      distance: distanceOnRoute(profile, ((index + end) / 2) * spacing),
+      distance: distanceOnRoute(profile, floor),
       waterElevation: here - BRIDGE_CLEARANCE_METRES,
     });
   }
 
   const lakes: Lake[] = [];
-  const low = lowest + Math.max(LAKE_LOW_METRES, (highest - lowest) * LAKE_LOW_SHARE);
+  // #3065: on an open-world view, how low a stretch must be is read round
+  // each sample (@see lowAround), and each lake is hashed on its ride
+  // distance: the view's own range and distance move as road is added ahead
+  // and dropped behind. A route reads its whole profile, as it always has.
+  const anchor = sceneryAnchor(profile);
+  const routeLow = lowest + Math.max(LAKE_LOW_METRES, (highest - lowest) * LAKE_LOW_SHARE);
+  const low =
+    anchor === undefined
+      ? undefined
+      : lowAround(elevation, Math.round(LAKE_ENCLOSURE_METRES / spacing));
+  const shift = anchor?.origin ?? 0;
   const nearCrossing = (distance: number): boolean =>
     crossings.some(
       (crossing) =>
@@ -2425,7 +2508,7 @@ function findWaterways(profile: RouteProfile, seed: number): Waterways {
       if (lakes.length >= MAXIMUM_WATERWAYS) return;
       const end = Math.min(to, start + LAKE_MAX_LENGTH_METRES);
       if (end - start < LAKE_MIN_LENGTH_METRES) break;
-      const hash = slotHash(seed, Math.round(start), LAKE_KEY);
+      const hash = slotHash(seed, Math.round(start + shift), LAKE_KEY);
       if (uniformFrom(hash, 0) >= LAKE_CHANCE) continue;
       lakes.push({
         from: start,
@@ -2438,7 +2521,7 @@ function findWaterways(profile: RouteProfile, seed: number): Waterways {
   for (let index = 0; index < samples; index += 1) {
     const qualifies =
       Math.abs(grade[index] as number) <= LAKE_MAX_GRADE_PERCENT &&
-      (elevation[index] as number) <= low &&
+      (elevation[index] as number) <= (low?.[index] ?? routeLow) &&
       !nearCrossing(index * spacing);
     if (qualifies && runStart < 0) runStart = index;
     if (!qualifies) finish(index - 1);

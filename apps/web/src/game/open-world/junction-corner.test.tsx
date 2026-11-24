@@ -17,9 +17,12 @@
  * - **No jump.** The drawn rider and the camera's eye move each frame by about
  *   what was ridden, and the change in that move from one frame to the next is
  *   under {@link JUMP_METRES}: a switch onto another road is metres in one
- *   frame. The control is the one switch this ride has, a U-turn press (see
- *   "What this file does not hold"), which the same measure reads at 4.9 m
- *   for the rider and 4.0 m for the eye.
+ *   frame. The control was the one switch this ride had, a U-turn press,
+ *   which the same measure read at 4.9 m for the rider and 4.0 m for the eye
+ *   before #3066 drew the press round a half-turn. Since #3066 the press is
+ *   held to the same bound here, and the control is a mutation: with the
+ *   half-turn taken out (`road.ts` §`drawnPath` drawing the press's line at
+ *   once), that case reads the jump again (#3066's merge with #3051).
  * - **A heading that changes continuously.** The camera turns no faster than
  *   `camera.ts`' cap, never back against the turn by more than
  *   {@link BACK_TURN_RADIANS}, and its turn rate changes by under
@@ -79,10 +82,9 @@
  *
  * ## What this file does not hold
  *
- * - **A U-turn.** A U-turn press changes the road under the rider at once
- *   (ADR 0088 D-1.6) and its line is drawn at once (`line-ease.ts`), so the
- *   drawn rider and the eye jump. Drawing it round an arc is #3045's lane
- *   (the turnaround's arc), and the press's jump is #3066.
+ * - **A U-turn, past its press.** The press itself is held to
+ *   {@link JUMP_METRES} here over 5 m either side; the half-turn's shape,
+ *   heading and grade are `u-turn-press.test.tsx`'s (#3066).
  * - **A street that ends.** Where the street turned into ends within the
  *   view, the route turns round there and comes back through the junction,
  *   and the junction's way out the route will come back along is drawn as
@@ -652,21 +654,23 @@ describe('an open-world ride turns round the corner at a junction, frame by fram
     );
   });
 
-  it('sees a switch where there is one: a U-turn press jumps the drawn rider and the eye, the control', async () => {
-    // The control for every bound above: the one switch this ride has. A
-    // U-turn changes the road under the rider at once (ADR 0088 D-1.6), and
-    // its line is drawn at once (`line-ease.ts`), so on the frame of the press
-    // the drawn rider's and the eye's move change by metres. Measured on
-    // 2026-11-22 at 30 fps: 4.9 m and 4.0 m. ⚠️ When the U-turn is drawn round an arc (#3066,
-    // after #3045's arc), this control is replaced by that change's own: it
-    // holds the measure, not the jump.
+  it('holds a U-turn press to the same bound: the drawn rider and the eye do not jump (#3066)', async () => {
+    // This was the control for every bound above, the one switch this ride
+    // had: a U-turn changed the road under the rider at once (ADR 0088
+    // D-1.6) and its line was drawn at once, so on the frame of the press the
+    // drawn rider's and the eye's move changed by metres (measured on
+    // 2026-11-22 at 30 fps: 4.9 m and 4.0 m). #3066 draws the press round a
+    // half-turn from where the rider was drawn, so this case holds the
+    // measure, not the jump, as the 2026-11-22 note here asked of it. The
+    // control is now a mutation: with `road.ts` §`drawnPath` drawing the
+    // press's line at once, this case goes red at metres.
     const frames = await rideTheTurn('ArrowDown', [], {
       from: PRESS_AT_METRES - 5,
       to: PRESS_AT_METRES + 5,
     });
     const ridden = turned(frames);
-    expect(ridden.riderJump).toBeGreaterThan(20 * JUMP_METRES);
-    expect(ridden.eyeJump).toBeGreaterThan(20 * JUMP_METRES);
+    expect(ridden.riderJump).toBeLessThan(JUMP_METRES);
+    expect(ridden.eyeJump).toBeLessThan(JUMP_METRES);
   });
 
   it('asks the trainer for the road’s own grade at the odometer through the turn: the corner is drawn only', async () => {
