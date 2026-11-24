@@ -41,11 +41,17 @@ import {
   type Obstacle,
 } from './obstacles';
 import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
+import { CRASH_SECONDS } from './crash-look';
 import {
+  CRASH_OFFSET_BOUND_METRES,
+  CRASH_PAYOUT_SHARE,
+  CRASH_STOP_SECONDS,
+  drawnRiderDistance,
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
   nextHouse,
+  payoutSpeed,
   startDeliveryRide,
   stepDeliveryRide,
   throwSideOn,
@@ -124,7 +130,11 @@ function started(storage = storageOf(), riderDistance = 0): DeliveryRide {
 
 const SPEED = 8;
 
-/** Ride `ride` on at `speed`, one step a call, to `along`, throwing `throwTo` on the first. */
+/**
+ * Ride `ride` on at `speed`, one step a call, to the ride distance `along`
+ * (the odometer, #3021: not the drawn distance, which a crash holds back),
+ * throwing `throwTo` on the first.
+ */
 function rideTo(
   ride: DeliveryRide,
   along: number,
@@ -134,8 +144,8 @@ function rideTo(
   let now = ride;
   let crashes = 0;
   let first = true;
-  while (now.along < along - 1e-9) {
-    const next = Math.min(along, now.along + speed * DELIVERY_TICK_SECONDS);
+  while (now.rideAlong < along - 1e-9) {
+    const next = Math.min(along, now.rideAlong + speed * DELIVERY_TICK_SECONDS);
     const stepped = stepDeliveryRide(now, {
       ticks: 1,
       along: next,
@@ -203,7 +213,7 @@ describe('a round at the press — #1816', () => {
       let now = rideTo(ride, throwPoint(target)).ride;
       now = stepDeliveryRide(now, {
         ticks: 1,
-        along: now.along + SPEED * DELIVERY_TICK_SECONDS,
+        along: now.rideAlong + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
         throwTo: target.side,
       }).ride;
@@ -377,7 +387,7 @@ describe('a round ridden, step by step — #1816', () => {
     const atEdge = rideTo(ride, first.along + THROW_WINDOW_AFTER_METRES);
     const thrown = stepDeliveryRide(atEdge.ride, {
       ticks: 1,
-      along: atEdge.ride.along + SPEED * DELIVERY_TICK_SECONDS,
+      along: atEdge.ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS,
       speed: SPEED,
       throwTo: first.side,
     });
@@ -416,9 +426,13 @@ describe('a round ridden, step by step — #1816', () => {
         crashed: [false],
       },
     };
-    const once = rideTo(onCourse, rolling.along + 2);
-    expect(once.crashes).toBe(1);
-    expect(once.ride.score).toBe(1 + CRASH_SCORE_DELTA);
+    const crashed = rideTo(onCourse, rolling.along + 2);
+    expect(crashed.crashes).toBe(1);
+    expect(crashed.ride.score).toBe(1 + CRASH_SCORE_DELTA);
+    // #3021: on past the stop and its payout, so the drawn rider rides at the
+    // ride's speed again and the second bin's timing holds.
+    const once = rideTo(crashed.ride, crashed.ride.rideAlong + SPEED * 10);
+    expect(once.ride.crashOffset).toBe(0);
     // A second crash at nought costs nothing.
     const again: DeliveryRide = {
       ...once.ride,
@@ -429,7 +443,7 @@ describe('a round ridden, step by step — #1816', () => {
         crashed: [...once.ride.obstacleState.crashed, false],
       },
     };
-    const twice = rideTo(again, once.ride.along + 32);
+    const twice = rideTo(again, once.ride.rideAlong + 32);
     expect(twice.crashes).toBe(1);
     expect(twice.ride.score).toBe(0);
     expect(OBSTACLE_SIGHT_METRES).toBeGreaterThan(30);
@@ -462,7 +476,7 @@ describe('a round ridden, step by step — #1816', () => {
     // And a rider who covered almost nothing, whatever speed they end on, has
     // not run into a bin 3 m behind them.
     const near = stepDeliveryRide(
-      { ...crossing(2), along: 5 },
+      { ...crossing(2), along: 5, rideAlong: 5 },
       { ticks: 1, along: 5.01, speed: 100 },
     );
     expect(near.crashes).toBe(0);
@@ -682,7 +696,7 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     while (ride.along < 60) {
       const stepped = stepDeliveryRide(ride, {
         ticks: 1,
-        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        along: ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
       });
       ride = stepped.ride;
@@ -717,7 +731,7 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     while (ride.along < 60) {
       ride = stepDeliveryRide(ride, {
         ticks: 1,
-        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        along: ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
       }).ride;
       const beside =
@@ -750,7 +764,7 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     while (ride.obstacleState.crashed[0] !== true) {
       ride = stepDeliveryRide(ride, {
         ticks: 1,
-        along: ride.along + SPEED * DELIVERY_TICK_SECONDS,
+        along: ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
       }).ride;
     }
@@ -758,7 +772,7 @@ describe('a crash into a parked car is drawn as one — #2362, the owner’s rul
     while (ride.along < 60) {
       ride = stepDeliveryRide(
         { ...ride, steer: steerToward(ride.steer, 'lane-right') },
-        { ticks: 1, along: ride.along + SPEED * DELIVERY_TICK_SECONDS, speed: SPEED },
+        { ticks: 1, along: ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS, speed: SPEED },
       ).ride;
       if (inside(ride.along, ride.steer.offset)) drawnInside += 1;
     }
@@ -1111,7 +1125,7 @@ describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
     const aimed = rideTo(ride, first.along - short).ride;
     let now = stepDeliveryRide(aimed, {
       ticks: 1,
-      along: aimed.along + speed * DELIVERY_TICK_SECONDS,
+      along: aimed.rideAlong + speed * DELIVERY_TICK_SECONDS,
       speed,
       throwTo: first.side,
     }).ride;
@@ -1119,7 +1133,7 @@ describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
     while (now.throws.inFlight.length > 0) {
       now = stepDeliveryRide(now, {
         ticks: 1,
-        along: now.along + speed * DELIVERY_TICK_SECONDS,
+        along: now.rideAlong + speed * DELIVERY_TICK_SECONDS,
         speed,
       }).ride;
     }
@@ -1338,4 +1352,260 @@ describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
       }
     });
   }
+});
+
+describe('a crash stops the drawn rider, on a second distance the trainer never reads — #3021, ADR 0094', () => {
+  /** The round with a bin standing in the rider's lane, `ahead` metres on from where they are drawn. */
+  function binAhead(ride: DeliveryRide, ahead: number): DeliveryRide {
+    const bin: Obstacle = { kind: 'bin', along: ride.along + ahead, stands: ride.steer.offset };
+    return {
+      ...ride,
+      obstacles: [...ride.obstacles, bin],
+      obstacleState: {
+        tick: ride.obstacleState.tick,
+        startedAt: [...ride.obstacleState.startedAt, undefined],
+        crashed: [...ride.obstacleState.crashed, false],
+      },
+    };
+  }
+
+  /** One tick at `speed`, the odometer handed on as `GameView` hands it. */
+  function tick(
+    ride: DeliveryRide,
+    speed = SPEED,
+    throwTo?: 'left' | 'right',
+  ): ReturnType<typeof stepDeliveryRide> {
+    return stepDeliveryRide(ride, {
+      ticks: 1,
+      along: ride.rideAlong + speed * DELIVERY_TICK_SECONDS,
+      speed,
+      ...(throwTo === undefined ? {} : { throwTo }),
+    });
+  }
+
+  /** Ridden a tick at a time at `speed` until a crash is counted: the ride on that tick. */
+  function toCrash(ride: DeliveryRide, speed = SPEED): DeliveryRide {
+    let now = ride;
+    for (let ticks = 0; ticks < 2_000; ticks += 1) {
+      const stepped = tick(now, speed);
+      now = stepped.ride;
+      if (stepped.crashes > 0) return now;
+    }
+    throw new Error('no crash');
+  }
+
+  /** `count` ticks on at `speed`. */
+  function ticksOn(ride: DeliveryRide, count: number, speed = SPEED): DeliveryRide {
+    let now = ride;
+    for (let each = 0; each < count; each += 1) now = tick(now, speed).ride;
+    return now;
+  }
+
+  const STOP_TICKS = Math.round(CRASH_STOP_SECONDS / DELIVERY_TICK_SECONDS);
+  const road = (): DeliveryRide => withoutObstacles(started());
+
+  it('stops for the crash’s own 1.8 s, with B by D-2.5’s rule and P = 25 %', () => {
+    expect(CRASH_STOP_SECONDS).toBe(CRASH_SECONDS);
+    expect(CRASH_STOP_SECONDS).toBeCloseTo(1.8, 9);
+    expect(STOP_TICKS).toBe(36);
+    expect(CRASH_OFFSET_BOUND_METRES).toBe(25);
+    expect(CRASH_PAYOUT_SHARE).toBe(0.25);
+    expect(payoutSpeed(8)).toBe(10);
+    expect(payoutSpeed(11)).toBe(AVOIDABLE_FASTEST_METRES_PER_SECOND);
+    expect(payoutSpeed(13)).toBe(13);
+    expect(payoutSpeed(0)).toBe(0);
+  });
+
+  it('starts every round level with the ride, and a ride with no crash stays level (D-2)', () => {
+    const ride = road();
+    expect(ride).toMatchObject({ crashOffset: 0, crashOffsetBefore: 0, stopTicks: 0 });
+    const ridden = rideTo(ride, 200).ride;
+    expect(ridden.crashOffset).toBe(0);
+    expect(ridden.along).toBe(ridden.rideAlong);
+  });
+
+  it('holds the drawn rider where they crashed for CRASH_STOP_SECONDS, the ride distance handed on untouched (D-2.4, D-3.1)', () => {
+    const crashed = toCrash(binAhead(road(), 20));
+    expect(crashed.stopTicks).toBe(STOP_TICKS);
+    const held = crashed.along;
+    let now = crashed;
+    for (let each = 1; each <= STOP_TICKS; each += 1) {
+      const handed = now.rideAlong + SPEED * DELIVERY_TICK_SECONDS;
+      now = tick(now).ride;
+      // The odometer is the simulation's, exactly as handed in; the drawing holds.
+      expect(now.rideAlong).toBe(handed);
+      expect(now.along).toBeCloseTo(held, 9);
+      expect(now.crashOffset).toBeCloseTo(held - now.rideAlong, 9);
+      // A frame no step ran on steps nothing, so a pause changes neither distance (D-3.4).
+      const paused = stepDeliveryRide(now, { ticks: 0, along: now.rideAlong + 50, speed: SPEED });
+      expect(paused.ride).toBe(now);
+    }
+    expect(now.stopTicks).toBe(0);
+    expect(now.crashOffset).toBeCloseTo(-SPEED * CRASH_STOP_SECONDS, 9);
+    // Back on: the next step moves the drawn rider.
+    expect(tick(now).ride.along).toBeGreaterThan(held + 0.1);
+  });
+
+  it('ends the stop at the bound, the drawn rider moving with the ride, and waits there above 12 m/s (D-3.2, D-4.3)', () => {
+    const fast = 16;
+    let now = toCrash(binAhead(road(), 40), fast);
+    let ticks = 0;
+    while (now.stopTicks > 0) {
+      now = tick(now, fast).ride;
+      ticks += 1;
+      expect(now.crashOffset).toBeGreaterThanOrEqual(-CRASH_OFFSET_BOUND_METRES);
+    }
+    // 25 m at 0.8 m a tick: the stop ended at the bound, short of its 36 ticks.
+    expect(ticks).toBe(Math.ceil(CRASH_OFFSET_BOUND_METRES / (fast * DELIVERY_TICK_SECONDS)));
+    expect(ticks).toBeLessThan(STOP_TICKS);
+    expect(now.crashOffset).toBe(-CRASH_OFFSET_BOUND_METRES);
+    // Faster than every hazard is proved avoidable at: no payout, the offset waits.
+    const on = tick(now, fast).ride;
+    expect(on.along - now.along).toBeCloseTo(fast * DELIVERY_TICK_SECONDS, 9);
+    expect(on.crashOffset).toBe(-CRASH_OFFSET_BOUND_METRES);
+    // Slower, it is paid out.
+    expect(tick(on, SPEED).ride.crashOffset).toBeGreaterThan(-CRASH_OFFSET_BOUND_METRES);
+  });
+
+  it('pays the banked distance out a quarter faster than the ride, in 7.2 s at a steady speed (D-4.1, D-4.2)', () => {
+    let now = ticksOn(toCrash(binAhead(road(), 20)), STOP_TICKS);
+    expect(now.crashOffset).toBeCloseTo(-SPEED * CRASH_STOP_SECONDS, 9);
+    let ticks = 0;
+    while (now.crashOffset < 0) {
+      const next = tick(now).ride;
+      if (next.crashOffset < 0) {
+        expect(next.along - now.along).toBeCloseTo(payoutSpeed(SPEED) * DELIVERY_TICK_SECONDS, 9);
+      }
+      now = next;
+      ticks += 1;
+    }
+    expect(now.crashOffset).toBe(0);
+    expect(ticks * DELIVERY_TICK_SECONDS).toBeCloseTo(CRASH_STOP_SECONDS / CRASH_PAYOUT_SHARE, 1);
+    // Level from there: the drawn rider rides with the ride.
+    const level = ticksOn(now, 20);
+    expect(level.along).toBe(level.rideAlong);
+  });
+
+  it('never draws the payout past the fastest avoidable speed (D-4.3)', () => {
+    const near = 11;
+    let paying = ticksOn(toCrash(binAhead(road(), 30), near), STOP_TICKS, near);
+    for (let each = 0; each < 20; each += 1) {
+      const next = tick(paying, near).ride;
+      expect(next.along - paying.along).toBeCloseTo(
+        AVOIDABLE_FASTEST_METRES_PER_SECOND * DELIVERY_TICK_SECONDS,
+        9,
+      );
+      paying = next;
+    }
+  });
+
+  it('starts a new stop from the offset as it stands on a crash during the payout (D-4.4)', () => {
+    const paying = ticksOn(toCrash(binAhead(road(), 20)), STOP_TICKS + 10);
+    expect(paying.crashOffset).toBeLessThan(-10);
+    const again = toCrash(binAhead(paying, 5));
+    expect(again.stopTicks).toBe(STOP_TICKS);
+    const from = again.crashOffset;
+    expect(from).toBeLessThan(-12);
+    expect(tick(again).ride.crashOffset).toBeCloseTo(from - SPEED * DELIVERY_TICK_SECONDS, 9);
+    // And the bound ends it: over 12 m banked and 14.4 m more is past 25.
+    let ended = again;
+    let ticks = 0;
+    while (ended.stopTicks > 0) {
+      ended = tick(ended).ride;
+      ticks += 1;
+    }
+    expect(ticks).toBeLessThan(STOP_TICKS);
+    expect(ended.crashOffset).toBe(-CRASH_OFFSET_BOUND_METRES);
+  });
+
+  it('takes no throw while the rider is down, and the next once they are up (D-3.3)', () => {
+    const crashed = toCrash(binAhead(road(), 20));
+    const refused = tick(crashed, SPEED, 'left');
+    expect(refused.thrown).toBe(false);
+    expect(refused.ride.throws.inFlight).toEqual([]);
+    const up = ticksOn(refused.ride, STOP_TICKS);
+    expect(up.stopTicks).toBe(0);
+    expect(tick(up, SPEED, 'left').thrown).toBe(true);
+  });
+
+  it('lands a parcel thrown before the crash where it would have landed with no crash (D-3.3)', () => {
+    const plain = road();
+    const withBin = binAhead(plain, 20);
+    // How many ticks the bin is met on, and a parcel thrown four before that.
+    let crashTicks = 1;
+    for (let now = withBin; ; crashTicks += 1) {
+      const stepped = tick(now);
+      if (stepped.crashes > 0) break;
+      now = stepped.ride;
+    }
+    const flight = (ride: DeliveryRide): DeliveryRide => {
+      const thrown = tick(ticksOn(ride, crashTicks - 4), SPEED, 'right').ride;
+      expect(thrown.throws.inFlight).toHaveLength(1);
+      return ticksOn(thrown, PARCEL_FLIGHT_TICKS + 1);
+    };
+    const crashed = flight(withBin);
+    const clear = flight(plain);
+    expect(crashed.stopTicks).toBeGreaterThan(0);
+    expect(crashed.changes.filter((each) => each !== 'delivery')).toHaveLength(1);
+    expect(crashed.throws.inFlight).toEqual([]);
+    expect(crashed.round).toEqual(clear.round);
+    expect(crashed.throws).toEqual(clear.throws);
+  });
+
+  it('counts no contact while the rider is down, then or later (D-3.3)', () => {
+    const crashed = toCrash(binAhead(road(), 20));
+    expect(crashed.changes).toHaveLength(1);
+    // A second bin standing where the held rider lies: met while they are down.
+    const down = tick(binAhead(crashed, 0.5));
+    expect(down.crashes).toBe(0);
+    expect(down.ride.obstacleState.crashed).toEqual([true, true]);
+    const later = rideTo(down.ride, down.ride.rideAlong + 60);
+    expect(later.crashes).toBe(0);
+    expect(later.ride.changes).toHaveLength(1);
+  });
+
+  it('misses no house the stop holds the rider short of while the ride passes it, and counts down from where they are drawn (D-3.3, D-4.5, D-6.3)', () => {
+    const ride = road();
+    const first = ride.throwTargets[0] as ThrowTarget;
+    const closes = first.along + THROW_WINDOW_AFTER_METRES;
+    // Ridden to a bin met about 5 m before the first house's window closes.
+    const to = closes - 5 - RIDER_AHEAD_METRES - OBSTACLE_KINDS.bin.halfLength - 20;
+    const crashed = toCrash(binAhead(rideTo(ride, to).ride, 20));
+    expect(crashed.along).toBeLessThan(closes);
+    const counted = nextHouse(crashed);
+    const held = ticksOn(crashed, STOP_TICKS);
+    // The ride is past the window's close; the drawn rider is not, and the house is not missed.
+    expect(held.rideAlong).toBeGreaterThan(closes);
+    expect(held.round.houses[first.position]).toBe('expecting');
+    expect(nextHouse(held)).toEqual(counted);
+    // A ride that ends here ends its round at the drawn distance: not missed (D-4.5).
+    expect(endDeliveryRide(held).missed).toBe(0);
+    // The control: the same odometer with no crash has missed it.
+    expect(rideTo(ride, held.rideAlong).ride.round.houses[first.position]).toBe('missed');
+    // And once the drawn rider is past the close, it is missed.
+    const past = rideTo(held, held.rideAlong + 20).ride;
+    expect(past.along).toBeGreaterThan(closes);
+    expect(past.round.houses[first.position]).toBe('missed');
+  });
+
+  it('stops the rider with the assisted setting on (D-8)', () => {
+    const assist: DeliveryAssist = { widerWindows: true, obstacles: 'normal', noFail: true };
+    const assisted = withoutObstacles(
+      started(storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist })),
+    );
+    expect(assisted.round.assisted).toBe(true);
+    const held = ticksOn(toCrash(binAhead(assisted, 20)), STOP_TICKS);
+    expect(held.crashOffset).toBeCloseTo(-SPEED * CRASH_STOP_SECONDS, 9);
+  });
+
+  it('draws the rider between the last two steps’ offsets, as `drawnAt` blends the ride (D-6.1)', () => {
+    const ride = { crashOffset: -4, crashOffsetBefore: -3 };
+    expect(drawnRiderDistance(ride, 100, 0)).toBe(97);
+    expect(drawnRiderDistance(ride, 100, 1)).toBe(96);
+    expect(drawnRiderDistance(ride, 100, 0.5)).toBe(96.5);
+    // Clamped, as `drawnAt`'s blend is.
+    expect(drawnRiderDistance(ride, 100, 3)).toBe(96);
+    expect(drawnRiderDistance(ride, 100, -1)).toBe(97);
+    expect(drawnRiderDistance({ crashOffset: 0, crashOffsetBefore: 0 }, 100, 0.3)).toBe(100);
+  });
 });

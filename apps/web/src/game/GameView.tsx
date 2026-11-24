@@ -293,6 +293,7 @@ import {
   type PageBox,
 } from './off-screen-marker';
 import {
+  drawnRiderDistance,
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
@@ -4453,6 +4454,19 @@ function GameScreen({
           roomRacing === undefined
             ? undefined
             : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        // #3021, ADR 0094 D-6.1: a round's rider is drawn, and the camera
+        // follows them, at the ride distance plus the round's crash offset —
+        // held by a crash and paid out after, blended between the same two
+        // steps as `drawnAt`. The drawing only: the grade above was read at the
+        // odometer, and nothing that feeds the simulation reads this.
+        const roundDrawnDistance =
+          deliveryRef.current === undefined
+            ? drawn.riderDistance
+            : drawnRiderDistance(
+                deliveryRef.current,
+                drawn.riderDistance,
+                simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
+              );
         // #1853: where the round has steered the rider, the place the
         // obstacles meet them; none on a ride with no round, or in a room (DL9).
         const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
@@ -4482,7 +4496,7 @@ function GameScreen({
           state: onRoad,
           riderDistance: alongView(
             road,
-            raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? drawn.riderDistance,
+            raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? roundDrawnDistance,
           ),
           // #2989: an open-world ride's path, a new view's line eased in from
           // the one drawn before it, so a junction choice moves neither the
@@ -4577,7 +4591,7 @@ function GameScreen({
               ? undefined
               : eyeLateralBesideParkedCars(
                   deliveryRef.current.obstacles,
-                  drawn.riderDistance,
+                  roundDrawnDistance,
                   deliverySteered,
                   deliveryRef.current.obstacleState,
                 ),
