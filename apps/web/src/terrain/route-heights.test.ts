@@ -174,7 +174,7 @@ describe('offline or unreachable', () => {
     placeInTile(FIXTURE_HEIGHT_TILE, 200, 256),
   );
 
-  it('fails as one retryable error that says elevation is unavailable and the route still saves', async () => {
+  it('fails as one retryable error that says elevation could not be downloaded and the route saves flat', async () => {
     const { heights, source } = await readerOver([
       { tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() },
     ]);
@@ -184,7 +184,22 @@ describe('offline or unreachable', () => {
     expect((failed as RoutingError).code).toBe('unavailable');
     expect((failed as RoutingError).retryable).toBe(true);
     expect((failed as RoutingError).message).toBe(
-      'Elevation is unavailable. The terrain archive could not be reached. The route can still be saved, and is saved flat.',
+      "Elevation couldn't be downloaded right now. The route is saved flat; try again later.",
+    );
+  });
+
+  it('says this copy of the app cannot read an archive of the wrong kind', async () => {
+    // Stops short of zoom 12: the reader refuses it as the wrong archive.
+    const source = countingSource(
+      await buildTerrainArchive([{ tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() }], {
+        maxZoom: 11,
+      }),
+    );
+    const heights = terrainHeights({ archive: terrainArchiveFrom(source), decode: fixtureDecode });
+    const failed = await planElevation(draft, heights, heights.interval).catch((e: unknown) => e);
+    expect((failed as RoutingError).code).toBe('unavailable');
+    expect((failed as RoutingError).message).toBe(
+      "This copy of the app can't read the elevation data. The route is saved flat.",
     );
   });
 

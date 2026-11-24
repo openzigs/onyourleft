@@ -27,7 +27,7 @@
  *   the climb is a floor (#72), and the rest of the route keeps its heights.
  * - **The archive could not be read** (offline, a host that is down): the
  *   whole request fails with one `RoutingError('unavailable')`, the planner
- *   says elevation is unavailable, and the route still saves.
+ *   says elevation could not be downloaded, and the route still saves, flat.
  *
  * ⚠️ **No message names a coordinate or a tile** (ADR 0004 D).
  */
@@ -52,13 +52,13 @@ import {
 
 import { decodeHeightTile, type DecodeHeightTile } from './decode';
 import {
-  elevationUnavailableText,
+  elevationFailureText,
   TERRAIN_DATASET_NAME,
   TERRAIN_SAMPLE_INTERVAL_METRES,
   type RouteHeights,
   type TerrainHeightRequest,
 } from './heights';
-import { describeTerrainFailure, terrainFailureOf, type TerrainArchive } from './terrain-source';
+import { terrainFailureOf, type TerrainArchive } from './terrain-source';
 
 /**
  * The most z12 tiles one route's heights are read from: **200**.
@@ -169,10 +169,7 @@ export function terrainHeights(options: TerrainHeightsOptions): RouteHeights {
           Array.from({ length: Math.min(TERRAIN_READ_CONCURRENCY, queue.length) }, worker),
         );
       } catch (error) {
-        throw new RoutingError(
-          'unavailable',
-          elevationUnavailableText(describeTerrainFailure(terrainFailureOf(error))),
-        );
+        throw new RoutingError('unavailable', elevationFailureText(terrainFailureOf(error)));
       }
 
       const road =
