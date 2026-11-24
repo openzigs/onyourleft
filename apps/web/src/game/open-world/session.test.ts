@@ -42,6 +42,7 @@ import {
 } from './ride';
 import { createOpenWorldSession, OPEN_WORLD_START_TIMEOUT_MS } from './session';
 import type { OpenWorldStart } from './start';
+import { describeTilePlanFailure } from './tile-planner';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -170,6 +171,11 @@ describe('an open-world session on the fixture archive — #2896', () => {
     });
     expect((await session.ready).kind).toBe('ready');
     session.stop();
+    // #2901: this platform has no `Worker`, so the tile planner says its own
+    // line too, which names nothing; the graph's is the other one.
+    const planner = describeTilePlanFailure();
+    expect(lines.filter((line) => line === planner)).toHaveLength(1);
+    lines.splice(lines.indexOf(planner), 1);
     expect(lines).toHaveLength(1);
     // `describeStreetGraphRefusal`'s words: the constraint and its limit.
     expect(lines[0]).toMatch(/^street graph: the tile.* the limit of \d+/);

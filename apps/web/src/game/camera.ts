@@ -480,8 +480,74 @@ export function cameraRig(pose: CameraPose): CameraRig {
  * — a few degrees through a bend — and swings round the rider at a
  * turnaround, as the old camera's did.
  */
-export function turnedPose(pose: CameraPose, heading: GroundHeading): CameraPose {
-  return { ...pose, headingX: heading.headingX, headingZ: heading.headingZ };
+export function turnedPose(
+  pose: CameraPose,
+  heading: GroundHeading,
+  lookAhead: number = pose.targetAheadMetres,
+): CameraPose {
+  const turned = { ...pose, headingX: heading.headingX, headingZ: heading.headingZ };
+  if (lookAhead === pose.targetAheadMetres) return turned;
+  // #3045: looking `lookAhead` on instead, at the road's height there as the
+  // line from the eye to the road the pose looks at has it — the same
+  // slope, so a climb is still looked up and a descent down.
+  const wanted = CAMERA_BEHIND_METRES + pose.targetAheadMetres;
+  const held = CAMERA_BEHIND_METRES + lookAhead;
+  return {
+    ...turned,
+    targetAheadMetres: lookAhead,
+    targetRoadY: pose.eyeRoadY + (pose.targetRoadY - pose.eyeRoadY) * (held / wanted),
+  };
+}
+
+/**
+ * How quickly the camera's look-ahead settles onto the one the frame asks
+ * for: the time constant of {@link dampedLookAhead}'s exponential approach,
+ * **0.1 s** — #3045. @see CAMERA_LOOK_AHEAD_RATE
+ */
+export const CAMERA_LOOK_AHEAD_SETTLE_SECONDS = 0.1;
+
+/**
+ * The fastest the camera's look-ahead ever changes, metres a second: **15** —
+ * #3045.
+ *
+ * Coming out of a turnaround the frame's look-ahead (`scene.ts`
+ * §`roadTarget`) jumps from the 10 m it is held to while the road comes back
+ * past the rider to the 25 m of the straight, as soon as the road that far on
+ * keeps the rider in the frame: 9 m to 23 m in two frames on a single-point
+ * reversal at 30 km/h, which pitched the view up by 5° in one frame. At this
+ * rate the camera raises its gaze over about a second. Only the pitch moves
+ * with it: the heading is {@link dampedHeading}'s, and the eye stays where it
+ * was.
+ */
+export const CAMERA_LOOK_AHEAD_RATE = 15;
+
+/**
+ * The camera's look-ahead, metres past `pose.x`/`pose.z`, after `seconds`
+ * more of following `wanted` from `held` — #3045: {@link dampedHeading}'s
+ * rule for a length, toward `wanted` at a rate proportional to how far off it
+ * is ({@link CAMERA_LOOK_AHEAD_SETTLE_SECONDS}) and never faster than
+ * {@link CAMERA_LOOK_AHEAD_RATE}, solved exactly over the step, so no frame
+ * rate changes it. `held` undefined is a ride's first frame, which takes
+ * `wanted`.
+ */
+export function dampedLookAhead(held: number | undefined, wanted: number, seconds: number): number {
+  if (held === undefined || !Number.isFinite(held)) return wanted;
+  const error = wanted - held;
+  const knee = CAMERA_LOOK_AHEAD_RATE * CAMERA_LOOK_AHEAD_SETTLE_SECONDS;
+  let left = Math.abs(error);
+  let time = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  if (left > knee) {
+    const capped = (left - knee) / CAMERA_LOOK_AHEAD_RATE;
+    if (time <= capped) {
+      left -= CAMERA_LOOK_AHEAD_RATE * time;
+      time = 0;
+    } else {
+      left = knee;
+      time -= capped;
+    }
+  }
+  left *= Math.exp(-time / CAMERA_LOOK_AHEAD_SETTLE_SECONDS);
+  return wanted - Math.sign(error) * left;
 }
 
 /** A unit vector in the ground plane, as {@link CameraPose} carries its heading. */

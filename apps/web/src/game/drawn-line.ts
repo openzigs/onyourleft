@@ -47,6 +47,9 @@
  *   few per cent of their speed rather than more than half, and is never more
  *   than a few metres from their own place. Stateless, like the lean: a
  *   function of where the rider is.
+ * - **A U-turn where the path turns back at one sample** (#3045,
+ *   §`uTurnSamples`): a recorded turnaround is drawn as a half-turn across the
+ *   road, not as a loop round the one point.
  * - **A line object the easing and the lean already read.** {@link drawnLine}
  *   is a `RacingLine`. Its curvature at each sample is the path's, times the
  *   square of how fast the drawn place moves along the path per metre of
@@ -125,6 +128,12 @@ export interface DrawnLine extends RacingLine {
    * through a corner and nought on a straight. @see drawnPlaceOf
    */
   readonly shifts: Float64Array;
+  /**
+   * The samples the path turns back on itself at, each drawn as a U-turn
+   * across the road between its two neighbours — #3045. Ascending, and empty
+   * on a route with none. @see uTurnSamples
+   */
+  readonly uTurns: readonly number[];
 }
 
 const computed = new WeakMap<RouteProfile, DrawnLine>();
@@ -194,10 +203,80 @@ export function drawnLineAt(line: DrawnLine, distance: number): DrawnPoint {
   const fraction = Math.max(0, Math.min(1, raw - index));
   const x = splineAt(line.xs, line.bendXs, index, fraction, resolution);
   const z = splineAt(line.zs, line.bendZs, index, fraction, resolution);
-  const length = Math.hypot(x.slope, z.slope);
+  const turned = uTurned(line, raw, resolution);
+  const slopeX = turned?.slopeX ?? x.slope;
+  const slopeZ = turned?.slopeZ ?? z.slope;
+  const atX = turned?.x ?? x.value;
+  const atZ = turned?.z ?? z.value;
+  const length = Math.hypot(slopeX, slopeZ);
   return length > 0
-    ? { x: x.value, z: z.value, headingX: x.slope / length, headingZ: z.slope / length }
-    : { x: x.value, z: z.value, headingX: 0, headingZ: 1 };
+    ? { x: atX, z: atZ, headingX: slopeX / length, headingZ: slopeZ / length }
+    : { x: atX, z: atZ, headingX: 0, headingZ: 1 };
+}
+
+/**
+ * The path, and its slope per metre of odometer, `raw` samples along a line
+ * where that is inside a U-turn — #3045 — or undefined where it is not.
+ *
+ * Between a U-turn's two neighbours the path is a cubic Bézier half-turn from
+ * the one to the other: its handles `4r/3` long, `r` half the way across
+ * between them, the length that draws a half-circle, and laid along the
+ * spline's own heading at each neighbour, so the path's heading runs on into
+ * the spline's with no step. Its parameter is a cubic in the odometer whose
+ * slope at each end runs the curve at the spline's own pace there, so the
+ * drawn rider's speed has no step either: they slow into the turn and pick
+ * up out of it, as a rider does.
+ */
+function uTurned(
+  line: DrawnLine,
+  raw: number,
+  resolution: number,
+):
+  | { readonly x: number; readonly z: number; readonly slopeX: number; readonly slopeZ: number }
+  | undefined {
+  for (const sample of line.uTurns) {
+    const u = (raw - (sample - 1)) / 2;
+    if (!(u > 0 && u < 1)) continue;
+    const span = 2 * resolution;
+    // The spline where the U-turn starts and ends: its two neighbours, and
+    // which way, and how fast a metre of odometer, it runs there.
+    const startX = splineAt(line.xs, line.bendXs, sample - 1, 0, resolution);
+    const startZ = splineAt(line.zs, line.bendZs, sample - 1, 0, resolution);
+    const endX = splineAt(line.xs, line.bendXs, sample, 1, resolution);
+    const endZ = splineAt(line.zs, line.bendZs, sample, 1, resolution);
+    const entry = Math.hypot(startX.slope, startZ.slope);
+    const exit = Math.hypot(endX.slope, endZ.slope);
+    const radius = Math.hypot(endX.value - startX.value, endZ.value - startZ.value) / 2;
+    if (!(entry > 0 && exit > 0 && radius > 0)) continue;
+    // A cubic Bézier half-circle from one to the other, its handles 4r/3
+    // along the spline's own heading at each end: its tangent, 4r over the
+    // curve, the heading the spline has there.
+    const handle = (4 / 3) * radius;
+    const p0x = startX.value;
+    const p0z = startZ.value;
+    const p1x = p0x + (startX.slope / entry) * handle;
+    const p1z = p0z + (startZ.slope / entry) * handle;
+    const p3x = endX.value;
+    const p3z = endZ.value;
+    const p2x = p3x - (endX.slope / exit) * handle;
+    const p2z = p3z - (endZ.slope / exit) * handle;
+    // The curve's parameter t(u): a cubic with t(0) = 0, t(1) = 1, whose
+    // slope at each end runs the curve at the spline's pace there, so the
+    // drawn rider's speed has no step where the U-turn begins or ends.
+    const startRate = (entry * span) / (4 * radius);
+    const endRate = (exit * span) / (4 * radius);
+    const c3 = startRate + endRate - 2;
+    const c2 = 3 - 2 * startRate - endRate;
+    const t = ((c3 * u + c2) * u + startRate) * u;
+    const tSlope = ((3 * c3 * u + 2 * c2) * u + startRate) / span;
+    const w = 1 - t;
+    const x = w * w * w * p0x + 3 * w * w * t * p1x + 3 * w * t * t * p2x + t * t * t * p3x;
+    const z = w * w * w * p0z + 3 * w * w * t * p1z + 3 * w * t * t * p2z + t * t * t * p3z;
+    const dx = 3 * (w * w * (p1x - p0x) + 2 * w * t * (p2x - p1x) + t * t * (p3x - p2x));
+    const dz = 3 * (w * w * (p1z - p0z) + 2 * w * t * (p2z - p1z) + t * t * (p3z - p2z));
+    return { x, z, slopeX: dx * tSlope, slopeZ: dz * tSlope };
+  }
+  return undefined;
 }
 
 /** A cubic spline segment's value and slope, `fraction` of the way along a segment `span` long. */
@@ -239,6 +318,7 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
       shifts: new Float64Array(count),
       bendXs: new Float64Array(count),
       bendZs: new Float64Array(count),
+      uTurns: NO_U_TURNS,
     };
   }
   // On a loop the last sample IS the first: the lap is `count − 1` samples,
@@ -325,6 +405,12 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
     shifts[count - 1] = shifts[0] as number;
   }
 
+  // 2b. #3045: a turn back on itself at one sample is drawn as a U-turn
+  // (@see uTurned), whose tip is put a half-turn's radius beyond the middle
+  // of its two neighbours, so the spline either side runs into it.
+  const uTurns = uTurnSamples(xs, zs);
+  for (const sample of uTurns) roundTheTip(xs, zs, sample);
+
   // 3. Held on the road between samples, not only at them.
   const origin = corridorOrigin(profile);
   const road = (odometer: number): RoadFrame => roadFrameAt(profile, origin, odometer);
@@ -373,7 +459,101 @@ function buildDrawnLine(profile: RouteProfile): DrawnLine {
     curvatures[0] = 0;
     curvatures[count - 1] = 0;
   }
-  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts };
+  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts, uTurns };
+}
+
+/** A line with no U-turn in it. */
+const NO_U_TURNS: readonly number[] = [];
+
+/**
+ * How sharply the drawn path must turn at ONE of its samples to be drawn as a
+ * U-turn: through more than **120°** between the chords to its two neighbours
+ * — #3045. The angle `terrain.ts` §`retracedRows` takes for a road that comes
+ * back along itself. A bend sampled every 10 m, a 10 m hairpin's included,
+ * turns a few tens of degrees a sample; a turn this sharp at one sample is a
+ * recorded turnaround.
+ */
+const U_TURN_RADIANS = (120 * Math.PI) / 180;
+
+/**
+ * The narrowest U-turn drawn, metres across: **3**. Where the path's two
+ * samples either side of a turnaround are nearer than this, a half-turn
+ * through them would be no rounder than the spline it replaces.
+ */
+const U_TURN_LEAST_ACROSS_METRES = 3;
+
+/**
+ * The samples {@link drawnLineAt} draws a U-turn at — #3045. @see uTurned
+ *
+ * ## Why
+ *
+ * A route that turns back on itself at one recorded point — the far end of an
+ * out-and-back, 172° in one 10 m step on the owner's — left the path's sample
+ * there a whole sample beyond its two neighbours, which the line had already
+ * taken out to the road's two edges. The spline through the three was a long,
+ * narrow loop: 1.2 m of radius at its tightest on `route-fixtures-testing.ts`
+ * §`reversalRoute(172)` and 0.65 m at 180°, where the drawn rider swung round
+ * at 137°/s and 240°/s at 60 fps, faster than the chase camera ever turns
+ * (`camera.ts` §`CAMERA_MAXIMUM_YAW_RATE`), and the apex stood 3 m past the end
+ * of the drawn road. Now such a sample is put at the tip of the half-circle
+ * through its neighbours ({@link roundTheTip}) and the path between them is a
+ * half-turn across the road: 3.5 m and 2.3 m of radius, 65°/s and 81°/s
+ * (`turnaround.test.ts`).
+ *
+ * Interior samples only: a sample at the end of a line, or at a loop's wrap,
+ * has a neighbour on one side only here, and is drawn as the spline.
+ *
+ * ⚠️ **A drawing, never physics** — the module note's rule: the odometer, the
+ * grade and the trainer never read the line. The lean and the easing read the
+ * spline's curvature at the rounded tip, as at every sample: 14° to 19° of
+ * lean through these turns at 20 km/h.
+ */
+export function uTurnSamples(xs: Float64Array, zs: Float64Array): readonly number[] {
+  const found: number[] = [];
+  for (let sample = 1; sample + 1 < xs.length; sample += 1) {
+    const x = xs[sample] as number;
+    const z = zs[sample] as number;
+    const inX = x - (xs[sample - 1] as number);
+    const inZ = z - (zs[sample - 1] as number);
+    const outX = (xs[sample + 1] as number) - x;
+    const outZ = (zs[sample + 1] as number) - z;
+    const lengths = Math.hypot(inX, inZ) * Math.hypot(outX, outZ);
+    if (!(lengths > 0)) continue;
+    if (!((inX * outX + inZ * outZ) / lengths < Math.cos(U_TURN_RADIANS))) continue;
+    const across = Math.hypot(
+      (xs[sample + 1] as number) - (xs[sample - 1] as number),
+      (zs[sample + 1] as number) - (zs[sample - 1] as number),
+    );
+    if (!(across >= U_TURN_LEAST_ACROSS_METRES)) continue;
+    // Two in a row would overlap: the first is drawn, the second is spline.
+    if (found.length > 0 && (found[found.length - 1] as number) >= sample - 1) continue;
+    found.push(sample);
+  }
+  return found;
+}
+
+/**
+ * Puts a U-turn's own sample at the tip of the half-circle through its two
+ * neighbours — #3045: the radius, half the way across between them, beyond
+ * their middle, square to the line between them on the side the sample was.
+ * In place.
+ */
+function roundTheTip(xs: Float64Array, zs: Float64Array, sample: number): void {
+  const beforeX = xs[sample - 1] as number;
+  const beforeZ = zs[sample - 1] as number;
+  const acrossX = (xs[sample + 1] as number) - beforeX;
+  const acrossZ = (zs[sample + 1] as number) - beforeZ;
+  const radius = Math.hypot(acrossX, acrossZ) / 2;
+  const middleX = beforeX + acrossX / 2;
+  const middleZ = beforeZ + acrossZ / 2;
+  const squareX = -acrossZ / (2 * radius);
+  const squareZ = acrossX / (2 * radius);
+  const side =
+    ((xs[sample] as number) - middleX) * squareX + ((zs[sample] as number) - middleZ) * squareZ >= 0
+      ? 1
+      : -1;
+  xs[sample] = middleX + side * squareX * radius;
+  zs[sample] = middleZ + side * squareZ * radius;
 }
 
 /**

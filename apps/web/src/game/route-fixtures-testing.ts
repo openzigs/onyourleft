@@ -486,6 +486,42 @@ export function levelHairpinRoute(radius: number, leg: number): RouteProfile {
 }
 
 /**
+ * How far north {@link reversalRoute} turns back, in metres: **1 000**.
+ */
+export const REVERSAL_AT_METRES = 1_000;
+
+/**
+ * A single-vertex reversal — #3045: {@link REVERSAL_AT_METRES} due north, a
+ * point every 10 m as a recorded ride is sampled, then back the way it came
+ * turned through `degrees` (172 by default) AT ONE POINT, to the `hand` side,
+ * for as far again, level all the way. The owner's out-and-back turned 172° in
+ * one 10 m step and nowhere else that sharply; this is that turn, built from
+ * arithmetic, with no point of the owner's route in it. The first point back
+ * is `10 · sin(180° − degrees)` across from the way out, 1.4 m at 172°.
+ */
+export function reversalRoute(degrees = 172, hand: 'right' | 'left' = 'right'): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const mirror = hand === 'right' ? 1 : -1;
+  const turn = (degrees * Math.PI) / 180;
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + (mirror * east) / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(6.6),
+    });
+  };
+  for (let north = 0; north <= REVERSAL_AT_METRES; north += 10) push(0, north);
+  for (let back = 10; back <= REVERSAL_AT_METRES; back += 10) {
+    push(back * Math.sin(turn), REVERSAL_AT_METRES + back * Math.cos(turn));
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/**
  * A road that crosses itself — #1996: 200 m north, 100 m east, 100 m south,
  * then 200 m west, across the first 200 m at right angles 100 m along it, and
  * 300 m south. Both crossings of the one place are in one corridor; neither
