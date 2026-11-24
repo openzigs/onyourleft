@@ -5709,13 +5709,32 @@ function GameScreen({
         // circuit, in every world, the stylised one included, because the
         // road itself is the circuit's line drawn from OpenStreetMap. A ride
         // on the stylised world on the rider's own route still shows none.
-        attribution={rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined}
+        // ⚠️ Since #3106 a THIRD key: an open-world ride, in every world. Its
+        // road, its side streets, its buildings and its plan view are all
+        // drawn from OpenStreetMap, and until #3106 it showed no credit at all.
+        attribution={
+          rideHasCorridor || rideOnBuiltIn || rideRoad?.follower !== undefined
+            ? OSM_ATTRIBUTION
+            : undefined
+        }
         // #2290: and the plan view draws that corridor as a street map around
         // the rider — on exactly the rides that carry the corridor's credit
         // (a stylised-world ride on a circuit carries the credit and draws no
         // map), from the corridor fixed at the press, so it makes no request
         // during the ride.
-        corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
+        // #3106: and on an open-world ride, the streets the ride holds round
+        // the rider (`open-world/street-corridor.ts`): the ones the scene
+        // draws and the junction prompt offers, so the rider can see the
+        // network on the map too. Read from the blocks already held, so this
+        // asks for nothing either; a new corridor when a block is read or let
+        // go, which the map follows.
+        corridor={
+          rideRoad?.follower === undefined
+            ? rideHasCorridor
+              ? worldCorridorRef.current
+              : undefined
+            : rideRoad.follower.streets()
+        }
         onPause={() => {
           // #2656: the ride's pause, not only the game's. The simulation stops
           // with the loop, and the recording with the controller's own

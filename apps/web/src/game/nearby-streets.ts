@@ -20,9 +20,11 @@
  * - **off the route**: for a street that never touches it, with its edge off
  *   the main road's verge — at least `landform.ts` §`ROAD_CLEARANCE_METRES`
  *   and its own half-width from ANY stretch of the drawn road. A street that
- *   **touches** the route (a point of it, resampled as `cross-streets.ts`
- *   §`mappedJunctions` resamples it, within `cross-streets.ts`
- *   §`JUNCTION_TOLERANCE_METRES` of the drawn road on land that was read) is
+ *   **meets the route at a junction** (a point of it, resampled as
+ *   `cross-streets.ts` §`mappedJunctions` resamples it, within
+ *   `cross-streets.ts` §`JUNCTION_TOLERANCE_METRES` of the drawn road on land
+ *   that was read, from which it leaves at an angle an arm is taken at — #3106:
+ *   a fork has no stub, and is drawn as a street that never touches is) is
  *   the junctions' near the route: its stub there stays exactly as it was,
  *   and it is drawn here only from {@link NEARBY_STREET_HANDOVER_METRES} off
  *   the road — where every stub is still at its full width and height, before
@@ -100,8 +102,10 @@ import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, StreetFeature } from '@onyourleft/map-features';
 
 import {
+  ARM_REACH_METRES,
   JUNCTION_MIN_ANGLE_DEGREES,
   JUNCTION_TOLERANCE_METRES,
+  leavesAtJunctionAngle,
   resampled,
   SIDE_ROAD_FADE_METRES,
   SIDE_ROAD_METRES,
@@ -116,7 +120,13 @@ import {
 } from './cross-streets';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, TERRAIN_COLUMN_OFFSETS, terrainHeightAt } from './landform';
-import { distanceToDrawnRoad, nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
+import {
+  distanceToDrawnRoad,
+  nearestOnDrawnRoad,
+  roadNeighbourhood,
+  type NearestOnRoad,
+  type RoadNeighbourhood,
+} from './road-grid';
 import {
   APPROACH_METRES,
   EMBANKMENT_MAX_RUN_METRES,
@@ -156,6 +166,16 @@ export const NEARBY_STREET_VIEW_METRES = 400;
  * always reached.
  */
 export const NEARBY_STREET_REFRESH_METRES = 40;
+
+/**
+ * How far from the drawn road a street's stations are made, in metres:
+ * **440** — the view and a refresh more, which is as far as
+ * {@link nearbyStreetsAt} looks from a place on the road. #3106: nothing
+ * farther off is read (`road-grid.ts` §`roadNeighbourhood`), so a corridor
+ * far wider than the view — an open-world ride's nine blocks — costs what is
+ * near the road and no more.
+ */
+export const NEARBY_STREET_REACH_METRES = NEARBY_STREET_VIEW_METRES + NEARBY_STREET_REFRESH_METRES;
 
 /** The most pieces a frame draws: **256**, the nearest the rider first. */
 export const NEARBY_STREETS_PER_FRAME = 256;
@@ -348,18 +368,42 @@ function segmentToSegmentSquared(
 
 // --- Finding them ------------------------------------------------------------
 
-/** A street's stations every {@link NEARBY_STREET_STEP_METRES} by arc length, its end kept, drawn from `budget`. */
-function stationsOf(line: Float32Array, budget: { metres: number }): number[] {
+/**
+ * A street's stations every {@link NEARBY_STREET_STEP_METRES} by arc length, its end kept, drawn from `budget`.
+ *
+ * #3106: a segment off `near` — land no rider on this road can see
+ * (`road-grid.ts` §`RoadNeighbourhood`) — has no stations and takes nothing
+ * from `budget`. It leaves ONE station that is no place (`NaN`), which is on no
+ * land that was read, so no piece runs across the gap; and the arc length
+ * carries on across it, so the stations after it stand where they would have.
+ */
+function stationsOf(
+  line: Float32Array,
+  budget: { metres: number },
+  near: RoadNeighbourhood,
+): number[] {
   const out: number[] = [];
   let carried = 0;
+  /** Whether the last thing written was a gap's station. */
+  let gap = false;
   for (let at = 0; at + 3 < line.length; at += 2) {
     const ax = line[at] as number;
     const az = line[at + 1] as number;
     const bx = line[at + 2] as number;
     const bz = line[at + 3] as number;
     if (![ax, az, bx, bz].every(Number.isFinite)) break;
-    if (at === 0) out.push(ax, az);
     const length = Math.hypot(bx - ax, bz - az);
+    if (!near.near(Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz))) {
+      if (!gap) out.push(Number.NaN, Number.NaN);
+      gap = true;
+      // The stations it would have had, counted and not made.
+      const first = NEARBY_STREET_STEP_METRES - carried;
+      carried = first > length ? carried + length : (length - first) % NEARBY_STREET_STEP_METRES;
+      continue;
+    }
+    // The street's own start, or where it comes back within reach.
+    if (at === 0 || gap) out.push(ax, az);
+    gap = false;
     if (length > budget.metres) {
       budget.metres = 0;
       break;
@@ -390,23 +434,45 @@ function stationsOf(line: Float32Array, budget: { metres: number }): number[] {
   return out;
 }
 
-/** Whether a street touches the route: `cross-streets.ts` §`mappedJunctions`' own test, point for point. */
-function touchesRoute(
+/**
+ * Whether a street meets the route as a junction's arm does: a point of it on
+ * the route (`cross-streets.ts` §`mappedJunctions`' own test, point for
+ * point) from which it leaves at an angle an arm is taken at
+ * (`cross-streets.ts` §`leavesAtJunctionAngle`). Such a street has a stub at
+ * the road, and is drawn here from past it.
+ *
+ * ⚠️ #3106: a street that touches the route and leaves it only as a **fork**,
+ * under `cross-streets.ts` §`JUNCTION_MIN_ANGLE_DEGREES`, has NO stub, and is
+ * no junction here: until #3106 it was, and was drawn from the hand-over
+ * distance all the same — 69 m along a street leaving at 20°, with nothing
+ * drawn before it.
+ */
+function meetsAtAJunction(
   street: StreetFeature,
   corridor: WorldCorridor,
   profile: RouteProfile,
   origin: CorridorOrigin,
   budget: { metres: number },
+  near: RoadNeighbourhood,
 ): boolean {
-  const points = resampled(street.line, budget);
-  for (let at = 0; at + 1 < points.length; at += 2) {
-    const x = points[at] as number;
-    const z = points[at + 1] as number;
-    if (
+  const points = resampled(street.line, budget, near);
+  const count = points.length / 2;
+  const on = new Uint8Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const x = points[index * 2] as number;
+    const z = points[index * 2 + 1] as number;
+    on[index] =
       corridor.covered(x, z) &&
       nearestOnDrawnRoad(profile, origin, x, z, JUNCTION_TOLERANCE_METRES) !== undefined
-    ) {
-      return true;
+        ? 1
+        : 0;
+  }
+  for (let index = 0; index < count; index += 1) {
+    if (on[index] !== 1) continue;
+    for (const direction of [1, -1] as const) {
+      const next = index + direction;
+      if (next < 0 || next >= count || on[next] === 1) continue;
+      if (leavesAtJunctionAngle(points, index * 2, direction * 2, profile, origin)) return true;
     }
   }
   return false;
@@ -532,20 +598,28 @@ export function nearbyStreets(
   const bridges = mappedGradeCrossings(corridor, profile, origin).filter(
     (crossing) => crossing.grade === 'bridge',
   );
+  // #3106: only the streets a rider on this road can come within sight of, or
+  // that can touch it, are read and counted — never a block's worth a
+  // kilometre off, which an open-world ride holds eight of.
+  const touching = roadNeighbourhood(profile, origin, ARM_REACH_METRES);
+  const inSight = roadNeighbourhood(profile, origin, NEARBY_STREET_REACH_METRES);
   for (const street of corridor.streets) {
     if (street.grade !== 'ground') continue;
     const widthClass = widthClassOf(street);
     const half = SIDE_ROAD_WIDTHS[widthClass] / 2;
-    const clearOfRoad = touchesRoute(street, corridor, profile, origin, touchBudget)
+    const stations = stationsOf(street.line, drawBudget, inSight);
+    const count = stations.length / 2;
+    // Nothing of it in sight, so nothing of it to draw.
+    if (count < 2) continue;
+    const clearOfRoad = meetsAtAJunction(street, corridor, profile, origin, touchBudget, touching)
       ? NEARBY_STREET_HANDOVER_METRES
       : ROAD_CLEARANCE_METRES + half;
-    const stations = stationsOf(street.line, drawBudget);
-    const count = stations.length / 2;
     const kept = new Uint8Array(count);
     for (let index = 0; index < count; index += 1) {
       const x = stations[index * 2] as number;
       const z = stations[index * 2 + 1] as number;
-      if (!corridor.covered(x, z)) continue;
+      // A gap's station (`stationsOf`) is no place, and so on no land.
+      if (!Number.isFinite(x) || !corridor.covered(x, z)) continue;
       if (distanceToDrawnRoad(profile, origin, x, z, clearOfRoad + 1) < clearOfRoad) continue;
       if (onOverpassRoad(bridges, x, z, half)) continue;
       if (widthClass === 'service') {

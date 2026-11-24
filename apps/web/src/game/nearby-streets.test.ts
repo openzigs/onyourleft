@@ -793,3 +793,138 @@ function gridTown(): { readonly corridor: WorldCorridor } {
     },
   };
 }
+
+describe('a corridor far wider than the view — #3106', () => {
+  /** How far each drawn station of `corridor`'s pieces is from the road. */
+  const lateralsOf = (corridor: WorldCorridor): number[] =>
+    nearbyStreets(corridor, ROLLING, ORIGIN).pieces.flatMap((piece) => {
+      const out: number[] = [];
+      for (let at = 0; at + 1 < piece.line.length; at += 2) {
+        out.push(
+          distanceToDrawnRoad(
+            ROLLING,
+            ORIGIN,
+            piece.line[at] as number,
+            piece.line[at + 1] as number,
+            3_000,
+          ),
+        );
+      }
+      return out;
+    });
+
+  it('spends its bound near the road alone: far streets read first leave the near ones drawn', () => {
+    // 410 km of street two kilometres and more off the road, in 100 m
+    // segments: an open-world ride's far blocks, read before the rider's own.
+    const far: StreetFeature[] = Array.from({ length: 205 }, (_, index) =>
+      street(
+        Array.from(
+          { length: 21 },
+          (_, vertex) => [500 + vertex * 100, 2_000 + index * 20] as const,
+        ),
+        'minor_road',
+        'residential',
+      ),
+    );
+    const corridor = corridorOf([...far, PARALLEL, CROSSING]);
+    const found = nearbyStreets(corridor, ROLLING, ORIGIN);
+    // The parallel street whole, and the crossing street past its stubs.
+    const alone = nearbyStreets(corridorOf([PARALLEL, CROSSING]), ROLLING, ORIGIN);
+    expect(alone.pieces.length).toBeGreaterThan(40);
+    expect(found.pieces).toHaveLength(alone.pieces.length);
+    // And through a frame: the streets are in the side roads the frame draws.
+    expect(streetsOf(frameAt(corridor, 1_400)).length).toBeGreaterThan(5);
+    // None of the far streets is a piece: nothing of them can be in view.
+    expect(Math.max(...lateralsOf(corridor))).toBeLessThan(300);
+  });
+
+  it('makes no station out of sight of the road, and runs no piece across the gap', () => {
+    // Out from the road, a kilometre and a half off, along, and back to it.
+    const loop = street(
+      [
+        [500, 30],
+        [500, 900],
+        [500, 1_500],
+        [900, 1_500],
+        [900, 900],
+        [900, 30],
+      ],
+      'minor_road',
+      'residential',
+    );
+    const found = nearbyStreets(corridorOf([loop]), ROLLING, ORIGIN);
+    for (const piece of found.pieces) {
+      for (let at = 0; at + 3 < piece.line.length; at += 2) {
+        // Consecutive stations of one piece are a step apart, never the gap's 1.6 km.
+        expect(
+          Math.hypot(
+            (piece.line[at + 2] as number) - (piece.line[at] as number),
+            (piece.line[at + 3] as number) - (piece.line[at + 1] as number),
+          ),
+        ).toBeLessThanOrEqual(4.01);
+      }
+    }
+    const laterals = lateralsOf(corridorOf([loop]));
+    // Both legs are drawn where they are in sight, and nothing past 900 m is made.
+    expect(Math.min(...laterals)).toBeLessThan(40);
+    expect(Math.max(...laterals)).toBeLessThanOrEqual(900.5);
+    // The leg coming back stands where it would have with every station made:
+    // each a whole number of steps along the street from its start.
+    const vertex = (index: number): readonly [number, number] => [
+      loop.line[index * 2] as number,
+      loop.line[index * 2 + 1] as number,
+    ];
+    let toLastLeg = 0;
+    for (let index = 0; index < 4; index += 1) {
+      const [ax, az] = vertex(index);
+      const [bx, bz] = vertex(index + 1);
+      toLastLeg += Math.hypot(bx - ax, bz - az);
+    }
+    const [fromX, fromZ] = vertex(4);
+    const [endX, endZ] = vertex(5);
+    const back = found.pieces.flatMap((piece) => {
+      const out: number[] = [];
+      for (let at = 0; at + 1 < piece.line.length; at += 2) {
+        const x = piece.line[at] as number;
+        const z = piece.line[at + 1] as number;
+        const fromVertex = Math.hypot(x - fromX, z - fromZ);
+        const fromEnd = Math.hypot(x - endX, z - endZ);
+        // On the last leg, clear of the vertex it comes back in at and of the street's end.
+        const onLeg =
+          Math.abs(fromVertex + fromEnd - Math.hypot(endX - fromX, endZ - fromZ)) < 0.01;
+        if (onLeg && fromVertex > 1 && fromEnd > 1) out.push(toLastLeg + fromVertex);
+      }
+      return out;
+    });
+    expect(back.length).toBeGreaterThan(50);
+    for (const arc of back) {
+      const off = arc % 4;
+      expect(Math.min(off, 4 - off)).toBeLessThan(0.05);
+    }
+  });
+
+  it('draws a fork from the road’s verge, and a street at a junction’s angle from past its stub', () => {
+    /** A street leaving the road at 1 500 m at `degrees`, 300 m long. */
+    const leaving = (degrees: number): StreetFeature => {
+      const radians = (degrees * Math.PI) / 180;
+      return street(
+        [
+          [1_500, 0],
+          [1_500 + 300 * Math.cos(radians), 300 * Math.sin(radians)],
+        ],
+        'minor_road',
+        'residential',
+      );
+    };
+    // A fork has no stub (`cross-streets.ts`): it is drawn from clear of the
+    // verge. Until #3106 it was drawn from the hand-over, 69 m along it.
+    const fork = Math.min(...lateralsOf(corridorOf([leaving(20)])));
+    expect(fork).toBeGreaterThanOrEqual(ROAD_CLEARANCE_METRES + SIDE_ROAD_WIDTHS.minor / 2);
+    expect(fork).toBeLessThan(ROAD_CLEARANCE_METRES + SIDE_ROAD_WIDTHS.minor / 2 + 4);
+    expect(mappedJunctions(corridorOf([leaving(20)]), ROLLING, ORIGIN, SEED)).toHaveLength(0);
+    // Control: at 45° there is a stub, and the street is drawn from past it.
+    const crossing = Math.min(...lateralsOf(corridorOf([leaving(45)])));
+    expect(crossing).toBeGreaterThanOrEqual(NEARBY_STREET_HANDOVER_METRES);
+    expect(mappedJunctions(corridorOf([leaving(45)]), ROLLING, ORIGIN, SEED)).toHaveLength(1);
+  });
+});

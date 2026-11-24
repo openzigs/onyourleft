@@ -242,3 +242,170 @@ export const START_ROW = MAIN_STREET_ROW + 52;
 /** A pin over 250 m from every street: the nearest is the western cross street. */
 export const FAR_COLUMN = -3100;
 export const FAR_ROW = 6500;
+
+/** #3106: where {@link OPEN_WORLD_AWKWARD_STREETS}' four side streets leave Main street, west to east. */
+export const AWKWARD_FORK_COLUMN = -2000;
+export const AWKWARD_BRIDGE_COLUMN = -1000;
+export const AWKWARD_SPLIT_COLUMN = 0;
+export const AWKWARD_CROSSROADS_COLUMN = 1000;
+
+/**
+ * #3106: **a town of the junctions a town of crossroads has none of** — each
+ * a way the street graph offers that the scene's own reading of the streets
+ * (`cross-streets.ts`, `nearby-streets.ts`) does not draw from its junction:
+ *
+ * - at {@link AWKWARD_FORK_COLUMN}, a **fork**: a street leaving Main street
+ *   to the right at 20°, under the 30° a junction's arm is taken at;
+ * - at {@link AWKWARD_BRIDGE_COLUMN}, a street to the left **mapped on a
+ *   bridge** from the junction itself, as a street over a stream beside the
+ *   main road is;
+ * - at {@link AWKWARD_SPLIT_COLUMN}, a street to the left whose first 9 m is
+ *   a way of its own, as a mapped street is where its attributes change:
+ *   too short to be an arm, and too far out for the rest to touch the road;
+ * - at {@link AWKWARD_CROSSROADS_COLUMN}, an ordinary crossroads: the control.
+ *
+ * Main street carries a vertex at each, as a mapped street does at a node.
+ * A ring road north and east closes the streets that would otherwise end.
+ * Ridden east along Main street from the start pin, the junctions are 232 m
+ * apart, so each one's prompt appears as the one before is passed.
+ */
+export const OPEN_WORLD_AWKWARD_STREETS: readonly GraphFixtureStreet[] = [
+  {
+    tags: { kind: 'major_road', kind_detail: 'secondary' },
+    line: [
+      [-4000, MAIN_STREET_ROW],
+      [AWKWARD_FORK_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_BRIDGE_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_SPLIT_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_CROSSROADS_COLUMN, MAIN_STREET_ROW],
+      [4000, MAIN_STREET_ROW],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [AWKWARD_FORK_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_FORK_COLUMN + 2200, MAIN_STREET_ROW + 800],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential', is_bridge: true },
+    line: [
+      [AWKWARD_BRIDGE_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_BRIDGE_COLUMN, 300],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [AWKWARD_SPLIT_COLUMN, MAIN_STREET_ROW],
+      [AWKWARD_SPLIT_COLUMN, MAIN_STREET_ROW - 40],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [AWKWARD_SPLIT_COLUMN, MAIN_STREET_ROW - 40],
+      [AWKWARD_SPLIT_COLUMN, 300],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [AWKWARD_CROSSROADS_COLUMN, 300],
+      [AWKWARD_CROSSROADS_COLUMN, 7900],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [-4000, 300],
+      [4000, 300],
+    ],
+  },
+  {
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [4000, 300],
+      [4000, 7900],
+    ],
+  },
+];
+
+/**
+ * #3106: **more street than a corridor's bound, nowhere near the ride** —
+ * 220 service roads the block's width, each 1.86 km, some 700 m to 1.4 km
+ * south of Main street: 409 km, past `cross-streets.ts` §`STREET_MAX_METRES`
+ * (400 km). The street graph leaves a service road out (ADR 0091 D-3), so
+ * they cost the graph nothing; the scene reads every one. Put BEFORE a
+ * town's streets in a tile, they are what an open-world ride's far blocks
+ * are to the block the rider is in: read first, and none of it in view.
+ */
+export const OPEN_WORLD_FAR_SERVICE_ROADS: readonly GraphFixtureStreet[] = Array.from(
+  { length: 220 },
+  (_, index) => ({
+    tags: { kind: 'minor_road', kind_detail: 'service' },
+    line: [
+      [-4000, 5000 + index * 13],
+      [4000, 5000 + index * 13],
+    ] as const,
+  }),
+);
+
+/** #3106: how far apart {@link OPEN_WORLD_DENSE_STREETS}' streets are, in fixture pixels: **172**, 40 m. */
+export const DENSE_SPACING = 172;
+
+/** The columns of {@link OPEN_WORLD_DENSE_STREETS}' north–south streets: thirty, west to east. */
+export const DENSE_COLUMNS: readonly number[] = Array.from(
+  { length: 30 },
+  (_, index) => START_COLUMN - DENSE_SPACING / 2 + (index - 5) * DENSE_SPACING,
+);
+
+/** The rows of {@link OPEN_WORLD_DENSE_STREETS}' east–west streets: six each side of Main street's. */
+export const DENSE_ROWS: readonly number[] = Array.from(
+  { length: 21 },
+  (_, index) => MAIN_STREET_ROW + (index - 10) * DENSE_SPACING,
+);
+
+/** The column whose first block north of Main street is mapped on a bridge: the sixth junction of a ride east from the start pin. */
+export const DENSE_BRIDGE_COLUMN = DENSE_COLUMNS[11] as number;
+
+/**
+ * #3106: **a town of short blocks** — a crossroads every 40 m, as terraced
+ * streets are, with ONE awkward way: at {@link DENSE_BRIDGE_COLUMN} the block
+ * north of Main street is mapped on a bridge, which the streets' own drawing
+ * leaves out and only `way-roads.ts` draws. Ridden east along Main street,
+ * the view holds ten junctions ahead and one or two behind, each with two
+ * ways out and the junctions along each of those: more way than
+ * `way-roads.ts` §`WAY_ROAD_STATIONS_PER_FRAME` reads in a frame, so which
+ * ways it reads first decides whether the offered one is drawn. Every street
+ * carries a vertex at every crossing, as a mapped street does at a node.
+ */
+export const OPEN_WORLD_DENSE_STREETS: readonly GraphFixtureStreet[] = [
+  ...DENSE_ROWS.map((row) => ({
+    tags: {
+      kind: row === MAIN_STREET_ROW ? 'major_road' : 'minor_road',
+      kind_detail: row === MAIN_STREET_ROW ? 'secondary' : 'residential',
+    },
+    line: DENSE_COLUMNS.map((column) => [column, row] as const),
+  })),
+  ...DENSE_COLUMNS.flatMap((column): GraphFixtureStreet[] => {
+    const tags = { kind: 'minor_road', kind_detail: 'residential' };
+    if (column !== DENSE_BRIDGE_COLUMN) {
+      return [{ tags, line: DENSE_ROWS.map((row) => [column, row] as const) }];
+    }
+    const north = DENSE_ROWS.filter((row) => row < MAIN_STREET_ROW);
+    const south = DENSE_ROWS.filter((row) => row >= MAIN_STREET_ROW);
+    return [
+      { tags, line: north.map((row) => [column, row] as const) },
+      {
+        tags: { ...tags, is_bridge: true },
+        line: [
+          [column, MAIN_STREET_ROW - DENSE_SPACING],
+          [column, MAIN_STREET_ROW],
+        ],
+      },
+      { tags, line: south.map((row) => [column, row] as const) },
+    ];
+  }),
+];
