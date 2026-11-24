@@ -63,7 +63,10 @@ describe('the mapped buildings’ materials outlive a belt — #3107', () => {
     expect(disposed.count).toBe(0);
     const second = new MappedBuildingBelt(mappedBuildingsOf([]), new Map(), undefined, shared);
     // The same objects: no material is new, so no program is.
-    expect(drawnIn(second)).toStrictEqual(drawnIn(first));
+    const before = drawnIn(first);
+    const after = drawnIn(second);
+    expect(after.size).toBe(before.size);
+    for (const material of after) expect(before.has(material)).toBe(true);
     second.dispose();
     expect(disposed.count).toBe(0);
   });
