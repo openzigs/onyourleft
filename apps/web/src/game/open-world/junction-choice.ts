@@ -99,11 +99,29 @@ export interface JunctionPrompt {
    * saying the choice is locked. Never true while {@link locked} is false.
    */
   readonly tooClose: boolean;
+  /**
+   * The junction before this one whose choice is final, when the prompt
+   * passed over it to reach this one ({@link promptedJunction}, #3129), or
+   * `undefined`. The pop-up shows one junction, so this one's lock is not
+   * shown; `hud/junction-text.ts` §`junctionEvent` says it (ADR 0088 D-3).
+   */
+  readonly lockedBefore: LockedJunction | undefined;
+}
+
+/** A junction whose choice is final, as {@link JunctionPrompt.lockedBefore} names it. */
+export interface LockedJunction {
+  /** The ride distance of the junction. */
+  readonly distance: number;
+  /** Every way on, from the furthest left to the furthest right. */
+  readonly ways: readonly RollingWay[];
+  /** The edge id the ride will take there, which can no longer change. */
+  readonly chosen: string;
 }
 
 /**
- * The junction the prompt is for with the rider at ride distance `rider`, and
- * which one ahead it is, or `undefined` while none is within
+ * The junction the prompt is for with the rider at ride distance `rider`,
+ * which one ahead it is, and the last junction it passed over to reach it
+ * (`before`, whose choice is final), or `undefined` while none is within
  * {@link JUNCTION_PROMPT_METRES} — ADR 0088 D-1.2 as amended on 2026-11-24
  * (#3129, the owner's Q2 ruling):
  *
@@ -125,7 +143,13 @@ export interface JunctionPrompt {
 export function promptedJunction(
   route: RollingRoute,
   rider: number,
-): { readonly junction: RollingJunction; readonly ordinal: number } | undefined {
+):
+  | {
+      readonly junction: RollingJunction;
+      readonly ordinal: number;
+      readonly before: RollingJunction | undefined;
+    }
+  | undefined {
   const within = (junction: RollingJunction | undefined): junction is RollingJunction =>
     junction !== undefined && junction.distance - rider <= JUNCTION_PROMPT_METRES;
   const final = (junction: RollingJunction): boolean =>
@@ -133,13 +157,15 @@ export function promptedJunction(
   let junction = route.nextJunctionAfter(rider);
   if (!within(junction)) return undefined;
   let ordinal = 1;
+  let before: RollingJunction | undefined;
   while (final(junction)) {
     const after = route.nextJunctionAfter(junction.distance);
     if (!within(after)) break;
+    before = junction;
     junction = after;
     ordinal += 1;
   }
-  return { junction, ordinal };
+  return { junction, ordinal, before };
 }
 
 /**
@@ -230,7 +256,10 @@ export interface TurnNotice {
 
 /** An open-world ride's junction choice: `GameView` holds one for the ride (#3013). */
 export interface JunctionChoice {
-  /** The prompt for the next junction, or `undefined` while none is within {@link JUNCTION_PROMPT_METRES}. */
+  /**
+   * The prompt for the junction {@link promptedJunction} names, or `undefined`
+   * while none is within {@link JUNCTION_PROMPT_METRES}.
+   */
   prompt(rider: number): JunctionPrompt | undefined;
   /** One press, from any input, with the rider at ride distance `rider`. */
   press(press: TurnPress, rider: number): void;
@@ -266,7 +295,7 @@ export function createJunctionChoice(route: RollingRoute, clock: () => number): 
   const prompt = (rider: number): JunctionPrompt | undefined => {
     const found = promptedJunction(route, rider);
     if (found === undefined) return undefined;
-    const { junction, ordinal } = found;
+    const { junction, ordinal, before } = found;
     const toLock = Math.max(0, junction.distance - rider - JUNCTION_LOCK_METRES);
     const locked = toLock === 0;
     let lockedFirst = lockedWhenFirstShown.get(junction.distance);
@@ -287,6 +316,10 @@ export function createJunctionChoice(route: RollingRoute, clock: () => number): 
       locked,
       toLock,
       tooClose: locked && lockedFirst,
+      lockedBefore:
+        before === undefined
+          ? undefined
+          : { distance: before.distance, ways: before.ways, chosen: before.taken },
     };
   };
 

@@ -403,8 +403,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   to choose" in place of "Choice locked" for such a junction, and only for one. A roundabout's ring
   is a run of ordinary junctions in the street graph (ADR 0091 D-5) until
   [#2893](https://github.com/openzigs/onyourleft/issues/2893) flags it, so nothing here treats its
-  exits apart. The ruling is posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129),
-  whose pull request implements it. (#3129)
+  exits apart. Three things this changes for a junction with another less than 150 m after it,
+  which the prompt reaches as the first one locks. D-1.5's "the prompt shows that it is locked" no
+  longer holds for it: the pop-up moves on to the next junction as its choice becomes final, so
+  its lock is not shown. D-3's "announced … once when it locks" still holds, in another form: the
+  lock, with the way taken, is said at the front of the next junction's first sentence ("Junction
+  choice locked: left. At the 2nd junction: …", or "Choice at the 2nd junction locked: left. At
+  the 3rd junction: …" while the junction before it is still ahead; new wording for the owner's
+  approval). And the Consequences bullet "Late presses do nothing" no longer holds for it: a press
+  inside its lock chooses at the junction the prompt shows, and still does nothing at the locked
+  one. The ruling is posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129), whose
+  pull request implements it. (#3129)
 - **2026-11-24** — **The owner ruled that a U-turn within 100 m past the junction just turned at
   takes, as its default there, the way back onto the street the rider came along.** The owner's
   same ride: *"i turned off a street then did a u turn and was not offered to turn back onto the

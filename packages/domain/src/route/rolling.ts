@@ -598,7 +598,8 @@ export class RollingRoute {
     this.#cutAfter(index, turn);
     const length = leg.along[leg.along.length - 1] as number;
     // The street ridden in on, when the leg turned on began at the junction
-    // whose lock the rider is now inside.
+    // whose lock the rider is now inside. The `atNode` and `end` checks are
+    // defensive: legs are contiguous, so no test can make them false.
     const before = this.#legs[index - 1];
     const back =
       before?.atNode === true &&

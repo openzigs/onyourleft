@@ -7,9 +7,11 @@
  * The words the prompt draws on each way (`JunctionChoicePrompt.tsx`), and the
  * sentences the HUD's one live region says: once when a junction's prompt
  * appears, naming its ways and the default; once each time the choice changes;
- * and once when the choice locks (D-3). A junction whose lock is already
- * behind the rider when it becomes the next one (D-1.5) says so instead of the
- * first.
+ * and once when the choice locks (D-3). A junction whose choice is already
+ * final on the first frame it is prompted (D-1.5, #3129) says so instead of
+ * the first. When the prompt moves on to a later junction as the one it showed
+ * locks (#3129), that lock is said at the front of the new junction's first
+ * sentence, so the rider still hears which way they are committed to.
  *
  * ## Owed until said, one sentence at a time
  *
@@ -48,7 +50,12 @@ import type { RollingWay } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatSmallDistance } from '../../units/format';
-import type { JunctionPrompt, TurnNotice, TurnNoticeKind } from '../open-world/junction-choice';
+import type {
+  JunctionPrompt,
+  LockedJunction,
+  TurnNotice,
+  TurnNoticeKind,
+} from '../open-world/junction-choice';
 import type { AnnouncementEvent, AnnouncementKind } from './announce';
 
 /** The prompt's title, and the name of its group. */
@@ -84,8 +91,13 @@ const ORDINALS = new Intl.PluralRules('en-GB', { type: 'ordinal' });
  */
 export function junctionTitle(shown: Pick<JunctionPrompt, 'ordinal'>): string {
   if (shown.ordinal <= 1) return JUNCTION_PROMPT_TITLE;
-  const suffix = ORDINAL_SUFFIX[ORDINALS.select(shown.ordinal)] ?? 'th';
-  return `At the ${String(shown.ordinal)}${suffix} junction`;
+  return `At the ${ordinalJunction(shown.ordinal)}`;
+}
+
+/** "2nd junction", "3rd junction", … */
+function ordinalJunction(ordinal: number): string {
+  const suffix = ORDINAL_SUFFIX[ORDINALS.select(ordinal)] ?? 'th';
+  return `${String(ordinal)}${suffix} junction`;
 }
 
 /**
@@ -156,7 +168,7 @@ export function lockLine(toLock: number, units: UnitSystem): string {
   return `Choice locks in ${String(tens)} ${measured.unit}`;
 }
 
-function wordOf(shown: JunctionPrompt, id: string): string {
+function wordOf(shown: Pick<JunctionPrompt, 'ways'>, id: string): string {
   const way = shown.ways.find((each) => each.edge.id === id);
   return way === undefined ? wayWord(0).toLowerCase() : wayPhrase(way);
 }
@@ -187,6 +199,22 @@ function chosenSentence(shown: JunctionPrompt): string {
 /** The sentence said when the choice becomes final (D-1.5). */
 function lockedSentence(shown: JunctionPrompt): string {
   return `Junction choice locked: ${wordOf(shown, shown.chosen)}.`;
+}
+
+/**
+ * Said at the front of `shown`'s first sentence when the prompt moved on to it
+ * from `passed`, the junction just before it, as that one's choice became
+ * final, so that lock is never shown (#3129). The next junction's is
+ * {@link lockedSentence}'s words; one further on is named as the title names
+ * it, "Choice at the 2nd junction locked: left." New wording, drafted for the
+ * owner's approval.
+ */
+function passedLockWords(shown: JunctionPrompt, passed: LockedJunction): string {
+  const ordinal = shown.ordinal - 1;
+  const way = wordOf(passed, passed.chosen);
+  return ordinal <= 1
+    ? `Junction choice locked: ${way}.`
+    : `Choice at the ${ordinalJunction(ordinal)} locked: ${way}.`;
 }
 
 /** What the caller threads back in. Returned, never kept here. */
@@ -245,6 +273,12 @@ export function junctionEvent(
     owed = undefined;
   } else if (shown.distance !== announced.junction) {
     owed = shown.locked ? tooCloseSentence(shown) : aheadSentence(shown);
+    // #3129: the prompt moved on from the junction it showed, as that one's
+    // choice became final: its lock is said first (D-3), or it never is.
+    const passed = shown.lockedBefore;
+    if (passed !== undefined && passed.distance === announced.junction && !announced.locked) {
+      owed = `${passedLockWords(shown, passed)} ${owed}`;
+    }
   } else if (shown.locked && !announced.locked) {
     owed = lockedSentence(shown);
   } else if (shown.chosen !== announced.chosen) {

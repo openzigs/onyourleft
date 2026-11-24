@@ -15,7 +15,6 @@
  * the last junction to choose (#3129). Its title says which junction it is
  * for when that is not the next one: "At the 2nd junction" (#3129,
  * `junction-choice.ts` §`promptedJunction`). A U-turn button
-
  * stands with the ride controls for the whole ride (D-1.6, D-3):
  * {@link JunctionUTurn}.
  *

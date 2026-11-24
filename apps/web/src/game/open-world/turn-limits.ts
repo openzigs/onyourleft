@@ -23,8 +23,9 @@
  * ADR 0091 D-5, the owner's answer to D-9 Q3, offers a one-way street **both
  * ways**.
  *
- * The owner approved these sentences on 2026-11-24 (#3129), and its ruling
- * changed the 100 m sentence to match ADR 0088's amendment of that date. They
+ * The owner approved these sentences on 2026-11-24 (#3129), except the 100 m
+ * sentence: its ruling changed that one to match ADR 0088's amendment of that
+ * date, and the redraft awaits the owner's approval. They
  * are shown in the open-world start screen's help
  * (`shell/routes.ts` §`OPEN_WORLD_ROUTE`). `open-world/junction-limits.test.tsx`
  * rides a fixture junction for each limit through the real game screen,
@@ -37,7 +38,7 @@
 /** A reason an open-world junction offers no turn, kept on purpose. @see the header */
 export type TurnLimit = 'service' | 'private' | 'motorway' | 'path' | 'not-joined' | 'too-close';
 
-/** Each limit's words, as the help says them (#3124, approved; the 100 m sentence #3129's). */
+/** Each limit's words, as the help says them (#3124, approved; the 100 m sentence #3129's, awaiting approval). */
 export const TURN_LIMIT_WORDS: Readonly<Record<TurnLimit, string>> = {
   service: 'driveways, car parks and alleys',
   private: 'private roads',
@@ -54,8 +55,8 @@ export const TURN_LIMIT_WORDS: Readonly<Record<TurnLimit, string>> = {
 /**
  * The open-world start screen's help paragraph on turns: where they are
  * offered, every limit of {@link TURN_LIMIT_WORDS}, and that a one-way street
- * is offered both ways (ADR 0091 D-5). Approved by the owner (#3129).
-
+ * is offered both ways (ADR 0091 D-5). Approved by the owner on 2026-11-24,
+ * except the 100 m sentence, redrafted for #3129 and awaiting approval.
  */
 export const TURN_LIMITS_HELP =
   'Turns are offered where a public street meets the one you are on. Not offered: ' +

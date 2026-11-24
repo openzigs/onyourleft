@@ -33,7 +33,9 @@
  * - **A town of blocks 60 to 90 m long** offers every way of every junction
  *   before its choice is final: while the next junction's choice is final,
  *   the pop-up is for the first junction after it whose choice is not, and
- *   says which junction ahead it is ("At the 2nd junction").
+ *   says which junction ahead it is ("At the 2nd junction"). Each junction's
+ *   lock is still said once, with the way taken, as the pop-up moves on from
+ *   it (ADR 0088 D-3, from the review of #3130).
  * - **A U-turn 60 m past the junction turned at** rides back onto the street
  *   the rider came along: the way back is that junction's default, set by
  *   the U-turn, since the junction is inside its lock from then on.
@@ -54,6 +56,7 @@ import {
 import type { GraphFixtureStreet } from '@onyourleft/map-features/testing';
 
 import { OPEN_WORLD_ROUTE } from '../../shell/routes';
+import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../hud/announce-preference';
 import { JUNCTION_LOCKED_LINE, JUNCTION_TOO_CLOSE_LINE } from '../hud/junction-text';
 import type { SceneInput } from '../scene';
 import {
@@ -71,6 +74,21 @@ import {
   type RiddenFrame,
 } from './offered-ways-testing';
 import { TURN_LIMIT_WORDS, type TurnLimit } from './turn-limits';
+
+/** Every sentence the game screen's announcer said, in turn, repeats included. */
+const { heard } = vi.hoisted(() => ({ heard: [] as string[] }));
+
+vi.mock('../hud/announce', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hud/announce')>();
+  return {
+    ...actual,
+    announce: (...args: Parameters<typeof actual.announce>) => {
+      const said = actual.announce(...args);
+      if (said.sentence !== undefined) heard.push(said.sentence);
+      return said;
+    },
+  };
+});
 
 vi.mock('../scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../scene')>();
@@ -292,12 +310,41 @@ describe('a town of crossroads: a turn at every junction, and after a U-turn the
 
 describe('a town of blocks 60 to 90 m long: every junction offered before its lock, the pop-up saying which — #3129', () => {
   beforeAll(async () => {
+    // Every junction sentence is said in the HUD's one region (#2898).
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true }),
+    );
+    heard.length = 0;
     ride = await startOfferedWaysRide(DENSE_TOWN_STREETS, START_COLUMN, START_ROW);
     await ride.rideTo(denseAt(DENSE_TOWN_COLUMNS.length - 1) + 10);
   });
   afterAll(() => {
     ride?.end();
     ride = undefined;
+    localStorage.clear();
+  });
+
+  it('says each junction’s lock once, with the way taken, though the pop-up has moved on from it', () => {
+    // ADR 0088 D-3, as amended on 2026-11-24: the pop-up moves on to the next
+    // junction as each choice becomes final, so the lock is said at the front
+    // of that junction's first sentence. The last junction has none after it,
+    // and the pop-up stays on it, saying its lock as before.
+    const locks = heard.filter((sentence) => / locked: /.test(sentence));
+    const ahead =
+      'left, straight on along Main Street or right. The default is straight on along Main Street.';
+    expect(locks).toEqual([
+      // The 1st junction locks while it is the next one.
+      `Junction choice locked: straight on along Main Street. At the 2nd junction: ${ahead}`,
+      // Each after it locks while the junction before it is still ahead.
+      ...DENSE_TOWN_COLUMNS.slice(2).map(
+        () =>
+          'Choice at the 2nd junction locked: straight on along Main Street. ' +
+          `At the 3rd junction: ${ahead}`,
+      ),
+      // The last, with none after it: the pop-up stays on it.
+      'Junction choice locked: straight on along Main Street.',
+    ]);
   });
 
   it('offers every way of every junction before its choice is final', () => {

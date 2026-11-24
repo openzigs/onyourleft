@@ -160,3 +160,50 @@ describe('which junction the prompt is for — #3129', () => {
     expect(frame(NO_JUNCTION_ANNOUNCED, shown).text).toMatch(/^Junction ahead: /);
   });
 });
+
+describe('a lock the pop-up moved on from — #3129, ADR 0088 D-3 as amended', () => {
+  /** The prompt, not yet locked, for a junction 70 m after `shown`'s, with `shown`'s junction locked behind it. */
+  function after(shown: JunctionPrompt, ordinal: number, chosen: string): JunctionPrompt {
+    return {
+      ...shown,
+      distance: shown.distance + 70,
+      ordinal,
+      locked: false,
+      toLock: 70,
+      tooClose: false,
+      lockedBefore: { distance: shown.distance, ways: shown.ways, chosen },
+    };
+  }
+
+  it('says the lock, with the way taken, before the next junction’s ways', () => {
+    const { choice, rider, ids } = starRide([-90, 0, 90]);
+    const shown = choice.prompt(rider) as JunctionPrompt;
+    const seen = frame(NO_JUNCTION_ANNOUNCED, shown).announced;
+    expect(frame(seen, after(shown, 2, ids[0] as string)).text).toBe(
+      'Junction choice locked: left. At the 2nd junction: left, straight on or right. ' +
+        'The default is straight on.',
+    );
+    // Further on, the locked junction is named as the title names it.
+    expect(frame(seen, after({ ...shown, ordinal: 2 }, 3, ids[2] as string)).text).toBe(
+      'Choice at the 2nd junction locked: right. At the 3rd junction: left, straight on or ' +
+        'right. The default is straight on.',
+    );
+  });
+
+  it('says nothing of a lock already said, or of a junction it never prompted', () => {
+    const { choice, junction, ids } = starRide([-90, 0, 90]);
+    // Too close from its first frame: its own sentence already said the way.
+    const locked = choice.prompt(junction.distance - 60) as JunctionPrompt;
+    const tooClose = frame(NO_JUNCTION_ANNOUNCED, locked);
+    expect(tooClose.text).toMatch(/too close to choose/);
+    expect(frame(tooClose.announced, after(locked, 2, ids[1] as string)).text).toMatch(
+      /^At the 2nd junction: /,
+    );
+    // The junction before was never the one prompted.
+    const open = choice.prompt(junction.distance - 200) as JunctionPrompt;
+    const elsewhere = frame(NO_JUNCTION_ANNOUNCED, { ...open, distance: open.distance - 30 });
+    expect(frame(elsewhere.announced, after(open, 2, ids[1] as string)).text).toMatch(
+      /^At the 2nd junction: /,
+    );
+  });
+});
