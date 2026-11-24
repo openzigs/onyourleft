@@ -578,6 +578,13 @@ export {
   routeProfile,
 } from './route/profile';
 
+// A road's heights across a bridge or a tunnel (#2013, ADR 0087 D-4.3): a
+// terrain model puts a bridge on the valley floor, so the road's height across
+// a span is linear between the ground either side of it.
+
+export type { RoadSpan } from './route/spans';
+export { heightsAcrossSpans } from './route/spans';
+
 // The rolling route (#2895): an open-world ride's profile, which grows ahead
 // along the street graph's default ways, swaps its tail at a junction before
 // the 100 m lock and drops the road far behind (ADR 0087 D-4.1, D-6; ADR 0088

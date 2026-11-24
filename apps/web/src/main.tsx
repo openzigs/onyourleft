@@ -169,6 +169,8 @@ import { browserBasemapConfig } from './map/basemap';
 import { readMapTilesChoice } from './map/tiles-preference';
 import { readRealisticWorldChoice } from './game/world-preference';
 import { lazyWorldCorridorPort, readingCorridorOnSave } from './world-data/corridor-lazy';
+import { browserTerrainConfig } from './terrain/config';
+import { lazyRouteHeights, type RouteHeights } from './terrain/heights';
 import type { WorldCorridorPort } from './world-data/corridor-port';
 import type { MapPort } from './map/port';
 import { forgettingOnDelete, type LibraryPort } from './library/store-port';
@@ -760,6 +762,26 @@ function buildWorldCorridorPort(rideController: RideController | undefined): Wor
  */
 function buildWorkoutPort(): WorkoutPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * A drawn route's heights (#2013): the terrain archive, read in the app with
+ * no instance and no routing engine.
+ *
+ * `undefined` for a build configured with no terrain archive, or with no
+ * basemap (`terrain/config.ts` §`readTerrainConfig`), and the planner then
+ * saves a drawn route flat, as it did before. The reader, `pmtiles` and the decoder
+ * are loaded on the first request (`terrain/heights.ts` §`lazyRouteHeights`),
+ * and with map tiles off nothing is loaded or asked (ADR 0054 D-6.4: one
+ * switch for everything the tile host is asked).
+ */
+function buildRouteHeights(): RouteHeights | undefined {
+  const config = browserTerrainConfig();
+  if (config === undefined) return undefined;
+  return lazyRouteHeights({
+    config,
+    mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+  });
 }
 
 /**
@@ -2073,6 +2095,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           routes={buildRoutePort(worldCorridorPort)}
           // #2008: roads from the rider's instance, or none and straight lines.
           routing={buildRoutingPort()}
+          heights={buildRouteHeights()}
+          terrain={browserTerrainConfig()}
           openWorld={buildOpenWorldStartPort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}

@@ -1148,6 +1148,32 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
                         which hands it a pad's turns), named as roots, with
                         the prompt importing `gradient.ts` a red case
+    src/game/open-world/turn-limits.ts
+                        where an open-world ride offers NO turn, on purpose
+                        (#3124), and the words the open-world start screen's
+                        help says it in (`shell/routes.ts`, drafts for the
+                        owner). Each limit is an accepted ADR decision:
+                        service ways, i.e. driveways, car parks and alleys
+                        (ADR 0091 D-3, D-9 Q2); `access` `no`/`private` and
+                        motorways (D-3); footways, cycleways, paths, tracks
+                        (D-3, D-9 Q1); a street mapped to stop more than 3 m
+                        short of the road (D-4, `T_SNAP_METRES`); and a
+                        junction whose choice is final (100 m before it,
+                        ADR 0088 D-1.5, ADR 0087 D-6.2) before it was ever
+                        prompted, whose pop-up says "Too close to the last
+                        junction to choose". Since #3129 (ADR 0088's
+                        amendments of 2026-11-24) the pop-up offers the
+                        first junction not yet final within 250 m while the
+                        next is final, titled "At the 2nd junction"
+                        (`junction-choice.ts` §`promptedJunction`), and a
+                        U-turn within 100 m past a junction takes the street
+                        came along as its default (`RollingRoute.uTurn`), so
+                        a dense town and a quick U-turn are offered. A one-way
+                        street is offered BOTH ways (ADR 0091 D-5): not a
+                        limit. `junction-limits.test.tsx` rides each through
+                        the real game screen and holds its words in the help.
+                        ⚠️ A new reason a junction offers no turn goes in this
+                        list and that test, or it is a defect
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
@@ -2085,7 +2111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+                        the tint is a VERTEX attribute, and there is no ground blob (#620).
+                        ⚠️ **One belt a world since #3119**: an open-world
+                        ride's every plan is another set, handed to the belt
+                        it has (`MappedBuildingBelt.rebind`,
+                        `mappedBeltFor`) and refilled in its buffers; a new
+                        belt allocated and uploaded ~10 MB inside the frame
     src/game/house-models.ts
                         which mapped plans are drawn as a house MODEL (#1585):
                         GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
@@ -2409,7 +2440,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         or of the blocks held read every street inside one
                         frame. A route ride's are read whole, once, as before.
                         A reading's grid of segments (`onNearbyStreet`) is
-                        built when a planner of buildings first asks for it
+                        built when a planner of buildings first asks for it.
+                        ⚠️ **Since #3119 the scenery along the ways out is
+                        placed a few ways a frame** (`scatter.ts`
+                        §`WaysOutPlacing`, `StreetScans.ways`): at most
+                        `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
+                        first, all on the ride's first frame; a junction in a
+                        dense town hands on ~20 at once. The way roads below
+                        still read every way handed on.
                         ⚠️ Since #3105 an open-world ride draws a side
                         street's BRIDGE too, as a deck at the road's level
                         across the water a ground street stops at
@@ -2428,7 +2466,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         them and the scenery is kept off them; worked out
                         again when the ways, the side roads or the reach in
                         40 m steps change; at most 1 024 stations a frame.
-                        Off with the `-nearby-streets` lever
+                        Off with the `-nearby-streets` lever.
+                        ⚠️ **Since #3123 also the road turned off**: once
+                        the rider passes a junction where the route left
+                        the road it came along (`open-world/road.ts`
+                        §`turnedOff`, `SceneInput.turnedOff`), that road on
+                        past the junction and back from it, 400 m each way,
+                        read right after the next junction's ways. The road
+                        covers it only where the frame draws the road (from
+                        60 m behind the rider, in 40 m steps): the road back
+                        is the route still, which nothing else draws
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

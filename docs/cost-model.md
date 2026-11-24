@@ -80,6 +80,7 @@ that has none.
 | `h` | 0.5 | CDN cache hit rate, as a share | Protomaps' cost calculator default. Conservative — a real basemap caches far better | read |
 | `s` | 70,000 | bytes, average tile | [ADR 0010](adr/0010-map-tiles-and-routing.md), inherited from #60 | inherited |
 | `S` | 138,031,484,053 | bytes, basemap archive | **Measured** 2026-09-15 from `build-metadata.protomaps.dev/builds.json`, build `20260915`, b3sum `ba618b53…` | measured |
+| `S_terrain` | 14,438,629,218 | bytes, terrain archive | **Measured** 2026-11-24: the length of the hosted object `terrain-us-mapterhorn-20260911.pmtiles`, Mapterhorn 0.0.13's `planet.pmtiles` (355,579,263,191 bytes, modified 2026-09-11) cut to `-125,24,-66,50` at zoom 12 only, 231,203 tiles ([#2013](https://github.com/openzigs/onyourleft/issues/2013)) | measured |
 | `p_storage` | 0.015 | USD per GB-month | Cloudflare R2 Standard storage, `developers.cloudflare.com/r2/pricing/` (page dated 2026-08-07), read 2026-09-15 | read |
 | `p_classB` | 0.36 | USD per million Class B requests | Same page, read 2026-09-15 | read |
 | `p_egress` | 0.00 | USD per GB egress | Same page, read 2026-09-15: R2 egress is free | read |
@@ -113,15 +114,16 @@ what happens when it is exceeded.
 | Basemap archive storage | $2.07 | $2.07 | $2.07 |
 | Basemap tile requests | $0.08 | $0.81 | $8.10 |
 | Basemap egress | $0.00 | $0.00 | $0.00 |
+| Terrain archive storage | $0.22 | $0.22 | $0.22 |
 | Activity streams (object storage) | $0.02 | $0.16 | $1.63 |
-| Infrastructure subtotal | $26.39 | $27.26 | $36.02 |
-| Infrastructure, per 1,000 MAU | $26.39 | $2.73 | $0.36 |
+| Infrastructure subtotal | $26.60 | $27.48 | $36.24 |
+| Infrastructure, per 1,000 MAU | $26.60 | $2.75 | $0.36 |
 | Domain name | $0.86 | $0.86 | $0.86 |
 | Transactional email | $0.00 | $0.00 | $0.00 |
 | Error tracking | $0.00 | $0.00 | $0.00 |
-| Fully loaded total | $27.24 | $28.12 | $36.88 |
-| Fully loaded, per 1,000 MAU | $27.24 | $2.81 | $0.37 |
-| Fully loaded, US cents per athlete per year | 32.69 | 3.37 | 0.44 |
+| Fully loaded total | $27.46 | $28.34 | $37.10 |
+| Fully loaded, per 1,000 MAU | $27.46 | $2.83 | $0.37 |
+| Fully loaded, US cents per athlete per year | 32.95 | 3.40 | 0.45 |
 | Dominant line item | Instance (one box) | Instance (one box) | Instance (one box) |
 | Second-largest line item | Basemap archive storage | Basemap archive storage | Basemap tile requests |
 
@@ -149,11 +151,12 @@ is the harder half of that problem, and no part of it is measured here.
 
 ### The box is the whole bill, at every scale modelled
 
-The dominant line item is the instance at 1,000, 10,000 **and** 100,000 monthly actives — 89%, 86%
-and 66% of the fully-loaded total. ⚠️ **Against the *infrastructure subtotal* the same three shares
-read 92%, 89% and 67%**, and they are stated here because mixing the two denominators is the
-specific mistake this paragraph shipped with: its 92% was the infrastructure share of the smallest
-column quoted as a fully-loaded one. Either reading supports the sentence below; neither may be
+The dominant line item is the instance at 1,000, 10,000 **and** 100,000 monthly actives — 88%, 85%
+and 65% of the fully-loaded total. ⚠️ **Against the *infrastructure subtotal* the same three shares
+read 91%, 88% and 67%**, and they are stated here because mixing the two denominators is the
+specific mistake this paragraph shipped with: its first figure was the infrastructure share of the
+smallest column quoted as a fully-loaded one. (Recomputed on 2026-11-23, when the terrain archive's
+line was added, [#2013](https://github.com/openzigs/onyourleft/issues/2013).) Either reading supports the sentence below; neither may be
 quoted without its denominator. #54's second criterion asks that the next thing to optimise be
 known in advance rather than discovered, and the answer is blunt: **it is never the tiles and never
 the streams. It is whether one box still serves.**
@@ -196,8 +199,8 @@ one that `L` does not reach.
 
 ### The per-athlete figure, and the sentence it licenses
 
-At 10,000 monthly actives the fully-loaded infrastructure costs **3.37 US cents per athlete per
-year**. At 100,000 it is **0.44 cents**. At 1,000 it is **32.69 cents**, because a fixed box divided
+At 10,000 monthly actives the fully-loaded infrastructure costs **3.40 US cents per athlete per
+year**. At 100,000 it is **0.45 cents**. At 1,000 it is **32.95 cents**, because a fixed box divided
 by a small population is a large number — the per-athlete cost of this architecture falls with scale
 for exactly one reason, and it is that the box does not get bigger.
 
@@ -259,6 +262,29 @@ it is **315 GB a month**. On a platform that meters egress at $0.10/GB that same
 which is [ADR 0010](adr/0010-map-tiles-and-routing.md) D-2's whole argument in one cell. It is kept
 in the table at $0.00 rather than deleted for exactly that reason: a line item that disappears when
 it is cheap cannot warn anybody when it stops being.
+
+### Terrain — archive storage
+
+`S_terrain` × `p_storage`: **$0.22 a month**, the same at every scale.
+[#2013](https://github.com/openzigs/onyourleft/issues/2013) hosts an extract of Mapterhorn's terrain
+tiles on the bucket the basemap is in, and a drawn route's heights are read from it in the app, so a
+route has its climbs with no instance. Like the basemap it is one immutable file: a newer extract
+is a new object beside the old one, which is never deleted while a shipped build names it.
+
+⚠️ **Unlike the basemap line, this one is stated at the size actually hosted, not at the planet's.**
+The owner's ruling of 2026-11-02 was the lower 48, and of 2026-11-24 zoom 12 only, the one zoom the
+app reads; `S_terrain` is that object's length, 14,438,629,218 bytes, of which 14,438,171,098 are
+tile data. Upstream's whole `planet.pmtiles` is 355,579,263,191 bytes, which at this rate is
+**$5.33 a month**, more than twice the basemap line; a deployment that wanted the world's heights
+would pay that, and this model does not carry it. Zoom 13 and above are separate upstream files,
+about 4.2 TB for the US (#2013's own figure, not re-measured here), and are not hosted.
+
+**Its requests are not modelled, and round to nothing.** A drawn route reads the header and a
+directory once, then one zoom-12 tile for each 7.5 to 9 km square its line crosses, and holds the
+last four it decoded, so an edit inside the same squares asks for nothing. At `p_classB`, a
+thousand routes of five tiles each is $0.0018. Egress is free, as it is for the basemap. An
+open-world ride's height reads are [#2899](https://github.com/openzigs/onyourleft/issues/2899)'s:
+ADR 0087 D-9 counts them at a few zoom-12 tiles an hour.
 
 ### Activity streams
 
@@ -416,8 +442,8 @@ current balance, against an estimated annual budget of $433.59 — and its real 
 **Nobody in this space is funded by hosting being cheap.** They are funded by donations, patrons or
 grants. Hosting being cheap is what makes small donations *sufficient*, which is a different and much
 better claim, and it is the one this model supports: at 10,000 monthly actives the whole
-fully-loaded bill is **$28.12 a month**, which one supporter at $4 a month almost covers a seventh
-of. ⚠️ **Seven of them do not cover it — eight do.** Seven gifts are $28.00 gross against a $28.12
+fully-loaded bill is **$28.34 a month**, which one supporter at $4 a month almost covers a seventh
+of. ⚠️ **Seven of them do not cover it — eight do.** Seven gifts are $28.00 gross against a $28.34
 bill, and **$25.09** net of the 10.4% monthly card fee the next section computes; eight are $32.00
 gross and $28.67 net. An earlier draft said seven covered it outright, which the fee table below
 already contradicted — a prose figure disagreeing with the checked table a screen away.

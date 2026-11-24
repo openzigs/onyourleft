@@ -6,7 +6,9 @@
  * `browser/game.browser.spec.ts` §"#1539 corridor read").
  *
  * `pmtiles` is imported under `apps/web/src/` by `map/maplibre.ts` (the ride
- * map) and by `world-data/corridor-source.ts` (the corridor read), and by
+ * map), by `world-data/corridor-source.ts` (the corridor read) and, since
+ * #2013, by `terrain/terrain-source.ts` (a drawn route's heights, from the
+ * terrain archive `terrain/config.ts` resolves), and by
  * nothing else — never by anything under `game/`, which names no network at
  * all (ADR 0054 D-1.1). And the one URL that module is handed is
  * `readBasemapConfig(…).archiveUrl`: it holds no URL of its own, and
@@ -25,7 +27,11 @@ import { stripComments } from '../../units/no-inline-units';
 const SOURCE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 /** The modules permitted to import `pmtiles`, by path relative to `apps/web/src`. */
-const PMTILES_IMPORTERS = [join('map', 'maplibre.ts'), join('world-data', 'corridor-source.ts')];
+const PMTILES_IMPORTERS = [
+  join('map', 'maplibre.ts'),
+  join('terrain', 'terrain-source.ts'),
+  join('world-data', 'corridor-source.ts'),
+];
 
 interface SourceFile {
   readonly path: string;
@@ -66,13 +72,13 @@ function pmtilesImporters(files: readonly SourceFile[]): string[] {
 function pmtilesFindings(files: readonly SourceFile[]): string[] {
   return pmtilesImporters(files)
     .filter((path) => !PMTILES_IMPORTERS.includes(path) || path.startsWith(`game${sep}`))
-    .map((path) => `${path} imports pmtiles; only ${PMTILES_IMPORTERS.join(' and ')} may`);
+    .map((path) => `${path} imports pmtiles; only ${PMTILES_IMPORTERS.join(', ')} may`);
 }
 
-describe('pmtiles is named by the map and the corridor read, and nothing else', () => {
+describe('pmtiles is named by the map, the corridor read and the heights read, and nothing else', () => {
   const tree = productSources();
 
-  it('has source to scan, and finds the two that do import it', () => {
+  it('has source to scan, and finds the three that do import it', () => {
     expect(tree.length).toBeGreaterThan(100);
     expect(pmtilesImporters(tree)).toStrictEqual([...PMTILES_IMPORTERS].sort());
   });

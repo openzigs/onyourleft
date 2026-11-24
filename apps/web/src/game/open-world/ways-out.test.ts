@@ -68,6 +68,7 @@ import {
   WAYS_OUT_LOOK_METRES,
   type OpenWorldWayOut,
 } from './road';
+import { TURNED_OFF_REACH_METRES } from '../way-roads';
 
 const COLUMNS = [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450];
 const ROWS = [0, 230, 400, 650, 820, 1_090, 1_280, 1_510, 1_700, 1_960, 2_150];
@@ -363,6 +364,77 @@ describe('the ways out of the junctions in view — #3051', () => {
     expect(turned.every((way) => way.fromMetres + road.view.origin > rider)).toBe(true);
     expect(road.waysOut(Number.NaN)).toHaveLength(0);
     expect(road.waysOut(Number.POSITIVE_INFINITY)).toHaveLength(0);
+  });
+
+  it('hands on a junction turned off at, with the way the route would have taken, until the fog is past it — #3123', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    // Ridden straight on, no junction is one turned off at.
+    expect(road.turnedOff(rider)).toHaveLength(0);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    const turned = road.turnedOff(rider);
+    expect(turned).toHaveLength(1);
+    const [only] = turned;
+    expect(only?.junction).toBe(junction.distance);
+    // Its way is the road the route left, on past the junction: the way out handed on for it.
+    const origin = road.view.origin;
+    expect(road.waysOut(rider)).toContain(only?.way);
+    const at = junction.distance + 40;
+    const way = only?.way;
+    if (way === undefined) throw new Error('no way');
+    expect(junction.ways.find((each) => each.edge.id === junction.defaultWay)?.edge.id).not.toBe(
+      other,
+    );
+    expect(placeOn(way.profile, origin, at)).not.toEqual(placeOn(road.view.profile, origin, at));
+    // The same array while nothing changes, through the junction and on.
+    expect(road.turnedOff(rider + 1)).toBe(turned);
+    for (const past of [junction.distance + 1, junction.distance + TURNED_OFF_REACH_METRES - 1]) {
+      road.follow(past);
+      expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toStrictEqual(
+        turned,
+      );
+    }
+    // Dropped once the rider is the reach past it.
+    const gone = junction.distance + TURNED_OFF_REACH_METRES + WAYS_OUT_LOOK_METRES + 1;
+    road.follow(gone);
+    expect(road.turnedOff(gone)).toHaveLength(0);
+    expect(road.turnedOff(Number.NaN)).toHaveLength(0);
+  });
+
+  it('drops a junction turned off at on a U-turn: the road under the rider changed — #3123', () => {
+    const { road } = grid();
+    const { junction, other } = nextJunction(road, 40);
+    expect(road.route.choose(junction.distance, other, 40)).toBe('swapped');
+    road.follow(40);
+    expect(road.turnedOff(40)).toHaveLength(1);
+    const rider = junction.distance + 30;
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(1);
+    road.route.uTurn(rider);
+    expect(road.follow(rider)?.turned).toBe(true);
+    expect(road.turnedOff(rider)).toHaveLength(0);
+  });
+
+  it('drops a junction turned off at when the turn is undone before the lock, and through the junction on — #3123', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    const straight = junction.defaultWay;
+    expect(junction.distance - rider).toBeGreaterThan(JUNCTION_LOCK_METRES);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(1);
+    // A straight press before the lock takes the road on again: nothing was turned off.
+    expect(road.route.choose(junction.distance, straight, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(0);
+    // And it stays so as the rider rides through the junction and on.
+    for (const past of [junction.distance + 1, junction.distance + 100]) {
+      road.follow(past);
+      expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toHaveLength(0);
+    }
   });
 
   it('without a frame, makes a way again once the trim has moved the view’s first point: both are drawn about it', () => {

@@ -58,6 +58,7 @@ import {
   distanceBetween,
   geographicPosition,
   metres,
+  type GeographicPosition,
   seconds,
   thresholdShare,
   unixSeconds,
@@ -81,7 +82,19 @@ import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
 import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
 import { replanInput, replanRequest } from '../workout/replan-job';
 import { planCorridor } from '../game/world-data/corridor';
+import { resampleShape } from '../routing/elevation';
+import { terrainHeights } from '../terrain/route-heights';
+import { terrainArchiveFrom } from '../terrain/terrain-source';
+import {
+  buildTerrainArchive,
+  fixtureDecode,
+  FIXTURE_HEIGHT_TILE,
+  placeInTile,
+} from '../terrain/terrain-testing';
+import { stripComments } from '../units/no-inline-units';
+import { countingSource, type CountingSource } from '../world-data/archive-testing';
 import { tileBounds } from '@onyourleft/map-features';
+import { flatHeightTile } from '@onyourleft/map-features/testing';
 
 import { coordinatesIn, insideZone } from './boundaries';
 
@@ -246,6 +259,23 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'terrain/terrain-source.ts',
+    what: 'byte ranges of the terrain archive under a route being drawn or redrawn, asked for so the route has its climbs with no instance (#2013, ADR 0087 D-2.3)',
+    // ⚠️ Departing, and like the corridor read its payload carries NO
+    // coordinate and is still a location: the host can tell which z12 height
+    // tiles were read, each about 7.5 to 9 km across. It travels as byte
+    // offsets in a `Range` header, so the walk below cannot fire on it.
+    // What protects the rider: a tile is far coarser than the map the planner
+    // is drawing on the same screen, from the same host; the read is a
+    // function of the tiles the line crosses and of nothing else, so it reads
+    // inside a privacy zone the same way as outside one and shows no hole
+    // (ADR 0090 R-1 and R-3, which ADR 0087 D-2.2 binds to every height
+    // read); and with map tiles off nothing is asked at all. The case below,
+    // "a drawn route's heights", holds the first two against a counting
+    // archive, and `terrain/heights.test.ts` holds the switch.
+    direction: 'departing',
+  },
+  {
     module: 'transfer/export-activity.ts',
     what: "the athlete's own ride, written to a file they asked for",
     // ⚠️ Not a mistake, and the one entry in this table worth reading twice.
@@ -290,8 +320,11 @@ function boundaryModulesOnDisk(): readonly string[] {
       // request to the rider's instance, sent while a ride is in progress.
       // ⚠️ And `corridor-source.ts` since #1539: the one module that asks the
       // basemap archive for a route's corridor.
+      // ⚠️ And `terrain-source.ts` since #2013: the one module that asks the
+      // terrain archive for a height tile.
       if (
         entry === 'corridor-source.ts' ||
+        entry === 'terrain-source.ts' ||
         entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
         entry === 'replan-job.ts' ||
@@ -989,5 +1022,54 @@ describe('the walk cannot see inside image bytes, and says so', () => {
     const header = readFileSync(fileURLToPath(new URL('./boundaries.ts', import.meta.url)), 'utf8');
     expect(header).toContain('cannot inspect image bytes');
     expect(header).toContain('frame.ts');
+  });
+});
+
+/**
+ * **A drawn route's heights ask for whole height tiles, and for the same ones
+ * whatever is inside them — #2013.**
+ *
+ * The heights read's payload is byte ranges, so `coordinatesIn` has nothing to
+ * walk. What can be held is what the ranges are a function of: the z12 tiles
+ * the line crosses, and nothing finer. So a line through the athlete's privacy
+ * zone and a line through the far corner of the same tile ask for the same
+ * ranges in the same order — no request says where in the tile the line is,
+ * and none depends on a zone, which the reader is never handed.
+ */
+describe('a drawn route’s heights ask for whole tiles, zone or no zone — #2013', () => {
+  const zoneCentre = placeInTile(FIXTURE_HEIGHT_TILE, 256, 256);
+
+  async function asked(line: readonly GeographicPosition[]): Promise<CountingSource['calls']> {
+    const source = countingSource(
+      await buildTerrainArchive([{ tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() }]),
+    );
+    const heights = terrainHeights({ archive: terrainArchiveFrom(source), decode: fixtureDecode });
+    await heights.heights({
+      shape: resampleShape(line, heights.interval),
+      interval: heights.interval,
+    });
+    return source.calls;
+  }
+
+  it('asks the same of the host for a line through a zone as for one far from it in the same tile', async () => {
+    // Through the zone's centre, and along the tile's far edge, 3 km away.
+    const through = await asked([
+      placeInTile(FIXTURE_HEIGHT_TILE, 236, 250),
+      zoneCentre,
+      placeInTile(FIXTURE_HEIGHT_TILE, 276, 262),
+    ]);
+    const far = await asked([
+      placeInTile(FIXTURE_HEIGHT_TILE, 20, 500),
+      placeInTile(FIXTURE_HEIGHT_TILE, 60, 505),
+    ]);
+    expect(through.length).toBeGreaterThan(0);
+    expect(through).toStrictEqual(far);
+  });
+
+  it('takes no zone: the reader’s options name an archive and a decoder and nothing else', () => {
+    const source = stripComments(
+      readFileSync(fileURLToPath(new URL('terrain/route-heights.ts', sourceRoot)), 'utf8'),
+    );
+    expect(source).not.toMatch(/PrivacyZone|listPrivacyZones|zone/i);
   });
 });
