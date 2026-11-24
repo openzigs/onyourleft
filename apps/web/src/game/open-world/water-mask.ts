@@ -71,7 +71,7 @@ const WATER_CODE = TILE_LAND_CLASSES.indexOf('water');
 
 const holds = new WeakMap<TilePlan, boolean>();
 
-/** Whether a tile's plan holds any real water: a water line it owns, or a `water` cell. */
+/** Whether a tile's plan holds any real water: a water line through it, or a `water` cell. */
 export function tileHoldsWater(plan: TilePlan): boolean {
   let known = holds.get(plan);
   if (known === undefined) {
@@ -96,17 +96,37 @@ function cellAt(plan: TilePlan, x: number, z: number): number {
   return row * columns + column;
 }
 
-/** The water lines the tiles own, as the features they were decoded as. */
+/** Whether two lines are the same line, float for float. */
+function sameLine(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let at = 0; at < a.length; at += 1) {
+    if (!Object.is(a[at], b[at])) return false;
+  }
+  return true;
+}
+
+/**
+ * The water lines the tiles hold, as the features they were decoded as, **each
+ * once**: a line that crosses two tiles is held by both
+ * (`tile-plan.ts` §`TileWater`), and a line read twice would be crossed and
+ * filed twice by everything that reads the mask's lines.
+ */
 function waterLinesOf(tiles: readonly TilePlan[]): WaterLineFeature[] {
   const lines: WaterLineFeature[] = [];
+  /** The lines kept so far, by kind, length and first vertex: the few a copy can be. */
+  const kept = new Map<string, WaterLineFeature[]>();
   for (const { water } of tiles) {
     for (let index = 0; index < water.count; index += 1) {
       const kind = TILE_WATER_LINE_KINDS[water.kinds[index] as number];
       if (kind === undefined) continue;
-      lines.push({
-        kind,
-        line: water.lines.subarray(water.lineStarts[index], water.lineStarts[index + 1]),
-      });
+      const line = water.lines.subarray(water.lineStarts[index], water.lineStarts[index + 1]);
+      const key = `${kind}:${String(line.length)}:${String(line[0])}:${String(line[1])}`;
+      const alike = kept.get(key);
+      if (alike?.some((other) => sameLine(other.line, line)) === true) continue;
+      const feature: WaterLineFeature = { kind, line };
+      if (alike === undefined) kept.set(key, [feature]);
+      else alike.push(feature);
+      lines.push(feature);
     }
   }
   return lines;

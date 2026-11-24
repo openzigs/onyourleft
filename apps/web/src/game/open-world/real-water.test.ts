@@ -43,7 +43,10 @@ import { NO_LAND_CLASS, type LandClassMask } from '../land-class';
 import { NEARBY_STREETS_PER_FRAME } from '../nearby-streets';
 import {
   PORTAL_CLEAR_METRES,
+  riddenSpanParts,
   riddenSpans,
+  SPAN_MIN_METRES,
+  SPAN_PIECE_METRES,
   SPAN_SAMPLE_METRES,
   type RiddenSpan,
 } from '../mapped-spans';
@@ -55,6 +58,8 @@ import { atStartLine } from '../simulation';
 import {
   corridorOrigin,
   drawnRoadPosition,
+  drawProfileIn,
+  roadCorridor,
   localGroundPosition,
   ROAD_WIDTH_METRES,
 } from '../terrain';
@@ -64,6 +69,7 @@ import {
   MAXIMUM_BRIDGE_PARTS,
   PARAPET_THICKNESS_METRES,
   STREAM_HALF_WIDTH_METRES,
+  WATER_UNDER_ROAD_MAX_METRES,
   inWater,
   onOpenWater,
   waterNearRoute,
@@ -248,12 +254,18 @@ function blockOf(fixture: Fixture = {}): TileBlockFeatures {
   };
 }
 
-/** Each of the block's tiles, planned as the worker plans it and cloned as a transfer is. */
-function plansOf(block: TileBlockFeatures): TilePlan[] {
+/**
+ * The block's tiles — all of them, or `only` those — planned as the worker
+ * plans each and cloned as a transfer is.
+ */
+function plansOf(block: TileBlockFeatures, only?: readonly TileId[]): TilePlan[] {
   const core = tilePlanWorkerCore();
   core.handle({ kind: 'frame', frame: FRAME });
   core.handle({ kind: 'hold', block: 'b', features: block });
-  return block.tiles.map(({ tile }, id) => {
+  const asked = block.tiles.filter(
+    ({ tile }) => only?.some((each) => each.x === tile.x && each.y === tile.y) ?? true,
+  );
+  return asked.map(({ tile }, id) => {
     const answer = core.handle({ kind: 'plan', id, block: 'b', tile, detail: 'full' });
     if (answer?.reply.kind !== 'plan') throw new Error('a tile was not planned');
     return structuredClone(answer.reply.plan, { transfer: answer.transfer });
@@ -352,18 +364,90 @@ beforeAll(() => {
 });
 
 describe('the tiles hold the real water — #3105', () => {
-  it('plans the river’s water line in exactly one tile, and carries it across a transfer', () => {
-    const owners = world.plans.filter((plan) => plan.water.count > 0);
-    expect(owners).toHaveLength(1);
-    const [owner] = owners as [TilePlan];
-    expect(owner.water.lines).toHaveLength(4);
-    // The line is the block's own, float for float.
-    expect([...owner.water.lines]).toStrictEqual([...(world.block.waterLines?.[0]?.line ?? [])]);
-    // And its buffers are among the ones a worker transfers.
-    const buffers = tilePlanBuffers(owner);
-    for (const array of [owner.water.kinds, owner.water.lineStarts, owner.water.lines]) {
-      expect(buffers).toContain(array.buffer);
+  it('plans the river’s water line in each tile it crosses, carries it across a transfer, and reads it once', () => {
+    const holders = world.plans.filter((plan) => plan.water.count > 0);
+    // The line runs 600 m either side of the street, across the tile the street
+    // is in and the one east of it, and through no other.
+    const crossed = [tileOf(0, 330), tileOf(600, 330)];
+    expect(crossed[0]).not.toStrictEqual(crossed[1]);
+    expect(holders.map((plan) => [plan.tile.x, plan.tile.y]).sort()).toStrictEqual(
+      crossed.map((tile) => [tile.x, tile.y]).sort(),
+    );
+    for (const holder of holders) {
+      expect(holder.water.lines).toHaveLength(4);
+      // The line is the block's own, float for float.
+      expect([...holder.water.lines]).toStrictEqual([...(world.block.waterLines?.[0]?.line ?? [])]);
+      // And its buffers are among the ones a worker transfers.
+      const buffers = tilePlanBuffers(holder);
+      for (const array of [holder.water.kinds, holder.water.lineStarts, holder.water.lines]) {
+        expect(buffers).toContain(array.buffer);
+      }
     }
+    // Two tiles hold it and the mask reads it once.
+    expect(world.land?.waterLines).toHaveLength(1);
+  });
+
+  it('holds a stream with no polygon in the route’s tile alone, whichever tile its line starts in', () => {
+    // A stream the map draws as a line and nothing else, across the street at
+    // the river's place. Its line starts in the tile east of the street's and
+    // ends in the one west of it, so no vertex of it is in the street's tile:
+    // the copy a tile is handed of a line that enters from a neighbour.
+    const ends = [local(600, 330), local(-700, 330)];
+    const stream: WaterLineFeature = {
+      kind: 'stream',
+      line: Float32Array.from(ends.flatMap((point) => [point.x, point.z])),
+    };
+    const routeTile = tileOf(0, 330);
+    for (const [east] of [[600], [-700]] as const) {
+      expect(tileOf(east, 330)).not.toStrictEqual(routeTile);
+    }
+    const block = { ...blockOf({ dry: true }), waterLines: [stream] };
+    // Only the tile the route crosses is planned, as `tiles-ahead.ts` asks.
+    const [plan, ...others] = plansOf(block, [routeTile]);
+    expect(others).toStrictEqual([]);
+    expect(plan?.water.count).toBe(1);
+    expect(plan?.land.classes.includes(1)).toBe(false);
+    const land = new WaterMaskKeeper().of(plan === undefined ? [] : [plan]);
+    expect(land).toBeDefined();
+    if (land === undefined) return;
+    expect(land.waterLines.map((line) => line.kind)).toStrictEqual(['stream']);
+    // The stream is a crossing of the road, where the map draws it.
+    const profile = dry.profile;
+    const norths = waterways(profile, scatterSeed(profile), land).crossings.map(
+      (crossing) => crossing.distance + START_NORTH,
+    );
+    expect(norths.filter((north) => Math.abs(north - 330) < 10)).toHaveLength(1);
+    // And its buffer keeps the near valley's invented stream off it.
+    const at = local(0, 330);
+    expect(land.covered(at.x, at.z)).toBe(true);
+    expect(norths.some((north) => Math.abs(north - NEAR_VALLEY) < 20)).toBe(false);
+    // Control: the tile with no stream through it holds none, and is no mask.
+    const south = tileOf(0, START_NORTH);
+    expect(south).not.toStrictEqual(routeTile);
+    const [dryPlan] = plansOf(block, [south]);
+    expect(dryPlan?.water.count).toBe(0);
+    expect(new WaterMaskKeeper().of(dryPlan === undefined ? [] : [dryPlan])).toBeUndefined();
+  });
+
+  it('holds a line that cuts a tile’s corner, and not one that passes the corner by', () => {
+    const routeTile = tileOf(0, 330);
+    const [bare] = plansOf(blockOf({ dry: true }), [routeTile]);
+    if (bare === undefined) throw new Error('the tile was not planned');
+    const { minX, minZ } = bare.box;
+    const held = (ends: [number, number, number, number]): number | undefined =>
+      plansOf(
+        {
+          ...blockOf({ dry: true }),
+          waterLines: [{ kind: 'stream', line: Float32Array.from(ends) }],
+        },
+        [routeTile],
+      )[0]?.water.count;
+    // Across the corner, 100 m into the tile on each edge: neither end in the tile.
+    expect(held([minX - 100, minZ + 200, minX + 200, minZ - 100])).toBe(1);
+    // The same slope 300 m further out: the line's box overlaps the tile's, the line misses it.
+    expect(held([minX - 200, minZ + 100, minX + 100, minZ - 200])).toBe(0);
+    // A coordinate that is no number is no stretch of a line.
+    expect(held([minX - 100, minZ + 200, Number.NaN, minZ - 100])).toBe(0);
   });
 
   it('answers water on the river, nothing else anywhere, and covered only in the river’s buffer', () => {
@@ -424,6 +508,52 @@ describe('the tiles hold the real water — #3105', () => {
         (crossing) => crossing.halfWidth !== undefined,
       ),
     ).toHaveLength(1);
+  });
+
+  /** The crossings of the dry world's road widened to the open water of `bands`, each a river across it. */
+  const riversOver = (bands: readonly (readonly [number, number])[]) => {
+    const landUse = bands.map(([south, north]): LandUseFeature => {
+      const corners = [
+        local(-600, south),
+        local(600, south),
+        local(600, north),
+        local(-600, north),
+      ];
+      return {
+        layer: 'water',
+        kind: 'river',
+        rings: [Float32Array.from(corners.flatMap((corner) => [corner.x, corner.z]))],
+      };
+    });
+    const land = new WaterMaskKeeper().of(plansOf({ ...blockOf({ dry: true }), landUse }));
+    const profile = dry.profile;
+    return waterways(profile, scatterSeed(profile), land ?? NO_LAND_CLASS).crossings.filter(
+      (crossing) => crossing.halfWidth !== undefined,
+    );
+  };
+
+  it('makes a river with an island in it one crossing, and two rivers apart two', () => {
+    // Two channels of 30 m with 30 m of land between them: one river, bank to far bank.
+    const island = riversOver([
+      [300, 330],
+      [360, 390],
+    ]);
+    expect(island).toHaveLength(1);
+    expect(Math.abs((island[0]?.distance ?? 0) + START_NORTH - 345)).toBeLessThan(10);
+    expect(island[0]?.halfWidth).toBeGreaterThan(40);
+    // Control: the same two channels 200 m apart are two rivers.
+    expect(
+      riversOver([
+        [300, 330],
+        [530, 560],
+      ]),
+    ).toHaveLength(2);
+  });
+
+  it('leaves water wider than a lake’s least length to the lakes', () => {
+    expect(riversOver([[300, 300 + WATER_UNDER_ROAD_MAX_METRES + 100]])).toStrictEqual([]);
+    // Control: a river 100 m under the cap is a crossing.
+    expect(riversOver([[300, 300 + WATER_UNDER_ROAD_MAX_METRES - 100]])).toHaveLength(1);
   });
 
   it('leaves water under the centre line and on one side of the road to the lakes', () => {
@@ -634,6 +764,64 @@ describe('an open-world ride draws a real river and the bridge over it — #3105
     expect(sideOnly).toStrictEqual([]);
   });
 
+  it('takes no stretch shorter than a span’s least length for a bridge', () => {
+    const spansOf = (length: number): readonly RiddenSpan[] =>
+      riddenSpans(
+        openWorldStreetCorridor(FRAME, [
+          {
+            ...world.block,
+            tiles: world.block.tiles.map((each, index) => ({
+              ...each,
+              streets:
+                index === 0
+                  ? [
+                      street(
+                        [
+                          [0, 0],
+                          [0, length],
+                        ],
+                        'bridge',
+                      ),
+                    ]
+                  : [],
+            })),
+          },
+        ]),
+        world.profile,
+        corridorOrigin(world.profile),
+      );
+    // One sample short of the least: a culvert's worth of bridge tag.
+    expect(spansOf(SPAN_MIN_METRES - SPAN_SAMPLE_METRES)).toStrictEqual([]);
+    // Control: the same street three times the least is a span.
+    expect(spansOf(SPAN_MIN_METRES * 3)).toHaveLength(1);
+  });
+
+  it('spends a short budget on the parapets nearest the rider', () => {
+    const { profile } = world;
+    const origin = corridorOrigin(profile);
+    // The rider 20 m short of the mapped bridge's far end, and the bridge alone: no water.
+    const rider = alongOf(BRIDGE.north - 20);
+    // A corridor that reaches back over the whole span, so every piece is in it.
+    const corridor = roadCorridor(profile, origin, rider, { behindMetres: 200 });
+    const span: RiddenSpan = {
+      from: alongOf(BRIDGE.south),
+      to: alongOf(BRIDGE.north),
+      grade: 'bridge',
+    };
+    const none = { crossings: [], lakes: [] };
+    const all = riddenSpanParts(profile, origin, corridor, [span], none, rider, 1_000);
+    // Control: with room for them all, parapets stand at the span's near end too.
+    expect(all.some((part) => northOf(part) < BRIDGE.south + 2 * SPAN_PIECE_METRES)).toBe(true);
+    const room = 2;
+    expect(all.length).toBeGreaterThan(room);
+    const few = riddenSpanParts(profile, origin, corridor, [span], none, rider, room);
+    expect(few.length).toBeGreaterThan(0);
+    expect(few.length).toBeLessThanOrEqual(room);
+    for (const part of few) {
+      expect(Math.abs(northOf(part) - (BRIDGE.north - 20))).toBeLessThanOrEqual(SPAN_PIECE_METRES);
+    }
+  });
+
   it('draws a portal at each mouth of the ridden road’s tunnel', () => {
     const seen = see(world, TUNNEL.south - 80);
     const concrete = seen.bridges.filter((part) => part.finish === 'concrete');
@@ -714,6 +902,74 @@ describe('a side street on a bridge is drawn as a deck, not dropped — #3105', 
     const seen = see(groundSide, 200);
     expect(overRiver(seen)).toBe(0);
     expect(seen.sideRoads.filter((road) => road.deck === true)).toStrictEqual([]);
+  });
+});
+
+describe('a route ride is drawn as it was: the same map, on a profile that is not anchored — #3105', () => {
+  /**
+   * The open world's own view, corridor and mask, on a copy of the profile
+   * that is drawn in the same frame and anchored to no ride: what `scene.ts`,
+   * `waterways.ts` and `nearby-streets.ts` take for a route.
+   */
+  let route: World;
+
+  beforeAll(() => {
+    const profile = { ...world.profile };
+    drawProfileIn(profile, FRAME);
+    route = { ...world, profile };
+  });
+
+  it('is the same road over the same river', () => {
+    const origin = corridorOrigin(route.profile);
+    const at = drawnRoadPosition(route.profile, origin, alongOf(330));
+    expect(Math.abs(at.x - xOf(0))).toBeLessThan(0.5);
+    expect(Math.abs(at.z - zOf(330))).toBeLessThan(0.5);
+    expect(world.land?.classAt(at.x, at.z)).toBe('water');
+  });
+
+  it('crosses the river at its water line alone, at a stream’s width', () => {
+    const land = route.land ?? NO_LAND_CLASS;
+    const crossings = waterways(route.profile, scatterSeed(route.profile), land).crossings;
+    // The line's crossing is there, and no crossing is widened to the water.
+    const atRiver = crossings.filter(
+      (crossing) => Math.abs(crossing.distance + START_NORTH - 330) < 10,
+    );
+    expect(atRiver).toHaveLength(1);
+    expect(crossings.filter((crossing) => crossing.halfWidth !== undefined)).toStrictEqual([]);
+    // Control: the anchored profile's river is widened.
+    expect(
+      waterways(world.profile, scatterSeed(world.profile), land).crossings.filter(
+        (crossing) => crossing.halfWidth !== undefined,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('stands no parapet along the mapped span and no portal at the tunnel', () => {
+    const seen = see(route, 200);
+    const beside = parapets(seen.bridges).filter(
+      (part) => Math.abs(Math.abs(part.x - xOf(0)) - ROAD_WIDTH_METRES / 2) < 1,
+    );
+    // The stream's own bridge at the river's middle, and the span's ends bare.
+    expect(
+      gaps(beside, BRIDGE.south + SPAN_SAMPLE_METRES, BRIDGE.north - SPAN_SAMPLE_METRES).length,
+    ).toBeGreaterThan(0);
+    for (const north of [200, TUNNEL.south - 80]) {
+      expect(see(route, north).bridges.filter((part) => part.finish === 'concrete')).toStrictEqual(
+        [],
+      );
+    }
+    // Control: the anchored profile's frame, from the same place, has both.
+    const anchored = see(world, TUNNEL.south - 80);
+    expect(anchored.bridges.filter((part) => part.finish === 'concrete').length).toBeGreaterThan(0);
+  });
+
+  it('draws no side street’s bridge as a deck', () => {
+    const seen = see(route, 200);
+    expect(seen.sideRoads.filter((road) => road.deck === true)).toStrictEqual([]);
+    // Control: the anchored profile's frame draws one.
+    expect(see(world, 200).sideRoads.filter((road) => road.deck === true).length).toBeGreaterThan(
+      0,
+    );
   });
 });
 

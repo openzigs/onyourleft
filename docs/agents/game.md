@@ -1686,8 +1686,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/open-world/water-mask.ts
                         an open-world ride's real water as the land mask the
                         scene reads water from (#3105), from the planned
-                        tiles' `water` cells and the water lines each tile
-                        owns (`tile-plan.ts` §`TileWater`). ⚠️ **Water and
+                        tiles' `water` cells and the water lines through each
+                        tile, each read once (`tile-plan.ts` §`TileWater`). ⚠️ **Water and
                         its wetland only**: every other class reads
                         `unknown`, so no placement rule changes; `covered`
                         is true only within 200 m of real water

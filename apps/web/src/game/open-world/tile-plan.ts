@@ -32,7 +32,7 @@
  *   streets, each line with its width class (`cross-streets.ts`
  *   §`widthClassOf`) and its grade.
  * - **Water** ({@link TileWater}, #3105): the rivers, streams, canals,
- *   ditches and drains the tile owns, each line with its kind, and which of
+ *   ditches and drains that pass through the tile, each line with its kind, and which of
  *   the land's `water` cells are a wetland. With the land's own `water` cells
  *   it is what `water-mask.ts` reads the ride's real water from.
  *
@@ -175,9 +175,11 @@ export interface TileStreetLines {
 
 /**
  * A tile's water lines and wetland — #3105. Line `i` is
- * `lines[lineStarts[i]…lineStarts[i + 1]]`. A line is the tile's when the first
- * of its vertices that lies in any of its block's tiles lies in this one, so a
- * line two tiles of a block both reach is planned by exactly one of them.
+ * `lines[lineStarts[i]…lineStarts[i + 1]]`. A line is the tile's when any
+ * stretch of it passes through the tile's rectangle, so a line that crosses
+ * two tiles is held by both, whole, and `water-mask.ts` §`waterLinesOf` reads
+ * it once. A tile holds its water whichever of its neighbours is planned: only
+ * the tiles the route crosses are (`tiles-ahead.ts`).
  */
 export interface TileWater {
   readonly count: number;
@@ -423,28 +425,59 @@ function planLand(
 }
 
 /**
- * The water lines `box` owns of its block's — #3105: each line whose first
- * vertex inside any of the block's tiles is inside this one. A line that never
- * enters a tile of the block (it lies in a tile's buffer alone) is nobody's.
+ * Whether the segment from `(ax, az)` to `(bx, bz)` passes through `box`: the
+ * stretch of it inside the box's four edges is not empty (Liang–Barsky). A
+ * segment with a coordinate that is not finite passes through nothing.
  */
-function planWater(
-  frame: CorridorFrame,
-  block: TileBlockFeatures,
-  box: Box,
-  wetland: Uint8Array,
-): TileWater {
-  const boxes = block.tiles.map((each) => tileBox(frame, each.tile));
+function segmentInBox(box: Box, ax: number, az: number, bx: number, bz: number): boolean {
+  if (![ax, az, bx, bz].every(Number.isFinite)) return false;
+  let from = 0;
+  let to = 1;
+  const edges: [number, number][] = [
+    [ax - bx, ax - box.minX],
+    [bx - ax, box.maxX - ax],
+    [az - bz, az - box.minZ],
+    [bz - az, box.maxZ - az],
+  ];
+  for (const [step, room] of edges) {
+    if (step === 0) {
+      if (room < 0) return false;
+    } else if (step < 0) {
+      from = Math.max(from, room / step);
+    } else {
+      to = Math.min(to, room / step);
+    }
+    if (from > to) return false;
+  }
+  return true;
+}
+
+/**
+ * The water lines of its block that pass through `box` — #3105: each line
+ * with a stretch inside the tile's rectangle, whole. A block's lines are each
+ * of its tiles' own copy, clipped a buffer past that tile, so a copy's
+ * vertices can all lie in the tiles beside the one it crosses; and only the
+ * tiles the route crosses are planned (`tiles-ahead.ts`), so a line handed to
+ * one tile alone would be lost whenever that tile is not planned. A line two
+ * tiles both hold is read once (`water-mask.ts` §`waterLinesOf`).
+ */
+function planWater(block: TileBlockFeatures, box: Box, wetland: Uint8Array): TileWater {
   const owned: WaterLineFeature[] = [];
   for (const water of block.waterLines ?? []) {
     const line = water.line;
-    for (let at = 0; at + 1 < line.length; at += 2) {
-      const x = line[at] as number;
-      const z = line[at + 1] as number;
-      if (inTileBox(box, x, z)) {
+    for (let at = 0; at + 3 < line.length; at += 2) {
+      if (
+        segmentInBox(
+          box,
+          line[at] as number,
+          line[at + 1] as number,
+          line[at + 2] as number,
+          line[at + 3] as number,
+        )
+      ) {
         owned.push(water);
         break;
       }
-      if (boxes.some((other) => inTileBox(other, x, z))) break;
     }
   }
   const kinds = new Uint8Array(owned.length);
@@ -502,7 +535,7 @@ export function planTile(
     buildings: planBuildings(block.buildings, box),
     land,
     streets: planStreets(own?.streets ?? []),
-    water: planWater(frame, block, box, wetland),
+    water: planWater(block, box, wetland),
   };
 }
 
