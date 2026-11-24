@@ -4615,6 +4615,9 @@ function GameScreen({
                 // #3123: and each junction where the route turns off the road
                 // it came along, so that road is drawn on past it once passed.
                 turnedOff: road.follower.turnedOff(simulation.state.ride.distance),
+                // #3133: and each junction the route turns through, drawn as
+                // the streets meeting there rather than as one road bending.
+                junctionsTurned: road.follower.junctionsTurned(simulation.state.ride.distance),
                 // #3095: and every junction it has seen, where a village's
                 // street is cut so the piece past one is laid alike on each way.
                 junctionsSeen: road.follower.junctionsSeen(),

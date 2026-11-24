@@ -127,6 +127,7 @@ import {
   drawnRoadFrame,
   localGroundPosition,
   roadCorridor,
+  VIEW_AHEAD_METRES,
   type CorridorOrigin,
   type CorridorPoint,
   type RoadCorridor,
@@ -169,6 +170,7 @@ import {
   type NearbyStreetScan,
 } from './nearby-streets';
 import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
+import { junctionSurfacesAt, type JunctionSurface, type TurnedJunction } from './junction-surface';
 import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -389,6 +391,21 @@ export interface SceneInput {
    * renderer was handed.
    */
   readonly turnedOff?: readonly TurnedOffRoad[] | undefined;
+  /**
+   * #3133: in an open-world ride, each junction near the rider that the
+   * route turns through, chosen or not (`open-world/road.ts`
+   * §`OpenWorldRoad.junctionsTurned`), with every way on from it the route
+   * does not take. Each in view is drawn as the streets meeting there, each
+   * arm to its own width, joined at a surface with rounded corners, and the
+   * road's edge lines and centre line stop at its mouths
+   * (`junction-surface.ts`). Absent on every other ride.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link waysOut}: with it gone a
+   * junction turned through is one road bending again.
+   * `open-world/junction-surface.test.tsx` reads it back off the frames the
+   * renderer was handed.
+   */
+  readonly junctionsTurned?: readonly TurnedJunction[] | undefined;
   /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
@@ -747,7 +764,15 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
   // where the corridor, the camera and the scenery are built around.
   const riderDistance: number = drawnRider(input).distance;
-  const corridor = roadCorridor(input.profile, input.origin, riderDistance);
+  // #3133: the junctions the route turns through in view, drawn as the
+  // streets meeting there, with the road's lines stopped at their mouths.
+  const surfaces = junctionSurfacesInView(input, riderDistance);
+  const corridor =
+    surfaces.length === 0
+      ? roadCorridor(input.profile, input.origin, riderDistance)
+      : roadCorridor(input.profile, input.origin, riderDistance, {
+          unpainted: surfaces.map((surface) => surface.mouths),
+        });
   // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
   // keyed on a profile is a second source of truth a route change has to
   // remember to clear. One seed for the scenery and the ground under it, so a
@@ -866,9 +891,14 @@ export function sceneFrame(input: SceneInput): SceneFrame {
           input.landClass ?? NO_LAND_CLASS,
         );
   const streetRoads =
-    crossings.roads.length === 0 && nearby.length === 0
+    crossings.roads.length === 0 && nearby.length === 0 && surfaces.length === 0
       ? crossSideRoads
-      : [...crossSideRoads, ...crossings.roads, ...nearby];
+      : [
+          ...crossSideRoads,
+          ...crossings.roads,
+          ...nearby,
+          ...surfaces.map((surface) => surface.road),
+        ];
   // #3106: and every way out of an open-world junction, wherever none of the
   // above draws it — a fork, a street mapped on a bridge — so no way the
   // junction prompt offers is a turn into a hedge. Side roads too. Off with
@@ -1586,6 +1616,33 @@ function waysReached(input: SceneInput, toMetres: number): readonly ReachedWay[]
     if (reach > way.fromMetres) reached.push({ way, toMetres: reach, shift });
   }
   return reached;
+}
+
+const NO_JUNCTION_SURFACES: readonly JunctionSurface[] = [];
+
+/**
+ * The surfaces of the junctions of {@link SceneInput.junctionsTurned} that
+ * are near a rider at `riderDistance` — #3133: from `way-roads.ts`
+ * §`TURNED_OFF_REACH_METRES` behind them, as far as the road turned off is
+ * drawn back (#3123), to the view's reach ahead.
+ * ⚠️ Read off the constants, not the corridor: the corridor is built after,
+ * since which of its stretches go unpainted is these surfaces' answer.
+ */
+function junctionSurfacesInView(
+  input: SceneInput,
+  riderDistance: number,
+): readonly JunctionSurface[] {
+  const junctions = input.junctionsTurned;
+  if (junctions === undefined || junctions.length === 0) return NO_JUNCTION_SURFACES;
+  return junctionSurfacesAt(
+    input.profile,
+    input.origin,
+    junctions,
+    // Both count ride distance from the view's first sample.
+    sceneryAnchor(input.profile)?.origin ?? 0,
+    riderDistance - TURNED_OFF_REACH_METRES,
+    riderDistance + VIEW_AHEAD_METRES,
+  );
 }
 
 /**

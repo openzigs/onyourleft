@@ -642,6 +642,14 @@ export function roadCorridor(
      * passes it.
      */
     readonly unsmoothed?: boolean;
+    /**
+     * #3133: stretches of the road, as odometer readings `from` to `to`, where
+     * neither its edge lines nor its centre-line marks are painted: a junction
+     * the route turns through, between the mouths of the arm it comes in by
+     * and the arm it leaves by (`junction-surface.ts`), so the lines stop at
+     * the mouth instead of bending round the turn. None by default.
+     */
+    readonly unpainted?: readonly UnpaintedStretch[];
   } = {},
 ): RoadCorridor {
   const ahead = options.aheadMetres ?? VIEW_AHEAD_METRES;
@@ -714,8 +722,10 @@ export function roadCorridor(
   const normals = drawn === centre ? routeNormals : ribbonNormals(drawn);
   const surface = roadToTheTurn(normals, retraced);
 
-  writeSurface(profile, drawn, surface.normals, vertices, colours);
+  const unpainted = options.unpainted ?? NO_UNPAINTED;
+  writeSurface(profile, drawn, surface.normals, vertices, colours, unpainted);
   writeCentreLine(profile, drawn, normals, {
+    unpainted,
     atDistance,
     behind,
     layout,
@@ -1422,6 +1432,22 @@ function towardTheRidersPass(
   return moved ?? centre;
 }
 
+/** A stretch of road left unpainted, as odometer readings — #3133. @see roadCorridor */
+export interface UnpaintedStretch {
+  readonly from: number;
+  readonly to: number;
+}
+
+const NO_UNPAINTED: readonly UnpaintedStretch[] = [];
+
+/** Whether odometer readings `from` to `to` reach into any of `stretches`. */
+function within(stretches: readonly UnpaintedStretch[], from: number, to: number): boolean {
+  for (const stretch of stretches) {
+    if (to >= stretch.from && from <= stretch.to) return true;
+  }
+  return false;
+}
+
 /**
  * Widens the centreline into a ribbon of {@link ROAD_COLUMNS} columns.
  *
@@ -1435,6 +1461,7 @@ function writeSurface(
   normals: Float64Array,
   vertices: Float32Array,
   colours: Float32Array,
+  unpainted: readonly UnpaintedStretch[],
 ): void {
   for (let index = 0; index < centre.length; index += 1) {
     const here = centre[index] as CorridorPoint;
@@ -1444,13 +1471,16 @@ function writeSurface(
     // built for: the gradient is a property of the road, so on a loop the same
     // place is the same climb on every lap. @see CorridorPoint.distance
     const tint = roadTint(gradeAt(profile, here.distance));
+    // #3133: no edge line across a junction the route turns through.
+    const bare = within(unpainted, here.along, here.along);
     for (let column = 0; column < ROAD_COLUMNS; column += 1) {
       const offset = COLUMN_OFFSETS[column] as number;
       const at = (index * ROAD_COLUMNS + column) * 3;
       vertices[at] = here.x + normalX * offset;
       vertices[at + 1] = here.y;
       vertices[at + 2] = here.z + normalZ * offset;
-      const painted = column < FIRST_CARRIAGEWAY_COLUMN || column > LAST_CARRIAGEWAY_COLUMN;
+      const painted =
+        !bare && (column < FIRST_CARRIAGEWAY_COLUMN || column > LAST_CARRIAGEWAY_COLUMN);
       writeLinearColour(colours, at, painted ? MARKING_COLOUR : tint);
     }
   }
@@ -1496,6 +1526,8 @@ interface CentreLineRequest {
   readonly colours: Float32Array;
   /** {@link RoadCorridor.retraced}: a mark that touches one of its points is not drawn. */
   readonly retraced: Uint8Array;
+  /** #3133: a mark that reaches into one of these is not drawn. @see roadCorridor */
+  readonly unpainted: readonly UnpaintedStretch[];
 }
 
 /**
@@ -1580,6 +1612,8 @@ function writeCentreLine(
         break;
       }
     }
+    // #3133: nor is one across a junction the route turns through.
+    if (within(request.unpainted, from, to)) toParameter = fromParameter;
 
     const at = (request.firstVertex + slot * 4) * 3;
     writeMarkEdge(centre, normals, fromParameter, half, vertices, at);

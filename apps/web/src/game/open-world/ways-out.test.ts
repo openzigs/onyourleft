@@ -22,13 +22,20 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   JUNCTION_LOCK_METRES,
   RollingRoute,
+  distanceBetween,
   metres,
+  type GeographicPosition,
   type RollingEdge,
   type RollingJunction,
   type RouteProfile,
 } from '@onyourleft/domain';
 import { gridGraph, roughGround, type SyntheticGround } from '@onyourleft/domain/rolling-testing';
 
+import {
+  JUNCTION_HEADING_METRES,
+  TURNED_JUNCTION_DEGREES,
+  junctionWayWidth,
+} from '../junction-surface';
 import { NO_LAND_CLASS, countrysideWithout } from '../land-class';
 import { ROAD_CLEARANCE_METRES, standingOnGround } from '../landform';
 import { distanceToDrawnRoad } from '../road-grid';
@@ -435,6 +442,104 @@ describe('the ways out of the junctions in view — #3051', () => {
       road.follow(past);
       expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toHaveLength(0);
     }
+  });
+
+  it('hands on a junction the route is turned through, with its node and every way on, until the fog is past it — #3133', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    // Ridden straight on, it is not one.
+    expect(road.junctionsTurned(rider).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    const turned = road.junctionsTurned(rider);
+    const found = turned.find((each) => each.junction === junction.distance);
+    if (found === undefined) throw new Error('not handed on');
+    const taken = junction.ways.find((way) => way.edge.id === other);
+    if (taken === undefined) throw new Error('no such way');
+    expect(Math.abs(taken.turnDegrees)).toBeGreaterThanOrEqual(TURNED_JUNCTION_DEGREES);
+    // Its node is where every way on leaves, and each way is read along its own street.
+    expect(found.position).toEqual(taken.edge.points[0]?.position);
+    const along = (toward: GeographicPosition, way: RollingJunction['ways'][number]): boolean =>
+      way.edge.points.some((point) => point.position === toward);
+    expect(along(found.taken.toward, taken)).toBe(true);
+    expect(found.taken.width).toBe(junctionWayWidth(taken.edge.roadClass));
+    const others = junction.ways.filter((way) => way.edge.id !== other);
+    expect(found.ways).toHaveLength(others.length);
+    found.ways.forEach((way, index) => {
+      const street = others[index] as RollingJunction['ways'][number];
+      expect(along(way.toward, street)).toBe(true);
+      expect(way.width).toBe(junctionWayWidth(street.edge.roadClass));
+      // Read far enough along to give the street's heading past the corner, or at its end.
+      expect(
+        (distanceBetween(found.position, way.toward) as number) >= JUNCTION_HEADING_METRES ||
+          way.toward === street.edge.points.at(-1)?.position,
+      ).toBe(true);
+    });
+    // The same array while nothing changes, through the junction and on.
+    expect(road.junctionsTurned(rider + 1)).toBe(turned);
+    for (const past of [junction.distance + 1, junction.distance + TURNED_OFF_REACH_METRES - 1]) {
+      road.follow(past);
+      expect(
+        road.junctionsTurned(past).find((each) => each.junction === junction.distance),
+        `${String(past - junction.distance)} m past`,
+      ).toBe(found);
+    }
+    // Dropped once the rider is the reach past it.
+    const gone = junction.distance + TURNED_OFF_REACH_METRES + WAYS_OUT_LOOK_METRES + 1;
+    road.follow(gone);
+    expect(road.junctionsTurned(gone).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
+    expect(road.junctionsTurned(Number.NaN)).toHaveLength(0);
+  });
+
+  it('hands on exactly the junctions ahead whose way taken turns, the default ones too — #3133', () => {
+    const { road } = grid();
+    let defaults = 0;
+    for (let rider = 0; rider <= 4_000; rider += 50) {
+      road.follow(rider);
+      const listed = new Set(road.junctionsTurned(rider).map((each) => each.junction));
+      for (const junction of road.route.junctionsAfter(rider)) {
+        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) break;
+        const taken = junction.ways.find((way) => way.edge.id === junction.taken);
+        const turns = Math.abs(taken?.turnDegrees ?? 0) >= TURNED_JUNCTION_DEGREES;
+        if (turns && junction.taken === junction.defaultWay) defaults += 1;
+        expect(
+          listed.has(junction.distance),
+          `${String(junction.distance)} from ${String(rider)}`,
+        ).toBe(turns);
+      }
+    }
+    // Not vacuous: the ride east meets the grid's edge and turns there by default.
+    expect(defaults).toBeGreaterThan(0);
+  });
+
+  it('drops a junction turned through when the turn is undone before the lock, and on a U-turn — #3133', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    const at = (): number[] => road.junctionsTurned(rider).map((each) => each.junction);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).toContain(junction.distance);
+    expect(road.route.choose(junction.distance, junction.defaultWay, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).not.toContain(junction.distance);
+    // Turned again, ridden past, and turned round: the road under the rider changed.
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).toContain(junction.distance);
+    const past = junction.distance + 30;
+    road.follow(past);
+    expect(road.junctionsTurned(past).map((each) => each.junction)).toContain(junction.distance);
+    road.route.uTurn(past);
+    expect(road.follow(past)?.turned).toBe(true);
+    expect(road.junctionsTurned(past).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
   });
 
   it('without a frame, makes a way again once the trim has moved the view’s first point: both are drawn about it', () => {
