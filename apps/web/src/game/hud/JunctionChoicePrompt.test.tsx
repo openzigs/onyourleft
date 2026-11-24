@@ -14,12 +14,17 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { distanceBetween } from '@onyourleft/domain';
+import { distanceBetween, RollingRoute, type RollingEdge } from '@onyourleft/domain';
+import { gridGraph } from '@onyourleft/domain/rolling-testing';
 
 import { tap } from '../../design/touch-lock-testing';
 import { activateWithKeyboard, mount, type Mounted } from '../../testing/mount';
 import type { PadSnapshot } from '../gamepad-port';
-import { pressesOfWays, type JunctionPrompt } from '../open-world/junction-choice';
+import {
+  createJunctionChoice,
+  pressesOfWays,
+  type JunctionPrompt,
+} from '../open-world/junction-choice';
 import {
   newRide,
   readAt,
@@ -37,7 +42,12 @@ import {
   wayButtons,
   wordOn,
 } from './junction-prompt-testing';
-import { U_TURN_NAME } from './junction-text';
+import {
+  JUNCTION_LOCKED_LINE,
+  JUNCTION_PROMPT_TITLE,
+  JUNCTION_TOO_CLOSE_LINE,
+  U_TURN_NAME,
+} from './junction-text';
 
 let mounted: Mounted | undefined;
 
@@ -94,6 +104,57 @@ describe('a press in the prompt changes the branch the rolling route reads (#289
     // 50 m on is back where the rider was 50 m ago, give or take the sample it turned on.
     expect(distanceBetween(placeAt(route, rider + 60), behind)).toBeLessThan(25);
     expect(route.legs.some((leg) => leg.kind === 'u-turn')).toBe(true);
+  });
+});
+
+describe('what the pop-up says of the junction it is for — #3129', () => {
+  const popup = (part: 'title' | 'lock'): string =>
+    textOf(
+      document.querySelector(`.oyl-hud__junction-popup .oyl-hud__junction-${part}`) as Element,
+    );
+
+  it('names the junction after the next while the next one’s choice is final', async () => {
+    // Junctions 70 m apart along row 1, after a first block of 300 m.
+    const { graph } = gridGraph([0, 300, 370, 700], [0, 230, 460], undefined, 1);
+    const route = new RollingRoute(
+      graph,
+      graph.edgesFrom('0,1').find((edge) => edge.id === 'h0,1') as RollingEdge,
+    );
+    const choice = createJunctionChoice(route, () => 0);
+    const [first] = route.junctionsAfter(0);
+    const before = (first?.distance as number) - 150;
+    route.advance(before);
+    mounted = await mount(<JunctionHud choice={choice} rider={before} />);
+    expect(popup('title')).toBe(JUNCTION_PROMPT_TITLE);
+    mounted.unmount();
+    const inside = (first?.distance as number) - 60;
+    route.advance(inside);
+    mounted = await mount(<JunctionHud choice={choice} rider={inside} />);
+    expect(popup('title')).toBe('At the 2nd junction');
+    expect(wayButtons()).toHaveLength(3);
+    expect(popup('lock')).toMatch(/^Choice locks in /);
+  });
+
+  it('says Too close to the last junction to choose for a junction locked on its first frame, and Choice locked otherwise', async () => {
+    // Locked from the first frame: the junction a U-turn 60 m past it rides back to.
+    const turned = newRide();
+    const junction = theJunction(turned.route);
+    turned.route.advance(junction.distance - 150);
+    turned.choice.press('right', junction.distance - 150);
+    turned.route.advance(junction.distance + 60);
+    turned.choice.press('u-turn', junction.distance + 60);
+    mounted = await mount(<JunctionHud choice={turned.choice} rider={junction.distance + 60} />);
+    expect(popup('lock')).toBe(JUNCTION_TOO_CLOSE_LINE);
+    expect(wayButtons()).toHaveLength(1);
+    mounted.unmount();
+    // Offered first, then locked.
+    const plain = newRide();
+    for (let rider = junction.distance - 250; rider <= junction.distance - 90; rider += 10) {
+      plain.route.advance(rider);
+      plain.choice.prompt(rider);
+    }
+    mounted = await mount(<JunctionHud choice={plain.choice} rider={junction.distance - 90} />);
+    expect(popup('lock')).toBe(JUNCTION_LOCKED_LINE);
   });
 });
 

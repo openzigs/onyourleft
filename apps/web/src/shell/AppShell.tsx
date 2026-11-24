@@ -525,10 +525,11 @@ export interface AppShellProps {
   /**
    * The routing engine the drawing canvas asks for roads (#70, #71).
    *
-   * ⚠️ `undefined` everywhere today, and not by oversight: ADR 0010 D-4 chose
-   * Valhalla and #53 has not stood one up, so there is nothing to pass. The
-   * builder screen places and moves waypoints without it and says why the roads
-   * between them are missing — see `views/RouteBuilderView.tsx`.
+   * Since #2008, the rider's instance's Valhalla (`instance/routing-port.ts`)
+   * when this device is connected to an instance it can seal to, and
+   * `undefined` otherwise — and then the builder screen places and moves
+   * waypoints without it and says why the roads between them are missing
+   * (`views/RouteBuilderView.tsx`).
    */
   readonly routing?: RoutingProvider | undefined;
   /**

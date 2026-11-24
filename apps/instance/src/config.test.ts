@@ -9,6 +9,7 @@ import {
   readConfig,
   readPictureModelSettings,
   readHistorySettings,
+  readRoutingSettings,
 } from './config.ts';
 import { NO_LEGAL_SETTINGS } from './legal.ts';
 
@@ -50,6 +51,11 @@ describe('readConfig', () => {
           kind: 'off',
           code: 'not-set',
           reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
+        },
+        routing: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_ROUTING_URL is not set, so no routing engine is configured.',
         },
         name: null,
         legal: NO_LEGAL_SETTINGS,
@@ -234,6 +240,31 @@ describe('the remote path (#2805, ADR 0079)', () => {
         `OYL_INSTANCE_REMOTE_PATH=${path} needs OYL_INSTANCE_CLIENT_ADDRESS_HEADER=${wanted}: that is the header its proxy writes the rider's address in.`,
       ]);
     }
+  });
+});
+
+describe('the routing engine’s settings (#2008)', () => {
+  it('is off, and says so, when nothing is set', () => {
+    expect(readRoutingSettings({}).kind).toBe('off');
+    expect(readRoutingSettings({ routingUrl: '  ' })).toMatchObject({ code: 'not-set' });
+  });
+
+  it('is on at the home deployment’s service name, and reaches the server’s config', () => {
+    const settings = readRoutingSettings({ routingUrl: 'http://routing:8002' });
+    expect(settings).toEqual({ kind: 'on', endpoint: new URL('http://routing:8002') });
+    const read = readConfig({ commit: COMMIT, routingUrl: 'http://routing:8002' });
+    expect(read.ok && read.config.routing.kind).toBe('on');
+  });
+
+  it.each([
+    ['not a URL', 'routing', 'not-a-url'],
+    ['another scheme', 'ftp://routing:8002', 'not-a-url'],
+    ['a path', 'http://routing:8002/route', 'not-origin'],
+    ['credentials', 'http://me:secret@routing:8002', 'not-origin'],
+    ['a public host', 'http://routing.example.com:8002', 'not-local'],
+    ['https by a name', 'https://routing:8002', 'tls-by-name'],
+  ])('is off for %s, and says why', (_case, routingUrl, code) => {
+    expect(readRoutingSettings({ routingUrl })).toMatchObject({ kind: 'off', code });
   });
 });
 

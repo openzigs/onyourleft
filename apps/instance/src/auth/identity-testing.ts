@@ -77,6 +77,9 @@ import { matchPath } from '../handler.ts';
 import { ROUTES } from '../routes.ts';
 import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
 import type { SecretFromFile } from '../setup/secrets.ts';
+import { createRouting } from '../routing/routing.ts';
+import type { RoutingEngine } from '../routing/valhalla.ts';
+import type { RateLimit } from './rate-limit.ts';
 
 /** The origin every test instance states. */
 export const TEST_ORIGIN = 'https://ride.example';
@@ -314,6 +317,12 @@ export async function startIdentityInstance(
      */
     pictures?: { local?: PictureConnection; hostedFetch?: typeof globalThis.fetch };
     /**
+     * The route planner's routing (#2008): the engine its two routes ask —
+     * `routing/valhalla-testing.ts`'s fake Valhalla, usually — and a route
+     * allowance of a test's own. Absent: no engine, every request `routing_off`.
+     */
+    routing?: { engine?: RoutingEngine; routeLimit?: RateLimit };
+    /**
      * Model-chosen lap-race bot tactics (#2709), over the world's store and
      * clock, sharing one model slot with {@link analysis}'s jobs as
      * `instance.ts` builds them. Absent: no local model is offered, no name
@@ -404,6 +413,7 @@ export async function startIdentityInstance(
     startsAt,
     analysis,
     pictures,
+    routing: routingOptions,
     tactics: tacticsOptions,
     hostedFetch,
     observe,
@@ -614,6 +624,17 @@ export async function startIdentityInstance(
       problems,
       ...(adminOptions === undefined ? {} : { admin: adminFor(identity) as Admin }),
       sidePose,
+      // #2008: the route planner's routing, over the world's clock and the
+      // instance's own log, with the engine a test hands (or none: `routing_off`).
+      routing: (log) =>
+        createRouting({
+          engine: routingOptions?.engine,
+          log,
+          now: () => clock.ms,
+          ...(routingOptions?.routeLimit === undefined
+            ? {}
+            : { routeLimit: routingOptions.routeLimit }),
+        }),
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
       hostedSettings,
       tactics,

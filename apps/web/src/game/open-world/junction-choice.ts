@@ -13,7 +13,9 @@
  * ways, when that way is an end, the press for that end steps inward. Nothing
  * pressed rides ADR 0088 D-1.4's default (the smallest change of bearing). The
  * choice is final {@link JUNCTION_LOCK_METRES} before the junction (D-1.5,
- * ADR 0087 D-6.2), and after that a press for it does nothing. A U-turn press
+ * ADR 0087 D-6.2), and after that a press for it does nothing; while it is
+ * final, the prompt, and so a press, is for the first junction after it whose
+ * choice is not ({@link promptedJunction}, #3129). A U-turn press
  * turns the rider round at any time (D-1.6); a dead end turns them round by
  * itself (D-1.7), which the rolling route does on its own. Each of those, and
  * a left, straight or right pressed with no junction near, stands as a notice
@@ -43,13 +45,18 @@
  * `hud/JunctionChoicePrompt.test.tsx` drive it as `GameView` does.
  */
 
-import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyourleft/domain';
+import {
+  JUNCTION_LOCK_METRES,
+  type RollingJunction,
+  type RollingRoute,
+  type RollingWay,
+} from '@onyourleft/domain';
 
 /**
  * The prompt for a junction appears when the rider is this far before it:
- * **250 m** (ADR 0088 D-1.2, answered by the owner in D-9 Q2). With two
- * junctions closer than this, the second's prompt appears as the first is
- * passed, because only the next junction is ever prompted.
+ * **250 m** (ADR 0088 D-1.2, answered by the owner in D-9 Q2). While the next
+ * junction's choice is final, the prompt is for the first junction after it
+ * whose choice is not, within this reach ({@link promptedJunction}, #3129).
  * `junction-choice.test.ts` holds the prompt to appearing at exactly this
  * distance; {@link createJunctionChoice} reads it here.
  */
@@ -66,10 +73,15 @@ export type WayPress = Exclude<TurnPress, 'u-turn'>;
 /** The presses that choose a way, in the order the prompt names them. */
 export const WAY_PRESSES: readonly WayPress[] = ['left', 'straight', 'right'];
 
-/** What the prompt shows for the next junction (#2898 draws it). */
+/** What the prompt shows for the junction it is for (#2898 draws it). */
 export interface JunctionPrompt {
   /** The ride distance of the junction. */
   readonly distance: number;
+  /**
+   * Which junction ahead it is: 1 for the next, 2 for the one after it, and so
+   * on (#3129). More than 1 only while the next junction's choice is final.
+   */
+  readonly ordinal: number;
   /** Every way on, from the furthest left to the furthest right. */
   readonly ways: readonly RollingWay[];
   /** The edge id the ride will take: the rider's choice, or the default. */
@@ -80,6 +92,80 @@ export interface JunctionPrompt {
   readonly locked: boolean;
   /** Metres until the choice is final; 0 once it is. */
   readonly toLock: number;
+  /**
+   * The choice was already final on the first frame this junction was
+   * prompted, so it was never offered (#3129, the owner's Q4 ruling): the
+   * pop-up says it was too close to the last junction to choose, in place of
+   * saying the choice is locked. Never true while {@link locked} is false.
+   */
+  readonly tooClose: boolean;
+  /**
+   * The junction before this one whose choice is final, when the prompt
+   * passed over it to reach this one ({@link promptedJunction}, #3129), or
+   * `undefined`. The pop-up shows one junction, so this one's lock is not
+   * shown; `hud/junction-text.ts` §`junctionEvent` says it (ADR 0088 D-3).
+   */
+  readonly lockedBefore: LockedJunction | undefined;
+}
+
+/** A junction whose choice is final, as {@link JunctionPrompt.lockedBefore} names it. */
+export interface LockedJunction {
+  /** The ride distance of the junction. */
+  readonly distance: number;
+  /** Every way on, from the furthest left to the furthest right. */
+  readonly ways: readonly RollingWay[];
+  /** The edge id the ride will take there, which can no longer change. */
+  readonly chosen: string;
+}
+
+/**
+ * The junction the prompt is for with the rider at ride distance `rider`,
+ * which one ahead it is, and the last junction it passed over to reach it
+ * (`before`, whose choice is final), or `undefined` while none is within
+ * {@link JUNCTION_PROMPT_METRES} — ADR 0088 D-1.2 as amended on 2026-11-24
+ * (#3129, the owner's Q2 ruling):
+ *
+ * - **The next junction**, while its choice is not final.
+ * - **While the next junction's choice is final, the first junction after it
+ *   whose choice is not**, within {@link JUNCTION_PROMPT_METRES}. So a town
+ *   of blocks under 100 m offers every junction, each while it is between
+ *   100 m and 250 m ahead, which is how far ahead a choice can be made.
+ * - **With none such, the furthest junction whose choice is final**: the one
+ *   last prompted, so the prompt never steps back to a junction it has left.
+ *
+ * D-1.5's lock is untouched: `RollingRoute.choose` refuses a choice within
+ * {@link JUNCTION_LOCK_METRES} of its junction whichever junction is shown, so
+ * no choice is ever made inside 100 m (ADR 0087 D-6.2).
+ *
+ * Each step is `nextJunctionAfter`, which builds one junction and none of the
+ * others ahead (#2898): this runs every frame.
+ */
+export function promptedJunction(
+  route: RollingRoute,
+  rider: number,
+):
+  | {
+      readonly junction: RollingJunction;
+      readonly ordinal: number;
+      readonly before: RollingJunction | undefined;
+    }
+  | undefined {
+  const within = (junction: RollingJunction | undefined): junction is RollingJunction =>
+    junction !== undefined && junction.distance - rider <= JUNCTION_PROMPT_METRES;
+  const final = (junction: RollingJunction): boolean =>
+    junction.distance - rider <= JUNCTION_LOCK_METRES;
+  let junction = route.nextJunctionAfter(rider);
+  if (!within(junction)) return undefined;
+  let ordinal = 1;
+  let before: RollingJunction | undefined;
+  while (final(junction)) {
+    const after = route.nextJunctionAfter(junction.distance);
+    if (!within(after)) break;
+    before = junction;
+    junction = after;
+    ordinal += 1;
+  }
+  return { junction, ordinal, before };
 }
 
 /**
@@ -170,7 +256,10 @@ export interface TurnNotice {
 
 /** An open-world ride's junction choice: `GameView` holds one for the ride (#3013). */
 export interface JunctionChoice {
-  /** The prompt for the next junction, or `undefined` while none is within {@link JUNCTION_PROMPT_METRES}. */
+  /**
+   * The prompt for the junction {@link promptedJunction} names, or `undefined`
+   * while none is within {@link JUNCTION_PROMPT_METRES}.
+   */
   prompt(rider: number): JunctionPrompt | undefined;
   /** One press, from any input, with the rider at ride distance `rider`. */
   press(press: TurnPress, rider: number): void;
@@ -196,19 +285,41 @@ export function createJunctionChoice(route: RollingRoute, clock: () => number): 
   const standing = (): TurnNotice | undefined =>
     notice !== undefined && clock() - notice.since < TURN_NOTICE_SECONDS ? notice : undefined;
 
+  /**
+   * For each junction prompted and not yet passed, by its ride distance,
+   * whether its choice was already final on the first frame it was prompted
+   * (#3129): what {@link JunctionPrompt.tooClose} reads.
+   */
+  const lockedWhenFirstShown = new Map<number, boolean>();
+
   const prompt = (rider: number): JunctionPrompt | undefined => {
-    // Only the next junction is ever prompted, and this runs every frame:
-    // `nextJunctionAfter` builds that one and none of the others ahead (#2898).
-    const next = route.nextJunctionAfter(rider);
-    if (next === undefined || next.distance - rider > JUNCTION_PROMPT_METRES) return undefined;
-    const toLock = Math.max(0, next.distance - rider - JUNCTION_LOCK_METRES);
+    const found = promptedJunction(route, rider);
+    if (found === undefined) return undefined;
+    const { junction, ordinal, before } = found;
+    const toLock = Math.max(0, junction.distance - rider - JUNCTION_LOCK_METRES);
+    const locked = toLock === 0;
+    let lockedFirst = lockedWhenFirstShown.get(junction.distance);
+    if (lockedFirst === undefined) {
+      lockedFirst = locked;
+      // A junction passed is never prompted again: what it was is let go.
+      for (const passed of lockedWhenFirstShown.keys()) {
+        if (passed <= rider) lockedWhenFirstShown.delete(passed);
+      }
+      lockedWhenFirstShown.set(junction.distance, lockedFirst);
+    }
     return {
-      distance: next.distance,
-      ways: next.ways,
-      chosen: next.taken,
-      defaultWay: next.defaultWay,
-      locked: toLock === 0,
+      distance: junction.distance,
+      ordinal,
+      ways: junction.ways,
+      chosen: junction.taken,
+      defaultWay: junction.defaultWay,
+      locked,
       toLock,
+      tooClose: locked && lockedFirst,
+      lockedBefore:
+        before === undefined
+          ? undefined
+          : { distance: before.distance, ways: before.ways, chosen: before.taken },
     };
   };
 

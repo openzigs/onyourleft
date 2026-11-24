@@ -51,6 +51,7 @@ import { roomShortCode } from './operate/operate.ts';
 import { fakeRoomRouter } from './operate/rooms-testing.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
+import { fakeValhalla, NOWHERE_POINTS } from './routing/valhalla-testing.ts';
 
 /**
  * The specification cannot drift from the implementation (#36): the committed
@@ -293,6 +294,17 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     send(world, 'POST', '/v1/camera/side-pose', (await signedIn(world)).token, {
       picture: base64Of(testPicture()),
       source: 'instance-local',
+    }),
+  // #2008: the route planner's two, against the fake Valhalla the world is handed.
+  routeBetweenWaypoints: async (world) =>
+    send(world, 'POST', '/v1/routing/route', (await signedIn(world)).token, {
+      waypoints: NOWHERE_POINTS,
+      preferences: { bicycle: 'road', hills: 'neutral', surface: 'prefer-paved' },
+    }),
+  heightsAlongLine: async (world) =>
+    send(world, 'POST', '/v1/routing/heights', (await signedIn(world)).token, {
+      shape: NOWHERE_POINTS,
+      interval: 100,
     }),
   startAnalysisJob: async (world) =>
     send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
@@ -1096,6 +1108,8 @@ describe('every route answers with the shape its entry declares', () => {
       },
       // #1106: a picture model that answers at once, as the engine above does.
       pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
+      // #2008: a routing engine that answers at once, in Valhalla's own shapes.
+      routing: { engine: fakeValhalla().engine() },
       // #2709: a local model offered to every rider, answering every call with a decision.
       tactics: {
         local: OFFERED,
