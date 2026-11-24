@@ -708,7 +708,13 @@ describe('#1856 — only houses a parcel can reach', () => {
    * nearest lane.
    */
   function throwAtEveryHouse(ride: DeliveryRide): DeliveryRide {
-    let now = ride;
+    // With no obstacle on the road (#3021): a crash now stops the drawn rider
+    // and refuses the throw, and this asks about the pick, not the crash.
+    let now: DeliveryRide = {
+      ...ride,
+      obstacles: [],
+      obstacleState: { tick: 0, startedAt: [], crashed: [] },
+    };
     const step = (along: number, throwTo?: ThrowTarget['side']): void => {
       now = stepDeliveryRide(
         { ...now, steer: ride.steer },
