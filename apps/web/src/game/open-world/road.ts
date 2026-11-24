@@ -121,7 +121,7 @@ import type { MappedBuildings } from '../mapped-buildings';
 import { NearbyStreetScan } from '../nearby-streets';
 import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
-import { routeSeed } from '../scatter';
+import { routeSeed, WaysOutPlacing } from '../scatter';
 import type { StreetScans } from '../scene';
 import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
@@ -493,11 +493,13 @@ export class OpenWorldRoad {
   /**
    * #3107: the ride's readings of its streets, a slice a frame
    * (`scene.ts` §`SceneInput.streetScans`). One for the ride: a reading is
-   * handed on as last read through every view and corridor change.
+   * handed on as last read through every view and corridor change. #3119:
+   * and the ways out whose scenery is placed a few a frame.
    */
   readonly streetScans: StreetScans = {
     nearby: new NearbyStreetScan(),
     junctions: new JunctionScan(),
+    ways: new WaysOutPlacing(),
   };
   #view: OpenWorldRoadView;
   #uTurns: number;

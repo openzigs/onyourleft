@@ -2047,7 +2047,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+                        the tint is a VERTEX attribute, and there is no ground blob (#620).
+                        ⚠️ **One belt a world since #3119**: an open-world
+                        ride's every plan is another set, handed to the belt
+                        it has (`MappedBuildingBelt.rebind`,
+                        `mappedBeltFor`) and refilled in its buffers; a new
+                        belt allocated and uploaded ~10 MB inside the frame
     src/game/house-models.ts
                         which mapped plans are drawn as a house MODEL (#1585):
                         GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
@@ -2371,7 +2376,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         or of the blocks held read every street inside one
                         frame. A route ride's are read whole, once, as before.
                         A reading's grid of segments (`onNearbyStreet`) is
-                        built when a planner of buildings first asks for it
+                        built when a planner of buildings first asks for it.
+                        ⚠️ **Since #3119 the scenery along the ways out is
+                        placed a few ways a frame** (`scatter.ts`
+                        §`WaysOutPlacing`, `StreetScans.ways`): at most
+                        `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
+                        first, all on the ride's first frame; a junction in a
+                        dense town hands on ~20 at once. The way roads below
+                        still read every way handed
     src/game/way-roads.ts
                         way roads (#3106) — every way out of an open-world
                         junction (`SceneInput.waysOut`, the views the rolling
