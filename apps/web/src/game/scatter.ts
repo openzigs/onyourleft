@@ -920,6 +920,22 @@ export function routeSeed(profile: RouteProfile): number {
 }
 
 /**
+ * #2902: the seed an open-world ride's frame implies — its start, rounded as
+ * {@link scatterSeed} rounds a route's first coordinate. An open-world ride's
+ * view changes every kilometre or so, and with it the view's
+ * {@link scatterSeed}; the frame does not, so what is seeded from it stays.
+ */
+export function frameSeed(frame: {
+  readonly latitude: number;
+  readonly longitude: number;
+}): number {
+  let seed = SEED_BASIS;
+  seed = mix(seed, Math.round(frame.latitude * SEED_COORDINATE_SCALE));
+  seed = mix(seed, Math.round(frame.longitude * SEED_COORDINATE_SCALE));
+  return seed >>> 0;
+}
+
+/**
  * Everything standing beside the road between two odometer readings.
  *
  * Pure, total and **stateless**: the answer for a span depends on the span and

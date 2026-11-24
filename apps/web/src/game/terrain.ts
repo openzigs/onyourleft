@@ -554,12 +554,36 @@ export function localGroundPosition(
 }
 
 /**
- * The projection origin for a route: its first grid point.
+ * The frames profiles are drawn in where that is not their first point —
+ * #2902. @see drawProfileIn
+ */
+const fixedFrames = new WeakMap<RouteProfile, CorridorOrigin>();
+
+/**
+ * Draws `profile` in `frame` rather than about its first point — #2902. An
+ * open-world ride's view is trimmed behind the rider (`RollingRoute`'s header,
+ * item 5), which moves its first point about once a kilometre; drawn about
+ * that point, every trim moved the world's origin, so nothing planned in a
+ * fixed frame — the map's tiles (`open-world/tile-plan.ts`) — could be drawn
+ * where it is. `open-world/road.ts` hands every view it makes to this with the
+ * session's start, so {@link corridorOrigin} answers that start for each, and
+ * every reader of it (the road, the drawn line, the racing line, the scene)
+ * draws the whole ride in one frame.
+ */
+export function drawProfileIn(profile: RouteProfile, frame: CorridorOrigin): void {
+  fixedFrames.set(profile, frame);
+}
+
+/**
+ * The projection origin for a route: its first grid point — or, since #2902,
+ * the frame {@link drawProfileIn} fixed for it.
  *
  * Computed once per route and reused for every rebuild, because a projection
  * that moved with the rider would make the whole world shift under them.
  */
 export function corridorOrigin(profile: RouteProfile): CorridorOrigin {
+  const fixed = fixedFrames.get(profile);
+  if (fixed !== undefined) return fixed;
   const first = profile.positions[0] as GeographicPosition;
   return {
     latitude: first.latitude,

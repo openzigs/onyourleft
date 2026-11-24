@@ -76,6 +76,7 @@ import {
   degreesLongitude,
   geographicPosition,
   altitudeMetres,
+  positionAt as positionAlong,
   RollingRoute,
   ROLLING_LEAST_WAY_METRES,
   type GeographicPosition,
@@ -85,6 +86,7 @@ import {
 } from '@onyourleft/domain';
 import {
   describeStreetGraphRefusal,
+  localMetres,
   METRES_PER_DEGREE_LATITUDE,
   type CorridorFrame,
   type StreetGraphEdge,
@@ -109,6 +111,7 @@ import {
 } from './ride';
 import { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
+import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
 import type { TileBlockFeatures } from './tile-plan';
 import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
 import { tilesToPlan } from './tiles-ahead';
@@ -425,10 +428,39 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   function planAhead(route: RollingRoute, rider: number): void {
     if (planner === undefined || !Number.isFinite(rider)) return;
     const view = route.view();
-    if (asked?.view === view && Math.abs(rider - asked.rider) < TILE_ASK_METRES) return;
-    asked = { view, rider };
-    planner.want(tilesToPlan(route, rider));
+    if (asked?.view !== view || Math.abs(rider - asked.rider) >= TILE_ASK_METRES) {
+      asked = { view, rider };
+      planner.want(tilesToPlan(route, rider));
+    } else if (buildingsAsked !== undefined) {
+      return;
+    }
+    // #2902: and the mapped buildings round the rider, against this view,
+    // whenever the view or the tiles planned changed, or the rider has ridden
+    // on far enough that the reach planned no longer covers the belt's. Until
+    // they are first asked for, every call looks, so a standing start asks as
+    // soon as its first tile is planned rather than 25 m on.
+    const along = rider - route.origin;
+    if (!(along >= 0 && along <= route.end - route.origin)) return;
+    const tiles = [...planner.plans()].length;
+    if (tiles === 0) return;
+    const at = positionAlong(view, along);
+    const { x, z } = localMetres(frame, at.longitude, at.latitude);
+    const last = buildingsAsked;
+    if (
+      last !== undefined &&
+      last.view === view &&
+      last.tiles === tiles &&
+      Math.hypot(x - last.x, z - last.z) < OPEN_WORLD_BUILDINGS_REPLAN_METRES
+    ) {
+      return;
+    }
+    buildingsAsked = { view, tiles, x, z };
+    planner.planBuildings({ profile: view, x, z });
   }
+  /** What the buildings were last planned for. @see planAhead */
+  let buildingsAsked:
+    | { readonly view: unknown; readonly tiles: number; readonly x: number; readonly z: number }
+    | undefined;
   const reader = createAreaReader({
     archive: options.archive,
     frame,
@@ -528,6 +560,9 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
           },
           graphVersion: () => mirror.version,
           ahead: planAhead,
+          // #2902: the whole ride drawn in the start's frame, the tiles' own.
+          frame: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
+          buildings: () => planner?.buildings,
         }),
     };
   })();

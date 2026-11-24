@@ -207,17 +207,109 @@ function inTileBox(box: Box, x: number, z: number): boolean {
   return x >= box.minX && x < box.maxX && z >= box.minZ && z < box.maxZ;
 }
 
+/**
+ * How near two footprints' centroids are for one to be a copy of the other:
+ * **1 m** — #2902, after #3060's rule. A tile carries a buffer past its edges,
+ * so a footprint near an edge is in both tiles' features; each tile puts its
+ * vertices on its own grid, about 0.3 m apart at z15, so the two copies'
+ * centroids differ by less than that.
+ */
+export const TILE_COPY_METRES = 1;
+
+/** The share of the larger's area the smaller must have to be its copy: **0.8**. */
+export const TILE_COPY_AREA_SHARE = 0.8;
+
+function ringArea(ring: Float32Array): number {
+  const count = Math.floor(ring.length / 2);
+  let twice = 0;
+  for (let i = 0; i < count; i += 1) {
+    const next = (i + 1) % count;
+    twice +=
+      (ring[i * 2] as number) * (ring[next * 2 + 1] as number) -
+      (ring[next * 2] as number) * (ring[i * 2 + 1] as number);
+  }
+  return Math.abs(twice) / 2;
+}
+
+/** Whether two footprints carry the same tags: a part over its building is not its copy. */
+function sameTags(a: BuildingFeature, b: BuildingFeature): boolean {
+  return (
+    a.kind === b.kind &&
+    a.heightMetres === b.heightMetres &&
+    a.minHeightMetres === b.minHeightMetres &&
+    a.levels === b.levels &&
+    a.buildingType === b.buildingType &&
+    a.roofShape === b.roofShape &&
+    a.landmark === b.landmark
+  );
+}
+
+/**
+ * The footprints `box` owns, each once. A footprint is the tile's when its
+ * centroid is in the tile; a copy of one already taken — the same tags, its
+ * centroid within {@link TILE_COPY_METRES} and its area within
+ * {@link TILE_COPY_AREA_SHARE} — is not taken again, and of two copies the
+ * larger is kept, the first read where they are the same size (#3060's rule).
+ */
+function ownedFootprints(
+  buildings: readonly BuildingFeature[],
+  box: Box,
+): { readonly index: number; readonly x: number; readonly z: number }[] {
+  const kept: { index: number; x: number; z: number; area: number }[] = [];
+  const cells = new Map<string, number[]>();
+  const cellOf = (x: number, z: number): [number, number] => [
+    Math.floor(x / TILE_COPY_METRES),
+    Math.floor(z / TILE_COPY_METRES),
+  ];
+  for (const [index, building] of buildings.entries()) {
+    const outer = building.rings[0];
+    if (outer === undefined || outer.length < 6) continue;
+    const centroid = ringCentroid(outer);
+    if (!inTileBox(box, centroid.x, centroid.z)) continue;
+    const area = ringArea(outer);
+    const [cx, cz] = cellOf(centroid.x, centroid.z);
+    let copyOf: number | undefined;
+    for (let dx = -1; dx <= 1 && copyOf === undefined; dx += 1) {
+      for (let dz = -1; dz <= 1 && copyOf === undefined; dz += 1) {
+        for (const at of cells.get(`${String(cx + dx)},${String(cz + dz)}`) ?? []) {
+          const other = kept[at] as (typeof kept)[number];
+          const larger = Math.max(area, other.area);
+          if (
+            Math.hypot(other.x - centroid.x, other.z - centroid.z) <= TILE_COPY_METRES &&
+            larger > 0 &&
+            Math.min(area, other.area) / larger >= TILE_COPY_AREA_SHARE &&
+            sameTags(building, buildings[other.index] as BuildingFeature)
+          ) {
+            copyOf = at;
+            break;
+          }
+        }
+      }
+    }
+    if (copyOf === undefined) {
+      const key = `${String(cx)},${String(cz)}`;
+      const list = cells.get(key) ?? [];
+      list.push(kept.length);
+      cells.set(key, list);
+      kept.push({ index, x: centroid.x, z: centroid.z, area });
+    } else if (area > (kept[copyOf] as (typeof kept)[number]).area) {
+      // The larger copy is kept, in the place the first was taken.
+      kept[copyOf] = { index, x: centroid.x, z: centroid.z, area };
+    }
+  }
+  return kept;
+}
+
 function planBuildings(buildings: readonly BuildingFeature[], box: Box): TileBuildings {
   const source: number[] = [];
   const centroids: number[] = [];
   const heights: number[] = [];
   const ringStarts: number[] = [0];
   let floats = 0;
-  for (const [index, building] of buildings.entries()) {
-    const outer = building.rings[0];
-    if (outer === undefined || outer.length < 6) continue;
-    const centroid = ringCentroid(outer);
-    if (!inTileBox(box, centroid.x, centroid.z)) continue;
+  for (const { index, x, z } of ownedFootprints(buildings, box)) {
+    const building = buildings[index] as BuildingFeature;
+    const outer = building.rings[0] as Float32Array;
+    const centroid = { x, z };
     source.push(index);
     centroids.push(centroid.x, centroid.z);
     heights.push(building.heightMetres ?? Number.NaN);

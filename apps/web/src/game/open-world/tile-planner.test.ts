@@ -20,6 +20,13 @@ import {
   type LandUseFeature,
   type TileId,
 } from '@onyourleft/map-features';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  routeProfile,
+} from '@onyourleft/domain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { planTile, tilePlanBuffers, type TileBlockFeatures, type TilePlan } from './tile-plan';
@@ -169,6 +176,27 @@ describe('a tile planned in the worker is the tile planned here — #2901', () =
     expect(classes.has(7)).toBe(true);
   });
 
+  it('plans a building two tiles both carry once, the larger copy — #2902, #3060’s rule', () => {
+    const whole = building(MID_X, MID_Z, 5);
+    // The neighbour's copy: its vertices on its own grid, 0.3 m off, and clipped smaller.
+    const copy = building(MID_X + 0.3, MID_Z - 0.2, 4.8);
+    const part: BuildingFeature = {
+      ...building(MID_X, MID_Z, 4.9),
+      kind: 'building_part',
+      minHeightMetres: 3,
+    };
+    const apart = building(MID_X + 3, MID_Z, 5);
+    const block: TileBlockFeatures = {
+      buildings: [copy, whole, part, apart],
+      landUse: [],
+      tiles: [{ tile: TILE, streets: [] }],
+    };
+    const plan = planTile(FIXTURE_FRAME, block, TILE, 'full');
+    // The whole copy, kept in the place the first was read; the part, whose
+    // tags differ; and the house 3 m along, which is not a copy.
+    expect(Array.from(plan.buildings.source)).toStrictEqual([1, 2, 3]);
+  });
+
   it('plans at reduced detail on a coarser lattice', () => {
     const full = planTile(FIXTURE_FRAME, fixtureBlock(), TILE, 'full');
     const reduced = planTile(FIXTURE_FRAME, fixtureBlock(), TILE, 'reduced');
@@ -208,7 +236,7 @@ function recordingWorker(fails?: (message: TilePlanRequest) => 'error' | 'failed
           worker.onerror?.({});
           return;
         }
-        if (failure === 'failed' && message.kind === 'plan') {
+        if (failure === 'failed' && (message.kind === 'plan' || message.kind === 'buildings')) {
           worker.onmessage?.({ data: { kind: 'failed', id: message.id } });
           return;
         }
@@ -315,6 +343,72 @@ describe('the tile planner — #2901', () => {
       planner.stop();
     });
   }
+
+  it('plans the buildings round the rider again on here when the worker fails them — #2902', async () => {
+    const { worker } = recordingWorker((message) =>
+      message.kind === 'buildings' ? 'error' : undefined,
+    );
+    const planner = createTilePlanner({
+      frame: FIXTURE_FRAME,
+      make: () => worker,
+      schedule: (run) => {
+        queueMicrotask(run);
+      },
+    });
+    planner.hold(blocks());
+    planner.want([TILE]);
+    await settle();
+    const at = (north: number) => ({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_FRAME.latitude + north),
+        degreesLongitude(FIXTURE_FRAME.longitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+    const profile = routeProfile([at(0), at(0.003)]);
+    // Asked once: the ask the worker failed is the one planned on here.
+    planner.planBuildings({ profile, x: MID_X, z: MID_Z });
+    await settle();
+    await settle();
+    expect(planner.inWorker).toBe(false);
+    expect(planner.buildings).toBeDefined();
+    planner.stop();
+  });
+
+  it('keeps the worker and its tiles when one buildings ask fails — #2902', async () => {
+    const { worker, asked, terminated } = recordingWorker((message) =>
+      message.kind === 'buildings' ? 'failed' : undefined,
+    );
+    const planner = createTilePlanner({
+      frame: FIXTURE_FRAME,
+      make: () => worker,
+      schedule: (run) => {
+        queueMicrotask(run);
+      },
+    });
+    planner.hold(blocks());
+    planner.want([TILE]);
+    await settle();
+    expect(planner.plan(TILE)).toBeDefined();
+    const at = (north: number) => ({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_FRAME.latitude + north),
+        degreesLongitude(FIXTURE_FRAME.longitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+    const profile = routeProfile([at(0), at(0.003)]);
+    planner.planBuildings({ profile, x: MID_X, z: MID_Z });
+    await settle();
+    await settle();
+    expect(terminated()).toBe(false);
+    expect(planner.inWorker).toBe(true);
+    expect(planner.plan(TILE)).toBeDefined();
+    expect(planner.buildings).toBeUndefined();
+    // The failed ask is not asked again.
+    expect(asked.filter((message) => message.kind === 'buildings')).toHaveLength(1);
+    planner.stop();
+  });
 
   it('plans on here when no worker can be made', async () => {
     const lines: string[] = [];

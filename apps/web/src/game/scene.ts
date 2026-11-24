@@ -272,6 +272,16 @@ export interface SceneInput {
    */
   readonly mappedBuildings?: MappedBuildings | undefined;
   /**
+   * #2902: in an open-world ride, the ways on from the next junction the route
+   * does not take (`open-world/road.ts` §`OpenWorldRoad.branchesAhead`), `x, z`
+   * pairs with a `NaN` pair between ways. A refill ranks the mapped buildings
+   * by the nearest of the road ahead AND these, so 60 m before a junction the
+   * belt holds the buildings of the street the rider has not chosen as well as
+   * those of the one they are on. Absent on every other ride: ranked by the
+   * road ahead alone, as since #2429.
+   */
+  readonly mappedBranches?: Float32Array | undefined;
+  /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
    * indexed from — #1583. `sceneFrame` never plans: planning a dense corridor
@@ -736,7 +746,14 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #1549: the ride's mapped buildings, and where the rider is among them.
     ...(input.mappedBuildings === undefined
       ? {}
-      : { mappedBuildings: mappedInView(input.mappedBuildings, corridor, riderDistance) }),
+      : {
+          mappedBuildings: mappedInView(
+            input.mappedBuildings,
+            corridor,
+            riderDistance,
+            input.mappedBranches,
+          ),
+        }),
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
     // — so the rider stays where `camera.ts` §`riderFrameBox` says they are.
@@ -1275,14 +1292,26 @@ function mappedInView(
   buildings: MappedBuildings,
   corridor: RoadCorridor,
   riderDistance: number,
+  branches: Float32Array | undefined,
 ): MappedBuildingsInView {
   const here = placeOnCorridor(corridor, riderDistance);
+  const road = routeAhead(corridor, riderDistance);
+  // #2902: the ways on not taken after the road ahead, a `NaN` pair between,
+  // which `rankFrom` measures no segment across.
+  let ahead = road;
+  if (branches !== undefined && branches.length >= 2) {
+    ahead = new Float32Array(road.length + 2 + branches.length);
+    ahead.set(road);
+    ahead[road.length] = Number.NaN;
+    ahead[road.length + 1] = Number.NaN;
+    ahead.set(branches, road.length + 2);
+  }
   return {
     buildings,
     chunk: mappedChunk(riderDistance),
     x: here.x,
     z: here.z,
-    ahead: routeAhead(corridor, riderDistance),
+    ahead,
   };
 }
 

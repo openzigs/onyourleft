@@ -41,6 +41,14 @@
 
 import { TILES_AT_Z15, type CorridorFrame, type TileId } from '@onyourleft/map-features';
 
+import type { FootprintPlan } from '../footprint-buildings';
+import { mappedBuildingsOf, type MappedBuildings } from '../mapped-buildings';
+import {
+  footprintPlanBuffers,
+  planBuildingsNear,
+  type BuildingsRequest,
+  type OwnedFootprints,
+} from './tile-buildings';
 import {
   planTile,
   tilePlanBuffers,
@@ -60,11 +68,19 @@ export type TilePlanRequest =
       readonly block: string;
       readonly tile: TileId;
       readonly detail: TilePlanDetail;
+    }
+  | {
+      /** #2902: the mapped buildings round the rider, from every tile planned so far. */
+      readonly kind: 'buildings';
+      readonly id: number;
+      readonly request: BuildingsRequest;
+      readonly detail: TilePlanDetail;
     };
 
 /** What the worker sends back. */
 export type TilePlanReply =
   | { readonly kind: 'plan'; readonly id: number; readonly plan: TilePlan }
+  | { readonly kind: 'buildings'; readonly id: number; readonly plans: readonly FootprintPlan[] }
   | { readonly kind: 'failed'; readonly id: number };
 
 /** A reply, and the buffers to transfer with it. */
@@ -81,6 +97,8 @@ export interface TilePlanAnswer {
 export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | undefined } {
   let frame: CorridorFrame | undefined;
   const blocks = new Map<string, TileBlockFeatures>();
+  /** #2902: what each tile planned owns, kept here: the plan's own buffers leave with it. */
+  const owned = new Map<string, OwnedFootprints>();
   return {
     handle: (data) => {
       if (typeof data !== 'object' || data === null) return undefined;
@@ -94,7 +112,31 @@ export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | 
           return undefined;
         case 'drop':
           blocks.delete(request.block);
+          for (const [key, tile] of owned) if (tile.block === request.block) owned.delete(key);
           return undefined;
+        case 'buildings': {
+          if (typeof request.id !== 'number') return undefined;
+          if (frame === undefined)
+            return { reply: { kind: 'failed', id: request.id }, transfer: [] };
+          try {
+            const planned = planBuildingsNear(
+              frame,
+              blocks,
+              owned.values(),
+              request.request,
+              request.detail,
+            );
+            // A copy, so what is transferred is the reply's alone and never a
+            // buffer a planner's cache here still holds.
+            const plans = structuredClone(planned);
+            return {
+              reply: { kind: 'buildings', id: request.id, plans },
+              transfer: footprintPlanBuffers(plans),
+            };
+          } catch {
+            return { reply: { kind: 'failed', id: request.id }, transfer: [] };
+          }
+        }
         case 'plan': {
           if (typeof request.id !== 'number') return undefined;
           const block = blocks.get(request.block);
@@ -105,6 +147,12 @@ export function tilePlanWorkerCore(): { handle(data: unknown): TilePlanAnswer | 
           if (frame === undefined || block === undefined) return failed;
           try {
             const plan = planTile(frame, block, request.tile, request.detail);
+            owned.set(`${String(plan.tile.x)}/${String(plan.tile.y)}`, {
+              block: request.block,
+              box: plan.box,
+              source: plan.buildings.source.slice(),
+              centroids: plan.buildings.centroids.slice(),
+            });
             return {
               reply: { kind: 'plan', id: request.id, plan },
               transfer: tilePlanBuffers(plan),
@@ -158,7 +206,7 @@ function inlineTilePlanWorker(schedule: TaskSchedule): TilePlanWorkerLike {
   let live = true;
   const worker: TilePlanWorkerLike = {
     postMessage: (message) => {
-      if (message.kind !== 'plan') {
+      if (message.kind !== 'plan' && message.kind !== 'buildings') {
         core.handle(message);
         return;
       }
@@ -197,6 +245,14 @@ export interface TilePlanner {
   plans(): IterableIterator<TilePlan>;
   /** Moves on each plan added or let go, so a reader can tell the plans changed. */
   readonly version: number;
+  /**
+   * #2902: asks for the mapped buildings round the rider to be planned against
+   * `request`'s view. One is planned at a time; asked again meanwhile, the
+   * latest is planned next and the others are not.
+   */
+  planBuildings(request: BuildingsRequest): void;
+  /** #2902: the buildings last planned round the rider, indexed; `undefined` until there are. */
+  readonly buildings: MappedBuildings | undefined;
   /** Whether plans are being made in a worker: `false` on the page's fallback. */
   readonly inWorker: boolean;
   /** Ends the worker; nothing more is planned. Safe to call twice. */
@@ -241,6 +297,11 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
   let inWorker = true;
   let stopped = false;
   let dead = false;
+  /** #2902: the buildings request in flight, the one waiting behind it, and the last answer. */
+  let buildingsInFlight: number | undefined;
+  let buildingsWaiting: BuildingsRequest | undefined;
+  let buildings: MappedBuildings | undefined;
+  let buildingsAsked: BuildingsRequest | undefined;
 
   const send = (message: TilePlanRequest): boolean => {
     if (worker === undefined) return false;
@@ -267,8 +328,30 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
     }
   };
 
+  const askBuildings = (): void => {
+    if (stopped || dead || buildingsInFlight !== undefined || worker === undefined) return;
+    const request = buildingsWaiting;
+    if (request === undefined) return;
+    buildingsWaiting = undefined;
+    const id = next++;
+    buildingsInFlight = id;
+    buildingsAsked = request;
+    send({ kind: 'buildings', id, request, detail });
+  };
+
   const answer = (data: unknown): void => {
     const reply = data as TilePlanReply | null | undefined;
+    if (reply !== null && reply !== undefined && reply.id === buildingsInFlight) {
+      buildingsInFlight = undefined;
+      if (reply.kind === 'buildings') {
+        buildings = mappedBuildingsOf(reply.plans);
+        version += 1;
+      }
+      // A failed one leaves the tiles' planner alone: the buildings last
+      // planned stay drawn, and only a newer ask is planned, never this again.
+      askBuildings();
+      return;
+    }
     if (reply === null || reply === undefined || inFlight === undefined) return;
     if (reply.id !== inFlight.id) return;
     const asked = inFlight;
@@ -302,6 +385,8 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
     const failed = worker;
     worker = undefined;
     inFlight = undefined;
+    if (buildingsInFlight !== undefined) buildingsWaiting ??= buildingsAsked;
+    buildingsInFlight = undefined;
     failed?.terminate();
     if (stopped) return;
     if (!inWorker) {
@@ -319,6 +404,7 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
     }
     attach(inlineTilePlanWorker(schedule));
     pump();
+    askBuildings();
   }
 
   let started = false;
@@ -361,6 +447,14 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
       if (stopped) return;
       wanted = tiles;
       pump();
+    },
+    planBuildings: (request) => {
+      if (stopped) return;
+      buildingsWaiting = request;
+      askBuildings();
+    },
+    get buildings() {
+      return buildings;
     },
     plan: (tile) => plans.get(tileKey(tile)),
     plans: () => plans.values(),
