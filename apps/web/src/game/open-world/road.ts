@@ -87,6 +87,7 @@ import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
 import { routeSeed } from '../scatter';
 import { anchorScenery } from '../scenery-anchor';
 import type { GameState } from '../simulation';
+import type { WorldCorridor } from '../world-data/corridor';
 import {
   corridorOrigin,
   drawProfileIn,
@@ -162,6 +163,12 @@ export interface OpenWorldRoadHooks {
   readonly frame?: CorridorOrigin | undefined;
   /** #2902: the mapped buildings planned round the rider, in {@link frame}, once there are any. */
   readonly buildings?: (() => MappedBuildings | undefined) | undefined;
+  /**
+   * #2903: the held blocks' streets as a corridor in {@link frame}
+   * (`street-corridor.ts`), which the scene draws to the fog as road and
+   * stubs at each junction; `undefined` until a block is held.
+   */
+  readonly streets?: (() => WorldCorridor | undefined) | undefined;
 }
 
 /** One open-world ride's road, from its start. See the file's header. */
@@ -198,6 +205,11 @@ export class OpenWorldRoad {
   /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
   buildings(): MappedBuildings | undefined {
     return this.#hooks.buildings?.();
+  }
+
+  /** The streets round the rider as a corridor (#2903), or `undefined` while none are held. */
+  streets(): WorldCorridor | undefined {
+    return this.#hooks.streets?.();
   }
 
   /** @see branchesAhead */

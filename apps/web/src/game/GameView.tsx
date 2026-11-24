@@ -4575,6 +4575,9 @@ function GameScreen({
             ? {}
             : {
                 mappedBuildings: road.follower.buildings(),
+                // #2903: and its streets, drawn to the fog as road, with a
+                // stub at each junction (`open-world/street-corridor.ts`).
+                worldCorridor: road.follower.streets(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
               }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),

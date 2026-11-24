@@ -20,9 +20,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
 import { countingSource } from '../../world-data/archive-testing';
-import { fixtureStart, openWorldFixtureArchive, START_COLUMN, START_ROW } from './fixture-testing';
+import {
+  fixtureStart,
+  OPEN_WORLD_FIXTURE_STREETS,
+  openWorldFixtureArchive,
+  START_COLUMN,
+  START_ROW,
+} from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
 import { createOpenWorldSession, TILE_ASK_METRES } from './session';
+import { openWorldStreetCorridor } from './street-corridor';
+import type { TileBlockFeatures } from './tile-plan';
 import {
   createTilePlanner,
   describeTilePlanFailure,
@@ -30,6 +38,12 @@ import {
   type TilePlanner,
   type TilePlanRequest,
 } from './tile-planner';
+
+// #2903: counted, so a test can tell a reused street corridor from a rebuilt one.
+vi.mock('./street-corridor', async (actual) => {
+  const real = await actual<typeof import('./street-corridor')>();
+  return { openWorldStreetCorridor: vi.fn(real.openWorldStreetCorridor) };
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -81,6 +95,7 @@ function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
 
 async function openRide(
   log?: (line: string) => void,
+  held?: ReadonlyMap<string, TileBlockFeatures>[],
   wrap?: (planner: TilePlanner) => TilePlanner,
 ) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
@@ -91,7 +106,17 @@ async function openRide(
     yieldToIdle: () => Promise.resolve(),
     random: () => 0,
     log,
-    tilePlanner: wrap === undefined ? undefined : (options) => wrap(createTilePlanner(options)),
+    // The real planner, with what each `hold` was handed recorded, and
+    // wrapped where a case asks.
+    tilePlanner: (options) => {
+      const planner = createTilePlanner(options);
+      const hold = planner.hold.bind(planner);
+      planner.hold = (blocks) => {
+        held?.push(blocks);
+        hold(blocks);
+      };
+      return wrap === undefined ? planner : wrap(planner);
+    },
   });
   const ready = await session.ready;
   if (ready.kind !== 'ready') throw new Error(`no ride: ${ready.kind}`);
@@ -129,13 +154,39 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
     expect(road.buildings()?.plans).toStrictEqual([]);
+    // #2903: and every held street, for the scene to draw: the fixture's three, in each tile it crosses.
+    // Each tile carries its own cut of a street it crosses, as a route's corridor does.
+    expect(road.streets()?.streets.length).toBeGreaterThanOrEqual(
+      OPEN_WORLD_FIXTURE_STREETS.length,
+    );
+    session.stop();
+  });
+
+  it('builds the street corridor again only when the held blocks change — #2903', async () => {
+    stubWorkers();
+    const built = vi.mocked(openWorldStreetCorridor);
+    built.mockClear();
+    const held: ReadonlyMap<string, TileBlockFeatures>[] = [];
+    const { session, road } = await openRide(undefined, held);
+    road.follow(0);
+    await settle();
+    const same = (
+      a: ReadonlyMap<string, TileBlockFeatures>,
+      b: ReadonlyMap<string, TileBlockFeatures>,
+    ) => a.size === b.size && [...a].every(([key, features]) => b.get(key) === features);
+    const changes = held.filter((blocks, at) => at === 0 || !same(blocks, held[at - 1] as never));
+    // Control: the session did hand the planner the same blocks more than once.
+    expect(held.length).toBeGreaterThan(changes.length);
+    // One corridor per change of what is held, and the road hands on the last.
+    expect(built).toHaveBeenCalledTimes(changes.length);
+    expect(road.streets()).toBe(built.mock.results.at(-1)?.value);
     session.stop();
   });
 
   it('asks again once the rider has ridden on, so the tiles past the start are planned', async () => {
     stubWorkers();
     const wants: (readonly TileId[])[] = [];
-    const { session, road } = await openRide(undefined, (planner) => ({
+    const { session, road } = await openRide(undefined, undefined, (planner) => ({
       ...planner,
       want: (tiles) => {
         wants.push(tiles);
