@@ -351,3 +351,61 @@ export const OPEN_WORLD_FAR_SERVICE_ROADS: readonly GraphFixtureStreet[] = Array
     ] as const,
   }),
 );
+
+/** #3106: how far apart {@link OPEN_WORLD_DENSE_STREETS}' streets are, in fixture pixels: **172**, 40 m. */
+export const DENSE_SPACING = 172;
+
+/** The columns of {@link OPEN_WORLD_DENSE_STREETS}' north–south streets: thirty, west to east. */
+export const DENSE_COLUMNS: readonly number[] = Array.from(
+  { length: 30 },
+  (_, index) => START_COLUMN - DENSE_SPACING / 2 + (index - 5) * DENSE_SPACING,
+);
+
+/** The rows of {@link OPEN_WORLD_DENSE_STREETS}' east–west streets: six each side of Main street's. */
+export const DENSE_ROWS: readonly number[] = Array.from(
+  { length: 21 },
+  (_, index) => MAIN_STREET_ROW + (index - 10) * DENSE_SPACING,
+);
+
+/** The column whose first block north of Main street is mapped on a bridge: the sixth junction of a ride east from the start pin. */
+export const DENSE_BRIDGE_COLUMN = DENSE_COLUMNS[11] as number;
+
+/**
+ * #3106: **a town of short blocks** — a crossroads every 40 m, as terraced
+ * streets are, with ONE awkward way: at {@link DENSE_BRIDGE_COLUMN} the block
+ * north of Main street is mapped on a bridge, which the streets' own drawing
+ * leaves out and only `way-roads.ts` draws. Ridden east along Main street,
+ * the view holds ten junctions ahead and one or two behind, each with two
+ * ways out and the junctions along each of those: more way than
+ * `way-roads.ts` §`WAY_ROAD_STATIONS_PER_FRAME` reads in a frame, so which
+ * ways it reads first decides whether the offered one is drawn. Every street
+ * carries a vertex at every crossing, as a mapped street does at a node.
+ */
+export const OPEN_WORLD_DENSE_STREETS: readonly GraphFixtureStreet[] = [
+  ...DENSE_ROWS.map((row) => ({
+    tags: {
+      kind: row === MAIN_STREET_ROW ? 'major_road' : 'minor_road',
+      kind_detail: row === MAIN_STREET_ROW ? 'secondary' : 'residential',
+    },
+    line: DENSE_COLUMNS.map((column) => [column, row] as const),
+  })),
+  ...DENSE_COLUMNS.flatMap((column): GraphFixtureStreet[] => {
+    const tags = { kind: 'minor_road', kind_detail: 'residential' };
+    if (column !== DENSE_BRIDGE_COLUMN) {
+      return [{ tags, line: DENSE_ROWS.map((row) => [column, row] as const) }];
+    }
+    const north = DENSE_ROWS.filter((row) => row < MAIN_STREET_ROW);
+    const south = DENSE_ROWS.filter((row) => row >= MAIN_STREET_ROW);
+    return [
+      { tags, line: north.map((row) => [column, row] as const) },
+      {
+        tags: { ...tags, is_bridge: true },
+        line: [
+          [column, MAIN_STREET_ROW - DENSE_SPACING],
+          [column, MAIN_STREET_ROW],
+        ],
+      },
+      { tags, line: south.map((row) => [column, row] as const) },
+    ];
+  }),
+];

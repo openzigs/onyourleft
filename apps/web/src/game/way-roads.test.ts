@@ -28,6 +28,7 @@ import { routeGround, streetRibbon } from './nearby-streets';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
+import { anchorScenery } from './scenery-anchor';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, ROAD_WIDTH_METRES } from './terrain';
@@ -44,7 +45,8 @@ import {
 const ROAD = northRoute(3_000, () => 30);
 const ORIGIN = corridorOrigin(ROAD);
 const SEED = scatterSeed(ROAD);
-const ON = { profile: ROAD, origin: ORIGIN, seed: SEED, land: NO_LAND_CLASS };
+/** The rider 100 m short of the junction most cases leave the road at, where {@link wayAt}'s view starts. */
+const ON = { profile: ROAD, origin: ORIGIN, seed: SEED, land: NO_LAND_CLASS, riderMetres: 1_400 };
 
 /** The place `lateral` metres off the road at `along`, in local metres. */
 function beside(along: number, lateral: number): readonly [number, number] {
@@ -65,6 +67,11 @@ function wayAt(junction: number, degrees: number, length = 400): RouteProfile {
   for (let out = 0; out <= length + 1e-9; out += 10) {
     local.push(beside(junction + out * Math.cos(radians), out * Math.sin(radians)));
   }
+  return profileOf(local);
+}
+
+/** The view through `local`, places in the road's local metres. */
+function profileOf(local: readonly (readonly [number, number])[]): RouteProfile {
   const perDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((ORIGIN.latitude * Math.PI) / 180);
   return routeProfile(
@@ -80,8 +87,26 @@ function wayAt(junction: number, degrees: number, length = 400): RouteProfile {
   );
 }
 
-function reached(profile: RouteProfile, toMetres = 500): WayReached {
-  return { way: { profile, fromMetres: 100 }, toMetres };
+/** A way of {@link wayAt} out of the junction at `junction` on the road, reached to `toMetres` on its own view. */
+function reached(profile: RouteProfile, toMetres = 500, junction = 1_500): WayReached {
+  return { way: { profile, fromMetres: 100 }, toMetres, shift: junction - 100 };
+}
+
+/**
+ * The view that takes a way out of a junction along another way: the road
+ * to the junction at `junction`, the street leaving it at 90° for `along`
+ * metres, then a street leaving THAT at `degrees` to the road's heading for
+ * 400 m. Its junction is `100 + along` metres along it.
+ */
+function wayBeyond(junction: number, along: number, degrees: number): RouteProfile {
+  const radians = (degrees * Math.PI) / 180;
+  const local: (readonly [number, number])[] = [];
+  for (let back = 100; back > 0; back -= 10) local.push(beside(junction - back, 0));
+  for (let out = 0; out < along; out += 10) local.push(beside(junction, out));
+  for (let out = 0; out <= 400 + 1e-9; out += 10) {
+    local.push(beside(junction + out * Math.cos(radians), along + out * Math.sin(radians)));
+  }
+  return profileOf(local);
 }
 
 /** Whether `(x, z)` lies on one of `roads`: within a segment's half-width of its centreline. */
@@ -235,13 +260,14 @@ describe('what the way roads cost — #3106', () => {
     expect(more[0]).toBe(next[0]);
   });
 
-  it('reads no more than a frame’s stations, the ways whose junctions are nearest first', () => {
-    // Forty ways of 400 m, a junction every 20 m: 4 000 stations asked for.
+  it('reads no more than a frame’s stations, the junctions ahead nearest first', () => {
+    // Forty ways of 400 m, a junction every 20 m ahead of a rider at 590 m:
+    // 4 000 stations asked for.
     const ways = Array.from({ length: 40 }, (_, index) =>
-      // The nearest junction has the most of its view left.
-      reached(wayAt(600 + index * 20, 90), 500 - index * 5),
+      reached(wayAt(600 + index * 20, 90), 500, 600 + index * 20),
     );
-    const roads = wayRoads(ways, ON, []);
+    // Handed over farthest first: the order is the junctions', not the array's.
+    const roads = wayRoads(ways.toReversed(), { ...ON, riderMetres: 590 }, []);
     let segments = 0;
     for (const road of roads) segments += road.segments.length / 4;
     expect(segments).toBeLessThanOrEqual(WAY_ROAD_STATIONS_PER_FRAME);
@@ -249,6 +275,64 @@ describe('what the way roads cost — #3106', () => {
     // The nearest ways are whole, and the farthest have none.
     expect(coveredOut(roads, 600, 90).at(-1)).toBeGreaterThanOrEqual(400 - WAY_ROAD_STEP_METRES);
     expect(coveredOut(roads, 600 + 39 * 20, 90)).toHaveLength(0);
+  });
+
+  /**
+   * A town of 40 m blocks about a rider at 1 035 m: junctions on the road at
+   * 980 and 1 020 m (behind them), 1 060 m (the next: the one the prompt
+   * offers) and 1 100 m, each with a way left and a way right, and a junction
+   * 40 m along each of those with a way on and a way back. 32 ways of 400 m:
+   * 3 232 stations asked for, three frames' worth.
+   */
+  function shortBlocks(): WayReached[] {
+    const ways: WayReached[] = [];
+    for (const junction of [980, 1_020, 1_060, 1_100]) {
+      for (const side of [1, -1]) {
+        // The junction along the way, 40 m out: its ways first, as `open-world/road.ts` hands them on.
+        for (const degrees of [0, 180]) {
+          const beyond = wayBeyond(junction, 40 * side, degrees);
+          ways.push({
+            way: { profile: beyond, fromMetres: 140 },
+            toMetres: 540,
+            shift: junction - 100,
+          });
+        }
+        ways.push(reached(wayAt(junction, 90 * side), 500, junction));
+      }
+    }
+    return ways;
+  }
+
+  it('reads the next junction’s ways first, then the road’s junctions ahead, and those behind the rider last', () => {
+    const roads = wayRoads(shortBlocks(), { ...ON, riderMetres: 1_035 }, []);
+    let segments = 0;
+    for (const road of roads) segments += road.segments.length / 4;
+    expect(segments).toBeLessThanOrEqual(WAY_ROAD_STATIONS_PER_FRAME);
+    expect(segments).toBeGreaterThan(WAY_ROAD_STATIONS_PER_FRAME - 100);
+    // The next junction's ways, and the one after's: whole, from the road's edge.
+    for (const junction of [1_060, 1_100]) {
+      for (const degrees of [90, -90]) {
+        const covered = coveredOut(roads, junction, degrees);
+        expect(covered[0], `${String(junction)} m at ${String(degrees)}°`).toBeLessThanOrEqual(4);
+        expect(covered.at(-1)).toBeGreaterThanOrEqual(400 - WAY_ROAD_STEP_METRES);
+        expect(covered).toHaveLength((covered.at(-1) as number) - (covered[0] as number) + 1);
+      }
+    }
+    // The ways of the junction farthest behind: unread past where the ways
+    // along them cross, 40 m out.
+    for (const degrees of [90, -90]) {
+      expect(coveredOut(roads, 980, degrees).filter((out) => out > 50)).toStrictEqual([]);
+    }
+  });
+
+  it('works them out again as a junction is passed, which changes the order', () => {
+    const ways = shortBlocks();
+    const before = wayRoads(ways, { ...ON, riderMetres: 1_055 }, []);
+    expect(wayRoads(ways, { ...ON, riderMetres: 1_059 }, [])).toBe(before);
+    // Past the junction at 1 060 m: its ways are behind, and the next junction's come first.
+    const after = wayRoads(ways, { ...ON, riderMetres: 1_061 }, []);
+    expect(after).not.toBe(before);
+    expect(coveredOut(after, 1_100, 90).at(-1)).toBeGreaterThanOrEqual(400 - WAY_ROAD_STEP_METRES);
   });
 });
 
@@ -274,6 +358,33 @@ describe('the way roads in a frame — #3106', () => {
     // Control: without the way, the same frame stands scenery where it runs.
     const without = sceneFrame(input({ waysOut: undefined }));
     expect(without.scatter.filter((item) => on(streets, item.x, item.z)).length).toBeGreaterThan(0);
+  });
+
+  it('are read from where the rider is: the next junction’s ways before those of the junctions passed', () => {
+    // Six junctions in the 60 m behind a rider at 1 035 m, each with a way
+    // left and right — a frame's stations and more — and the next at 1 060 m.
+    const waysOut = [980, 990, 1_000, 1_010, 1_020, 1_030, 1_060].flatMap((junction) =>
+      [90, -90].map((degrees) => {
+        const profile = wayAt(junction, degrees);
+        // As `open-world/road.ts` keys a way's view: where its distance zero is on the ride.
+        anchorScenery(profile, { seed: SEED, origin: junction - 100 });
+        return { profile, fromMetres: 100 };
+      }),
+    );
+    const start = atStartLine(ROAD);
+    const frame = sceneFrame({
+      profile: ROAD,
+      origin: ORIGIN,
+      state: { ...start, ride: { ...start.ride, distance: metres(1_035) } },
+      waysOut,
+    });
+    for (const degrees of [90, -90]) {
+      const covered = coveredOut(frame.sideRoads, 1_060, degrees);
+      expect(covered[0]).toBeLessThanOrEqual(4);
+      expect(covered.at(-1)).toBeGreaterThanOrEqual(400 - WAY_ROAD_STEP_METRES);
+    }
+    // Not vacuous: the frame's stations ran out, on a way of the junction farthest behind.
+    expect(coveredOut(frame.sideRoads, 980, 90).length).toBeLessThan(200);
   });
 
   it('are off with the nearby streets, whose control they would otherwise draw back in', () => {
