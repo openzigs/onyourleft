@@ -694,11 +694,15 @@ export function terrainCorridor(
     // #3103: under the nearer one's ROAD, not its own: two passes of one place
     // need not have one height (@see nearerRoadHeight). And let in from the
     // ends of the run, where the row beside it is drawn (@see UNDER_RAMP_METRES).
-    const under =
-      corridor.retraced[row] === 1
-        ? (RETRACE_UNDER_METRES + point.y - nearerRoadHeight(centre, corridor.retraced, row)) *
-          smoothstep01(fromDrawnRow(centre, corridor.retraced, row) / UNDER_RAMP_METRES)
-        : 0;
+    // #3122: and only as far under it as the nearer pass's own ground covers
+    // this one's: where it does not — the inside of its U-turn, folded —
+    // this pass's ground is the ground, met at the nearer road's height.
+    // @see coveredShare
+    const alongside = corridor.retraced[row] === 1;
+    const overNearer = alongside ? point.y - nearerRoadHeight(centre, corridor.retraced, row) : 0;
+    const letIn = alongside
+      ? smoothstep01(fromDrawnRow(centre, corridor.retraced, row) / UNDER_RAMP_METRES)
+      : 0;
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
       // #3094: on an open-world view, each vertex reads its own place's.
@@ -783,6 +787,14 @@ export function terrainCorridor(
               Math.min(SHALLOW_SINK_METRES, sunk(lateral - held, sinking)),
             )
           : met;
+        // Its road's edge is not a road's edge, its road not being drawn: it
+        // is held at the verge's foot with the rest of the verge.
+        const under = alongside
+          ? (RETRACE_UNDER_METRES * coveredShare(centre, normals2d, reach, x, z) +
+              overNearer +
+              (column === 0 ? VERGE_DROP_METRES : 0)) *
+            letIn
+          : 0;
         vertices[at * 3 + 1] = height - under;
         vertices[at * 3 + 2] = z;
         // #501: the wet margin. Column 0 is the road's own edge and is never
@@ -908,6 +920,7 @@ function nearerRoadHeight(
   const point = centre[row] as CorridorPoint;
   let nearest = (2 * RETRACE_OVERLAP_METRES) ** 2;
   let height = point.y;
+  NEARER_SEGMENT.segment = -1;
   for (let segment = 0; segment + 1 < centre.length; segment += 1) {
     if (retraced[segment] === 1 || retraced[segment + 1] === 1) continue;
     const from = centre[segment] as CorridorPoint;
@@ -923,10 +936,86 @@ function nearerRoadHeight(
     if (across < nearest) {
       nearest = across;
       height = from.y + (to.y - from.y) * t;
+      NEARER_SEGMENT.segment = segment;
+      NEARER_SEGMENT.share = t;
     }
   }
   return height;
 }
+
+/**
+ * The drawn segment {@link nearerRoadHeight} last found, and where along it:
+ * `segment` −1 where it found none. Module scratch, so the build allocates
+ * nothing per row (`landform-levelling.test.ts`). @see coveredShare
+ */
+const NEARER_SEGMENT = { segment: -1, share: 0 };
+
+/**
+ * How far, nought to one, the ground of the drawn pass covers the point
+ * `(x, z)` of a pass alongside it — #3122: one from
+ * {@link RETRACE_COVER_METRES} inside the reach of the drawn segment
+ * {@link nearerRoadHeight} last found on that side, nought at the reach and
+ * past it, and one where it found none. Read off the same `reach` the drawn
+ * rows' columns stop at.
+ *
+ * ⚠️ **Why the pass alongside is not simply drawn under everywhere.** It was,
+ * {@link RETRACE_UNDER_METRES} under the nearer pass's road (#1996, #3103),
+ * and that is right wherever the nearer pass's ground is over it. Inside the
+ * nearer pass's own U-turn it is not: there the nearer pass's ground is folded
+ * in ({@link BEND_FOLD_SHARE}), and the pass alongside is the only ground. On
+ * the synthetic 174° coast turnaround (`turnaround-coast.test.ts`) it showed
+ * as a pit up to 1.65 m under the road, 6 m from the road's edge beside the
+ * turn, walled by the folded edge of the nearer pass's ground — the owner's
+ * trench and wall of 2026-11-24 — and it came and went as the folded edge
+ * moved with the corridor from frame to frame, 1.6 m between frames at one
+ * place: the flashing. Covered, it is drawn under as before, so the two
+ * sheets never lie at one height where both are drawn; uncovered, it meets
+ * the nearer road as that pass's own ground would.
+ */
+function coveredShare(
+  centre: readonly CorridorPoint[],
+  normals2d: Float64Array,
+  reach: Float64Array,
+  x: number,
+  z: number,
+): number {
+  const { segment, share } = NEARER_SEGMENT;
+  if (segment < 0) return 1;
+  const from = centre[segment] as CorridorPoint;
+  const to = centre[segment + 1] as CorridorPoint;
+  const keep = 1 - share;
+  const normalX =
+    (normals2d[segment * 2] as number) * keep + (normals2d[segment * 2 + 2] as number) * share;
+  const normalZ =
+    (normals2d[segment * 2 + 1] as number) * keep + (normals2d[segment * 2 + 3] as number) * share;
+  const lateral =
+    (x - (from.x * keep + to.x * share)) * normalX + (z - (from.z * keep + to.z * share)) * normalZ;
+  const side = lateral >= 0 ? 0 : 1;
+  const fromReach = reach[segment * 2 + side] as number;
+  const toReach = reach[segment * 2 + 2 + side] as number;
+  // A side nothing limits is not folded at all.
+  if (!(Number.isFinite(fromReach) && Number.isFinite(toReach))) return 1;
+  const drawn = fromReach * keep + toReach * share;
+  return Math.min(1, Math.max(0, (drawn - Math.abs(lateral)) / RETRACE_COVER_METRES));
+}
+
+/**
+ * Over how far inside the reach of the nearer pass's ground a pass alongside
+ * it goes from meeting the nearer road to {@link RETRACE_UNDER_METRES} under
+ * it, in metres: **40** — #3122. @see coveredShare
+ *
+ * The pass alongside is a grid of its own columns, 4 to 13 m apart out to
+ * 40 m, so a triangle of it that spans the folded edge of the nearer pass's
+ * ground is under that edge by the drop at its inner vertex times that
+ * vertex's share of the span: a groove along the edge. Measured on the coast
+ * turnaround's return 3 m over, seen from 80 m and 120 m back, the deepest
+ * ground within 9.5 m of the drawn road was 0.50 m under it at 12 m, 0.37 at
+ * 24 and 0.32 at 40, against the verge's 0.25. Wider still, the two sheets
+ * lie close over more of the nearer one's edge: at 40 they are within 2 cm of
+ * each other only in the 53 cm inside it, where 2 cm is what a 24-bit depth
+ * buffer with the chase camera's 0.5 m near plane tells apart at 300 m.
+ */
+const RETRACE_COVER_METRES = 40;
 
 /**
  * Over how much road a pass alongside takes on its whole drop under the
