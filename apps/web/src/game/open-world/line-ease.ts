@@ -173,5 +173,6 @@ export function easedLine(
     blend(offsets, held.offsets[from] as number);
     blend(curvatures, held.curvatures[from] as number);
   }
-  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts };
+  // #3045: the new view's U-turns, drawn from these blended samples.
+  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts, uTurns: to.uTurns };
 }
