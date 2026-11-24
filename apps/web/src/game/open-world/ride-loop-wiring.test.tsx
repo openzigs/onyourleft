@@ -682,6 +682,9 @@ describe('an open-world road with real heights — #2899', () => {
     // It climbed the 6 %, and ended on 0 %.
     expect(Math.max(...grades)).toBeGreaterThan(5.5);
     expect(Math.abs(grades.at(-1) ?? Number.NaN)).toBeLessThan(0.1);
+    // ADR 0087 D-6.4: the start of the ride is walked too. The road's grade
+    // under the start is some 3 %, and the first write is one step from 0 %.
+    expect(Math.abs(grades[0] ?? Number.NaN)).toBeLessThanOrEqual(1.0001);
     // The grid ends 2.4 km east, where the route turns round: riding back
     // onto ground whose heights are known, the notice goes.
     for (

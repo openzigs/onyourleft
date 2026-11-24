@@ -18,6 +18,7 @@
 
 import {
   altitudeMetres,
+  gradePercent,
   RollingRoute,
   seconds,
   type RollingEdge,
@@ -154,6 +155,8 @@ async function ride(
         return Promise.resolve({ kind: 'stopped' });
       },
     },
+    // As `GameView` makes the session: a road with real heights walks its start.
+    ...(road.realHeights ? { walkFrom: gradePercent(0) } : {}),
   });
   const speed = options.speed ?? 10;
   for (let frame = 0; frame <= options.forSeconds * 5; frame += 1) {
@@ -209,6 +212,44 @@ describe('the grade written comes from the ground under the road', () => {
     // The trainer was sent simulation parameters and nothing else: no
     // resistance level, no ERG target, no other command (ADR 0087 D-5).
     expect(new Set(calls)).toStrictEqual(new Set(['setSimulationParameters']));
+  });
+
+  it('walks the start of the ride: on a 20 % slope the first write is 1 %, and a step a second after', async () => {
+    const { heights } = await heightsOver(heightTileWebp((column) => 200 + column * 0.2 * PIXEL));
+    await heights.start(placeInTile(FIXTURE_HEIGHT_TILE, START_COLUMN, ROW));
+    const edges = [street('a', [START_COLUMN, ROW], [330, ROW])];
+    const road = new OpenWorldRoad(
+      new RollingRoute(graphOf(edges), edges[0] as RollingEdge, { heights: heights.heightAt }),
+      { realHeights: true },
+    );
+    const { writes } = await ride(road, { forSeconds: 60 });
+    // The road under the start reads 10 %: half a window of the slope.
+    expect(road.view.profile.grades[0]).toBeGreaterThan(9);
+    expect(writes[0]).toMatchObject({ at: 0, grade: CORRECTION_GRADE_STEP_PERCENT_PER_SECOND });
+    expect(steepestWalk(writes)).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND);
+    expect(writes.at(-1)?.grade).toBeCloseTo(20, 1);
+  });
+
+  it('a ride that starts on the bridge over the valley fixture is written 0 %, never the floor under it', async () => {
+    const { heights } = await heightsOver(valleyHeightTile());
+    const middle = (VALLEY.westColumn + VALLEY.eastColumn) / 2;
+    await heights.start(placeInTile(FIXTURE_HEIGHT_TILE, middle, ROW));
+    // As `session.ts` §`startWays` hands it: the half of the bridge from the
+    // start to its far end, marked a span, then the street past it.
+    const edges = [
+      street('bridge', [middle, ROW], [VALLEY.eastColumn + 4, ROW], true),
+      street('east', [VALLEY.eastColumn + 4, ROW], [400, ROW]),
+    ];
+    const road = new OpenWorldRoad(
+      new RollingRoute(graphOf(edges), edges[0] as RollingEdge, { heights: heights.heightAt }),
+      { realHeights: true },
+    );
+    expect(road.heightsKnownAt(0)).toBe(false);
+    const { writes } = await ride(road, { forSeconds: 120 });
+    expect(writes.length).toBeGreaterThan(0);
+    expect(new Set(writes.map((write) => write.grade))).toStrictEqual(new Set([0]));
+    // Past the bridge the plateau's heights are known again.
+    expect(road.heightsKnownAt(1_000)).toBe(true);
   });
 
   it('writes 0 % on a flat block', async () => {

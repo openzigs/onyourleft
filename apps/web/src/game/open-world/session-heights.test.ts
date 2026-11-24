@@ -198,3 +198,69 @@ describe('the session’s road reads the terrain archive — #2899', () => {
     expect(source.calls).toHaveLength(0);
   });
 });
+
+describe('the session’s road keeps reading heights as the ride goes — #2899', () => {
+  /**
+   * The road the product's session returns, its terrain host not answering
+   * while the ride starts, and the ride loop's follow of it.
+   */
+  async function rideFromOffline() {
+    const { terrain, source } = await terrainOf(
+      heightTileWebp((column) => 400 + column * 0.03 * PIXEL),
+    );
+    source.offline = true;
+    const session = createOpenWorldSession({
+      start: START,
+      archive: corridorArchiveFrom(countingSource(await openWorldFixtureArchive())),
+      mapTilesOn: () => true,
+      yieldToIdle: () => Promise.resolve(),
+      terrain,
+      decodeHeights: fixtureDecode,
+      // A draw of 0 is no delay at all before a read (ADR 0090 R-8's delay is `heights.test.ts`'s).
+      random: () => 0,
+    });
+    const outcome = await session.ready;
+    if (outcome.kind !== 'ready') throw new Error(`not ready: ${outcome.kind}`);
+    const road = outcome.road();
+    let rider = 0;
+    /**
+     * Follows the road a frame at a time, a centimetre a frame, as the ride
+     * loop does, until `done` or 500 frames have gone. Whether it was done.
+     */
+    const frames = async (done: () => boolean): Promise<boolean> => {
+      for (let frame = 0; frame < 500 && !done(); frame += 1) {
+        rider += 0.01;
+        road.follow(rider);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 1);
+        });
+      }
+      return done();
+    };
+    return { session, source, road, frames };
+  }
+
+  it('asks again where the rider is, and the road takes the heights that arrive, with no extension of the route', async () => {
+    const { session, source, road, frames } = await rideFromOffline();
+    try {
+      // The start's read failed: the ride began level, its heights unknown.
+      expect(road.heightsKnownAt(100)).toBe(false);
+      const failed = source.calls.length;
+      const end = road.route.end;
+      // Still offline: the road tells the session where the rider is, the
+      // session's heights ask again for the tile that failed, and none arrives.
+      expect(await frames(() => source.calls.length > failed)).toBe(true);
+      expect(road.heightsKnownAt(100)).toBe(false);
+
+      source.offline = false;
+      // Asked for again, it arrives; and the follow after that sees a tile
+      // arrived and has the route ask for the heights it lacked.
+      expect(await frames(() => road.heightsKnownAt(100))).toBe(true);
+      expect(gradeAtSample(road.view.profile, 250)).toBeCloseTo(3, 1);
+      // Not by the route's next extension, which is a minute off at this pace.
+      expect(road.route.end).toBe(end);
+    } finally {
+      session.stop();
+    }
+  });
+});

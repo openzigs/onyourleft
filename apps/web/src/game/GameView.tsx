@@ -380,6 +380,7 @@ import {
 import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
+  gradePercent,
   metres,
   pacerGap,
   type BeatsPerMinute,
@@ -3171,7 +3172,14 @@ function GameScreen({
       gradientRef.current =
         found.control === undefined
           ? undefined
-          : createGradientSession({ profile, control: found.control });
+          : createGradientSession({
+              profile,
+              control: found.control,
+              // #2899, ADR 0087 D-6.4: on a road whose heights come from the
+              // terrain archive the start of the ride is walked, a step from
+              // 0 % a second, like every other change the lock cannot prevent.
+              ...(openRoad?.realHeights === true ? { walkFrom: gradePercent(0) } : {}),
+            });
       // #782: join the room, when this ride has one. After the last await, so a
       // rider who left while the trainer was asked joins nothing. The mass is
       // for the ticket alone (ADR 0028 D-1) and goes nowhere near the renderer.
