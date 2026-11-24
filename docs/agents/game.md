@@ -1158,10 +1158,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         motorways (D-3); footways, cycleways, paths, tracks
                         (D-3, D-9 Q1); a street mapped to stop more than 3 m
                         short of the road (D-4, `T_SNAP_METRES`); and a
-                        junction under 100 m after the last one, after a
-                        U-turn, or round a roundabout, which takes its
-                        default because the choice is final 100 m before it
-                        (ADR 0088 D-1.2, D-1.5; ADR 0087 D-6.2). A one-way
+                        junction whose choice is final (100 m before it,
+                        ADR 0088 D-1.5, ADR 0087 D-6.2) before it was ever
+                        prompted, whose pop-up says "Too close to the last
+                        junction to choose". Since #3129 (ADR 0088's
+                        amendments of 2026-11-24) the pop-up offers the
+                        first junction not yet final within 250 m while the
+                        next is final, titled "At the 2nd junction"
+                        (`junction-choice.ts` §`promptedJunction`), and a
+                        U-turn within 100 m past a junction takes the street
+                        came along as its default (`RollingRoute.uTurn`), so
+                        a dense town and a quick U-turn are offered. A one-way
                         street is offered BOTH ways (ADR 0091 D-5): not a
                         limit. `junction-limits.test.tsx` rides each through
                         the real game screen and holds its words in the help.
