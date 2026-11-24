@@ -676,6 +676,11 @@ to its wording is held for the owner's approval.
       section answers of 2026-09-30 (§4): **encrypted in transit: Yes**, except a
       picture or a ride's numbers sent to the rider's own computer; **deletion:
       Yes, in the app or by email to matt@openzigs.ai** (#906).
+- [ ] Data Safety, with the **next release** after #2013 (the owner's ruling of
+      2026-11-24): the answers are unchanged, but the approximate-location
+      row's explanation changed (a drawn route's heights are read from the
+      terrain archive on the same host). Re-enter that explanation from the
+      `why` in `src/android/data-safety.ts`, never typed by hand.
 - [ ] Data Safety, account deletion: the app lets a rider create an account (on
       an instance), so answer that it does, and paste `ACCOUNT_DELETION_URL`
       from `apps/web/src/privacy/policy.ts` into the delete-account URL field,

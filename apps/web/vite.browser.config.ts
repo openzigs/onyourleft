@@ -106,6 +106,29 @@ function corridorFixture(): Plugin {
   };
 }
 
+/**
+ * Emit the terrain archive a drawn route's heights are read from (#2013) —
+ * built, never committed, as the two above are. `terrain-fixture.ts` says what
+ * is in it: four synthetic height tiles, no terrain data from any source.
+ */
+function terrainFixture(): Plugin {
+  return {
+    name: 'oyl-terrain-fixture',
+    async generateBundle() {
+      // Through Vite's module runner, for `corridorFixture`'s reason.
+      const { module } = await runnerImport<typeof import('./browser/terrain-fixture')>(
+        fileURLToPath(new URL('./browser/terrain-fixture.ts', import.meta.url)),
+        { configFile: false },
+      );
+      this.emitFile({
+        type: 'asset',
+        fileName: module.TERRAIN_ARCHIVE_FILE,
+        source: await module.buildTerrainFixtureArchive(),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   // #530: the pose runtime the product ships, so `pose.browser.spec.ts` runs
   // the same bytes a rider's tablet would.
@@ -118,6 +141,7 @@ export default defineConfig({
   plugins: [
     pmtilesFixture(),
     corridorFixture(),
+    terrainFixture(),
     themeSelection(),
     poseRuntime(),
     basisTranscoder(),
@@ -258,6 +282,11 @@ export default defineConfig({
         // choice on a rolling route over a synthetic grid.
         // `junction-prompt-harness.tsx` says what it does not prove.
         'junction-prompt': 'browser/junction-prompt.html',
+        // #2013: a drawn route's heights, through the product's decoder,
+        // reader and one fetch, from a synthetic terrain archive at this
+        // origin; and the planner's profile of that route.
+        // `terrain-harness.tsx` says what it does not prove.
+        terrain: 'browser/terrain.html',
         // #3107: the real game screen, renderer and open-world session over
         // fixture streets, ridden through new areas a frame at a time while
         // every program link is counted. `open-world-harness.tsx` says what

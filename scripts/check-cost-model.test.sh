@@ -73,6 +73,7 @@ base_document() {
 | `h` | 0.6 | share | a source | read |
 | `s` | 70,000 | bytes | a source | inherited |
 | `S` | 200,000,000,000 | bytes | a source | measured |
+| `S_terrain` | 0 | bytes | a source | measured |
 | `p_storage` | 0.01 | USD per GB-month | a source | read |
 | `p_classB` | 2.00 | USD per million | a source | read |
 | `p_egress` | 0.01 | USD per GB | a source | read |
@@ -93,6 +94,7 @@ base_document() {
 | Basemap archive storage | $2.00 | $2.00 | $2.00 |
 | Basemap tile requests | $0.08 | $0.80 | $8.00 |
 | Basemap egress | $0.07 | $0.70 | $7.00 |
+| Terrain archive storage | $0.00 | $0.00 | $0.00 |
 | Activity streams (object storage) | $0.02 | $0.20 | $2.00 |
 | Infrastructure subtotal | $17.17 | $18.70 | $34.00 |
 | Infrastructure, per 1,000 MAU | $17.17 | $1.87 | $0.34 |
@@ -248,6 +250,24 @@ edit 's/| `p_storage` | 0.01 |/| `p_storage` | 0.02 |/'
 run_check
 assert_red 'an input changed without the projection fails'
 assert_says 'and names the storage line' '"Basemap archive storage" at 1,000 MAU states $2.00'
+
+# --- COST003: the terrain archive grows and its line does not (#2013) --------
+#
+# The base document's terrain archive is empty, so that every other figure in
+# it stands as it did before the line existed. Given a size, the line follows
+# from it at the storage rate, and a row left at nought is a disagreement.
+base_document
+edit 's/| `S_terrain` | 0 |/| `S_terrain` | 100,000,000,000 |/'
+run_check
+assert_red 'a terrain archive whose storage line was not recomputed fails'
+assert_says 'and names the terrain line and both numbers' '"Terrain archive storage" at 1,000 MAU states $0.00; the model gives $1.00'
+
+# --- COST002: the terrain archive's size is a required input (#2013) ---------
+base_document
+edit '/^| `S_terrain` |/d'
+run_check
+assert_red 'a document with no terrain archive size fails'
+assert_says 'and names the input' 'the inputs table is missing `S_terrain`'
 
 # --- COST003: a projection row deleted --------------------------------------
 base_document
