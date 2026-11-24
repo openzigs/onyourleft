@@ -42,9 +42,13 @@
  *
  * ## Heights
  *
- * `/height` with `range: true` and the caller's interval: `[metres along,
- * metres high]` pairs, `null` where the terrain tiles have no data — a void,
- * passed on as one (#72). The tiles are Tilezen's (`valhalla_build_elevation`
+ * `/height` once per point of the caller's line, which the app has already
+ * laid out at its interval: point `k` is `k × interval` along it, so that is
+ * the `along` passed back, `null` where the terrain tiles have no data — a
+ * void, passed on as one (#72). Valhalla is not asked to resample the line or
+ * to measure it (`resample_distance`, `range`): its distances are not the
+ * app's (0.11% longer, and some land at 29.9 m for 30 m), and every sample
+ * they put off the app's grid is a hole there (#3136). The tiles are Tilezen's (`valhalla_build_elevation`
  * downloads them for the graph's area), named in {@link ELEVATION_DATASET} so
  * a route records what its heights came from.
  */
@@ -338,29 +342,21 @@ export function createValhalla(options: ValhallaOptions): RoutingEngine {
     async heights(shape, intervalMetres, signal) {
       const answer = await call(
         'height',
-        {
-          shape: shape.map(([lat, lon]) => ({ lat, lon })),
-          range: true,
-          resample_distance: intervalMetres,
-          height_precision: 1,
-        },
+        { shape: shape.map(([lat, lon]) => ({ lat, lon })), height_precision: 1 },
         signal,
       );
       if ('failed' in answer) return { ok: false, why: answer.failed };
       if (answer.status !== 200) return { ok: false, why: 'malformed' };
-      const pairs = (answer.json as { range_height?: unknown } | null)?.range_height;
-      if (!Array.isArray(pairs) || pairs.length === 0) return { ok: false, why: 'malformed' };
+      const heights = (answer.json as { height?: unknown } | null)?.height;
+      if (!Array.isArray(heights) || heights.length !== shape.length) {
+        return { ok: false, why: 'malformed' };
+      }
       const samples: (readonly [number, number | null])[] = [];
-      for (const pair of pairs as unknown[]) {
-        if (!Array.isArray(pair) || pair.length !== 2) return { ok: false, why: 'malformed' };
-        const [along, height] = pair as [unknown, unknown];
-        if (typeof along !== 'number' || !Number.isFinite(along) || along < 0) {
-          return { ok: false, why: 'malformed' };
-        }
+      for (const [index, height] of (heights as unknown[]).entries()) {
         if (height !== null && (typeof height !== 'number' || !Number.isFinite(height))) {
           return { ok: false, why: 'malformed' };
         }
-        samples.push([along, height]);
+        samples.push([index * intervalMetres, height]);
       }
       return { ok: true, value: samples };
     },

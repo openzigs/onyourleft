@@ -236,6 +236,18 @@ describe('the route planner’s roads, from the rider’s instance (#2008)', () 
     expect(planned?.profile.totalDistance as number).toBeGreaterThan(1000);
   });
 
+  it('lines every height up with the planner’s grid, so an answer with no holes is a complete profile', async () => {
+    // #3136: asked to resample again, the engine measured its own distances,
+    // which fell off the grid and read back here as holes on every real route.
+    const { w, send } = await world({ heights: [10, 11.5, 13, 14.5] });
+    const { routing } = await connected(send, w);
+    const edit = oneLeg();
+    const resolved = await resolveDraft(edit.draft, edit.stale, routing, RIDING_DEFAULTS);
+    const planned = await planElevation(resolved, routing);
+    expect(planned?.coverage).toEqual({ complete: true, missing: 0, gaps: [] });
+    expect(planned?.profile.totalAscent as number).toBeGreaterThan(0);
+  });
+
   it('sends nothing for a leg that starts in a privacy zone, and says why without the place', async () => {
     const { w, send, seen, valhalla } = await world();
     const { routing } = await connected(send, w, { zones: [zoneAround(A)] });

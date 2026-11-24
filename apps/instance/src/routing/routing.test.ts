@@ -247,12 +247,12 @@ describe('roads between waypoints, from the instance’s routing engine (#2008)'
 });
 
 describe('heights along a line, from the instance’s terrain data (#2008)', () => {
-  it('answers samples at the interval asked, a hole as null, and names its source', async () => {
+  it('answers one sample per point, at point × interval, a hole as null, and names its source', async () => {
     const valhalla = fakeValhalla({ heights: [10, null, 12.5] });
     const { world, token } = await routingWorld({ engine: valhalla });
     const answer = await world.call('POST', ROUTING_HEIGHTS_PATH, {
       token,
-      body: { shape: NOWHERE_POINTS, interval: 100 },
+      body: { shape: [...NOWHERE_POINTS, ...NOWHERE_POINTS], interval: 100 },
     });
     expect(answer.status).toBe(200);
     const { source, samples } = answer.body as {
@@ -263,14 +263,19 @@ describe('heights along a line, from the instance’s terrain data (#2008)', () 
       name: ELEVATION_DATASET.name,
       resolutionMetres: ELEVATION_DATASET.resolutionMetres,
     });
-    expect(samples.length).toBeGreaterThan(3);
-    expect(samples.slice(0, 3)).toEqual([
+    // The app laid the line out at the interval already: point k is k × interval
+    // along it, never a distance the engine measured again (#3136).
+    expect(samples).toEqual([
       [0, 10],
       [100, null],
       [200, 12.5],
+      [300, 10],
+      [400, null],
+      [500, 12.5],
     ]);
     const asked = valhalla.requests.find((each) => each.action === 'height');
-    expect(asked?.body).toMatchObject({ range: true, resample_distance: 100 });
+    expect(asked?.body).not.toHaveProperty('resample_distance');
+    expect(asked?.body).not.toHaveProperty('range');
   });
 
   it('refuses an interval it would not sample at', async () => {

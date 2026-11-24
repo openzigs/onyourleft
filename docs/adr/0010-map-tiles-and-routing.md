@@ -769,7 +769,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   United States their source is USGS 3DEP, a bare-earth model and public domain, which answers
   D-5's first caveat rather than adding to it; their notices are in
   [`docs/operating-an-instance.md`](../operating-an-instance.md) §"Road routing". Keeping them, or
-  loading GLO-30 as D-5 names, is the owner's call on #2008. (2) D-5's own third caveat, GLO-30's
+  loading GLO-30 as D-5 names, is the owner's call on
+  [#3138](https://github.com/openzigs/onyourleft/issues/3138). (2) D-5's own third caveat, GLO-30's
   maintenance to 2026, is still open. The in-browser bundle (`apps/web/tools/valhalla`) stays at
   `3.8.3` until its own change moves it.
   ([#2008](https://github.com/openzigs/onyourleft/issues/2008))

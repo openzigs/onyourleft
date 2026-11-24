@@ -121,7 +121,7 @@ export const ROUTING_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'heightsAlongLine',
     reaches: 'own',
-    summary: `The heights along a line (#2008). \`shape\` is a list of 2 to ${String(MAXIMUM_HEIGHT_POINTS)} \`{ latitude, longitude }\` points in degrees and \`interval\` the metres between samples. Answers \`samples\` as [metres along, metres high] pairs, high \`null\` where the terrain data has a hole, and \`source\`, the elevation dataset and its grid in metres, for a route to record. **Nothing is kept.** Reached only sealed, on every instance. \`routing_off\`, \`routing_failed\` and \`rate_limited\` as for a route.`,
+    summary: `The heights along a line (#2008). \`shape\` is a list of 2 to ${String(MAXIMUM_HEIGHT_POINTS)} \`{ latitude, longitude }\` points in degrees, already laid out \`interval\` metres apart, and \`interval\` that spacing. Answers \`samples\`, one per point, as [metres along, metres high] pairs with point k at k × \`interval\`, high \`null\` where the terrain data has a hole, and \`source\`, the elevation dataset and its grid in metres, for a route to record. **Nothing is kept.** Reached only sealed, on every instance. \`routing_off\`, \`routing_failed\` and \`rate_limited\` as for a route.`,
     identity: true,
     auth: 'session',
     routing: true,

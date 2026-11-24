@@ -39,7 +39,7 @@ the engine: `apps/web/src/instance/routing-port.ts` is a `RoutingProvider` that 
 sealed, through the one #777 module, and refuses on the device any leg or line touching a privacy
 zone (a `departing` boundary in `privacy/boundaries.test.ts`). `main.tsx` hands the planner that
 provider only when the device is connected to an instance it can seal to; otherwise there is none,
-and legs are straight lines. Still not done: #70's *"the same suite against two engines"* (OSRM),
+and legs are straight lines. Still not done: #70's *"the same suite against two engines"* (OSRM, #3137),
 and an in-browser engine for a rider with no instance (#2734).
 
 **What is real, and what the tests therefore prove.** The interface; the validation every engine's

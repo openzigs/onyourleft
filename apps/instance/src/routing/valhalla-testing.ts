@@ -122,7 +122,15 @@ export function fakeValhalla(options: FakeValhallaOptions = {}): FakeValhalla {
     }
     if (action === 'height') {
       const shape = latLons(body.shape);
-      const interval = body.resample_distance as number;
+      const heightAt = (index: number): number | null => heights[index % heights.length] ?? null;
+      if (body.range !== true && body.resample_distance === undefined) {
+        // One height per point asked, as Valhalla 3.9.1 answers it.
+        return Response.json({ height: shape.map((_, index) => heightAt(index)) });
+      }
+      // Asked to resample and measure, it answers its own distances, which are
+      // not the app's: measured on the pinned 3.9.1 image (#3136), about 0.11%
+      // longer than the domain's, so most land off the app's grid.
+      const interval = (body.resample_distance as number | undefined) ?? 30;
       let span = 0;
       for (let index = 1; index < shape.length; index += 1) {
         span += metresBetween(shape[index - 1]!, shape[index]!);
@@ -130,8 +138,8 @@ export function fakeValhalla(options: FakeValhallaOptions = {}): FakeValhalla {
       const count = Math.max(2, Math.floor(span / interval) + 1);
       return Response.json({
         range_height: Array.from({ length: count }, (_, index) => [
-          index * interval,
-          heights[index % heights.length] ?? null,
+          Math.round(index * interval * 1.0011 * 10) / 10,
+          heightAt(index),
         ]),
       });
     }

@@ -97,7 +97,16 @@ describe('what the client will not pass on', () => {
 
   it('refuses a height that is not a number or null', async () => {
     const valhalla = fakeValhalla();
-    valhalla.failNext('height', 200, { range_height: [[0, 'high']] });
+    valhalla.failNext('height', 200, { height: [1, 'high', 3] });
+    expect(await valhalla.engine().heights(NOWHERE, 30, SIGNAL)).toStrictEqual({
+      ok: false,
+      why: 'malformed',
+    });
+  });
+
+  it('refuses heights that are not one per point asked', async () => {
+    const valhalla = fakeValhalla();
+    valhalla.failNext('height', 200, { height: [1, 2] });
     expect(await valhalla.engine().heights(NOWHERE, 30, SIGNAL)).toStrictEqual({
       ok: false,
       why: 'malformed',
