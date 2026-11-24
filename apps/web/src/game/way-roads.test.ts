@@ -33,6 +33,7 @@ import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, ROAD_WIDTH_METRES } from './terrain';
 import {
+  TURNED_OFF_REACH_METRES,
   WAY_ROAD_MOUTH_METRES,
   WAY_ROAD_REFRESH_METRES,
   WAY_ROAD_STATIONS_PER_FRAME,
@@ -323,6 +324,61 @@ describe('what the way roads cost — #3106', () => {
     for (const degrees of [90, -90]) {
       expect(coveredOut(roads, 980, degrees).filter((out) => out > 50)).toStrictEqual([]);
     }
+  });
+
+  it('reads a road turned off straight after the next junction’s ways, and back from its junction only where the frame does not draw the road — #3123', () => {
+    // The rider at 1 035 m turned off a road at the junction 1 020 m along:
+    // the road back from it runs down the road's own view, which the frame
+    // draws from 975 m only (60 m behind the rider).
+    const back: WayReached = {
+      way: { profile: ROAD, fromMetres: 1_020 },
+      toMetres: 1_020 - TURNED_OFF_REACH_METRES,
+      shift: 0,
+      turnedOff: { junctionMetres: 1_020, back: true },
+    };
+    const road = { ...ON, riderMetres: 1_035, drawnFromMetres: 975 };
+    // Handed over last, behind a frame's stations three times over.
+    const roads = wayRoads([...shortBlocks(), back], road, []);
+    let segments = 0;
+    for (const each of roads) segments += each.segments.length / 4;
+    expect(segments).toBeLessThanOrEqual(WAY_ROAD_STATIONS_PER_FRAME);
+    const drawnAt = (along: number): boolean => on(roads, ...beside(along, 0));
+    // Drawn from where the frame's road stops, in whole refreshes (1 000 m) and
+    // a station on into it, back to the reach.
+    for (let along = 1_020 - TURNED_OFF_REACH_METRES + 2; along <= 1_000; along += 2) {
+      expect(drawnAt(along), `${String(along)} m`).toBe(true);
+    }
+    // Not over the road the frame draws, a station past that.
+    for (let along = 1_010; along <= 1_020; along += 2) {
+      expect(drawnAt(along), `${String(along)} m`).toBe(false);
+    }
+    // The next junction's ways are still read first, whole.
+    for (const degrees of [90, -90]) {
+      expect(coveredOut(roads, 1_060, degrees).at(-1)).toBeGreaterThanOrEqual(
+        400 - WAY_ROAD_STEP_METRES,
+      );
+    }
+    // Control: as a way out of a junction behind the rider like any other, the
+    // stations run out before it is read.
+    const plain: WayReached = { ...back, turnedOff: undefined };
+    const unread = wayRoads([...shortBlocks(), plain], road, []);
+    expect(on(unread, ...beside(800, 0))).toBe(false);
+  });
+
+  it('draws the way on from a junction turned off at from the junction itself once the frame’s road has left it — #3123', () => {
+    const way = wayAt(1_500, 90);
+    const turnedOff = { junctionMetres: 1_500, back: false };
+    const reachedOn: WayReached = { ...reached(way, 500), turnedOff };
+    // The rider 100 m past the junction: the frame's road starts 40 m past it.
+    const past = { ...ON, riderMetres: 1_600, drawnFromMetres: 1_540 };
+    expect(coveredOut(wayRoads([reachedOn], past, []), 1_500, 90)[0]).toBe(0);
+    // While the frame draws the road at the junction, from the road's edge as any way out.
+    const at = { ...ON, riderMetres: 1_520, drawnFromMetres: 1_460 };
+    const fromEdge = coveredOut(wayRoads([reachedOn], at, []), 1_500, 90)[0];
+    // The ribbon starts 3 m out, half a metre inside the road's edge, so the
+    // junction's own point is 3 m off it, past its half-width.
+    expect(fromEdge).toBeGreaterThan(0);
+    expect(fromEdge).toBeLessThanOrEqual(4);
   });
 
   it('works them out again as a junction is passed, which changes the order', () => {
