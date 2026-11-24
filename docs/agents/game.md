@@ -2356,7 +2356,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         rider had no stub and no street. And a
                         **fork** — a street leaving the route at under 30°,
                         which has no stub — is drawn from the verge, not from
-                        the 23.5 m hand-over a stub covers
+                        the 23.5 m hand-over a stub covers.
+                        ⚠️ **Since #3107 an open-world ride reads them a
+                        slice a frame**: `NearbyStreetScan` here and
+                        `cross-streets.ts` §`JunctionScan`, one of each a ride
+                        (`open-world/road.ts` §`streetScans`, handed to the
+                        scene as `SceneInput.streetScans`), read at most 1 000
+                        units of street a call and hand on the last whole
+                        reading until the new one is whole — the junctions
+                        carried onto the new view by how far its start moved.
+                        A piece or a junction found again is the same object,
+                        so the side road built on it and the renderer's mesh
+                        are kept. Read whole, every change of the road's view
+                        or of the blocks held read every street inside one
+                        frame. A route ride's are read whole, once, as before.
+                        A reading's grid of segments (`onNearbyStreet`) is
+                        built when a planner of buildings first asks for it
     src/game/way-roads.ts
                         way roads (#3106) — every way out of an open-world
                         junction (`SceneInput.waysOut`, the views the rolling

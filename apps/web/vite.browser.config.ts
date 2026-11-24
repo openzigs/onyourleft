@@ -258,6 +258,11 @@ export default defineConfig({
         // choice on a rolling route over a synthetic grid.
         // `junction-prompt-harness.tsx` says what it does not prove.
         'junction-prompt': 'browser/junction-prompt.html',
+        // #3107: the real game screen, renderer and open-world session over
+        // fixture streets, ridden through new areas a frame at a time while
+        // every program link is counted. `open-world-harness.tsx` says what
+        // it does not prove.
+        'open-world': 'browser/open-world.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

@@ -381,6 +381,7 @@ function stationsOf(
   line: Float32Array,
   budget: { metres: number },
   near: RoadNeighbourhood,
+  work: StreetWork,
 ): number[] {
   const out: number[] = [];
   let carried = 0;
@@ -396,6 +397,7 @@ function stationsOf(
     if (!near.near(Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz))) {
       if (!gap) out.push(Number.NaN, Number.NaN);
       gap = true;
+      work.units += FAR_SEGMENT_UNITS;
       // The stations it would have had, counted and not made.
       const first = NEARBY_STREET_STEP_METRES - carried;
       carried = first > length ? carried + length : (length - first) % NEARBY_STREET_STEP_METRES;
@@ -454,9 +456,11 @@ function meetsAtAJunction(
   origin: CorridorOrigin,
   budget: { metres: number },
   near: RoadNeighbourhood,
+  work: StreetWork,
 ): boolean {
   const points = resampled(street.line, budget, near);
   const count = points.length / 2;
+  work.units += count;
   const on = new Uint8Array(count);
   for (let index = 0; index < count; index += 1) {
     const x = points[index * 2] as number;
@@ -581,6 +585,155 @@ function onOverpassRoad(
 const found = new WeakMap<WorldCorridor, { profile: RouteProfile; streets: NearbyStreets }>();
 
 /**
+ * What reading a street costs, counted — #3107: one unit for each station
+ * made and each point resampled, and {@link FAR_SEGMENT_UNITS} for a segment
+ * out of sight, which is looked at and no more. @see NearbyStreetScan
+ */
+export interface StreetWork {
+  units: number;
+}
+
+/** What a segment out of sight of the road costs to pass over, in units: **1/16**. */
+const FAR_SEGMENT_UNITS = 1 / 16;
+
+/** What one reading of a corridor's streets against a road is read with. */
+interface Reading {
+  readonly corridor: WorldCorridor;
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly touchBudget: { metres: number };
+  readonly drawBudget: { metres: number };
+  readonly bridges: readonly GradeCrossing[];
+  readonly touching: RoadNeighbourhood;
+  readonly inSight: RoadNeighbourhood;
+  readonly work: StreetWork;
+  footprints: FootprintGrid | undefined;
+  /** The pieces a ride has made before, by street: one made again is the same object. @see NearbyStreetScan */
+  readonly known: WeakMap<Float32Array, Map<string, NearbyStreetPiece>> | undefined;
+}
+
+function readingOf(
+  corridor: WorldCorridor,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  known: Reading['known'],
+): Reading {
+  return {
+    corridor,
+    profile,
+    origin,
+    touchBudget: { metres: STREET_MAX_METRES },
+    drawBudget: { metres: STREET_MAX_METRES },
+    bridges: mappedGradeCrossings(corridor, profile, origin).filter(
+      (crossing) => crossing.grade === 'bridge',
+    ),
+    // #3106: only the streets a rider on this road can come within sight of, or
+    // that can touch it, are read and counted — never a block's worth a
+    // kilometre off, which an open-world ride holds eight of.
+    touching: roadNeighbourhood(profile, origin, ARM_REACH_METRES),
+    inSight: roadNeighbourhood(profile, origin, NEARBY_STREET_REACH_METRES),
+    work: { units: 0 },
+    footprints: undefined,
+    known,
+  };
+}
+
+/** One street's pieces, onto `pieces`. @see nearbyStreets */
+function readStreet(street: StreetFeature, reading: Reading, pieces: NearbyStreetPiece[]): void {
+  if (street.grade !== 'ground') return;
+  const { corridor, profile, origin } = reading;
+  const widthClass = widthClassOf(street);
+  const half = SIDE_ROAD_WIDTHS[widthClass] / 2;
+  const stations = stationsOf(street.line, reading.drawBudget, reading.inSight, reading.work);
+  const count = stations.length / 2;
+  // Nothing of it in sight, so nothing of it to draw.
+  if (count < 2) return;
+  reading.work.units += count;
+  const clearOfRoad = meetsAtAJunction(
+    street,
+    corridor,
+    profile,
+    origin,
+    reading.touchBudget,
+    reading.touching,
+    reading.work,
+  )
+    ? NEARBY_STREET_HANDOVER_METRES
+    : ROAD_CLEARANCE_METRES + half;
+  const kept = new Uint8Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const x = stations[index * 2] as number;
+    const z = stations[index * 2 + 1] as number;
+    // A gap's station (`stationsOf`) is no place, and so on no land.
+    if (!Number.isFinite(x) || !corridor.covered(x, z)) continue;
+    if (distanceToDrawnRoad(profile, origin, x, z, clearOfRoad + 1) < clearOfRoad) continue;
+    if (onOverpassRoad(reading.bridges, x, z, half)) continue;
+    if (widthClass === 'service') {
+      reading.footprints ??= new FootprintGrid(corridor.buildings);
+      if (reading.footprints.near(x, z, half + SERVICE_FOOTPRINT_MARGIN_METRES)) continue;
+    }
+    kept[index] = 1;
+  }
+  // Each run of kept stations, in pieces of at most `NEARBY_STREET_PIECE_STEPS` steps.
+  let start = 0;
+  while (start < count) {
+    if (kept[start] !== 1) {
+      start += 1;
+      continue;
+    }
+    let end = start;
+    while (end + 1 < count && kept[end + 1] === 1) end += 1;
+    let metres = 0;
+    for (let index = start; index < end; index += 1) {
+      metres += Math.hypot(
+        (stations[index * 2 + 2] as number) - (stations[index * 2] as number),
+        (stations[index * 2 + 3] as number) - (stations[index * 2 + 1] as number),
+      );
+    }
+    if (metres >= NEARBY_STREET_MIN_METRES) {
+      for (let from = start; from < end; from += NEARBY_STREET_PIECE_STEPS) {
+        const to = Math.min(end, from + NEARBY_STREET_PIECE_STEPS);
+        pieces.push(
+          knownPiece(reading.known, street.line, widthClass, stations, from * 2, to * 2 + 2),
+        );
+      }
+    }
+    start = end + 1;
+  }
+}
+
+/**
+ * The piece of `stations[from … to)`: the object a ride made for the same
+ * stretch of the same street before, where it has (`known`), and a new one
+ * otherwise. A stretch is its first and last stations and how many there are:
+ * between them a run holds only the street's own stations, a step apart.
+ */
+function knownPiece(
+  known: Reading['known'],
+  line: Float32Array,
+  widthClass: WidthClass,
+  stations: readonly number[],
+  from: number,
+  to: number,
+): NearbyStreetPiece {
+  if (known === undefined) return pieceOf(widthClass, stations.slice(from, to));
+  let ofStreet = known.get(line);
+  if (ofStreet === undefined) {
+    ofStreet = new Map();
+    known.set(line, ofStreet);
+  }
+  const key = `${(stations[from] as number).toFixed(2)},${(stations[from + 1] as number).toFixed(2)},${(
+    stations[to - 2] as number
+  ).toFixed(2)},${(stations[to - 1] as number).toFixed(2)},${String(to - from)}`;
+  let piece = ofStreet.get(key);
+  if (piece === undefined) {
+    piece = pieceOf(widthClass, stations.slice(from, to));
+    ofStreet.set(key, piece);
+  }
+  return piece;
+}
+
+/**
  * Every nearby street of a corridor, cut into pieces — #2973. Built once per
  * corridor and route, the same object after. @see the header
  */
@@ -592,70 +745,83 @@ export function nearbyStreets(
   const cached = found.get(corridor);
   if (cached?.profile === profile) return cached.streets;
   const pieces: NearbyStreetPiece[] = [];
-  const touchBudget = { metres: STREET_MAX_METRES };
-  const drawBudget = { metres: STREET_MAX_METRES };
-  let footprints: FootprintGrid | undefined;
-  const bridges = mappedGradeCrossings(corridor, profile, origin).filter(
-    (crossing) => crossing.grade === 'bridge',
-  );
-  // #3106: only the streets a rider on this road can come within sight of, or
-  // that can touch it, are read and counted — never a block's worth a
-  // kilometre off, which an open-world ride holds eight of.
-  const touching = roadNeighbourhood(profile, origin, ARM_REACH_METRES);
-  const inSight = roadNeighbourhood(profile, origin, NEARBY_STREET_REACH_METRES);
-  for (const street of corridor.streets) {
-    if (street.grade !== 'ground') continue;
-    const widthClass = widthClassOf(street);
-    const half = SIDE_ROAD_WIDTHS[widthClass] / 2;
-    const stations = stationsOf(street.line, drawBudget, inSight);
-    const count = stations.length / 2;
-    // Nothing of it in sight, so nothing of it to draw.
-    if (count < 2) continue;
-    const clearOfRoad = meetsAtAJunction(street, corridor, profile, origin, touchBudget, touching)
-      ? NEARBY_STREET_HANDOVER_METRES
-      : ROAD_CLEARANCE_METRES + half;
-    const kept = new Uint8Array(count);
-    for (let index = 0; index < count; index += 1) {
-      const x = stations[index * 2] as number;
-      const z = stations[index * 2 + 1] as number;
-      // A gap's station (`stationsOf`) is no place, and so on no land.
-      if (!Number.isFinite(x) || !corridor.covered(x, z)) continue;
-      if (distanceToDrawnRoad(profile, origin, x, z, clearOfRoad + 1) < clearOfRoad) continue;
-      if (onOverpassRoad(bridges, x, z, half)) continue;
-      if (widthClass === 'service') {
-        footprints ??= new FootprintGrid(corridor.buildings);
-        if (footprints.near(x, z, half + SERVICE_FOOTPRINT_MARGIN_METRES)) continue;
-      }
-      kept[index] = 1;
-    }
-    // Each run of kept stations, in pieces of at most `NEARBY_STREET_PIECE_STEPS` steps.
-    let start = 0;
-    while (start < count) {
-      if (kept[start] !== 1) {
-        start += 1;
-        continue;
-      }
-      let end = start;
-      while (end + 1 < count && kept[end + 1] === 1) end += 1;
-      let metres = 0;
-      for (let index = start; index < end; index += 1) {
-        metres += Math.hypot(
-          (stations[index * 2 + 2] as number) - (stations[index * 2] as number),
-          (stations[index * 2 + 3] as number) - (stations[index * 2 + 1] as number),
-        );
-      }
-      if (metres >= NEARBY_STREET_MIN_METRES) {
-        for (let from = start; from < end; from += NEARBY_STREET_PIECE_STEPS) {
-          const to = Math.min(end, from + NEARBY_STREET_PIECE_STEPS);
-          pieces.push(pieceOf(widthClass, stations.slice(from * 2, to * 2 + 2)));
-        }
-      }
-      start = end + 1;
-    }
-  }
-  const streets = withSegments(pieces);
+  const reading = readingOf(corridor, profile, origin, undefined);
+  for (const street of corridor.streets) readStreet(street, reading, pieces);
+  const streets = new PiecesFound(pieces);
   found.set(corridor, { profile, streets });
   return streets;
+}
+
+/**
+ * How much of a corridor's streets one frame reads, in {@link StreetWork}
+ * units: **1 000** — some 4 km of street in sight, or 16 000 segments out of
+ * it. *#3107's choice*: a view of the road has some 40 000 units of street
+ * within sight of it in a dense town, so a reading is spread over some forty
+ * frames, two thirds of a second, and no frame reads more than a fortieth.
+ */
+export const NEARBY_STREET_SLICE_UNITS = 1_000;
+
+/**
+ * **One ride's nearby streets, read a slice a frame** — #3107.
+ *
+ * {@link nearbyStreets} reads every street of the corridor against the road
+ * in one call. On a route ride that is once, at the start. On an open-world
+ * ride the road is a view that is replaced at every junction choice and every
+ * kilometre, and the corridor whenever a block is read or let go; each
+ * replaced the whole reading inside one frame — most of the half-second stall
+ * the owner's tablet showed as a new area loaded (2026-11-23).
+ *
+ * This reads at most {@link NEARBY_STREET_SLICE_UNITS} a call, and until a
+ * reading is whole it hands on **the last whole one**. That is safe to draw:
+ * a piece is a stretch of a street in the ride's one frame, which no view
+ * moves, so the pieces of the reading before are streets where they are. What
+ * differs is only where a piece stops short of the road, and the road a view
+ * change alters is past the junction, at least the lock's 100 m ahead. The
+ * first reading of a ride has none before it and is read whole, behind the
+ * ride's first frame.
+ *
+ * ⚠️ **A piece made again is the same object.** A new reading of a street
+ * that stands as it did hands on the piece the ride made for it before, so the
+ * side road built on it (`sideRoadOf`) and the mesh the renderer holds are
+ * kept: a view change rebuilds only the pieces that changed.
+ */
+export class NearbyStreetScan {
+  #whole: { corridor: WorldCorridor; profile: RouteProfile; streets: NearbyStreets } | undefined;
+  #reading:
+    { readonly reading: Reading; next: number; readonly pieces: NearbyStreetPiece[] } | undefined;
+  readonly #known = new WeakMap<Float32Array, Map<string, NearbyStreetPiece>>();
+  /** The units the last call read: at most a slice, but for a ride's first reading. */
+  lastUnits = 0;
+
+  /** The ride's nearby streets on `profile`: the reading of it once whole, and the last whole one until then. */
+  streets(corridor: WorldCorridor, profile: RouteProfile, origin: CorridorOrigin): NearbyStreets {
+    this.lastUnits = 0;
+    const whole = this.#whole;
+    if (whole?.corridor === corridor && whole.profile === profile) return whole.streets;
+    let at = this.#reading;
+    if (at?.reading.corridor !== corridor || at.reading.profile !== profile) {
+      at = { reading: readingOf(corridor, profile, origin, this.#known), next: 0, pieces: [] };
+      this.#reading = at;
+    }
+    const { reading } = at;
+    const from = reading.work.units;
+    const most = whole === undefined ? Number.POSITIVE_INFINITY : NEARBY_STREET_SLICE_UNITS;
+    const streets = corridor.streets;
+    while (at.next < streets.length && reading.work.units - from < most) {
+      readStreet(streets[at.next] as StreetFeature, reading, at.pieces);
+      at.next += 1;
+    }
+    this.lastUnits = reading.work.units - from;
+    if (at.next < streets.length) {
+      // `whole` is defined here: a first reading has no bound and is never left unfinished.
+      return whole?.streets ?? NO_NEARBY_STREETS;
+    }
+    const done = new PiecesFound(at.pieces);
+    this.#whole = { corridor, profile, streets: done };
+    this.#reading = undefined;
+    found.set(corridor, { profile, streets: done });
+    return done;
+  }
 }
 
 function pieceOf(widthClass: WidthClass, line: number[]): NearbyStreetPiece {
@@ -672,8 +838,50 @@ function pieceOf(widthClass: WidthClass, line: number[]): NearbyStreetPiece {
   return { widthClass, line: Float32Array.from(line), minX, maxX, minZ, maxZ };
 }
 
-/** The pieces, with their segments flat and in a grid for {@link onNearbyStreet}. */
-function withSegments(pieces: readonly NearbyStreetPiece[]): NearbyStreets {
+/**
+ * A reading's pieces, with their segments flat and in a grid for
+ * {@link onNearbyStreet} — built the first time either is asked for (#3107).
+ * A frame draws the pieces and never asks; only a planner of buildings does
+ * (`footprint-buildings.ts` rule 3b), so a reading made for a frame does not
+ * pay for a grid of every segment it holds.
+ */
+class PiecesFound implements NearbyStreets {
+  readonly pieces: readonly NearbyStreetPiece[];
+  #grid: { segments: Float32Array; cells: ReadonlyMap<number, readonly number[]> } | undefined;
+
+  constructor(pieces: readonly NearbyStreetPiece[]) {
+    this.pieces = pieces;
+  }
+
+  get segments(): Float32Array {
+    return (this.#grid ??= gridOf(this.pieces)).segments;
+  }
+
+  get cells(): ReadonlyMap<number, readonly number[]> {
+    return (this.#grid ??= gridOf(this.pieces)).cells;
+  }
+}
+
+/** How many readings' grids have been built. @see nearbyStreetGridsBuilt */
+let gridsBuilt = 0;
+
+/**
+ * How many readings have had their grid of segments built, in this module's
+ * life — #3107: one is built the first time a reading is asked for it, and a
+ * reading a frame only draws from is never asked.
+ *
+ * @test-facing read by `street-scans.test.ts`
+ */
+export function nearbyStreetGridsBuilt(): number {
+  return gridsBuilt;
+}
+
+/** The pieces' segments, flat, and by {@link SEGMENT_CELL_METRES} cell. */
+function gridOf(pieces: readonly NearbyStreetPiece[]): {
+  segments: Float32Array;
+  cells: ReadonlyMap<number, readonly number[]>;
+} {
+  gridsBuilt += 1;
   const flat: number[] = [];
   const cells = new Map<number, number[]>();
   for (const piece of pieces) {
@@ -704,7 +912,7 @@ function withSegments(pieces: readonly NearbyStreetPiece[]): NearbyStreets {
       }
     }
   }
-  return { pieces, segments: Float32Array.from(flat), cells };
+  return { segments: Float32Array.from(flat), cells };
 }
 
 /**

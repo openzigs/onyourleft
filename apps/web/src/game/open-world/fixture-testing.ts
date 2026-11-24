@@ -33,7 +33,14 @@
 
 import { geographicPosition, degreesLatitude, degreesLongitude } from '@onyourleft/domain';
 import type { GeographicPosition } from '@onyourleft/domain';
-import { FIXTURE_EXTENT, FIXTURE_TILE, graphFixtureTile } from '@onyourleft/map-features/testing';
+import {
+  FIXTURE_EXTENT,
+  FIXTURE_TILE,
+  graphFixtureTile,
+  outerRing,
+  polygon,
+  rectangle,
+} from '@onyourleft/map-features/testing';
 import type { GraphFixtureStreet } from '@onyourleft/map-features/testing';
 import type { TileId } from '@onyourleft/map-features';
 
@@ -175,25 +182,54 @@ export function fixtureBlockTiles(east: number): readonly TileId[] {
  * columns and a buffer of 256 either side, as a real tile's geometry is. Only
  * for streets drawn along a row or a column, which is every street here: a
  * line along a row is cut where it leaves the buffer, and one along a column
- * outside it lies in the buffer, which the graph clips away.
+ * outside it is not in the tile at all, as a street a real tile's box does
+ * not touch is not. (Until #3107 such a street was held onto the buffer's
+ * edge: a street the map never had, along every tile's seam, once a tile.)
  */
 function cutTo(streets: readonly GraphFixtureStreet[], tile: TileId): GraphFixtureStreet[] {
   const west = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT - 256;
   const east = west + FIXTURE_EXTENT + 512;
-  return streets.map((street) => ({
-    ...street,
-    line: street.line.map(([x, y]) => [Math.min(east, Math.max(west, x)), y] as const),
-  }));
+  return streets
+    .filter((street) => {
+      const columns = street.line.map(([x]) => x);
+      return Math.max(...columns) >= west && Math.min(...columns) <= east;
+    })
+    .map((street) => ({
+      ...street,
+      line: street.line.map(([x, y]) => [Math.min(east, Math.max(west, x)), y] as const),
+    }));
+}
+
+/** A fixture house: its footprint's west, north, east and south edges, in fixture pixels. */
+export type FixtureHouse = readonly [west: number, north: number, east: number, south: number];
+
+/** The `buildings` layer of `tile`: each of `houses` whose north-west corner is in it, in the tile's own pixels. */
+function housesIn(houses: readonly FixtureHouse[], tile: TileId) {
+  const dx = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT;
+  const dy = (tile.y - FIXTURE_TILE.y) * FIXTURE_EXTENT;
+  const within = (pixel: number): boolean => pixel >= 0 && pixel < FIXTURE_EXTENT;
+  return {
+    name: 'buildings',
+    features: houses
+      .filter(([west, north]) => within(west - dx) && within(north - dy))
+      .map(([west, north, east, south]) => ({
+        type: 3,
+        tags: { kind: 'building' },
+        geometry: polygon([outerRing(rectangle(west - dx, north - dy, east - dx, south - dy))]),
+      })),
+  };
 }
 
 /**
  * The archive's bytes: the block's four tiles of `streets`, and nothing round
  * them — or, with `blocksEast` (#2990), the tiles of that many blocks east of
- * it too, so a street drawn on past the block runs on into them.
+ * it too, so a street drawn on past the block runs on into them. With `houses`
+ * (#3107), each tile carries the footprints that stand in it too.
  */
 export function openWorldFixtureArchive(
   streets: readonly GraphFixtureStreet[] = OPEN_WORLD_FIXTURE_STREETS,
   blocksEast = 0,
+  houses: readonly FixtureHouse[] = [],
 ): Promise<Uint8Array> {
   const tiles: TileId[] = [];
   for (let east = 0; east <= blocksEast; east += 1) tiles.push(...fixtureBlockTiles(east));
@@ -201,7 +237,11 @@ export function openWorldFixtureArchive(
     tiles: tiles.map((tile) => ({
       x: tile.x,
       y: tile.y,
-      bytes: graphFixtureTile(blocksEast === 0 ? streets : cutTo(streets, tile), tile),
+      bytes: graphFixtureTile(
+        blocksEast === 0 ? streets : cutTo(streets, tile),
+        tile,
+        houses.length === 0 ? [] : [housesIn(houses, tile)],
+      ),
     })),
   });
 }
@@ -351,6 +391,94 @@ export const OPEN_WORLD_FAR_SERVICE_ROADS: readonly GraphFixtureStreet[] = Array
     ] as const,
   }),
 );
+
+/** #3107: the rows of {@link OPEN_WORLD_TOWN_STREETS}' east–west streets, Main street's among them: 100 m apart. */
+export const TOWN_ROWS: readonly number[] = Array.from(
+  { length: 18 },
+  (_, index) => MAIN_STREET_ROW - 4 * 430 + index * 430,
+);
+
+/** #3107: the columns of {@link OPEN_WORLD_TOWN_STREETS}' north–south streets, across three blocks: 100 m apart. */
+export const TOWN_COLUMNS: readonly number[] = Array.from(
+  { length: 57 },
+  (_, index) => -4000 + index * 430,
+);
+
+/**
+ * #3107: **a dense town three blocks long** — a street every 100 m each way,
+ * some 20 km of street a square kilometre, across the fixture's block and the
+ * two east of it ({@link openWorldFixtureArchive} with `blocksEast` 2). Ridden
+ * east along Main street from the start pin, a junction comes every 100 m, the
+ * road's view is replaced at 1 km, and the block the rider is in changes
+ * 1.65 km on: each a moment an open-world ride reads its streets again.
+ */
+export const OPEN_WORLD_TOWN_STREETS: readonly GraphFixtureStreet[] = [
+  ...TOWN_ROWS.map((row) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [-4000, row],
+      [20000, row],
+    ] as const,
+  })),
+  ...TOWN_COLUMNS.map((column) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [column, 300],
+      [column, 7900],
+    ] as const,
+  })),
+];
+
+/**
+ * #3107: {@link OPEN_WORLD_TOWN_STREETS} with **names that begin a kilometre
+ * on**: every north–south street from the fifteenth east of the block's edge
+ * is named, and none before it, nor any east–west street. A ride east from
+ * the start pin meets its first named street some 700 m on, so whatever the
+ * renderer builds for a street's name it builds mid-ride, unless it was made
+ * ready before the first frame.
+ */
+export const OPEN_WORLD_NEW_AREA_STREETS: readonly GraphFixtureStreet[] = [
+  ...TOWN_ROWS.map((row) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [-4000, row],
+      [20000, row],
+    ] as const,
+  })),
+  ...TOWN_COLUMNS.map((column, index) => ({
+    tags: {
+      kind: 'minor_road',
+      kind_detail: 'residential',
+      ...(index >= 14 ? { name: `Street ${String(index)}` } : {}),
+    },
+    line: [
+      [column, 300],
+      [column, 7900],
+    ] as const,
+  })),
+];
+
+/**
+ * #3107: **houses along Main street that begin 700 m from the start pin** — one
+ * each side of the street in the middle of every block of
+ * {@link OPEN_WORLD_NEW_AREA_STREETS} from there on, 10 m square and 20 m back
+ * from the street. The first is past what an open-world ride plans its
+ * buildings to (`tile-buildings.ts` §`OPEN_WORLD_BUILDINGS_REACH_METRES`), so
+ * a ride east from the start pin is handed sets of buildings with none in
+ * them, and then, mid-ride, the first with houses: whatever the renderer
+ * builds for a mapped building it builds then, unless it was made ready
+ * before the first frame.
+ */
+export const OPEN_WORLD_NEW_AREA_HOUSES: readonly FixtureHouse[] = TOWN_COLUMNS.slice(
+  11,
+  41,
+).flatMap((column) => {
+  const west = column + 215 - 22;
+  return [
+    [west, MAIN_STREET_ROW - 130, west + 44, MAIN_STREET_ROW - 86],
+    [west, MAIN_STREET_ROW + 86, west + 44, MAIN_STREET_ROW + 130],
+  ] as const;
+});
 
 /** #3106: how far apart {@link OPEN_WORLD_DENSE_STREETS}' streets are, in fixture pixels: **172**, 40 m. */
 export const DENSE_SPACING = 172;

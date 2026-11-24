@@ -89,6 +89,7 @@ on:
       - apps/web/browser/nightly.ts
       - apps/web/browser/game.browser.spec.ts
       - apps/web/browser/not-run-reporter.ts
+      - apps/web/browser/open-world.browser.spec.ts
       - apps/web/browser/realistic.browser.spec.ts
       - apps/web/browser/realistic-delivery.browser.spec.ts
       - apps/web/browser/realistic-lap-race.browser.spec.ts

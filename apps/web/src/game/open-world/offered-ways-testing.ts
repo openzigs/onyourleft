@@ -69,6 +69,8 @@ export interface OfferedWaysRide {
   readonly frames: readonly RiddenFrame[];
   /** Rides on until the odometer reaches `metres`, drawing a frame every `frameMs` of ride time. */
   rideTo(metres: number, frameMs?: number): Promise<void>;
+  /** Draws `count` more frames, `frameMs` of ride time apart. */
+  ridePumped(count: number, frameMs: number): Promise<void>;
   /** Presses a turn key, as a keyboard would. */
   press(key: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp'): Promise<void>;
   /** The mounted game screen. */
@@ -88,6 +90,8 @@ export async function startOfferedWaysRide(
   streets: readonly GraphFixtureStreet[],
   column: number,
   row: number,
+  /** How many blocks east of the fixture's the archive holds too: none, unless a ride crosses into one. */
+  blocksEast = 0,
 ): Promise<OfferedWaysRide> {
   sceneInputs.length = 0;
   let pending: FrameRequestCallback[] = [];
@@ -154,7 +158,7 @@ export async function startOfferedWaysRide(
     }),
   };
 
-  const source = countingSource(await openWorldFixtureArchive(streets));
+  const source = countingSource(await openWorldFixtureArchive(streets, blocksEast));
   const entry = createOpenWorldEntry();
   entry.hand(fixtureStart(column, row));
   const real = lazyOpenWorldSessions(
@@ -247,6 +251,9 @@ export async function startOfferedWaysRide(
     rideTo: async (metres, frameMs = 500) => {
       for (let frame = 0; frame < 4_000 && odometer() < metres; frame += 1) await pump(frameMs);
       expect(odometer()).toBeGreaterThanOrEqual(metres);
+    },
+    ridePumped: async (count, frameMs) => {
+      for (let frame = 0; frame < count; frame += 1) await pump(frameMs);
     },
     press: async (key) => {
       await act(async () => {
