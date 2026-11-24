@@ -1975,18 +1975,25 @@ export function cameraPose(
  * {@link U_TURN_CAMERA_METRES}' `easedIn` before the road the camera looks at
  * reaches the U-turn, and handed back over its `handedBack` once the road
  * behind the rider is straight again. Nought on a line with none.
+ *
+ * The U-turn is found where `drawn-line.ts` §`drawnLineAt` draws it, on the
+ * route position the odometer wraps to, so on a loop it pivots on every lap
+ * and not only the first.
  */
 function uTurnPivotShare(path: DrawnLine, atDistance: number): number {
-  const resolution: number = path.profile.resolution;
+  const { profile } = path;
+  const resolution: number = profile.resolution;
   const { easedIn, handedBack } = U_TURN_CAMERA_METRES;
   let most = 0;
   for (const sample of path.uTurns) {
+    const turning = sample * resolution;
+    const from = profile.loop ? distanceOnRoute(profile, atDistance) : atDistance;
     // The U-turn is ridden from one sample before the turning point to one
     // after it (`drawn-line.ts` §`uTurned`).
-    const begins = (sample - 1) * resolution - CAMERA_TARGET_AHEAD_METRES;
-    const ends = (sample + 1) * resolution + CAMERA_TARGET_AHEAD_METRES;
-    const into = smoothstep01((atDistance - (begins - easedIn)) / easedIn);
-    const out = 1 - smoothstep01((atDistance - ends) / handedBack);
+    const begins = turning - resolution - CAMERA_TARGET_AHEAD_METRES;
+    const ends = turning + resolution + CAMERA_TARGET_AHEAD_METRES;
+    const into = smoothstep01((from - (begins - easedIn)) / easedIn);
+    const out = 1 - smoothstep01((from - ends) / handedBack);
     most = Math.max(most, Math.min(into, out));
   }
   return most;

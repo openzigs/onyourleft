@@ -82,7 +82,7 @@ const LEG_METRES = 800;
  * back `lane` metres east falling 0.5 %, a point every 10 m. The first point
  * back is as far from the vertex as turns the road through 174° there.
  */
-function coastReversal(lane: number): RouteProfile {
+function coastReversal(lane: number, loop = false): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
   const points: RoutePoint[] = [];
@@ -101,7 +101,7 @@ function coastReversal(lane: number): RouteProfile {
   for (let north = back; north >= 0; north -= 10) {
     push(north, lane, top - 0.005 * (LEG_METRES - north));
   }
-  return routeProfile(points, { loop: false });
+  return routeProfile(points, { loop });
 }
 
 /** The sea both sides of the way out from 30 m, as a tile decodes it. */
@@ -601,19 +601,24 @@ const STRETCHES = {
 
 describe('the chase camera through a one-point turnaround on the coast — #3122', () => {
   it.each([
-    [3, 30, 60, 'easedIn'],
-    [3, 30, 60, 'turn'],
-    [3, 30, 60, 'handedBack'],
-    [1, 30, 60, 'turn'],
-    [3, 40, 20, 'whole'],
+    [3, 30, 60, 'easedIn', 1],
+    [3, 30, 60, 'turn', 1],
+    [3, 30, 60, 'handedBack', 1],
+    [1, 30, 60, 'turn', 1],
+    [3, 40, 20, 'whole', 1],
+    // The ends are 3 m apart, so as a loop (`draftIsLoop`) the route is
+    // ridden in laps, and the second lap's odometer is a lap past the turn.
+    [3, 30, 60, 'turn', 2],
   ] as const)(
-    'stays behind and above the rider and never jumps, the way back %d m over at %d km/h, %d fps: %s',
-    (lane, kmh, fps, stretch) => {
-      const profile = coastReversal(lane);
+    'stays behind and above the rider and never jumps, the way back %d m over at %d km/h, %d fps: %s, lap %d',
+    (lane, kmh, fps, stretch, lap) => {
+      const profile = coastReversal(lane, lap > 1);
       const land = coast(profile);
       const origin = corridorOrigin(profile);
       const start = atStartLine(profile);
-      const turn = profile.totalDistance / 2;
+      // The turn's odometer on the lap ridden: half the out-and-back, which the
+      // loop's closing metres do not move.
+      const turn = coastReversal(lane).totalDistance / 2 + (lap - 1) * profile.totalDistance;
       const speed = kmh / 3.6;
       const seconds = 1 / fps;
       const [from, to] = STRETCHES[stretch];
