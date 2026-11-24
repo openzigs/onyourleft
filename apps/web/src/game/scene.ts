@@ -56,6 +56,7 @@ import {
 } from './land-class';
 import {
   ROAD_CLEARANCE_METRES,
+  drawnProfileOf,
   horizonRelief,
   standingOnGround,
   terrainCorridor,
@@ -743,7 +744,10 @@ export interface StreetScans {
 }
 
 /** Builds one frame. */
-export function sceneFrame(input: SceneInput): SceneFrame {
+export function sceneFrame(asked: SceneInput): SceneFrame {
+  // #3140: a road ridden twice drawn at one height (`landform.ts`
+  // §`drawnProfileOf`). Everything below draws; nothing below is physics.
+  const input: SceneInput = { ...asked, profile: drawnProfileOf(asked.profile) };
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
   // where the corridor, the camera and the scenery are built around.
   const riderDistance: number = drawnRider(input).distance;

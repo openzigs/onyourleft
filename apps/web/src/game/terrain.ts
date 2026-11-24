@@ -916,11 +916,21 @@ const REVERSAL_COSINE = Math.cos((150 * Math.PI) / 180);
 
 /**
  * How near another pass of the road a corridor point must lie to be ON it, in
- * metres: **3.5**, half the road — #1996. A pass whose centreline runs inside
- * the other's carriageway is the same road ridden again, and drawing both put
+ * metres: **7**, a road's width — #1996, #3140. A pass whose carriageway
+ * overlaps the other's is the same road ridden again, and drawing both put
  * two roads and two grounds in one place. @see retracedRows
+ *
+ * ⚠️ **Why not #1996's half a road.** That took a pass as the same road only
+ * where its centreline ran inside the other's carriageway. A recorded way
+ * back along the other side of the road is further over than that: 4 to 6 m
+ * on `turnaround-coast.test.ts`' coast turnaround, where both were drawn —
+ * two roads side by side, the owner's "road twice its width" of 2026-11-24 —
+ * each at its own recorded height, so the way back's road and ground stood
+ * up to 3.7 m over the line from the chase camera to the rider 200 m before
+ * the turn: the owner's "camera low and far behind, only the helmet showing".
+ * Two roads further apart than this overlap nowhere, and are two roads.
  */
-export const RETRACE_OVERLAP_METRES = ROAD_WIDTH_METRES / 2;
+export const RETRACE_OVERLAP_METRES = ROAD_WIDTH_METRES;
 
 /**
  * How much further apart along the road than across it two points must be to
@@ -1344,13 +1354,16 @@ const TURN_TIP_METRES = 5;
 
 /**
  * How far from the rider's pass a point of the far pass is still moved
- * towards it, in metres: **7**, a road's width — #3061. Moved all the way
- * within {@link RETRACE_OVERLAP_METRES}, where the rider's pass is not drawn,
- * and less the further out beyond that, so that where the two passes part
- * the drawn road leaves the rider's pass along a taper rather than at a step.
+ * towards it, in metres: **10.5**, a road and a half — #3061, #3140. Moved
+ * all the way within {@link RETRACE_OVERLAP_METRES}, where the rider's pass is
+ * not drawn, and less the further out beyond that, so that where the two
+ * passes part the drawn road leaves the rider's pass along a taper rather
+ * than at a step. #3061's taper was the half road from its 3.5 m overlap to a
+ * road's width; since #3140's overlap is a road's width, the same half road
+ * past it.
  * @see towardTheRidersPass
  */
-const TURN_MOVE_REACH_METRES = ROAD_WIDTH_METRES;
+const TURN_MOVE_REACH_METRES = 1.5 * ROAD_WIDTH_METRES;
 
 /**
  * The corridor's points as the road and the ground are drawn on them — #3061:

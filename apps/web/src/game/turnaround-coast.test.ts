@@ -64,13 +64,20 @@ import {
   turnedPose,
   type GroundHeading,
 } from './camera';
-import { landBeside } from './footprint-fixtures-testing';
+import { FOUNDATION_METRES } from './buildings';
+import { footprintPlans } from './footprint-buildings';
+import { buildingBeside, landBeside, rectangleBeside } from './footprint-fixtures-testing';
 import { landClassMask, type LandClassMask } from './land-class';
-import { RELIEF_CLEAR_METRES, TERRAIN_COLUMN_OFFSETS, VERGE_DROP_METRES } from './landform';
+import {
+  RELIEF_CLEAR_METRES,
+  TERRAIN_COLUMN_OFFSETS,
+  VERGE_DROP_METRES,
+  standingOnGround,
+} from './landform';
 import { FIXTURE_LATITUDE } from './route-fixtures-testing';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { ROAD_WIDTH_METRES, corridorOrigin, type CorridorPoint } from './terrain';
+import { ROAD_COLUMNS, ROAD_WIDTH_METRES, corridorOrigin, type CorridorPoint } from './terrain';
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
@@ -78,11 +85,12 @@ const METRES_PER_DEGREE_LATITUDE = 111_320;
 const LEG_METRES = 800;
 
 /**
- * The fixture: north for {@link LEG_METRES} climbing 2.7 %, one vertex, and
- * back `lane` metres east falling 0.5 %, a point every 10 m. The first point
- * back is as far from the vertex as turns the road through 174° there.
+ * The fixture: north for {@link LEG_METRES} (or `leg`) climbing 2.7 % (or
+ * `climb`), one vertex, and back `lane` metres east falling 0.5 %, a point
+ * every 10 m. The first point back is as far from the vertex as turns the
+ * road through 174° there.
  */
-function coastReversal(lane: number, loop = false): RouteProfile {
+function coastReversal(lane: number, loop = false, leg = LEG_METRES, climb = 0.027): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
   const points: RoutePoint[] = [];
@@ -95,11 +103,11 @@ function coastReversal(lane: number, loop = false): RouteProfile {
       elevation: altitudeMetres(elevation),
     });
   };
-  for (let north = 0; north <= LEG_METRES; north += 10) push(north, 0, 30 + 0.027 * north);
-  const top = 30 + 0.027 * LEG_METRES;
-  const back = LEG_METRES - lane / Math.tan((6 * Math.PI) / 180);
+  for (let north = 0; north <= leg; north += 10) push(north, 0, 30 + climb * north);
+  const top = 30 + climb * leg;
+  const back = leg - lane / Math.tan((6 * Math.PI) / 180);
   for (let north = back; north >= 0; north -= 10) {
-    push(north, lane, top - 0.005 * (LEG_METRES - north));
+    push(north, lane, top - 0.005 * (leg - north));
   }
   return routeProfile(points, { loop });
 }
@@ -289,32 +297,42 @@ describe('a one-point turnaround on a coast whose passes are not at one height �
 
   it.each([1, 3])('draws no water above the road beside it, the way back %d m over', (lane) => {
     // Every vertex of the drawn water within 30 m of the drawn road is at its
-    // height or under it.
-    const profile = coastReversal(lane);
-    const land = coast(profile);
+    // height or under it. ⚠️ #3140: on the climbing way out, and on one
+    // level all the way out. The way back is drawn at the way out's heights
+    // (`landform.ts` §`drawnProfileOf`), and a mapped sea is drawn only
+    // beside a run of road no steeper than `waterways.ts` §`LAKE_MAX_GRADE_PERCENT`:
+    // so the climbing fixture now draws none — before, it drew one off the
+    // way back's own −0.5 % — and the level one is where water is judged.
     let judgedVertices = 0;
-    for (const offset of RIDER) {
-      const { frame, segments } = judged(profile, land, profile.totalDistance / 2 + offset);
-      const { vertices, indices } = frame.water.surface;
-      const used = new Set(indices);
-      for (const index of used) {
-        const at = index * 3;
-        const road = drawnRoadAt(
-          frame.corridor.centre,
-          segments,
-          vertices[at] as number,
-          vertices[at + 2] as number,
-        );
-        if (!(road.across <= 30)) continue;
-        judgedVertices += 1;
-        expect(
-          (vertices[at + 1] as number) - road.height,
-          `${String(offset)} m from the turn, ${road.across.toFixed(1)} m from the road`,
-        ).toBeLessThanOrEqual(0);
+    let levelVertices = 0;
+    for (const climb of [0.027, 0]) {
+      const profile = coastReversal(lane, false, LEG_METRES, climb);
+      const land = coast(profile);
+      for (const offset of RIDER) {
+        const { frame, segments } = judged(profile, land, profile.totalDistance / 2 + offset);
+        const { vertices, indices } = frame.water.surface;
+        const used = new Set(indices);
+        for (const index of used) {
+          const at = index * 3;
+          const road = drawnRoadAt(
+            frame.corridor.centre,
+            segments,
+            vertices[at] as number,
+            vertices[at + 2] as number,
+          );
+          if (!(road.across <= 30)) continue;
+          judgedVertices += 1;
+          if (climb === 0) levelVertices += 1;
+          expect(
+            (vertices[at + 1] as number) - road.height,
+            `${String(offset)} m from the turn, ${road.across.toFixed(1)} m from the road`,
+          ).toBeLessThanOrEqual(0);
+        }
       }
     }
     // Non-vacuity: the sea is drawn beside the road in view.
     expect(judgedVertices).toBeGreaterThan(50);
+    expect(levelVertices).toBeGreaterThan(50);
   });
 });
 
@@ -692,6 +710,347 @@ describe('the chase camera through a one-point turnaround on the coast — #3122
       if (stretch === 'turn' || stretch === 'whole') {
         expect(turned).toBeGreaterThan((160 * Math.PI) / 180);
       }
+    },
+  );
+});
+
+/*
+ * ## #3140: the owner's ride of 2026-11-24 with #3122's fix
+ *
+ * Three more things showed near the same turnaround: the camera low and far
+ * behind about a kilometre before the turn, only the rider's helmet showing;
+ * a house beside the road hanging over the grass; and the way back drawn as a
+ * second road beside the way out. Each is read off the frames a ride draws,
+ * on this fixture and on its passes 4 to 6 m apart, which a recorded way
+ * back along the other side of a real road can be.
+ */
+
+/** How far the passes are drawn apart in #3140's cases, metres: #3109's two, and wider. */
+const LANES_3140 = [1, 3, 4, 5] as const;
+
+/** The longer leg #3140's camera is ridden on: a kilometre before the turn, and the corridor's 60 m behind. */
+const LONG_LEG_METRES = 1_100;
+
+/**
+ * Whether anything drawn — the ground or the road — stands over the line
+ * from `from` to `to`, and by how much at most: the line read at 40 points
+ * strictly between its ends, against every triangle of the two meshes under
+ * it. The oracle is the triangles the renderer is handed, not the code.
+ */
+function overTheLine(
+  frame: ReturnType<typeof sceneFrame>,
+  from: { readonly x: number; readonly y: number; readonly z: number },
+  to: { readonly x: number; readonly y: number; readonly z: number },
+): number {
+  const minX = Math.min(from.x, to.x) - 0.1;
+  const maxX = Math.max(from.x, to.x) + 0.1;
+  const minZ = Math.min(from.z, to.z) - 0.1;
+  const maxZ = Math.max(from.z, to.z) + 0.1;
+  const facets: Facet[] = [];
+  const add = (vertices: Float32Array, indices: Uint32Array, road: boolean): void => {
+    for (let at = 0; at + 2 < indices.length; at += 3) {
+      const a = (indices[at] as number) * 3;
+      const b = (indices[at + 1] as number) * 3;
+      const c = (indices[at + 2] as number) * 3;
+      const ax = vertices[a] as number;
+      const bx = vertices[b] as number;
+      const cx = vertices[c] as number;
+      if (Math.max(ax, bx, cx) < minX || Math.min(ax, bx, cx) > maxX) continue;
+      const az = vertices[a + 2] as number;
+      const bz = vertices[b + 2] as number;
+      const cz = vertices[c + 2] as number;
+      if (Math.max(az, bz, cz) < minZ || Math.min(az, bz, cz) > maxZ) continue;
+      facets.push({
+        ax,
+        ay: vertices[a + 1] as number,
+        az,
+        bx,
+        by: vertices[b + 1] as number,
+        bz,
+        cx,
+        cy: vertices[c + 1] as number,
+        cz,
+        road,
+      });
+    }
+  };
+  add(frame.terrain.mesh.vertices, frame.terrain.mesh.indices, false);
+  add(frame.corridor.vertices, frame.corridor.indices, true);
+  let most = Number.NEGATIVE_INFINITY;
+  for (let step = 1; step < 40; step += 1) {
+    const t = step / 40;
+    const x = from.x + (to.x - from.x) * t;
+    const y = from.y + (to.y - from.y) * t;
+    const z = from.z + (to.z - from.z) * t;
+    for (const f of facets) {
+      const d = (f.bz - f.cz) * (f.ax - f.cx) + (f.cx - f.bx) * (f.az - f.cz);
+      if (Math.abs(d) < 1e-9) continue;
+      const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / d;
+      const v = ((f.cz - f.az) * (x - f.cx) + (f.ax - f.cx) * (z - f.cz)) / d;
+      if (u < -1e-6 || v < -1e-6 || 1 - u - v < -1e-6) continue;
+      most = Math.max(most, u * f.ay + v * f.by + (1 - u - v) * f.cy - y);
+    }
+  }
+  return most;
+}
+
+/** How high over the rider's road the line of sight to them is aimed: their hip, metres. */
+const RIDER_HIP_METRES = 0.9;
+
+/**
+ * Where #3140's camera is ridden, metres from the turn: from a kilometre
+ * before it until the U-turn pivot eases in (`scene.ts`
+ * §`U_TURN_CAMERA_METRES`: from 45 m before the turn on this fixture), a
+ * stretch at a time, each from a frame of its own.
+ */
+const LEAD_UP = [
+  [-1_000, -875],
+  [-875, -750],
+  [-750, -625],
+  [-625, -500],
+  [-500, -375],
+  [-375, -250],
+  [-250, -150],
+  [-150, -50],
+] as const;
+
+describe('the chase camera on the way up to a one-point turnaround — #3140', () => {
+  it.each(LANES_3140.flatMap((lane) => LEAD_UP.map(([from, to]) => [lane, from, to] as const)))(
+    'stays in the chase band and sees the rider, the way back %d m over, %d to %d m from the turn',
+    (lane, from, to) => {
+      const profile = coastReversal(lane, false, LONG_LEG_METRES);
+      const land = coast(profile);
+      const origin = corridorOrigin(profile);
+      const start = atStartLine(profile);
+      const turn = profile.totalDistance / 2;
+      // 30 km/h at 10 fps, composed as `GameView` composes the camera.
+      const speed = 30 / 3.6;
+      const seconds = 1 / 10;
+      const nearest: Worst = { value: Number.POSITIVE_INFINITY, at: 'nowhere' };
+      const farthest: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
+      const above: Worst = { value: 0, at: 'nowhere' };
+      const hidden: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
+      let heading: GroundHeading | undefined;
+      let lookAhead: number | undefined;
+      let frames = 0;
+      for (let along = turn + from; along <= turn + to; along += speed * seconds) {
+        const frame = sceneFrame({
+          profile,
+          origin,
+          landClass: land,
+          state: {
+            ...start,
+            ride: { ...start.ride, distance: metres(along), speed: speed as never },
+          },
+        });
+        heading = dampedHeading(heading, frame.camera, seconds, false);
+        lookAhead = dampedLookAhead(lookAhead, frame.camera.targetAheadMetres, seconds);
+        const { eye } = cameraRig(turnedPose(frame.camera, heading, lookAhead));
+        const rider = frame.markers.find((marker) => marker.kind === 'rider');
+        if (rider === undefined) throw new Error('no rider drawn');
+        const at = `${(along - turn).toFixed(1)} m from the turn`;
+        const behind = (rider.x - eye.x) * heading.headingX + (rider.z - eye.z) * heading.headingZ;
+        const off = Math.abs(eye.y - rider.y - CAMERA_ABOVE_METRES);
+        if (behind < nearest.value) Object.assign(nearest, { value: behind, at });
+        if (behind > farthest.value) Object.assign(farthest, { value: behind, at });
+        if (off > above.value) Object.assign(above, { value: off, at });
+        // "Only the helmet showed": nothing drawn between the eye and the rider.
+        const over = overTheLine(frame, eye, { ...rider, y: rider.y + RIDER_HIP_METRES });
+        if (over > hidden.value) Object.assign(hidden, { value: over, at });
+        frames += 1;
+      }
+      expect(nearest.value, `behind, ${nearest.at}`).toBeGreaterThanOrEqual(CHASE_BEHIND_METRES[0]);
+      expect(farthest.value, `behind, ${farthest.at}`).toBeLessThanOrEqual(CHASE_BEHIND_METRES[1]);
+      expect(above.value, `above the rider's road, ${above.at}`).toBeLessThanOrEqual(
+        CHASE_ABOVE_SLACK_METRES,
+      );
+      expect(hidden.value, `drawn over the line to the rider, ${hidden.at}`).toBeLessThanOrEqual(0);
+      // Non-vacuity: the stretch was ridden, and the line crossed drawn ground.
+      expect(frames).toBeGreaterThan(110);
+      expect(hidden.value).toBeGreaterThan(Number.NEGATIVE_INFINITY);
+    },
+  );
+});
+
+/**
+ * Where #3140's houses are planned: metres from the turn along the way out,
+ * and out from it, positive towards the way back. Each side of both passes,
+ * in the clear band and past it; and 60 m from the turn on the outside only.
+ * ⚠️ **Not on the inside of the U-turn within 100 m of it**: there the way
+ * out's own ground is held down by #2101's seam (`landform.ts`
+ * §`SEAM_CREST_FADE_METRES`) by an amount that changes from frame to frame —
+ * 0.9 m at 60 m from the turn and 18 m out, between the rider 120 m and 80 m
+ * from it, measured on the branch before #3140 — so no building planned once
+ * stands on it in every frame. Stated in #3127, not fixed here.
+ */
+const HOUSES_3140 = [
+  ...[-240, -160, -100].flatMap((along) =>
+    [-18, -7, 7, 18].map((lateral) => [along, lateral] as const),
+  ),
+  [-60, -18],
+  [-60, -7],
+] as const;
+
+/** The mapped height of #3140's houses, metres: their walls, from the floor to the eaves. */
+const HOUSE_HEIGHT_METRES = 6;
+
+/** Where the rider is when #3140's houses are read: the way out, then the way back. */
+const HOUSE_RIDER = [-300, -200, -120, -80, 80, 120, 200, 300];
+
+describe('a building beside either pass of a one-point turnaround — #3140', () => {
+  it.each(LANES_3140)(
+    'stands each house on the ground drawn under it on both passes, the way back %d m over',
+    (lane) => {
+      const profile = coastReversal(lane);
+      const origin = corridorOrigin(profile);
+      const turn = profile.totalDistance / 2;
+      const world = {
+        routeId: 'coast-reversal-houses',
+        origin,
+        covered: () => true,
+        coveredBoxes: [{ minX: -3_000, maxX: 3_000, minZ: -1_000, maxZ: 3_000 }],
+        landUse: [],
+        buildings: HOUSES_3140.map(([along, lateral]) =>
+          buildingBeside(
+            profile,
+            origin,
+            [rectangleBeside(turn + along, lateral, 10, 6)],
+            HOUSE_HEIGHT_METRES,
+          ),
+        ),
+        paths: [],
+        streets: [],
+      };
+      const land = landClassMask(world);
+      // Planned once, as `GameView` plans a ride's mapped buildings at the press.
+      const { plans } = footprintPlans(world, land, profile, origin);
+      const start = atStartLine(profile);
+      const air: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
+      const buried: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
+      let read = 0;
+      const passes = new Set<string>();
+      for (const offset of HOUSE_RIDER) {
+        const frame = sceneFrame({
+          profile,
+          origin,
+          landClass: land,
+          state: { ...start, ride: { ...start.ride, distance: metres(turn + offset) } },
+        });
+        const { camera } = frame;
+        for (const plan of plans) {
+          const points = [{ x: plan.centroid.x, y: 0, z: plan.centroid.z }];
+          for (let at = 0; at + 1 < plan.footprint.length; at += 2) {
+            points.push({
+              x: plan.footprint[at] as number,
+              y: 0,
+              z: plan.footprint[at + 1] as number,
+            });
+          }
+          // In view: ahead of the camera, and every point of it over drawn ground.
+          const ahead =
+            (plan.centroid.x - camera.x) * camera.headingX +
+            (plan.centroid.z - camera.z) * camera.headingZ;
+          if (!(ahead > 0 && ahead <= VIEW_METRES)) continue;
+          const stood = standingOnGround(points, frame.terrain.mesh);
+          if (stood.length < points.length) continue;
+          const lowest = Math.min(...stood.map((point) => point.y));
+          const highest = Math.max(...stood.map((point) => point.y));
+          read += 1;
+          passes.add(offset < 0 ? 'out' : 'back');
+          const at = `${String(offset)} m from the turn, the house at (${plan.centroid.x.toFixed(0)}, ${plan.centroid.z.toFixed(0)})`;
+          // Its foot is the ground it was planned on less its foundation: no
+          // gap between that ground and the ground drawn under it.
+          const gap = plan.base + FOUNDATION_METRES - lowest;
+          if (gap > air.value) Object.assign(air, { value: gap, at });
+          // And its floor, the doors' threshold, its mapped height under its
+          // eaves: never under the ground drawn under it.
+          const under = highest - (plan.eaves - HOUSE_HEIGHT_METRES);
+          if (under > buried.value) Object.assign(buried, { value: under, at });
+        }
+      }
+      expect(air.value, `over the ground drawn under it, ${air.at}`).toBeLessThanOrEqual(0.05);
+      expect(buried.value, `its floor under the ground, ${buried.at}`).toBeLessThanOrEqual(0.05);
+      // Non-vacuity: houses were read from both passes.
+      expect(read).toBeGreaterThan(20);
+      expect([...passes].sort()).toEqual(['back', 'out']);
+    },
+  );
+});
+
+/** How far `(x, z)` is in plan from the nearest of `rows`' segments, their ends included. */
+function planDistance(
+  centre: readonly CorridorPoint[],
+  rows: readonly number[],
+  x: number,
+  z: number,
+): number {
+  let least = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const span = dx * dx + dz * dz;
+    const t =
+      span > 0 ? Math.min(1, Math.max(0, ((x - from.x) * dx + (z - from.z) * dz) / span)) : 0;
+    least = Math.min(least, Math.hypot(x - from.x - dx * t, z - from.z - dz * t));
+  }
+  return least;
+}
+
+describe('one road drawn where it is ridden twice — #3140', () => {
+  it.each([...LANES_3140, 6])(
+    'draws only the road the rider is on beside the turn, the way back %d m over',
+    (lane) => {
+      // Every point of the drawn road in view, more than 30 m from the turn
+      // (inside that #3061 lays the road round the U-turn), lies within half a
+      // road of the centreline of the pass the rider is on: the other pass is
+      // the same road, and is not drawn as a second one beside it.
+      const profile = coastReversal(lane);
+      const land = coast(profile);
+      const turn = profile.totalDistance / 2;
+      const wide: Worst = { value: 0, at: 'nowhere' };
+      let judgedVertices = 0;
+      for (const offset of RIDER) {
+        const { frame, near } = judged(profile, land, turn + offset);
+        const { centre } = frame.corridor;
+        const ridden: number[] = [];
+        for (let row = 0; row + 1 < centre.length; row += 1) {
+          const from = (centre[row] as CorridorPoint).along;
+          const to = (centre[row + 1] as CorridorPoint).along;
+          if (offset < 0 ? to < turn : from > turn) ridden.push(row);
+        }
+        // Every vertex of a triangle the renderer draws: a quad folded to nothing
+        // (`terrain.ts` §`withoutRetraced`) draws none.
+        const used = new Set<number>();
+        const { indices } = frame.corridor;
+        for (let at = 0; at + 2 < indices.length; at += 3) {
+          const a = indices[at] as number;
+          const b = indices[at + 1] as number;
+          const c = indices[at + 2] as number;
+          if (a === b || b === c || a === c) continue;
+          used.add(a).add(b).add(c);
+        }
+        for (const index of used) {
+          const row = Math.floor(index / ROAD_COLUMNS);
+          if (row >= centre.length || !near(row)) continue;
+          if (Math.abs((centre[row] as CorridorPoint).along - turn) <= 30) continue;
+          const x = frame.corridor.vertices[index * 3] as number;
+          const z = frame.corridor.vertices[index * 3 + 2] as number;
+          const beyond = planDistance(centre, ridden, x, z) - ROAD_HALF_METRES;
+          judgedVertices += 1;
+          if (beyond > wide.value) {
+            Object.assign(wide, {
+              value: beyond,
+              at: `${String(offset)} m from the turn, ${((centre[row] as CorridorPoint).along - turn).toFixed(1)} m along`,
+            });
+          }
+        }
+      }
+      expect(wide.value, `road beyond the ridden road's edge, ${wide.at}`).toBeLessThanOrEqual(
+        0.05,
+      );
+      expect(judgedVertices).toBeGreaterThan(500);
     },
   );
 });
