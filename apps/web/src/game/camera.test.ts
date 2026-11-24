@@ -49,7 +49,9 @@ import {
   cameraRig,
   dampedHeading,
   dampedLookAhead,
+  pivotDuringUTurn,
   turnedPose,
+  U_TURN_PIVOT_METRES,
   horizontalSpread,
   projectToFrame,
   riderFrameBox,
@@ -831,5 +833,45 @@ describe('the camera’s look-ahead is damped — #3045', () => {
     const own = turnedPose(pose, { headingX: 0, headingZ: 1 });
     expect(own.targetAheadMetres).toBe(20);
     expect(own.targetRoadY).toBe(8);
+  });
+});
+
+describe('the point the camera turns about across a pressed U-turn — #3066', () => {
+  const pose: CameraPose = {
+    x: 10,
+    y: 0,
+    z: -9,
+    headingX: 0,
+    headingZ: -1,
+    targetAheadMetres: 25,
+    eyeRoadY: 0,
+    targetRoadY: 0,
+  };
+  const rider = { x: 1, z: 2 };
+  const held = { x: 0.6, z: -0.8 };
+  const { onto, held: hold, handedBack } = U_TURN_PIVOT_METRES;
+
+  it('starts where it stood from the rider the frame before the press, and comes onto them', () => {
+    const at = pivotDuringUTurn(pose, rider, held, 0);
+    expect(at.x).toBeCloseTo(rider.x + held.x, 9);
+    expect(at.z).toBeCloseTo(rider.z + held.z, 9);
+    // A rider drawn a step behind the press is on the same first stretch.
+    expect(pivotDuringUTurn(pose, rider, held, -0.3).x).toBeCloseTo(rider.x + held.x, 9);
+    const on = pivotDuringUTurn(pose, rider, held, onto);
+    expect([on.x, on.z]).toEqual([rider.x, rider.z]);
+    // Every other part of the pose is the frame's own.
+    expect({ ...on, x: pose.x, z: pose.z }).toEqual(pose);
+  });
+
+  it('hands the point back to the frame’s own over the last stretch, with no step at either end', () => {
+    const inside = pivotDuringUTurn(pose, rider, held, hold + 1e-6);
+    expect(Math.hypot(inside.x - rider.x, inside.z - rider.z)).toBeLessThan(1e-6);
+    const half = pivotDuringUTurn(pose, rider, held, hold + handedBack / 2);
+    expect(half.x).toBeCloseTo((rider.x + pose.x) / 2, 9);
+    expect(half.z).toBeCloseTo((rider.z + pose.z) / 2, 9);
+    const nearly = pivotDuringUTurn(pose, rider, held, hold + handedBack - 1e-6);
+    expect(Math.hypot(nearly.x - pose.x, nearly.z - pose.z)).toBeLessThan(1e-6);
+    expect(pivotDuringUTurn(pose, rider, held, hold + handedBack)).toBe(pose);
+    expect(pivotDuringUTurn(pose, rider, held, Number.NaN)).toBe(pose);
   });
 });

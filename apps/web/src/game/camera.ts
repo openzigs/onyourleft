@@ -500,6 +500,60 @@ export function turnedPose(
 }
 
 /**
+ * Over how much of the ride after a U-turn pressed in an open-world ride the
+ * chase camera turns about the drawn rider, in metres — #3066: brought onto
+ * them over the first **5**, held there to **45**, and handed back to the
+ * frame's own point over the next **15**.
+ *
+ * A pose's `x`/`z` are {@link CAMERA_BEHIND_METRES} on from its eye towards
+ * what it looks at (`scene.ts` §`cameraPose`), which {@link turnedPose} turns
+ * the eye about. A U-turn turns the road round at the rider (ADR 0088 D-1.6),
+ * so on the frame of the press the road the camera looks at swung from ahead
+ * of the rider to behind them, and that point swung with it, 2 m in one
+ * frame on the grid #3066 measured on; and through the half-turn, where the
+ * road comes back past the rider, it stepped each time the camera's target
+ * settled on another stretch of it. The drawn rider moves smoothly through
+ * all of it, the half-turn included (`open-world/road.ts` §`pressedTurn`),
+ * and on a straight is where that point is. 45 m is past the longest
+ * half-turn's end and the eye's 4.5 m behind it. @see pivotDuringUTurn
+ */
+export const U_TURN_PIVOT_METRES = { onto: 5, held: 45, handedBack: 15 } as const;
+
+/** A smoothstep of `share`, clamped to nought and one. */
+function smoothstep(share: number): number {
+  const clamped = Math.max(0, Math.min(1, share));
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+/**
+ * `pose` with the point it turns about moved onto the drawn rider across a
+ * pressed U-turn, `ridden` metres after it — #3066, @see U_TURN_PIVOT_METRES.
+ * `held` is how far that point was from the rider on the frame before the
+ * press, eased out over the first stretch. The pose as it is once the ride
+ * is past them, and where `ridden` is not a number. A rider drawn a step
+ * behind the press (`ridden` below nought) is on the first stretch.
+ */
+export function pivotDuringUTurn(
+  pose: CameraPose,
+  rider: { readonly x: number; readonly z: number },
+  held: { readonly x: number; readonly z: number },
+  ridden: number,
+): CameraPose {
+  const { onto, held: hold, handedBack } = U_TURN_PIVOT_METRES;
+  if (!(ridden < hold + handedBack)) return pose;
+  if (ridden < onto) {
+    const kept = 1 - smoothstep(ridden / onto);
+    return { ...pose, x: rider.x + held.x * kept, z: rider.z + held.z * kept };
+  }
+  const back = smoothstep((ridden - hold) / handedBack);
+  return {
+    ...pose,
+    x: rider.x + (pose.x - rider.x) * back,
+    z: rider.z + (pose.z - rider.z) * back,
+  };
+}
+
+/**
  * How quickly the camera's look-ahead settles onto the one the frame asks
  * for: the time constant of {@link dampedLookAhead}'s exponential approach,
  * **0.1 s** — #3045. @see CAMERA_LOOK_AHEAD_RATE
