@@ -15,6 +15,7 @@
  * its worker, is red here.
  */
 
+import type { TileId } from '@onyourleft/map-features';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
@@ -28,13 +29,14 @@ import {
   START_ROW,
 } from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
-import { createOpenWorldSession } from './session';
+import { createOpenWorldSession, TILE_ASK_METRES } from './session';
 import { openWorldStreetCorridor } from './street-corridor';
 import type { TileBlockFeatures } from './tile-plan';
 import {
   createTilePlanner,
   describeTilePlanFailure,
   tilePlanWorkerCore,
+  type TilePlanner,
   type TilePlanRequest,
 } from './tile-planner';
 
@@ -95,6 +97,7 @@ function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
 async function openRide(
   log?: (line: string) => void,
   held?: ReadonlyMap<string, TileBlockFeatures>[],
+  wrap?: (planner: TilePlanner) => TilePlanner,
 ) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
   const session = createOpenWorldSession({
@@ -104,7 +107,8 @@ async function openRide(
     yieldToIdle: () => Promise.resolve(),
     random: () => 0,
     log,
-    // The real planner, with what each `hold` was handed recorded.
+    // The real planner, with what each `hold` was handed recorded, and
+    // wrapped where a case asks.
     tilePlanner: (options) => {
       const planner = createTilePlanner(options);
       const hold = planner.hold.bind(planner);
@@ -112,7 +116,7 @@ async function openRide(
         held?.push(blocks);
         hold(blocks);
       };
-      return planner;
+      return wrap === undefined ? planner : wrap(planner);
     },
   });
   const ready = await session.ready;
@@ -143,9 +147,10 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     );
     expect(plans.length).toBeGreaterThan(0);
     // #2902: once tiles are planned, the buildings round the rider are, and
-    // the road hands them on (the fixture's block has no footprints).
+    // the road hands them on (the fixture's block has no footprints) — at a
+    // standing start, with the rider not yet moved.
     expect(road.buildings()).toBeUndefined();
-    road.follow(30);
+    road.follow(0);
     await settle();
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
@@ -191,6 +196,26 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     // One corridor per change of what is held, and the road hands on the last.
     expect(built).toHaveBeenCalledTimes(changes.length);
     expect(road.streets()).toBe(built.mock.results.at(-1)?.value);
+    session.stop();
+  });
+
+  it('asks again once the rider has ridden on, so the tiles past the start are planned', async () => {
+    stubWorkers();
+    const wants: (readonly TileId[])[] = [];
+    const { session, road } = await openRide(undefined, undefined, (planner) => ({
+      ...planner,
+      want: (tiles) => {
+        wants.push(tiles);
+        planner.want(tiles);
+      },
+    }));
+    road.follow(0);
+    expect(wants).toHaveLength(1);
+    // Within TILE_ASK_METRES on the same view: the same answer, not asked again.
+    road.follow(TILE_ASK_METRES / 2);
+    expect(wants).toHaveLength(1);
+    road.follow(TILE_ASK_METRES * 2);
+    expect(wants).toHaveLength(2);
     session.stop();
   });
 

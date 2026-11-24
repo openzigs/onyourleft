@@ -380,6 +380,32 @@ describe('the position marker tracks the physics', () => {
       expect(document.body.textContent).toContain('100% complete');
     });
 
+    // #3056: on an open-world ride the profile is only the rolling view of the
+    // road held round the rider, so a place in it is no share of the ride.
+    it('states no share of an open-ended ride, in the words or the accessible name', async () => {
+      const base = props({ openEnded: true });
+      const total: number = base.profile.totalDistance;
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...base}
+            state={{
+              ...base.state,
+              ride: { speed: metresPerSecond(6), distance: metres(total * 0.38) },
+            }}
+          />,
+        ),
+      );
+
+      const svg = document.querySelector('.oyl-hud__profile-svg');
+      expect(document.querySelector('.oyl-hud__profile-text')?.textContent).toBe('Open road');
+      expect(svg?.getAttribute('aria-label')).toBe('Road profile, open road');
+      expect(document.body.textContent).not.toMatch(/\d+% (complete|of lap)/);
+      // The marker still says where in the view the rider is.
+      const marker = document.querySelector('[data-testid="oyl-hud-position"]');
+      expect(Number(marker?.getAttribute('data-position'))).toBeCloseTo(0.38, 6);
+    });
+
     it('draws the marker where the sentence says it is', async () => {
       // The picture and the words out of one value (#94's third criterion,
       // widened by #287's third). The marker's place is the fraction as a
