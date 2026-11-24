@@ -175,15 +175,22 @@ export function fixtureBlockTiles(east: number): readonly TileId[] {
  * columns and a buffer of 256 either side, as a real tile's geometry is. Only
  * for streets drawn along a row or a column, which is every street here: a
  * line along a row is cut where it leaves the buffer, and one along a column
- * outside it lies in the buffer, which the graph clips away.
+ * outside it is not in the tile at all, as a street a real tile's box does
+ * not touch is not. (Until #3107 such a street was held onto the buffer's
+ * edge: a street the map never had, along every tile's seam, once a tile.)
  */
 function cutTo(streets: readonly GraphFixtureStreet[], tile: TileId): GraphFixtureStreet[] {
   const west = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT - 256;
   const east = west + FIXTURE_EXTENT + 512;
-  return streets.map((street) => ({
-    ...street,
-    line: street.line.map(([x, y]) => [Math.min(east, Math.max(west, x)), y] as const),
-  }));
+  return streets
+    .filter((street) => {
+      const columns = street.line.map(([x]) => x);
+      return Math.max(...columns) >= west && Math.min(...columns) <= east;
+    })
+    .map((street) => ({
+      ...street,
+      line: street.line.map(([x, y]) => [Math.min(east, Math.max(west, x)), y] as const),
+    }));
 }
 
 /**
@@ -351,3 +358,69 @@ export const OPEN_WORLD_FAR_SERVICE_ROADS: readonly GraphFixtureStreet[] = Array
     ] as const,
   }),
 );
+
+/** #3107: the rows of {@link OPEN_WORLD_DENSE_STREETS}' east–west streets, Main street's among them: 100 m apart. */
+export const DENSE_ROWS: readonly number[] = Array.from(
+  { length: 18 },
+  (_, index) => MAIN_STREET_ROW - 4 * 430 + index * 430,
+);
+
+/** #3107: the columns of {@link OPEN_WORLD_DENSE_STREETS}' north–south streets, across three blocks: 100 m apart. */
+export const DENSE_COLUMNS: readonly number[] = Array.from(
+  { length: 57 },
+  (_, index) => -4000 + index * 430,
+);
+
+/**
+ * #3107: **a dense town three blocks long** — a street every 100 m each way,
+ * some 20 km of street a square kilometre, across the fixture's block and the
+ * two east of it ({@link openWorldFixtureArchive} with `blocksEast` 2). Ridden
+ * east along Main street from the start pin, a junction comes every 100 m, the
+ * road's view is replaced at 1 km, and the block the rider is in changes
+ * 1.65 km on: each a moment an open-world ride reads its streets again.
+ */
+export const OPEN_WORLD_DENSE_STREETS: readonly GraphFixtureStreet[] = [
+  ...DENSE_ROWS.map((row) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [-4000, row],
+      [20000, row],
+    ] as const,
+  })),
+  ...DENSE_COLUMNS.map((column) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [column, 300],
+      [column, 7900],
+    ] as const,
+  })),
+];
+
+/**
+ * #3107: {@link OPEN_WORLD_DENSE_STREETS} with **names that begin a kilometre
+ * on**: every north–south street from the fifteenth east of the block's edge
+ * is named, and none before it, nor any east–west street. A ride east from
+ * the start pin meets its first named street some 700 m on, so whatever the
+ * renderer builds for a street's name it builds mid-ride, unless it was made
+ * ready before the first frame.
+ */
+export const OPEN_WORLD_NEW_AREA_STREETS: readonly GraphFixtureStreet[] = [
+  ...DENSE_ROWS.map((row) => ({
+    tags: { kind: 'minor_road', kind_detail: 'residential' },
+    line: [
+      [-4000, row],
+      [20000, row],
+    ] as const,
+  })),
+  ...DENSE_COLUMNS.map((column, index) => ({
+    tags: {
+      kind: 'minor_road',
+      kind_detail: 'residential',
+      ...(index >= 14 ? { name: `Street ${String(index)}` } : {}),
+    },
+    line: [
+      [column, 300],
+      [column, 7900],
+    ] as const,
+  })),
+];

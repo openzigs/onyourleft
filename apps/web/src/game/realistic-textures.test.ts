@@ -4015,6 +4015,64 @@ describe('the mapped buildings’ blobs, through the drawing a view builds — #
       drawing.dispose();
     }
   }, 120_000);
+
+  it('draws every set of mapped buildings in the one set of materials, so a new set links no program — #3107', async () => {
+    // An open-world ride plans the buildings round the rider again as it
+    // goes: each plan is another `MappedBuildings`, and the drawing builds
+    // another belt for it. The world is loaded by the case above.
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const mixed = mixedTownFixture();
+      const land = landClassMask(mixed.corridor);
+      const { plans } = footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin);
+      const start = atStartLine(mixed.profile);
+      const frameOf = (buildings: ReturnType<typeof mappedBuildingsOf>) =>
+        sceneFrame({
+          profile: mixed.profile,
+          origin: mixed.origin,
+          state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+          worldCorridor: mixed.corridor,
+          landClass: land,
+          mappedBuildings: buildings,
+          structureItems: REALISTIC_STRUCTURE_ITEMS,
+        });
+      const materialsOf = (): Set<unknown> => {
+        const belt = drawing.mapped;
+        if (belt === undefined) throw new Error('the frame carried no mapped buildings');
+        const surfaces = belt.mesh.material;
+        return new Set([
+          ...(Array.isArray(surfaces) ? surfaces : [surfaces]),
+          belt.modelMesh.material,
+        ]);
+      };
+      const one = frameOf(mappedBuildingsOf(plans));
+      drawing.updateMapped(one.mappedBuildings, one.scatter, one.billboards.length);
+      const first = drawing.mapped;
+      const drawnIn = materialsOf();
+      expect(first?.stats.buildings).toBeGreaterThan(0);
+      expect(drawnIn.size).toBeGreaterThan(1);
+      let disposed = 0;
+      for (const material of drawnIn) {
+        (
+          material as { addEventListener(type: 'dispose', listener: () => void): void }
+        ).addEventListener('dispose', () => {
+          disposed += 1;
+        });
+      }
+      // The next plan: another set of buildings, and so another belt.
+      const two = frameOf(mappedBuildingsOf(plans));
+      drawing.updateMapped(two.mappedBuildings, two.scatter, two.billboards.length);
+      expect(drawing.mapped).not.toBe(first);
+      expect(drawing.mapped?.stats.buildings).toBeGreaterThan(0);
+      // In the same materials, none of them disposed of: three keeps their programs.
+      expect(materialsOf()).toStrictEqual(drawnIn);
+      expect(disposed).toBe(0);
+    } finally {
+      drawing.dispose();
+    }
+  });
 });
 
 describe('the village models and the procedural belts, through the drawing a view builds — #1566', () => {
