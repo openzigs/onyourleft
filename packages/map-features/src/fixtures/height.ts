@@ -120,3 +120,38 @@ export function lossyHeightTile(): Uint8Array {
 export function outOfRangeHeightTile(): Uint8Array {
   return heightTileWebp(() => 9_000);
 }
+
+/** The cliff tile's two levels, and the column the edge is at. */
+export const CLIFF = { topMetres: 500, footMetres: 420, edgeColumn: 256 } as const;
+
+/**
+ * A cliff edge: level ground at {@link CLIFF}`.topMetres` west of
+ * `.edgeColumn`, and level ground 80 m lower east of it, with nothing between.
+ * Every height is a plausible one; the step is not a road.
+ */
+export function cliffHeightTile(): Uint8Array {
+  return heightTileWebp((column) =>
+    column < CLIFF.edgeColumn ? CLIFF.topMetres : CLIFF.footMetres,
+  );
+}
+
+/** The plateau tile's ground, its plateau, and the columns the plateau lies between. */
+export const PLATEAU = {
+  groundMetres: 100,
+  topMetres: 150,
+  westColumn: 200,
+  eastColumn: 260,
+} as const;
+
+/**
+ * A plateau inside the valid range (ADR 0087 D-3's hostile tile): level
+ * ground with a block 50 m higher standing on it, sheer on both sides and far
+ * wider than a median, so nothing but the step rule would refuse it.
+ */
+export function plateauHeightTile(): Uint8Array {
+  return heightTileWebp((column) =>
+    column >= PLATEAU.westColumn && column < PLATEAU.eastColumn
+      ? PLATEAU.topMetres
+      : PLATEAU.groundMetres,
+  );
+}

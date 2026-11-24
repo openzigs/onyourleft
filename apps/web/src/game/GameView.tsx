@@ -246,6 +246,7 @@ import {
   type JunctionAnnounced,
 } from './hud/junction-text';
 import { OSM_ATTRIBUTION } from '../map/basemap';
+import { cornerCredit, HEIGHTS_UNAVAILABLE_NOTICE } from './open-world/heights-text';
 import { landClassMask, type LandClassMask } from './land-class';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
@@ -1423,6 +1424,13 @@ function GameScreen({
    */
   const rideRoadRef = useRef<RideRoad>(NO_RIDE_ROAD);
   const [rideRoad, setRideRoad] = useState<RideRoad | undefined>(undefined);
+  /**
+   * #2899: that the open-world road's heights are not known where the rider
+   * is (ADR 0087 D-7). The ref is what the frame loop compares, so the state
+   * is set on a change and not on every frame.
+   */
+  const heightsUnknownRef = useRef(false);
+  const [heightsUnknown, setHeightsUnknown] = useState(false);
   /**
    * #3013: an open-world ride's junction choice (#2897, ADR 0088), over the
    * rolling route its road follows, and what its prompt has said (#2898).
@@ -4286,11 +4294,21 @@ function GameScreen({
       // #782: while the rider is being corrected toward a room, the grade may
       // change by at most `net/correction.ts`
       // §`CORRECTION_GRADE_STEP_PERCENT_PER_SECOND` a second.
+      // #2899, ADR 0087 D-7: and so it does where an open-world road's
+      // heights are not known. The road reads 0 % there, and the grade sent
+      // walks to it and back at the same bounded rate.
+      const heightsUnknown =
+        road.follower !== undefined &&
+        !road.follower.heightsKnownAt(simulation.state.ride.distance);
       gradientRef.current?.sample(
         simulation.state.elapsed,
         simulation.state.ride.distance,
-        simulation.correcting,
+        simulation.correcting || heightsUnknown,
       );
+      if (road.follower?.realHeights === true && heightsUnknown !== heightsUnknownRef.current) {
+        heightsUnknownRef.current = heightsUnknown;
+        setHeightsUnknown(heightsUnknown);
+      }
 
       // #1816: the Delivery round, stepped on exactly the simulation steps
       // that ran on this frame (`delivery/ride-round.ts` §"The steps that
@@ -5630,7 +5648,12 @@ function GameScreen({
         // circuit, in every world, the stylised one included, because the
         // road itself is the circuit's line drawn from OpenStreetMap. A ride
         // on the stylised world on the rider's own route still shows none.
-        attribution={rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined}
+        // #2899, ADR 0087 D-8: and the terrain's, while an open-world road's
+        // heights are read from the archive.
+        attribution={cornerCredit(
+          rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined,
+          rideRoad?.follower?.realHeights === true,
+        )}
         // #2290: and the plan view draws that corridor as a street map around
         // the rider — on exactly the rides that carry the corridor's credit
         // (a stylised-world ride on a circuit carries the credit and draws no
@@ -5850,6 +5873,14 @@ function GameScreen({
           mayStop ? (
             <StatusMessage key="keep-alive" tone="warning" label={KEEP_SCREEN_ON_LABEL} kept>
               {RIDE_MAY_STOP_WITH_SCREEN_OFF}
+            </StatusMessage>
+          ) : undefined,
+          // #2899, ADR 0087 D-7: an open-world road whose heights are not
+          // known here is drawn level and sends the trainer 0 %, and says so.
+          // Not `live`: the HUD's one region speaks.
+          heightsUnknown ? (
+            <StatusMessage key="heights" tone="warning" label={HEIGHTS_UNAVAILABLE_NOTICE.label}>
+              {HEIGHTS_UNAVAILABLE_NOTICE.text}
             </StatusMessage>
           ) : undefined,
           // #475, ADR 0026 D-7's "and says so". For STANDING_NOTICE_SECONDS of
