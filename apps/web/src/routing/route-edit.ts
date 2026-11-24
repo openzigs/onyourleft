@@ -172,9 +172,16 @@ export function straightStretch(
 }
 
 /**
+ * Something that answers heights along a line at its own spacing: the terrain
+ * archive read in the app (`terrain/heights.ts`, #2013).
+ */
+export type StretchHeights = Pick<RoutingProvider, 'heights'> & { readonly interval: Metres };
+
+/**
  * The stretch between two places: along the roads, with measured heights,
- * when there is a routing service, and {@link straightStretch} when there is
- * none.
+ * when there is a routing service; a straight line with the terrain's heights
+ * when there is none and the terrain archive can be read (#2013); and
+ * {@link straightStretch} when there is neither.
  *
  * ⚠️ **The stretch's two ends keep the route's heights there** even when the
  * rest is measured, so the line has no step where the new stretch meets the
@@ -191,8 +198,14 @@ export async function drawStretch(
   heights: { readonly from?: AltitudeMetres | undefined; readonly to?: AltitudeMetres | undefined },
   provider: RoutingProvider | undefined,
   preferences: RidingPreferences,
+  terrain?: StretchHeights,
 ): Promise<Stretch> {
-  if (provider === undefined) return straightStretch(from, to, heights);
+  if (provider === undefined) {
+    if (terrain === undefined) return straightStretch(from, to, heights);
+    // No engine, so the line is the straight one; its heights are the ground's.
+    const straight = await measuredOver([from, to], from, to, heights, terrain, terrain.interval);
+    return straight.measured ? straight : straightStretch(from, to, heights);
+  }
   const legs = await provider.route({
     waypoints: [{ position: from }, { position: to }],
     preferences,
@@ -200,12 +213,27 @@ export async function drawStretch(
   const shape: GeographicPosition[] = [from];
   for (const leg of legs) shape.push(...leg.shape);
   shape.push(to);
-  const interval = metres(ELEVATION_INTERVAL_METRES);
+  return measuredOver(shape, from, to, heights, provider, metres(ELEVATION_INTERVAL_METRES));
+}
+
+/**
+ * `shape`, resampled and given `source`'s heights. Not `measured` when the
+ * lookup failed or knew no height anywhere: the stretch is then the shape with
+ * the slope between its ends.
+ */
+async function measuredOver(
+  shape: readonly GeographicPosition[],
+  from: GeographicPosition,
+  to: GeographicPosition,
+  heights: { readonly from?: AltitudeMetres | undefined; readonly to?: AltitudeMetres | undefined },
+  source: Pick<RoutingProvider, 'heights'>,
+  interval: Metres,
+): Promise<Stretch> {
   const grid = resampleShape(shape, interval);
   if (grid.length < 2) return straightStretch(from, to, heights);
   let measured: (AltitudeMetres | undefined)[];
   try {
-    const answer = await provider.heights({ shape: grid, interval });
+    const answer = await source.heights({ shape: grid, interval });
     const byIndex = new Map<number, AltitudeMetres | undefined>();
     for (const sample of answer.samples) {
       const index = sample.along / interval;

@@ -138,6 +138,7 @@ const REQUIRED_INPUTS = {
   h: 'CDN cache hit rate',
   s: 'average tile size in bytes',
   S: 'basemap archive size in bytes',
+  S_terrain: 'terrain archive size in bytes',
   p_storage: 'object storage, USD per GB-month',
   p_classB: 'object storage Class B reads, USD per million',
   p_egress: 'object storage egress, USD per GB',
@@ -181,6 +182,14 @@ const LINE_ITEMS = [
     label: 'Basemap egress',
     group: 'infrastructure',
     of: (i, A) => ((A * i.L * i.T * i.s) / 1e9) * i.p_egress,
+  },
+  // #2013: the terrain archive a drawn route's heights are read from. Storage
+  // only: its reads are a handful of Class B requests a drawn route, which the
+  // document says in prose and does not model.
+  {
+    label: 'Terrain archive storage',
+    group: 'infrastructure',
+    of: (i) => (i.S_terrain / 1e9) * i.p_storage,
   },
   {
     label: 'Activity streams (object storage)',

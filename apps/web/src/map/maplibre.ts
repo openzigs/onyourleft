@@ -225,11 +225,20 @@ function fullStyle(
  *   buttons, a double click and a pinch remain.
  * - **Rotation and pitch are off.** The pan buttons are named north, south,
  *   east and west, which is only true of a map that keeps north up.
- * - **One finger scrolls the page.** MapLibre's touch pan calls
- *   `preventDefault` on a one-finger `touchmove`, so a thumb on a map that
- *   fills a phone's screen would pan the map and never the page. The touch pan
- *   is turned off (see `create`); a mouse drag still pans, a pinch still zooms,
- *   and the panel's compass buttons move the view for a touch.
+ * - **One finger scrolls the page, on a map nobody draws on.** MapLibre's
+ *   touch pan calls `preventDefault` on a one-finger `touchmove`, so a thumb on
+ *   a map that fills a phone's screen would pan the map and never the page. On
+ *   a saved route's map the touch pan is turned off (see `create`); a mouse
+ *   drag still pans, a pinch still zooms, and the panel's compass buttons move
+ *   the view for a touch.
+ * - **One finger drags an editable map** — the route planner's and the route
+ *   editor's (#3134). With the touch pan off, the owner found on the tablet
+ *   that a drag did not move the planner's map and a pinch did not zoom it:
+ *   the first finger's move went to the page, which then had the gesture. On a
+ *   map a rider draws on, moving it by hand is the work, so the touch pan stays
+ *   on there, as on the {@link DIRECT} map (#3014). A tap still adds a
+ *   waypoint and a marker still drags; the compass buttons stay for the
+ *   keyboard and for switch access.
  * - **Box zoom and the keyboard handler are off.** The keyboard handler
  *   listens on the canvas, which is kept out of the tab order (see the module
  *   note), and its equivalents are the panel's buttons.
@@ -534,8 +543,9 @@ const renderer: MapRenderer = {
       // A pinch zooms; it does not also turn the map. See `EXPLORABLE`.
       map.touchZoomRotate.disableRotation();
       // `dragPan` switches the mouse and the touch pan together; only the
-      // touch half is unwanted. See `EXPLORABLE`.
-      map.dragPan._touchPan.disable();
+      // touch half is unwanted, and only on a map nobody draws on: one finger
+      // pans the planner's and the editor's map (#3134). See `EXPLORABLE`.
+      if (!editable) map.dragPan._touchPan.disable();
     }
     /** The box the line was last fitted to, for `fitTrack`. */
     let fitted: TrackBounds | undefined;

@@ -50,6 +50,11 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   // the `Response` it checks. Its port (`world-data/corridor-port.ts`) and the
   // read (`game/world-data/corridor.ts`) name no HTTP type.
   join('world-data', 'corridor-source.ts'),
+  // #2013, ADR 0087 D-2.3: the one module that asks the terrain archive for a
+  // height tile, with its own `fetch`, for the corridor read's reason. The
+  // reader above it (`terrain/route-heights.ts`) and the port the planner is
+  // handed (`terrain/heights.ts`) name no HTTP type.
+  join('terrain', 'terrain-source.ts'),
 ];
 
 /**

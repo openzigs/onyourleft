@@ -95,6 +95,8 @@ import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
+import type { TerrainConfig } from '../terrain/config';
+import type { RouteHeights } from '../terrain/heights';
 import type { OpenWorldStartPort } from '../game/open-world/start-port';
 import type { WorkoutPort } from '../workouts/store-port';
 
@@ -529,6 +531,14 @@ export interface AppShellProps {
    * between them are missing — see `views/RouteBuilderView.tsx`.
    */
   readonly routing?: RoutingProvider | undefined;
+  /**
+   * Heights along a drawn or redrawn line, read from the terrain archive in
+   * the app (#2013): no instance and no routing engine. `undefined` for a
+   * build configured with no terrain archive.
+   */
+  readonly heights?: RouteHeights | undefined;
+  /** The terrain archive those heights are read from, for Settings to name beside the map-tiles switch. */
+  readonly terrain?: TerrainConfig | undefined;
   /** Saved workouts (#14), or `undefined` where this browser has no local store. */
   readonly workouts?: WorkoutPort | undefined;
   /**
@@ -780,6 +790,8 @@ function viewFor(
       return (
         <RouteBuilderView
           provider={props.routing}
+          // #2013: with no engine, the drawn line's heights from the terrain archive.
+          heights={props.heights}
           // #2006: drawn on the map a saved route's page draws, and saved
           // into the same routes.
           map={props.map}
@@ -803,6 +815,7 @@ function viewFor(
           routes={props.routes}
           selected={match.parameter}
           provider={props.routing}
+          heights={props.heights}
           map={props.map}
           basemap={props.basemap}
         />
@@ -951,6 +964,7 @@ function viewFor(
           onRiderBodyChange={kit.onBodyChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
+          terrain={props.terrain}
           maskedWords={props.maskedWords}
           calorieInputs={props.calorieInputs}
           riderText={props.riderText}
