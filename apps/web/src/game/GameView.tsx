@@ -4602,6 +4602,10 @@ function GameScreen({
                 // until a reading is whole, so no view or block change
                 // reads every street inside one frame.
                 streetScans: road.follower.streetScans,
+                // #3105: and its tiles' real water, as the land mask the scene
+                // draws the rivers, lakes and coast from and bridges the road
+                // over (`open-world/water-mask.ts`); none away from water.
+                landClass: road.follower.water(),
                 // #3052: and where each named street's name is painted on it.
                 streetNames: road.follower.streetNames(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),

@@ -117,6 +117,7 @@ import {
   type PathPoint,
   type PressedTurn,
 } from '../drawn-line';
+import type { LandClassMask } from '../land-class';
 import type { MappedBuildings } from '../mapped-buildings';
 import { NearbyStreetScan } from '../nearby-streets';
 import { lineOffsetAt } from '../racing-line';
@@ -373,6 +374,12 @@ export interface OpenWorldRoadHooks {
   /** #2902: the mapped buildings planned round the rider, in {@link frame}, once there are any. */
   readonly buildings?: (() => MappedBuildings | undefined) | undefined;
   /**
+   * #3105: the real water of the tiles planned so far, in {@link frame}, as
+   * the land mask the scene reads its water from (`water-mask.ts`);
+   * `undefined` while no tile planned holds any.
+   */
+  readonly water?: (() => LandClassMask | undefined) | undefined;
+  /**
    * #2903: the held blocks' streets as a corridor in {@link frame}
    * (`street-corridor.ts`), which the scene draws to the fog as road and
    * stubs at each junction; `undefined` until a block is held.
@@ -555,6 +562,11 @@ export class OpenWorldRoad {
   /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
   buildings(): MappedBuildings | undefined {
     return this.#hooks.buildings?.();
+  }
+
+  /** The real water round the rider as a land mask (#3105), or `undefined` while none is planned. */
+  water(): LandClassMask | undefined {
+    return this.#hooks.water?.();
   }
 
   /** The streets round the rider as a corridor (#2903), or `undefined` while none are held. */
