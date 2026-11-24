@@ -109,6 +109,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { JunctionScan } from '../cross-streets';
 import {
   drawnLine,
   drawnLineAt,
@@ -118,9 +119,11 @@ import {
 } from '../drawn-line';
 import type { LandClassMask } from '../land-class';
 import type { MappedBuildings } from '../mapped-buildings';
+import { NearbyStreetScan } from '../nearby-streets';
 import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
 import { routeSeed } from '../scatter';
+import type { StreetScans } from '../scene';
 import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
@@ -494,6 +497,15 @@ export class OpenWorldRoad {
   readonly #levels: StreetLevels;
   /** #3094: the frame the ride's places are read in: the session's, or the first view's. */
   readonly #placeFrame: CorridorOrigin;
+  /**
+   * #3107: the ride's readings of its streets, a slice a frame
+   * (`scene.ts` §`SceneInput.streetScans`). One for the ride: a reading is
+   * handed on as last read through every view and corridor change.
+   */
+  readonly streetScans: StreetScans = {
+    nearby: new NearbyStreetScan(),
+    junctions: new JunctionScan(),
+  };
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;

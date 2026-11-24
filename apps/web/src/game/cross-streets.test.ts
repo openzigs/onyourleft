@@ -15,8 +15,10 @@ import type { StreetFeature, StreetGrade } from '@onyourleft/map-features';
 import {
   distanceToSideRoads,
   JUNCTION_TOLERANCE_METRES,
+  leavesAtJunctionAngle,
   mappedJunctions,
   onSideRoad,
+  resampled,
   SIDE_ROAD_END_WIDTH_SHARE,
   SIDE_ROAD_FADE_METRES,
   SIDE_ROAD_FRAME_TRIANGLES,
@@ -685,6 +687,60 @@ describe('what a side road is — #1565', () => {
       SEED,
     );
     expect(before.length).toBeGreaterThan(0);
+  });
+
+  it('spends that bound near the road alone: far streets read first cost a junction nothing — #3106', () => {
+    const from = awayFromVillages(200, 1_000);
+    // 410 km of street two kilometres and more off the road, in 10 m
+    // segments as a mapped street's are: what an open-world ride's far
+    // blocks hold, and they are read before the block the rider is in.
+    const far: StreetFeature[] = Array.from({ length: 205 }, (_, index) =>
+      beside(0, 2_000, 2_000 + index * 20),
+    );
+    let metres = 0;
+    for (const each of far) {
+      for (let at = 0; at + 3 < each.line.length; at += 2) {
+        metres += Math.hypot(
+          (each.line[at + 2] as number) - (each.line[at] as number),
+          (each.line[at + 3] as number) - (each.line[at + 1] as number),
+        );
+      }
+    }
+    expect(metres).toBeGreaterThan(STREET_MAX_METRES);
+    const junctions = mappedJunctions(
+      corridorOf([...far, across(from, 100)]),
+      FARMLAND,
+      ORIGIN,
+      SEED,
+    );
+    // The street across the road, read last, is a crossroads: an arm each side.
+    expect(junctions).toHaveLength(1);
+    expect(junctions[0]?.arms).toHaveLength(2);
+    expect(Math.abs((junctions[0]?.along ?? 0) - from)).toBeLessThan(1);
+  });
+
+  it('reads a fork as no junction’s arm, and a street at 30° and more as one — #3106', () => {
+    const from = awayFromVillages(200, 1_000);
+    const leaves = (angle: number): boolean => {
+      const street = leaving(from, 1, angle, 200);
+      const points = resampled(street.line, { metres: STREET_MAX_METRES });
+      return leavesAtJunctionAngle(points, 0, 2, FARMLAND, ORIGIN);
+    };
+    expect(leaves(20)).toBe(false);
+    expect(leaves(160)).toBe(false);
+    expect(leaves(31)).toBe(true);
+    expect(leaves(90)).toBe(true);
+    expect(leaves(149)).toBe(true);
+    // And it is the junctions' own rule: an arm exactly where it says so.
+    for (const angle of [20, 31, 90, 149, 160]) {
+      const found = mappedJunctions(
+        corridorOf([leaving(from, 1, angle, 200)]),
+        FARMLAND,
+        ORIGIN,
+        SEED,
+      );
+      expect(found.length > 0, String(angle)).toBe(leaves(angle));
+    }
   });
 
   it('is the same objects every call', () => {

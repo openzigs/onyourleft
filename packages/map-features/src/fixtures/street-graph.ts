@@ -20,7 +20,7 @@
 import { localMetres } from '../projection';
 import { latitudeAtRow, longitudeAtColumn } from '../projection';
 import type { StreetGraphEdge, StreetNodeKind } from '../street-graph';
-import { encodeTile, line, type TagValue } from '../testing/mvt-encoder';
+import { encodeTile, line, type LayerSpec, type TagValue } from '../testing/mvt-encoder';
 import type { StreetOneway, TileId } from '../types';
 import { EARTH, FIXTURE_EXTENT, FIXTURE_FRAME, FIXTURE_TILE } from './tiles';
 
@@ -606,8 +606,16 @@ export const GRAPH_FIXTURES = {
 
 export type GraphFixtureName = keyof typeof GRAPH_FIXTURES;
 
-/** The fixture's streets as one tile's bytes, in that tile's own pixels. */
-export function graphFixtureTile(streets: readonly GraphFixtureStreet[], tile: TileId): Uint8Array {
+/**
+ * The fixture's streets as one tile's bytes, in that tile's own pixels — and,
+ * after them, whatever `layers` the caller wrote for the tile (a town's
+ * footprints, for a ride that plans buildings), in the tile's own pixels too.
+ */
+export function graphFixtureTile(
+  streets: readonly GraphFixtureStreet[],
+  tile: TileId,
+  layers: readonly LayerSpec[] = [],
+): Uint8Array {
   const dx = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT;
   const dy = (tile.y - FIXTURE_TILE.y) * FIXTURE_EXTENT;
   return encodeTile([
@@ -620,6 +628,7 @@ export function graphFixtureTile(streets: readonly GraphFixtureStreet[], tile: T
         geometry: line([street.line.map(([x, y]) => [x - dx, y - dy] as const)]),
       })),
     },
+    ...layers,
   ]);
 }
 

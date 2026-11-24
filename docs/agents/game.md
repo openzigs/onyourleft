@@ -2380,12 +2380,55 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         A footprint on one is dropped `on-street`
                         (`footprint-buildings.ts` rule 3b). `streetRibbon` names
                         no route: #2903's open world draws with it.
+                        Lever `-nearby-streets`, page `town=streets`.
+                        ⚠️ **Since #3106 only the streets near the road are
+                        read**: this file and `cross-streets.ts`
+                        §`mappedJunctions` skip every segment off the road's
+                        neighbourhood (`road-grid.ts` §`roadNeighbourhood`:
+                        72 m for a junction's arm, 440 m for a street in
+                        sight) and count none of it against
+                        §`STREET_MAX_METRES`. An open-world ride holds nine
+                        blocks in the order they were read; where they held
+                        more street than the 400 km bound it was spent on
+                        blocks a kilometre off, and the blocks ahead of the
+                        rider had no stub and no street. And a
+                        **fork** — a street leaving the route at under 30°,
+                        which has no stub — is drawn from the verge, not from
+                        the 23.5 m hand-over a stub covers.
+                        ⚠️ **Since #3107 an open-world ride reads them a
+                        slice a frame**: `NearbyStreetScan` here and
+                        `cross-streets.ts` §`JunctionScan`, one of each a ride
+                        (`open-world/road.ts` §`streetScans`, handed to the
+                        scene as `SceneInput.streetScans`), read at most 1 000
+                        units of street a call and hand on the last whole
+                        reading until the new one is whole — the junctions
+                        carried onto the new view by how far its start moved.
+                        A piece or a junction found again is the same object,
+                        so the side road built on it and the renderer's mesh
+                        are kept. Read whole, every change of the road's view
+                        or of the blocks held read every street inside one
+                        frame. A route ride's are read whole, once, as before.
+                        A reading's grid of segments (`onNearbyStreet`) is
+                        built when a planner of buildings first asks for it
                         ⚠️ Since #3105 an open-world ride draws a side
                         street's BRIDGE too, as a deck at the road's level
                         across the water a ground street stops at
                         (`deckGround`, `SideRoad.deck`); a route ride still
                         leaves every bridge to `overpasses.ts`.
-                        Lever `-nearby-streets`, page `town=streets`
+    src/game/way-roads.ts
+                        way roads (#3106) — every way out of an open-world
+                        junction (`SceneInput.waysOut`, the views the rolling
+                        route would hand out, which is what the junction
+                        prompt offers) drawn as road from its junction to the
+                        view's reach, wherever neither the road nor a side
+                        road of the frame already covers it: a fork's mouth, a
+                        street mapped on a bridge from the junction, a way too
+                        short for a stub. Nothing where the streets' own
+                        drawing is whole. Side roads, so the one mesh draws
+                        them and the scenery is kept off them; worked out
+                        again when the ways, the side roads or the reach in
+                        40 m steps change; at most 1 024 stations a frame.
+                        Off with the `-nearby-streets` lever
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

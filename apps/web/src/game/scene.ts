@@ -156,12 +156,19 @@ import {
   sideRoadClearance,
   sideRoadsAt,
   joinedJunctions,
+  type JunctionScan,
   type SideRoad,
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { riddenSpanParts, riddenSpans, sideDeckParts } from './mapped-spans';
-import { nearbyStreets, nearbyStreetsAt, routeGround } from './nearby-streets';
+import {
+  nearbyStreets,
+  nearbyStreetsAt,
+  routeGround,
+  type NearbyStreetScan,
+} from './nearby-streets';
+import { wayRoads } from './way-roads';
 import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -535,6 +542,17 @@ export interface SceneInput {
    */
   readonly nearbyStreetsOff?: boolean | undefined;
   /**
+   * #3107: where an open-world ride's streets are read a slice a frame —
+   * its nearby streets and its junctions, each handed on as last read until
+   * a new reading is whole (`nearby-streets.ts` §`NearbyStreetScan`,
+   * `cross-streets.ts` §`JunctionScan`). One for the ride
+   * (`open-world/road.ts` §`OpenWorldRoad.streetScans`), since what is read
+   * is kept across the views and corridors the ride goes through. Absent,
+   * every other ride's, the streets are read whole, once, as they were:
+   * a route ride's road and corridor are fixed when it starts.
+   */
+  readonly streetScans?: StreetScans | undefined;
+  /**
    * #2972's mapped footways, cycleways, park paths, steps and zebras left
    * undrawn (`footway-surfaces.ts`) — the realistic page's `-footways` lever,
    * the tablet's cost pair, and nothing else. Optional the safe way round, for
@@ -692,6 +710,12 @@ export interface RemoteRiderInput {
   readonly body?: RiderBody | undefined;
 }
 
+/** One open-world ride's readings of its streets. @see SceneInput.streetScans */
+export interface StreetScans {
+  readonly nearby: NearbyStreetScan;
+  readonly junctions: JunctionScan;
+}
+
 /** Builds one frame. */
 export function sceneFrame(input: SceneInput): SceneFrame {
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
@@ -711,13 +735,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const junctions =
     input.worldCorridor === undefined
       ? undefined
-      : mappedJunctions(
-          input.worldCorridor,
-          input.profile,
-          input.origin,
-          seed,
-          input.landClass ?? NO_LAND_CLASS,
-        );
+      : input.streetScans === undefined
+        ? mappedJunctions(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+          )
+        : // #3107: an open-world ride's, a slice a frame.
+          input.streetScans.junctions.junctions(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+            { rideOrigin: sceneryAnchor(input.profile)?.origin ?? 0, riderMetres: riderDistance },
+          );
   // #3095: the ways out the route does not take that this frame's view
   // reaches, each as far along it as the view reaches through its junction.
   const reached = waysReached(
@@ -795,17 +829,40 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.worldCorridor === undefined || input.nearbyStreetsOff === true
       ? NO_SIDE_ROADS
       : nearbyStreetsAt(
-          nearbyStreets(input.worldCorridor, input.profile, input.origin),
+          input.streetScans === undefined
+            ? nearbyStreets(input.worldCorridor, input.profile, input.origin)
+            : // #3107: an open-world ride's, a slice a frame.
+              input.streetScans.nearby.streets(input.worldCorridor, input.profile, input.origin),
           input.profile,
           input.origin,
           seed,
           riderDistance,
           input.landClass ?? NO_LAND_CLASS,
         );
-  const sideRoads =
+  const streetRoads =
     crossings.roads.length === 0 && nearby.length === 0
       ? crossSideRoads
       : [...crossSideRoads, ...crossings.roads, ...nearby];
+  // #3106: and every way out of an open-world junction, wherever none of the
+  // above draws it — a fork, a street mapped on a bridge — so no way the
+  // junction prompt offers is a turn into a hedge. Side roads too. Off with
+  // the nearby streets, whose control would otherwise be drawn back in here.
+  const onWays =
+    input.nearbyStreetsOff === true
+      ? NO_SIDE_ROADS
+      : wayRoads(
+          reached,
+          {
+            profile: input.profile,
+            origin: input.origin,
+            seed,
+            land: input.landClass ?? NO_LAND_CLASS,
+            // The next junction's ways are read first, and those behind the rider last.
+            riderMetres: riderDistance,
+          },
+          streetRoads,
+        );
+  const sideRoads = onWays.length === 0 ? streetRoads : [...streetRoads, ...onWays];
   const { scatter: items, billboards } = scenery(
     corridor,
     input,
@@ -897,7 +954,12 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     sideRoads,
     streets,
     // #3052: an open-world ride's street names, on their streets' surfaces.
-    ...(input.streetNames === undefined || input.streetNames.length === 0
+    // #3107: carried on EVERY frame of a ride that may name a street, the
+    // ones with no name in sight too (an empty view), so the renderer knows
+    // from the ride's first frame to make the names' belt ready
+    // (`three-renderer.ts` §`StreetNameBelt`) and not on the frame the first
+    // name comes into view.
+    ...(input.streetNames === undefined
       ? {}
       : {
           streetNames: streetNamesInView(
