@@ -40,11 +40,6 @@ class BitWriter {
     }
   }
 
-  /** An eight-bit prefix code: its bits go out most significant first. */
-  code(symbol: number): void {
-    for (let bit = 7; bit >= 0; bit -= 1) this.bits((symbol >>> bit) & 1, 1);
-  }
-
   finish(): Uint8Array {
     if (this.filled > 0) this.flush();
     return Uint8Array.from(this.bytes);
@@ -119,13 +114,29 @@ export function encodeLosslessWebp(
   fixedEightBitCode(out, 256); // blue
   oneSymbolCode(out, 255); // alpha
   oneSymbolCode(out, 0); // distance
+  const preamble = out.finish();
+  // The preamble is a whole number of bytes, so every pixel's three codes are
+  // three whole bytes: each an eight-bit prefix code, whose bits go out most
+  // significant first into a stream packed least significant first.
+  if (preamble.length * 8 !== PREAMBLE_BITS) throw new Error('the preamble is not what it was');
+  const stream = new Uint8Array(preamble.length + (rgba.length / 4) * 3);
+  stream.set(preamble, 0);
+  let to = preamble.length;
   for (let at = 0; at < rgba.length; at += 4) {
-    out.code(rgba[at + 1]!);
-    out.code(rgba[at]!);
-    out.code(rgba[at + 2]!);
+    stream[to] = REVERSED[rgba[at + 1]!]!;
+    stream[to + 1] = REVERSED[rgba[at]!]!;
+    stream[to + 2] = REVERSED[rgba[at + 2]!]!;
+    to += 3;
   }
-  return riff(out.finish());
+  return riff(stream);
 }
+
+/** Each byte with its bits in the other order. */
+const REVERSED = Uint8Array.from({ length: 256 }, (_, value) => {
+  let reversed = 0;
+  for (let bit = 0; bit < 8; bit += 1) reversed |= ((value >>> bit) & 1) << (7 - bit);
+  return reversed;
+});
 
 function riff(stream: Uint8Array): Uint8Array {
   const padded = stream.length + (stream.length % 2);
@@ -160,22 +171,14 @@ export function decodeFixtureWebp(bytes: Uint8Array): Uint8Array {
   if (stream.length * 8 < PREAMBLE_BITS + width * height * 24) {
     throw new Error('the fixture WebP is shorter than the size its header states');
   }
-  let bit = PREAMBLE_BITS;
-  const symbol = (): number => {
-    let value = 0;
-    for (let index = 0; index < 8; index += 1) {
-      value = (value << 1) | ((stream[bit >>> 3]! >>> (bit & 7)) & 1);
-      bit += 1;
-    }
-    return value;
-  };
+  let from = PREAMBLE_BITS / 8;
   const rgba = new Uint8Array(width * height * 4);
   for (let at = 0; at < rgba.length; at += 4) {
-    const green = symbol();
-    rgba[at] = symbol();
-    rgba[at + 1] = green;
-    rgba[at + 2] = symbol();
+    rgba[at + 1] = REVERSED[stream[from]!]!;
+    rgba[at] = REVERSED[stream[from + 1]!]!;
+    rgba[at + 2] = REVERSED[stream[from + 2]!]!;
     rgba[at + 3] = 255;
+    from += 3;
   }
   return rgba;
 }
