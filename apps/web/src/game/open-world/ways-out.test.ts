@@ -177,7 +177,8 @@ describe('the ways out of the junctions in view — #3051', () => {
     const first = junction.ways.filter((way) => way.edge.id !== junction.taken);
     // The grid's first crossroads is 140 m ahead: two ways not taken there.
     expect(first).toHaveLength(2);
-    const seed = sceneryAnchor(road.view.profile)?.seed;
+    // #3065: and the ride's elevation range, as the road's own view has it.
+    const { seed, band } = sceneryAnchor(road.view.profile) ?? {};
     for (const way of first) {
       // The view the choice gives, sample for sample.
       const { road: chosen } = grid();
@@ -194,10 +195,17 @@ describe('the ways out of the junctions in view — #3051', () => {
       expect(out.profile.positions.slice(0, count)).toEqual(swapped.positions.slice(0, count));
     }
     for (const out of ways) {
-      // The ride's seed and this view's origin, and the ride's frame; #3094:
-      // and the ride's held streets and the frame its places are read in.
+      // The ride's seed, elevation range and this view's origin, and the ride's
+      // frame; #3094: and the ride's held streets and the frame its places are
+      // read in.
       const { levels } = sceneryAnchor(road.view.profile) ?? {};
-      expect(sceneryAnchor(out.profile)).toEqual({ seed, origin: road.view.origin, levels, frame });
+      expect(sceneryAnchor(out.profile)).toEqual({
+        seed,
+        origin: road.view.origin,
+        levels,
+        frame,
+        band,
+      });
       expect(sceneryAnchor(out.profile)?.levels).toBe(levels);
       expect(corridorOrigin(out.profile)).toBe(frame);
     }

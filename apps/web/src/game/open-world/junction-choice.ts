@@ -15,7 +15,10 @@
  * choice is final {@link JUNCTION_LOCK_METRES} before the junction (D-1.5,
  * ADR 0087 D-6.2), and after that a press for it does nothing. A U-turn press
  * turns the rider round at any time (D-1.6); a dead end turns them round by
- * itself (D-1.7), which the rolling route does on its own.
+ * itself (D-1.7), which the rolling route does on its own. Each of those, and
+ * a left, straight or right pressed with no junction near, stands as a notice
+ * for {@link TURN_NOTICE_SECONDS} (#3058), which the HUD shows and says; and a
+ * second U-turn press while the first one's notice stands does nothing.
  *
  * ## The pending choice is the rolling route's tail
  *
@@ -138,19 +141,61 @@ export function pressesOfWays(shown: JunctionPrompt): ReadonlyMap<string, readon
   return presses;
 }
 
+/**
+ * How long a turn's notice stands, in seconds of the ride: **2 s** — #3058's
+ * choice, the time the camera takes to swing round after a U-turn, so the
+ * words stand for as long as the picture is turning. For the owner on the
+ * tablet.
+ */
+export const TURN_NOTICE_SECONDS = 2;
+
+/**
+ * What the ride says about a press, or a turn the road made, that is not a
+ * junction's prompt — #3058:
+ *
+ * - `turning-round`: a U-turn press turned the rider round. While it stands,
+ *   another U-turn press does nothing, so a double press is one U-turn and
+ *   not a U-turn and its undoing.
+ * - `dead-end`: the road ended and turned the rider round by itself (D-1.7).
+ * - `no-junction`: left, straight or right was pressed with no junction
+ *   within {@link JUNCTION_PROMPT_METRES}, which chooses nothing.
+ */
+export type TurnNoticeKind = 'turning-round' | 'dead-end' | 'no-junction';
+
+/** A notice, and when it began on the ride's clock: a new `since` is a new notice to say. */
+export interface TurnNotice {
+  readonly kind: TurnNoticeKind;
+  readonly since: number;
+}
+
 /** An open-world ride's junction choice: `GameView` holds one for the ride (#3013). */
 export interface JunctionChoice {
   /** The prompt for the next junction, or `undefined` while none is within {@link JUNCTION_PROMPT_METRES}. */
   prompt(rider: number): JunctionPrompt | undefined;
   /** One press, from any input, with the rider at ride distance `rider`. */
   press(press: TurnPress, rider: number): void;
+  /**
+   * The notice standing with the rider at ride distance `rider`, for
+   * {@link TURN_NOTICE_SECONDS} after it began, or `undefined` (#3058). Read
+   * every frame: a rider who reaches a dead end's turn-round between two
+   * reads begins its notice.
+   */
+  notice(rider: number): TurnNotice | undefined;
 }
 
 /**
  * The junction choice for an open-world ride on `route`: `GameView`
  * constructs it when the ride starts, on its road's rolling route (#3013).
+ * `clock` is the ride's own, in seconds (`GameState.elapsed`), which stands
+ * still while the ride is paused, as the picture does (#3058).
  */
-export function createJunctionChoice(route: RollingRoute): JunctionChoice {
+export function createJunctionChoice(route: RollingRoute, clock: () => number): JunctionChoice {
+  let notice: TurnNotice | undefined;
+  /** The furthest the rider was read at, so a dead end's turn-round is passed once. */
+  let furthest = Number.NEGATIVE_INFINITY;
+  const standing = (): TurnNotice | undefined =>
+    notice !== undefined && clock() - notice.since < TURN_NOTICE_SECONDS ? notice : undefined;
+
   const prompt = (rider: number): JunctionPrompt | undefined => {
     // Only the next junction is ever prompted, and this runs every frame:
     // `nextJunctionAfter` builds that one and none of the others ahead (#2898).
@@ -171,15 +216,36 @@ export function createJunctionChoice(route: RollingRoute): JunctionChoice {
     prompt,
     press(press, rider) {
       if (press === 'u-turn') {
+        // A second press while the first stands is harmless (#3058): the
+        // rider is already turning round.
+        if (standing()?.kind === 'turning-round') return;
+        const before = route.uTurns;
         route.uTurn(rider);
+        if (route.uTurns !== before) notice = { kind: 'turning-round', since: clock() };
         return;
       }
       const shown = prompt(rider);
-      if (shown === undefined) return;
+      if (shown === undefined) {
+        // Nothing to choose yet: said, so the press is not lost in silence.
+        if (Number.isFinite(rider)) notice = { kind: 'no-junction', since: clock() };
+        return;
+      }
       const wanted = wayForPress(press, shown);
       // `choose` refuses a choice inside the lock itself, so a press can never
       // move the grade under the rider, whatever this module decides.
       route.choose(shown.distance, wanted, rider);
+    },
+    notice(rider) {
+      if (Number.isFinite(rider) && rider > furthest) {
+        const from = furthest;
+        furthest = rider;
+        // A dead end's turn-round passed since the last read (D-1.7).
+        const passed = route.legs.some(
+          (leg) => leg.kind === 'turn-round' && leg.start > from && leg.start <= rider,
+        );
+        if (passed) notice = { kind: 'dead-end', since: clock() };
+      }
+      return standing();
     },
   };
 }

@@ -144,7 +144,7 @@ function throwAt(
   for (let tick = 0; tick <= PARCEL_FLIGHT_TICKS; tick += 1) {
     now = stepDeliveryRide(now, {
       ticks: 1,
-      along: now.along + speed * DELIVERY_TICK_SECONDS,
+      along: now.rideAlong + speed * DELIVERY_TICK_SECONDS,
       speed,
     }).ride;
   }

@@ -16,6 +16,7 @@ import {
   junctionSpoken,
   lockLine,
   NO_JUNCTION_ANNOUNCED,
+  TURN_NOTICE_WORDS,
   wayWord,
   type JunctionAnnounced,
 } from './junction-text';
@@ -106,6 +107,29 @@ describe('what the region is told, and when (ADR 0088 D-3)', () => {
     step = frame(step.announced, choice.prompt(junction.distance + 1), false);
     expect(step.text).toBeUndefined();
     expect(step.announced).toEqual(NO_JUNCTION_ANNOUNCED);
+  });
+
+  it('says a turn notice once, before the junction’s own sentence, and with no junction prompted — #3058', () => {
+    const { choice, rider } = starRide([-90, 0, 90]);
+    const turning = { kind: 'turning-round', since: 4 } as const;
+    // With no junction prompted: said, once, however many frames it stands.
+    let step = junctionEvent(NO_JUNCTION_ANNOUNCED, undefined, turning);
+    expect(step.event?.text).toBe(TURN_NOTICE_WORDS['turning-round'].said);
+    let state = junctionSpoken(step.announced, step.event?.kind);
+    step = junctionEvent(state, undefined, turning);
+    expect(step.event).toBeUndefined();
+    // Not said this frame: owed, and still owed past a junction appearing,
+    // whose sentence comes the frame after it.
+    const early = { kind: 'no-junction', since: 9 } as const;
+    step = junctionEvent(step.announced, undefined, early);
+    expect(step.event?.text).toBe(TURN_NOTICE_WORDS['no-junction'].said);
+    step = junctionEvent(step.announced, choice.prompt(rider), early);
+    expect(step.event?.text).toBe(TURN_NOTICE_WORDS['no-junction'].said);
+    state = junctionSpoken(step.announced, step.event?.kind);
+    step = junctionEvent(state, choice.prompt(rider + 1), early);
+    expect(step.event?.text).toMatch(/^Junction ahead/);
+    state = junctionSpoken(step.announced, step.event?.kind);
+    expect(junctionEvent(state, choice.prompt(rider + 2), early).event).toBeUndefined();
   });
 
   it('says a junction is too close to choose when its prompt appears already locked (D-1.5)', () => {

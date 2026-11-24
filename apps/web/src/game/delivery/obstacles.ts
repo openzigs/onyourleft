@@ -14,14 +14,18 @@
  * nought, so stepping on a tick the rider did not ride would cost a point for
  * not moving.
  *
- * ## A crash costs points, and nothing else (ADR 0059 D-2 item 4)
+ * ## A crash costs points and stops the DRAWN rider, never the ride (ADR 0094)
  *
- * A {@link Crash} is a score delta and nothing more. It does not slow the
- * virtual rider: the grade the trainer gets is read at the rider's simulated
- * distance, so a slow-down would change when every later grade is written,
- * which is a game event changing what the trainer is sent. Nothing here
- * imports the simulation, the gradient driver or a trainer port, and
- * `delivery-cannot-reach-trainer.test.ts` (#1807) holds that.
+ * A {@link Crash} is a score delta and nothing more here. Since ADR 0094
+ * (#3021, superseding ADR 0059 D-2.4 for Delivery rounds) a crash also stops
+ * the drawn rider, who gets back on and catches up, but that is
+ * `ride-round.ts`' second distance (§"A crash stops the DRAWN rider"), never
+ * the simulation's: the grade the trainer gets is read at the rider's
+ * simulated distance, so a slow-down of THAT would change when every later
+ * grade is written, which is a game event changing what the trainer is sent
+ * (ADR 0059 D-2.1, unchanged). The rider is met here where they are drawn.
+ * Nothing here imports the simulation, the gradient driver or a trainer port,
+ * and `delivery-cannot-reach-trainer.test.ts` (#1807) holds that.
  *
  * ## Dodged by timing, because phase 0 has no steering
  *
@@ -202,8 +206,10 @@ export const AVOIDABLE_SLOWEST_METRES_PER_SECOND = 3;
 
 /**
  * The fast end of the speeds every obstacle must be avoidable within: 12 m/s, 43.2 km/h.
- *
- * @test-facing the other bound of `obstacles.test.ts`' sweep, as above
+ * The other bound of `obstacles.test.ts`' sweep, as above; since #3021 it also
+ * caps the speed a crash's payout draws the rider at (`ride-round.ts`
+ * §`payoutSpeed`, ADR 0094 D-4.3), so the payout never draws them faster than
+ * every hazard is proved avoidable at.
  */
 export const AVOIDABLE_FASTEST_METRES_PER_SECOND = 12;
 
