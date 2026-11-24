@@ -298,9 +298,14 @@ const tileKey = (tile: TileId): number => tile.y * TILES_AT_Z15 + tile.x;
 export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
   const { frame } = options;
   const schedule = options.schedule ?? ownTask;
+  // No `Worker` on the platform is a failure like any other: said once, then reduced detail here.
   const make =
     options.make ??
-    (typeof Worker === 'undefined' ? () => inlineTilePlanWorker(schedule) : realTilePlanWorker);
+    (typeof Worker === 'undefined'
+      ? (): TilePlanWorkerLike => {
+          throw new Error('no Worker');
+        }
+      : realTilePlanWorker);
   /** The blocks held, and which held block each decoded tile is in. */
   let held: ReadonlyMap<string, TileBlockFeatures> = new Map();
   const blockOfTile = new Map<number, string>();
@@ -363,10 +368,10 @@ export function createTilePlanner(options: TilePlannerOptions): TilePlanner {
       if (reply.kind === 'buildings') {
         buildings = mappedBuildingsOf(reply.plans);
         version += 1;
-        askBuildings();
-      } else {
-        fail();
       }
+      // A failed one leaves the tiles' planner alone: the buildings last
+      // planned stay drawn, and only a newer ask is planned, never this again.
+      askBuildings();
       return;
     }
     if (reply === null || reply === undefined || inFlight === undefined) return;

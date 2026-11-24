@@ -32,6 +32,8 @@ import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
+  CAMERA_LOOK_AHEAD_RATE,
+  CAMERA_LOOK_AHEAD_SETTLE_SECONDS,
   CAMERA_MAXIMUM_YAW_RATE,
   CAMERA_TARGET_AHEAD_METRES,
   CAMERA_YAW_SETTLE_SECONDS,
@@ -46,6 +48,7 @@ import {
   NEAR_PLANE_METRES,
   cameraRig,
   dampedHeading,
+  dampedLookAhead,
   turnedPose,
   horizontalSpread,
   projectToFrame,
@@ -766,5 +769,67 @@ describe('the camera’s heading is damped — #1994', () => {
     // the middle of the frame however the camera has turned.
     expect(rig.eye.x).toBeCloseTo(-0.6 * CAMERA_BEHIND_METRES, 9);
     expect(rig.eye.z).toBeCloseTo(-0.8 * CAMERA_BEHIND_METRES, 9);
+  });
+});
+
+describe('the camera’s look-ahead is damped — #3045', () => {
+  const step = (from: number, to: number, seconds: number, frames: number): number => {
+    let held = from;
+    for (let frame = 0; frame < frames; frame += 1) {
+      held = dampedLookAhead(held, to, seconds / frames);
+    }
+    return held;
+  };
+
+  it('takes the frame’s own on a ride’s first frame', () => {
+    expect(dampedLookAhead(undefined, 17, 0.016)).toBe(17);
+  });
+
+  it('never changes faster than the cap, and changes at it while far off', () => {
+    const dt = 1 / 60;
+    for (const [from, to] of [
+      [9, 23],
+      [23, 9],
+      [10, 10.5],
+      [25, 1],
+    ] as const) {
+      expect(Math.abs(dampedLookAhead(from, to, dt) - from)).toBeLessThanOrEqual(
+        CAMERA_LOOK_AHEAD_RATE * dt + 1e-9,
+      );
+    }
+    // Far off, the cap is what binds, exactly — both ways.
+    expect(dampedLookAhead(9, 23, dt)).toBeCloseTo(9 + CAMERA_LOOK_AHEAD_RATE * dt, 9);
+    expect(dampedLookAhead(23, 9, dt)).toBeCloseTo(23 - CAMERA_LOOK_AHEAD_RATE * dt, 9);
+  });
+
+  it('lands in the same place however many frames the same time is cut into', () => {
+    for (const seconds of [0.3, 0.9, 1.5]) {
+      const one = step(9, 23, seconds, 1);
+      for (const frames of [8, 60, 240]) {
+        expect(step(9, 23, seconds, frames)).toBeCloseTo(one, 9);
+      }
+    }
+  });
+
+  it('closes a small error exponentially, with the stated time constant, and settles', () => {
+    // 1 m is under the knee (15 m/s × 0.1 s = 1.5 m), so it is all exponential.
+    expect(25 - step(24, 25, CAMERA_LOOK_AHEAD_SETTLE_SECONDS, 30)).toBeCloseTo(Math.exp(-1), 9);
+    expect(step(9, 23, 5, 300)).toBeCloseTo(23, 9);
+  });
+
+  it('looks that far on, at the road’s height along the same slope', () => {
+    // A pose looking 20 m on, at a road 2 m below the road under the eye: the
+    // gaze falls 2 m over 24.5 m. Held at 8 m, the target is 8 m on and the
+    // road there is as far down that slope as 12.5 m of it reaches.
+    const pose = { ...poseOn(0), targetAheadMetres: 20, eyeRoadY: 10, targetRoadY: 8 };
+    const held = turnedPose(pose, { headingX: 0, headingZ: 1 }, 8);
+    expect(held.targetAheadMetres).toBe(8);
+    const wanted = CAMERA_BEHIND_METRES + 20;
+    const near = CAMERA_BEHIND_METRES + 8;
+    expect(held.targetRoadY).toBeCloseTo(10 - (2 * near) / wanted, 9);
+    // And without one, the pose's own, untouched.
+    const own = turnedPose(pose, { headingX: 0, headingZ: 1 });
+    expect(own.targetAheadMetres).toBe(20);
+    expect(own.targetRoadY).toBe(8);
   });
 });

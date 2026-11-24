@@ -135,6 +135,26 @@ export const VALLEY_WINDOW_METRES = 300;
  */
 export const VALLEY_DEPTH_METRES = 8;
 
+/**
+ * How far either side of a valley floor the road is looked along to tell a
+ * turnaround from a valley, in metres: **30** — #3064. Where the road that
+ * far before the floor and that far after it are nearer each other than
+ * that, the road turned back at the floor rather than crossing it.
+ *
+ * ⚠️ **Why a low point is not always a valley.** A route that turns back on
+ * itself — an open-world U-turn (`RollingRoute.uTurn`), whose road past the
+ * rider is the road they came along, ridden back, or the far end of an
+ * out-and-back — mirrors its profile about the turn. Turned on a descent, the
+ * turn is the lowest point for a kilometre each way, and was read as a
+ * valley floor: a stream, its banks and a bridge were put at the rider's
+ * feet where there is no water, and the scenery round the turn was moved for
+ * them. Measured on `rolling-testing`'s grid, a U-turn at 640 m on a descent
+ * put a crossing at 640 m. A road that crosses a valley goes on across it: its
+ * two ends are about twice this apart. A hairpin tighter than 15 m in radius
+ * at a valley floor is read as a turnaround, and its stream is not drawn.
+ */
+export const TURNAROUND_REACH_METRES = 30;
+
 /** The most elevation samples the valley and lake search reads, whatever the route's length. */
 export const WATERWAY_SAMPLE_LIMIT = 4_096;
 
@@ -2366,6 +2386,22 @@ function lowAround(elevation: Float64Array, reach: number): Float64Array {
   return low;
 }
 
+/**
+ * Whether the road turns back on itself at route distance `at`: the drawn
+ * road {@link TURNAROUND_REACH_METRES} before it and as far after it are
+ * nearer each other than that — #3064. On a point-to-point route, a point
+ * nearer an end than that is not judged, and does not turn back.
+ */
+function turnsBackAt(profile: RouteProfile, at: number): boolean {
+  const before = at - TURNAROUND_REACH_METRES;
+  const after = at + TURNAROUND_REACH_METRES;
+  if (!profile.loop && (before < 0 || after > profile.totalDistance)) return false;
+  const origin = corridorOrigin(profile);
+  const from = drawnRoadPosition(profile, origin, before);
+  const to = drawnRoadPosition(profile, origin, after);
+  return Math.hypot(to.x - from.x, to.z - from.z) < TURNAROUND_REACH_METRES;
+}
+
 function findWaterways(profile: RouteProfile, seed: number): Waterways {
   const total = profile.totalDistance;
   const count = Math.max(2, Math.min(WATERWAY_SAMPLE_LIMIT, Math.round(total / 10)));
@@ -2418,8 +2454,11 @@ function findWaterways(profile: RouteProfile, seed: number): Waterways {
     while (end + 1 < samples + (profile.loop ? index : 0) && at(end + 1) === here) {
       end += 1;
     }
+    const floor = ((index + end) / 2) * spacing;
+    // #3064: a low point the road turns back at is not a valley it crosses.
+    if (turnsBackAt(profile, floor)) continue;
     crossings.push({
-      distance: distanceOnRoute(profile, ((index + end) / 2) * spacing),
+      distance: distanceOnRoute(profile, floor),
       waterElevation: here - BRIDGE_CLEARANCE_METRES,
     });
   }
