@@ -4598,12 +4598,23 @@ function GameScreen({
                 // #2903: and its streets, drawn to the fog as road, with a
                 // stub at each junction (`open-world/street-corridor.ts`).
                 worldCorridor: road.follower.streets(),
+                // #3107: read a slice a frame, and handed on as last read
+                // until a reading is whole, so no view or block change
+                // reads every street inside one frame.
+                streetScans: road.follower.streetScans,
+                // #3105: and its tiles' real water, as the land mask the scene
+                // draws the rivers, lakes and coast from and bridges the road
+                // over (`open-world/water-mask.ts`); none away from water.
+                landClass: road.follower.water(),
                 // #3052: and where each named street's name is painted on it.
                 streetNames: road.follower.streetNames(),
                 mappedBranches: road.follower.branchesAhead(simulation.state.ride.distance),
                 // #3051: and the ways out the route does not take, so the
                 // scenery stands along each before a choice and after it.
                 waysOut: road.follower.waysOut(simulation.state.ride.distance),
+                // #3123: and each junction where the route turns off the road
+                // it came along, so that road is drawn on past it once passed.
+                turnedOff: road.follower.turnedOff(simulation.state.ride.distance),
                 // #3095: and every junction it has seen, where a village's
                 // street is cut so the piece past one is laid alike on each way.
                 junctionsSeen: road.follower.junctionsSeen(),
@@ -5709,13 +5720,32 @@ function GameScreen({
         // circuit, in every world, the stylised one included, because the
         // road itself is the circuit's line drawn from OpenStreetMap. A ride
         // on the stylised world on the rider's own route still shows none.
-        attribution={rideHasCorridor || rideOnBuiltIn ? OSM_ATTRIBUTION : undefined}
+        // ⚠️ Since #3106 a THIRD key: an open-world ride, in every world. Its
+        // road, its side streets, its buildings and its plan view are all
+        // drawn from OpenStreetMap, and until #3106 it showed no credit at all.
+        attribution={
+          rideHasCorridor || rideOnBuiltIn || rideRoad?.follower !== undefined
+            ? OSM_ATTRIBUTION
+            : undefined
+        }
         // #2290: and the plan view draws that corridor as a street map around
         // the rider — on exactly the rides that carry the corridor's credit
         // (a stylised-world ride on a circuit carries the credit and draws no
         // map), from the corridor fixed at the press, so it makes no request
         // during the ride.
-        corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
+        // #3106: and on an open-world ride, the streets the ride holds round
+        // the rider (`open-world/street-corridor.ts`): the ones the scene
+        // draws and the junction prompt offers, so the rider can see the
+        // network on the map too. Read from the blocks already held, so this
+        // asks for nothing either; a new corridor when a block is read or let
+        // go, which the map follows.
+        corridor={
+          rideRoad?.follower === undefined
+            ? rideHasCorridor
+              ? worldCorridorRef.current
+              : undefined
+            : rideRoad.follower.streets()
+        }
         onPause={() => {
           // #2656: the ride's pause, not only the game's. The simulation stops
           // with the loop, and the recording with the controller's own

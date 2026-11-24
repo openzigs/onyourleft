@@ -565,6 +565,9 @@ const footwayLines = new WeakMap<
   { profile: RouteProfile; land: LandClassMask; rule: boolean; lines: readonly WalkLine[] }[]
 >();
 
+/** No walks: a corridor with no mapped footway. */
+const NO_FOOTWAY_WALKS: readonly WalkLine[] = [];
+
 /**
  * The corridor's mapped footways as lines people walk — #1551's network,
  * bounded as `footways.ts` bounds it, each line's density and kind from the
@@ -581,6 +584,9 @@ export function footwayWalks(
   land: LandClassMask,
   rule = true,
 ): readonly WalkLine[] {
+  // #3107: no mapped footway, no walk — and no reading of the corridor's
+  // junctions to break one over (`footway-surfaces.ts` §`footwaysInView`).
+  if (corridor.paths.length === 0) return NO_FOOTWAY_WALKS;
   const cached = footwayLines.get(corridor) ?? [];
   const found = cached.find(
     (entry) => entry.profile === profile && entry.land === land && entry.rule === rule,
