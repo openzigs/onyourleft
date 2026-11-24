@@ -348,7 +348,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       ),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
-  const elevation = profileReading(props.state, props.profile, props.lapSeconds);
+  // #3056: and no share of the view on an open-ended ride.
+  const elevation = profileReading(props.state, props.profile, props.lapSeconds, props.openEnded);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
   const noticeShown = hasContent(props.notices) || props.standingNotice?.expanded === true;
   const lap = noticeShown ? undefined : props.lapNotice;

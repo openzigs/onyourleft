@@ -236,7 +236,7 @@ function recordingWorker(fails?: (message: TilePlanRequest) => 'error' | 'failed
           worker.onerror?.({});
           return;
         }
-        if (failure === 'failed' && message.kind === 'plan') {
+        if (failure === 'failed' && (message.kind === 'plan' || message.kind === 'buildings')) {
           worker.onmessage?.({ data: { kind: 'failed', id: message.id } });
           return;
         }
@@ -375,6 +375,41 @@ describe('the tile planner — #2901', () => {
     planner.stop();
   });
 
+  it('keeps the worker and its tiles when one buildings ask fails — #2902', async () => {
+    const { worker, asked, terminated } = recordingWorker((message) =>
+      message.kind === 'buildings' ? 'failed' : undefined,
+    );
+    const planner = createTilePlanner({
+      frame: FIXTURE_FRAME,
+      make: () => worker,
+      schedule: (run) => {
+        queueMicrotask(run);
+      },
+    });
+    planner.hold(blocks());
+    planner.want([TILE]);
+    await settle();
+    expect(planner.plan(TILE)).toBeDefined();
+    const at = (north: number) => ({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_FRAME.latitude + north),
+        degreesLongitude(FIXTURE_FRAME.longitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+    const profile = routeProfile([at(0), at(0.003)]);
+    planner.planBuildings({ profile, x: MID_X, z: MID_Z });
+    await settle();
+    await settle();
+    expect(terminated()).toBe(false);
+    expect(planner.inWorker).toBe(true);
+    expect(planner.plan(TILE)).toBeDefined();
+    expect(planner.buildings).toBeUndefined();
+    // The failed ask is not asked again.
+    expect(asked.filter((message) => message.kind === 'buildings')).toHaveLength(1);
+    planner.stop();
+  });
+
   it('plans on here when no worker can be made', async () => {
     const lines: string[] = [];
     const planner = createTilePlanner({
@@ -392,6 +427,46 @@ describe('the tile planner — #2901', () => {
     await settle();
     expect(lines).toStrictEqual([describeTilePlanFailure()]);
     expect(planner.plan(TILE)?.detail).toBe('reduced');
+    planner.stop();
+  });
+
+  it('plans on here at reduced detail, and says so once, where the platform has no Worker', async () => {
+    vi.stubGlobal('Worker', undefined);
+    const lines: string[] = [];
+    const planner = createTilePlanner({
+      frame: FIXTURE_FRAME,
+      log: (line) => lines.push(line),
+      schedule: (run) => {
+        queueMicrotask(run);
+      },
+    });
+    planner.hold(blocks());
+    planner.want([TILE]);
+    await settle();
+    expect(lines).toStrictEqual([describeTilePlanFailure()]);
+    expect(planner.inWorker).toBe(false);
+    expect(planner.plan(TILE)?.detail).toBe('reduced');
+    planner.stop();
+  });
+
+  it('sends the worker a block held after it started, and plans that block’s tile there', async () => {
+    const SOUTH: TileId = { z: 15, x: TILE.x, y: TILE.y + 1 };
+    const later: TileBlockFeatures = {
+      buildings: [],
+      landUse: [],
+      tiles: [{ tile: SOUTH, streets: [] }],
+    };
+    const { worker, asked } = recordingWorker();
+    const planner = createTilePlanner({ frame: FIXTURE_FRAME, make: () => worker });
+    const first = blocks();
+    planner.hold(first);
+    planner.hold(new Map([...first, ['c', later]]));
+    expect(asked).toContainEqual({ kind: 'hold', block: 'c', features: later });
+    planner.want([SOUTH]);
+    await settle();
+    // Planned in the worker, at full detail: the worker held the block.
+    expect(planner.inWorker).toBe(true);
+    expect(planner.plan(SOUTH)?.detail).toBe('full');
     planner.stop();
   });
 

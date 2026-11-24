@@ -118,7 +118,13 @@ import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
-import { dampedHeading, turnedPose, type GroundHeading } from './camera';
+import {
+  dampedHeading,
+  dampedLookAhead,
+  pivotDuringUTurn,
+  turnedPose,
+  type GroundHeading,
+} from './camera';
 import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
@@ -293,6 +299,7 @@ import {
   type PageBox,
 } from './off-screen-marker';
 import {
+  drawnRiderDistance,
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
@@ -3048,8 +3055,11 @@ function GameScreen({
         openRoad === undefined ? { profile, origin: 0 } : { ...openRoad.view, follower: openRoad };
       setRideRoad(rideRoadRef.current);
       // #3013: and its junctions, chosen on the same rolling route.
+      // #3058: on the ride's own clock, which a pause stops, as it stops the picture.
       junctionRef.current =
-        openRoad === undefined ? undefined : createJunctionChoice(openRoad.route);
+        openRoad === undefined
+          ? undefined
+          : createJunctionChoice(openRoad.route, () => simulation.state.elapsed);
       junctionSaidRef.current = NO_JUNCTION_ANNOUNCED;
       // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
       // rider switched it on and consented — never in a room, a race or a
@@ -3549,6 +3559,17 @@ function GameScreen({
     // the first, which takes the road's own: a resumed ride starts afresh.
     let cameraHeading: GroundHeading | undefined;
     let cameraHeadingAt = 0;
+    // #3045: and how far ahead it looked, which `camera.ts` §`dampedLookAhead`
+    // eases toward the frame's, so a turnaround's exit does not pitch the view.
+    let cameraLookAhead: number | undefined;
+    // #3066: how far the point the camera turned about stood from the drawn
+    // rider on the frame before, and, from a U-turn pressed in an open-world
+    // ride until `camera.ts` §`pivotDuringUTurn` hands that point back, how
+    // far it stood at the press and the ride distance it was pressed at.
+    let cameraPivotOff: { readonly x: number; readonly z: number } | undefined;
+    let cameraUTurn:
+      | { readonly held: { readonly x: number; readonly z: number }; readonly at: number }
+      | undefined;
     // #2456: how fast the steered rider is DRAWN moving across the road, and
     // when it was last drawn, which `lane-change-lean.ts` §`dampedSway` follows
     // the steering toward by the wall clock, as the camera's heading is: a
@@ -3757,6 +3778,12 @@ function GameScreen({
         // ADR 0087 D-6: a U-turn's grade is walked at 1 % a second; nothing
         // else here changes a grade the rider was sent. `gradient.ts` §`follow`.
         gradientRef.current?.follow(followed.profile, followed.origin, followed.turned);
+        if (followed.turned) {
+          cameraUTurn = {
+            held: cameraPivotOff ?? { x: 0, z: 0 },
+            at: simulation.state.ride.distance,
+          };
+        }
         slopesRef.current = slopesOf(followed.profile);
         setRideRoad(rideRoadRef.current);
       }
@@ -4191,9 +4218,11 @@ function GameScreen({
       // #3013: an open-world ride's next junction — its ways as the prompt
       // appears, each change of choice, the lock — owed until said
       // (`hud/junction-text.ts`). Nothing on every other ride.
+      // #3058: and what a turn press, or a dead end, says beside it.
       const junctionOffered = junctionEvent(
         junctionSaidRef.current,
         junctionRef.current?.prompt(simulation.state.ride.distance),
+        junctionRef.current?.notice(simulation.state.ride.distance),
       );
       junctionSaidRef.current = junctionOffered.announced;
       if (junctionOffered.event !== undefined) events.push(junctionOffered.event);
@@ -4445,6 +4474,19 @@ function GameScreen({
           roomRacing === undefined
             ? undefined
             : roomLapRaceDrawing(roomRacing, roomLapNow, drawn.riderDistance);
+        // #3021, ADR 0094 D-6.1: a round's rider is drawn, and the camera
+        // follows them, at the ride distance plus the round's crash offset —
+        // held by a crash and paid out after, blended between the same two
+        // steps as `drawnAt`. The drawing only: the grade above was read at the
+        // odometer, and nothing that feeds the simulation reads this.
+        const roundDrawnDistance =
+          deliveryRef.current === undefined
+            ? drawn.riderDistance
+            : drawnRiderDistance(
+                deliveryRef.current,
+                drawn.riderDistance,
+                simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
+              );
         // #1853: where the round has steered the rider, the place the
         // obstacles meet them; none on a ride with no round, or in a room (DL9).
         const deliverySteered = steeredLateralFor(deliveryRef.current?.steer, {
@@ -4474,7 +4516,7 @@ function GameScreen({
           state: onRoad,
           riderDistance: alongView(
             road,
-            raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? drawn.riderDistance,
+            raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? roundDrawnDistance,
           ),
           // #2989: an open-world ride's path, a new view's line eased in from
           // the one drawn before it, so a junction choice moves neither the
@@ -4593,7 +4635,7 @@ function GameScreen({
               ? undefined
               : eyeLateralBesideParkedCars(
                   deliveryRef.current.obstacles,
-                  drawn.riderDistance,
+                  roundDrawnDistance,
                   deliverySteered,
                   deliveryRef.current.obstacleState,
                 ),
@@ -4629,8 +4671,37 @@ function GameScreen({
           (at - cameraHeadingAt) / 1000,
           reducedMotionRef.current,
         );
+        // #3045: the look-ahead by the same clock, and the same rule for a
+        // length: coming out of a turnaround it grows over a second rather
+        // than in two frames. `GameView.test.tsx` reads it back off the frames.
+        cameraLookAhead = dampedLookAhead(
+          cameraLookAhead,
+          unturned.camera.targetAheadMetres,
+          (at - cameraHeadingAt) / 1000,
+        );
         cameraHeadingAt = at;
-        const scene = { ...unturned, camera: turnedPose(unturned.camera, cameraHeading) };
+        // #3066: across a pressed U-turn, the camera turns about the drawn
+        // rider, who moves smoothly through it, rather than about a point
+        // that swung behind them with the road at the press.
+        const riderMarker = unturned.markers.find((marker) => marker.kind === 'rider');
+        const carried =
+          cameraUTurn === undefined || riderMarker === undefined
+            ? unturned.camera
+            : pivotDuringUTurn(
+                unturned.camera,
+                riderMarker,
+                cameraUTurn.held,
+                drawn.riderDistance - cameraUTurn.at,
+              );
+        if (carried === unturned.camera) cameraUTurn = undefined;
+        cameraPivotOff =
+          riderMarker === undefined
+            ? undefined
+            : { x: carried.x - riderMarker.x, z: carried.z - riderMarker.z };
+        const scene = {
+          ...unturned,
+          camera: turnedPose(carried, cameraHeading, cameraLookAhead),
+        };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
         // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
@@ -5389,6 +5460,8 @@ function GameScreen({
             ? undefined
             : {
                 prompt: choice.prompt(state.ride.distance),
+                // #3058: a U-turn, a dead end or a press with no junction near.
+                notice: choice.notice(state.ride.distance),
                 press: (turn: TurnPress) => {
                   choice.press(
                     turn,

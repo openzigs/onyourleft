@@ -102,7 +102,7 @@ function firstSeen(ride: DeliveryRide, speed: number): ReadonlyMap<number, numbe
   while (now.along < last + 5) {
     now = stepDeliveryRide(now, {
       ticks: 1,
-      along: now.along + speed * DELIVERY_TICK_SECONDS,
+      along: now.rideAlong + speed * DELIVERY_TICK_SECONDS,
       speed,
     }).ride;
     // The frame's corridor runs from the rider: the whole road here, so only the reveal hides a marker.

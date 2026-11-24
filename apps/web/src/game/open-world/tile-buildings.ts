@@ -23,7 +23,10 @@
  *   until #2899 gives it real heights, so its buildings are planned against
  *   the view they are drawn beside. A new view is planned again, here, off the
  *   main thread; the plans drawn meanwhile stay where they are, because the
- *   frame does not move.
+ *   frame does not move, and look as they did, because every choice a plan
+ *   makes is seeded from the frame (`scatter.ts` §`frameSeed`), never from the
+ *   view, whose own seed changes with it. Only its base and eaves follow the
+ *   view: they stand on the ground the scene draws, which is the view's.
  * - **With no land class and no urban class**: the scene of an open-world
  *   ride has neither, so a plan's ground is the ground the scene draws.
  *
@@ -38,6 +41,7 @@ import type { Box, BuildingFeature, CorridorFrame, LandUseFeature } from '@onyou
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, type FootprintPlan } from '../footprint-buildings';
 import { NO_LAND_CLASS } from '../land-class';
 import { MAPPED_BUILDING_REACH_METRES } from '../realistic-budget';
+import { frameSeed } from '../scatter';
 import { anchorScenery, sceneryAnchor } from '../scenery-anchor';
 import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
@@ -154,6 +158,8 @@ export function planBuildingsNear(
     request.profile,
     corridor.origin,
     FOOTPRINT_MAX_VERTICES,
+    undefined,
+    { seed: frameSeed(frame) },
   ).plans;
 }
 

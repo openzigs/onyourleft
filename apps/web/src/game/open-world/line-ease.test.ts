@@ -213,6 +213,15 @@ describe('a new view’s drawn path eased in from the one drawn before — #2989
     expect(easedLine(held, after.line, after.origin, 1)).toBe(after.line);
   });
 
+  it('draws the new view’s U-turns while it eases — #3045', () => {
+    // The new view's own list: its samples are the ones blended, and a U-turn
+    // is drawn from them (`drawn-line.ts` §`uTurned`). A marked one stands in
+    // for a dead end turned round at, which this junction has none of.
+    const marked: DrawnLine = { ...after.line, uTurns: [indexOf(junction)] };
+    const half = easedLine(heldLine(before.line, before.origin), marked, after.origin, 0.5);
+    expect(half.uTurns).toEqual([indexOf(junction)]);
+  });
+
   it('eases by a smoothstep of the distance ridden, from nought to one over the ease', () => {
     expect(easeWeight(-1)).toBe(0);
     expect(easeWeight(0)).toBe(0);

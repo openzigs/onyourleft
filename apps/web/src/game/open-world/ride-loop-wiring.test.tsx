@@ -312,11 +312,15 @@ describe('an open-world ride past its first view — #2982', () => {
     }
     // The HUD reads the same view at the same distance: part of the way along
     // it, never the end of it, which is where the ride distance on a view a
-    // kilometre and more behind would put it.
-    const strip = queryAll(mounted.container, '[aria-label^="Route profile"]')[0];
-    const percent = Number(/(\d+) per cent/.exec(strip?.getAttribute('aria-label') ?? '')?.[1]);
-    expect(percent).toBeGreaterThan(10);
-    expect(percent).toBeLessThan(90);
+    // kilometre and more behind would put it. Read off the marker, which is
+    // drawn at that place: the words state no share of a view (#3056).
+    const marker = queryAll(mounted.container, '[data-testid="oyl-hud-position"]')[0];
+    const along = Number(marker?.getAttribute('data-position'));
+    expect(along).toBeGreaterThan(0.1);
+    expect(along).toBeLessThan(0.9);
+    expect(
+      queryAll(mounted.container, '.oyl-hud__profile-svg')[0]?.getAttribute('aria-label'),
+    ).toBe('Road profile, open road');
     // And each grade the trainer was asked for is the road's at the rider on
     // the view drawn that frame or the one before: the same road, read at the
     // same distance, past the first view as before it.
