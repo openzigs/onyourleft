@@ -35,6 +35,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
+import { NIGHTLY } from './nightly';
 import type { OpenWorldHarness, OpenWorldRideReport } from './open-world-harness';
 
 declare global {
@@ -61,13 +62,16 @@ async function open(page: Page, query = ''): Promise<void> {
   expect(await page.evaluate(() => window.__oylOpenWorld?.errors ?? [])).toEqual([]);
 }
 
-/** Rides on to `metres` from the start, on frames a second of ride time apart. */
-function ride(page: Page, metres: number): Promise<OpenWorldRideReport> {
-  return page.evaluate(async (to) => {
-    const harness = window.__oylOpenWorld;
-    if (harness === undefined) throw new Error('no harness');
-    return harness.ride(to, 1_000);
-  }, metres);
+/** Rides on to `metres` from the start, on frames `frameMs` of ride time apart: a second, unless told. */
+function ride(page: Page, metres: number, frameMs = 1_000): Promise<OpenWorldRideReport> {
+  return page.evaluate(
+    async ([to, each]) => {
+      const harness = window.__oylOpenWorld;
+      if (harness === undefined) throw new Error('no harness');
+      return harness.ride(to, each);
+    },
+    [metres, frameMs] as const,
+  );
 }
 
 test('#3107 an open-world ride through new areas links no program after its first frame', async ({
@@ -124,43 +128,52 @@ test('#3107 an open-world ride through new areas links no program after its firs
   expect(await page.evaluate(() => window.__oylOpenWorld?.shaderErrorsChecked())).toBe(false);
 });
 
-test('#3107 a realistic open-world ride links no program when its first mapped buildings arrive', async ({
-  page,
-}) => {
-  // A smaller stage still: the realistic world is slow to draw without a GPU.
-  await page.setViewportSize({ width: 320, height: 200 });
-  await open(page, '?world=realistic');
-  const warmUp = await page.evaluate(async () => window.__oylOpenWorld?.start());
-  expect(warmUp).toBeGreaterThan(10);
+/**
+ * The realistic world is a rung a rider chooses, and its load is slow with no
+ * GPU: on the required runner this case took 44 s of its 60, so it runs
+ * nightly (`nightly.ts`), as the other realistic loads do.
+ */
+test.describe('an open-world ride in the realistic world — #3107', { tag: NIGHTLY }, () => {
+  test('#3107 a realistic open-world ride links no program when its first mapped buildings arrive', async ({
+    page,
+  }) => {
+    // A smaller stage still: the realistic world is slow to draw without a GPU.
+    await page.setViewportSize({ width: 320, height: 200 });
+    await open(page, '?world=realistic');
+    const warmUp = await page.evaluate(async () => window.__oylOpenWorld?.start());
+    expect(warmUp).toBeGreaterThan(10);
 
-  // To 150 m: no building is drawn, the first house standing 700 m on, past
-  // what the ride's first plan reaches (600 m) and what the belt draws to
-  // (400 m). To 650 m: houses are planned, come into reach and are drawn.
-  const stretches = [await ride(page, 150), await ride(page, 650)];
-  const [before, among] = stretches as [OpenWorldRideReport, OpenWorldRideReport];
-  const facts = stretches
-    .map(
-      (stretch) =>
-        `to ${stretch.ridden.toFixed(0)} m in the ${stretch.world} world: ` +
-        `${String(stretch.frames)} frames, ${String(stretch.buildings)} buildings at the most, ` +
-        `${String(stretch.links)} links at ${JSON.stringify(stretch.linkedAt)}, ` +
-        `new programs ${JSON.stringify(stretch.newPrograms)}`,
-    )
-    .join('; ');
-  console.log(`#3107 realistic: the warm-up linked ${String(warmUp)} programs; ${facts}`);
+    // To 150 m: no building is drawn, the first house standing 700 m on, past
+    // what the ride's first plan reaches (600 m) and what the belt draws to
+    // (400 m). To 650 m: houses are planned, come into reach and are drawn.
+    // On frames 3 s apart: a link is counted whatever the frame's length, and
+    // the realistic world takes a tenth of a second a frame to draw with no GPU.
+    const stretches = [await ride(page, 150, 3_000), await ride(page, 650, 3_000)];
+    const [before, among] = stretches as [OpenWorldRideReport, OpenWorldRideReport];
+    const facts = stretches
+      .map(
+        (stretch) =>
+          `to ${stretch.ridden.toFixed(0)} m in the ${stretch.world} world: ` +
+          `${String(stretch.frames)} frames, ${String(stretch.buildings)} buildings at the most, ` +
+          `${String(stretch.links)} links at ${JSON.stringify(stretch.linkedAt)}, ` +
+          `new programs ${JSON.stringify(stretch.newPrograms)}`,
+      )
+      .join('; ');
+    console.log(`#3107 realistic: the warm-up linked ${String(warmUp)} programs; ${facts}`);
 
-  // The ride was the realistic world's, with no building drawn in its first
-  // stretch and houses drawn in its second: they arrived mid-ride.
-  for (const stretch of stretches) {
-    expect(stretch.world).toBe('realistic');
-    expect(stretch.frames).toBeGreaterThan(10);
-  }
-  expect(before.buildings, 'no building is in reach of the start').toBe(0);
-  expect(among.buildings, 'houses were drawn').toBeGreaterThan(0);
+    // The ride was the realistic world's, with no building drawn in its first
+    // stretch and houses drawn in its second: they arrived mid-ride.
+    for (const stretch of stretches) {
+      expect(stretch.world).toBe('realistic');
+      expect(stretch.frames).toBeGreaterThan(0);
+    }
+    expect(before.buildings, 'no building is in reach of the start').toBe(0);
+    expect(among.buildings, 'houses were drawn').toBeGreaterThan(0);
 
-  // And no program was built inside a frame of the ride.
-  for (const stretch of stretches) {
-    expect(stretch.links, facts).toBe(0);
-    expect(stretch.newPrograms, facts).toEqual([]);
-  }
+    // And no program was built inside a frame of the ride.
+    for (const stretch of stretches) {
+      expect(stretch.links, facts).toBe(0);
+      expect(stretch.newPrograms, facts).toEqual([]);
+    }
+  });
 });
