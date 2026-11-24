@@ -11610,6 +11610,325 @@
         }
       }
     },
+    "/v1/routing/heights": {
+      "post": {
+        "operationId": "heightsAlongLine",
+        "summary": "The heights along a line (#2008). `shape` is a list of 2 to 15000 `{ latitude, longitude }` points in degrees, already laid out `interval` metres apart, and `interval` that spacing. Answers `samples`, one per point, as [metres along, metres high] pairs with point k at k × `interval`, high `null` where the terrain data has a hole, and `source`, the elevation dataset and its grid in metres, for a route to record. **Nothing is kept.** Reached only sealed, on every instance. `routing_off`, `routing_failed` and `rate_limited` as for a route.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "interval": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "shape",
+                  "interval"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "resolutionMetres": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "resolutionMetres"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "samples": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "samples"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/routing_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `routing_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/routing/route": {
+      "post": {
+        "operationId": "routeBetweenWaypoints",
+        "summary": "Roads between your waypoints, by bicycle (#2008). `waypoints` is a list of 2 to 25 `{ latitude, longitude }` points in degrees; `preferences` names a `bicycle` (road, hybrid, city, cross, mountain), `hills` (avoid, neutral, seek) and `surface` (paved-only, prefer-paved, any). Answers one leg per adjacent pair: its shape as [latitude, longitude] pairs, its length in metres, and its surface (paved, unpaved, or unknown when the map does not say). **Nothing is kept**: not the waypoints, the shape or the answer, in a table, a file or a log. Reached only sealed, on every instance: one that holds no keys answers `sealed_required`. `routing_off` when the operator has set up no routing engine; `no_route` when no road joins two waypoints; `unpaved_endpoint` when `paved-only` strands a waypoint on a bad surface; `routing_failed` when the engine gave no usable answer; `rate_limited` past your allowance a minute.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "waypoints": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "preferences": {
+                    "type": "object",
+                    "properties": {
+                      "bicycle": {
+                        "type": "string",
+                        "enum": [
+                          "road",
+                          "hybrid",
+                          "city",
+                          "cross",
+                          "mountain"
+                        ]
+                      },
+                      "hills": {
+                        "type": "string",
+                        "enum": [
+                          "avoid",
+                          "neutral",
+                          "seek"
+                        ]
+                      },
+                      "surface": {
+                        "type": "string",
+                        "enum": [
+                          "paved-only",
+                          "prefer-paved",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "bicycle",
+                      "hills",
+                      "surface"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "waypoints",
+                  "preferences"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "legs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "shape": {
+                            "type": "array",
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "distanceMetres": {
+                            "type": "number"
+                          },
+                          "surface": {
+                            "type": "string",
+                            "enum": [
+                              "paved",
+                              "unpaved",
+                              "unknown"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "shape",
+                          "distanceMetres",
+                          "surface"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "legs"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "422": {
+            "description": "One of `no_route`, `unpaved_endpoint`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/routing_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `routing_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sealed": {
       "post": {
         "operationId": "sealedRequest",
@@ -13901,15 +14220,19 @@
                   "record_not_your_key",
                   "record_key_revoked",
                   "model_without_pictures",
+                  "no_route",
+                  "unpaved_endpoint",
                   "rate_limited",
                   "too_many",
                   "internal",
                   "picture_model_failed",
                   "tactics_invalid",
                   "tactics_failed",
+                  "routing_failed",
                   "unavailable",
                   "analysis_off",
-                  "pictures_off"
+                  "pictures_off",
+                  "routing_off"
                 ]
               },
               "message": {
@@ -14469,6 +14792,26 @@
           }
         }
       },
+      "no_route": {
+        "description": "`no_route` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "unpaved_endpoint": {
+        "description": "`unpaved_endpoint` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
         "content": {
@@ -14529,6 +14872,16 @@
           }
         }
       },
+      "routing_failed": {
+        "description": "`routing_failed` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "unavailable": {
         "description": "`unavailable` (503), in the one error shape.",
         "content": {
@@ -14551,6 +14904,16 @@
       },
       "pictures_off": {
         "description": "`pictures_off` (503), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "routing_off": {
+        "description": "`routing_off` (503), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

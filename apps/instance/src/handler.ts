@@ -21,6 +21,7 @@ import { OPERATE_NEEDS_KEYS, type Operate } from './operate/operate.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
+import type { InstanceRouting } from './routing/routing.ts';
 import type { Setup } from './setup/setup.ts';
 import { isSetupPath } from './setup/setup-routes.ts';
 import type { Sync } from './sync/sync.ts';
@@ -185,6 +186,11 @@ export interface HandlerOptions {
    * them answers `unavailable`.
    */
   readonly segments?: Segments;
+  /**
+   * The route planner's roads and heights (#2008). Absent, every route that
+   * needs them answers `unavailable`.
+   */
+  readonly routing?: InstanceRouting;
   /**
    * The owner's Operate area (#2602). Absent, every route that needs it
    * answers `unavailable`.
@@ -409,6 +415,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.segments === true && options.segments === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.routing === true && options.routing === undefined) {
+      return errorResponse('unavailable');
+    }
     if (matched.operate === true && options.operate === undefined) {
       return errorResponse('unavailable');
     }
@@ -466,6 +475,7 @@ export function createHandler(options: HandlerOptions): Handler {
       tactics: options.tactics,
       sidePose: options.sidePose,
       segments: options.segments,
+      routing: options.routing,
       operate: options.operate,
       instanceKeys: options.instanceKeys,
       probes: options.probes,

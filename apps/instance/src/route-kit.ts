@@ -18,6 +18,7 @@ import type { Operate } from './operate/operate.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
+import type { InstanceRouting } from './routing/routing.ts';
 import type { Sync } from './sync/sync.ts';
 import { JSON_TYPE, type ErrorCode, type FieldProblem } from './errors.ts';
 
@@ -173,6 +174,8 @@ export interface RouteContext {
   readonly sidePose: SidePose | undefined;
   /** Published segments and their boards (#68). Present for every route that declares `segments`. */
   readonly segments: Segments | undefined;
+  /** The route planner's roads and heights (#2008). Present for every route that declares `routing`. */
+  readonly routing: InstanceRouting | undefined;
   /** The owner's Operate area (#2602). Present for every route that declares `operate`. */
   readonly operate: Operate | undefined;
   /**
@@ -286,6 +289,11 @@ export interface Route {
    * handed none answers `unavailable` without calling it.
    */
   readonly segments?: true;
+  /**
+   * The route needs the route planner's routing (#2008). An instance handed
+   * none answers `unavailable` without calling it.
+   */
+  readonly routing?: true;
   /**
    * The route needs the owner's Operate area (#2602). An instance handed none
    * answers `unavailable` without calling it.
