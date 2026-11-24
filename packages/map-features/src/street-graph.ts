@@ -171,6 +171,11 @@ export interface StreetGraphEdge {
   readonly metres: number;
   /** `x0, z0, …` from `from`'s position to `to`'s, in local metres. */
   readonly line: Float32Array;
+  /**
+   * #3052, ADR 0096: the street's mapped name, when the tiles were decoded
+   * with names (`decodeTile`'s `streetNames`) and the street carries one.
+   */
+  readonly name?: string;
 }
 
 /**
@@ -298,6 +303,7 @@ export class StreetGraph {
         isLink: edge.street.isLink,
         metres: edge.metres,
         line: edge.line,
+        ...(edge.street.name === undefined ? {} : { name: edge.street.name }),
       });
     });
     const seamEnds = built.seamEnds.map((seam) => {

@@ -105,8 +105,9 @@ export const PITCH_SPORTS = [
  * own. A value the lists do not name — another string, a number where a
  * string belongs, a string where a boolean belongs — is read as the field's
  * default (`NO_ROAD_FIELDS`) and counted in `DecodedTile.roadValuesDefaulted`,
- * never thrown and never refused. `name`, `ref`, `network*`, `shield_text*`,
- * `service` and `min_zoom` stay unread (D-2).
+ * never thrown and never refused. `ref`, `network*`, `shield_text*`,
+ * `service` and `min_zoom` stay unread (D-2), and so does `name` unless the
+ * caller asks for it (#3052, ADR 0096: {@link KEY_NAME}).
  */
 
 /** A street's one-way flag: an OSM `oneway` string. */
@@ -115,6 +116,23 @@ export const KEY_ONEWAY = 'oneway';
 export const KEY_ACCESS = 'access';
 /** Whether a street is a `*_link`: a boolean. */
 export const KEY_IS_LINK = 'is_link';
+
+/**
+ * A street's name — #3052, ADR 0096: the OSM `name`, read in `roads` alone,
+ * only when the caller asks for it (`decodeTile`'s `streetNames`), and kept
+ * only on a street. No `name:*`, `ref` or any other label key is read.
+ */
+export const KEY_NAME = 'name';
+
+/**
+ * The most characters of a street's name that are kept: **48**. A longer
+ * value is cut at the last whole word inside it; no mapped US street name is
+ * near it, and a hostile tile's megabyte string costs one bounded read.
+ */
+export const STREET_NAME_MAX_CHARS = 48;
+
+/** The most UTF-8 bytes of a name value that are read at all: four a character of {@link STREET_NAME_MAX_CHARS}, and a margin. */
+export const STREET_NAME_MAX_BYTES = 256;
 
 /**
  * The `oneway` strings the decoder recognises (ADR 0091 D-2): `yes` runs along

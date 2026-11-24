@@ -40,9 +40,11 @@
  *   sample's (`terrain.ts` §`corridorOrigin`), and a trim moves it, so the
  *   held path is put in the new frame through the same projection: an x
  *   scaled by the ratio of the two origins' cosines, and both shifted.
- * - **Not after a U-turn.** A U-turn changes the road under the rider at once
- *   (ADR 0088 D-1.6), so the held path is on a road the rider has left. The
- *   new line is drawn at once, and the camera's own damping turns the view.
+ * - **After a U-turn too** (#3066). A U-turn changes the road under the rider
+ *   at once (ADR 0088 D-1.6), but the road up to the rider is the road they
+ *   came along, so the held path is blended there as after a choice; past
+ *   the turn no held sample is in the same place, and the new line is drawn.
+ *   The half-turn between the two is `road.ts` §`pressedTurn`'s.
  *
  * ⚠️ **A drawing, never physics** — `drawn-line.ts`' rule, unchanged. The
  * odometer, the grade and the recording never read this.
@@ -108,6 +110,31 @@ export function heldLine(line: DrawnLine, origin: number): HeldLine {
   };
 }
 
+/**
+ * How a point in `from`'s local metres is put in `to`'s: its x scaled by
+ * `scaleX`, then both moved by `shift` — #2989, and #3066 for a pressed
+ * U-turn's start.
+ *
+ * `terrain.ts` §`localGroundPosition` is `x = (lon₀ − lon) · K`,
+ * `z = (lat − lat₀) · M`, with `K` the metres in a degree of longitude at the
+ * origin's latitude. So from `from` to `to` a point moves by where `from`'s
+ * origin is in `to`, and its x is scaled by `K' / K`; both read off the
+ * projection itself.
+ */
+export function reframing(
+  from: CorridorOrigin,
+  to: CorridorOrigin,
+): { readonly shift: { readonly x: number; readonly z: number }; readonly scaleX: number } {
+  const place = (latitude: number, longitude: number): GeographicPosition =>
+    geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
+  const degreeAcross = (at: CorridorOrigin): number =>
+    localGroundPosition(at, place(at.latitude, at.longitude - 1)).x;
+  return {
+    shift: localGroundPosition(to, place(from.latitude, from.longitude)),
+    scaleX: degreeAcross(to) / degreeAcross(from),
+  };
+}
+
 /** How far into the ease a rider `ridden` metres past its start is: a smoothstep from 0 to 1. */
 export function easeWeight(ridden: number): number {
   const share = Math.max(0, Math.min(1, ridden / LINE_EASE_METRES));
@@ -128,18 +155,7 @@ export function easedLine(
   if (!(weight < 1)) return to;
   const profile = to.profile;
   const count = to.xs.length;
-  const frame = corridorOrigin(profile);
-  // `terrain.ts` §`localGroundPosition` is `x = (lon₀ − lon) · K`,
-  // `z = (lat − lat₀) · M`, with `K` the metres in a degree of longitude at
-  // the origin's latitude. So from `held.frame` to `frame` a point moves by
-  // where the held frame's origin is in the new one, and its x is scaled by
-  // `K' / K`; both read off the projection itself.
-  const place = (latitude: number, longitude: number): GeographicPosition =>
-    geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
-  const shift = localGroundPosition(frame, place(held.frame.latitude, held.frame.longitude));
-  const degreeAcross = (at: CorridorOrigin): number =>
-    localGroundPosition(at, place(at.latitude, at.longitude - 1)).x;
-  const scaleX = degreeAcross(frame) / degreeAcross(held.frame);
+  const { shift, scaleX } = reframing(held.frame, corridorOrigin(profile));
   const xs = new Float64Array(to.xs);
   const zs = new Float64Array(to.zs);
   const bendXs = new Float64Array(to.bendXs);
@@ -173,5 +189,6 @@ export function easedLine(
     blend(offsets, held.offsets[from] as number);
     blend(curvatures, held.curvatures[from] as number);
   }
-  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts };
+  // #3045: the new view's U-turns, drawn from these blended samples.
+  return { profile, offsets, curvatures, xs, zs, bendXs, bendZs, shifts, uTurns: to.uTurns };
 }

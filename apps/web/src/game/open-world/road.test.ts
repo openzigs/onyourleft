@@ -26,6 +26,8 @@ import {
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
 import { drawnLine, drawnLineAt } from '../drawn-line';
+import { routeSeed } from '../scatter';
+import { elevationBand, sceneryAnchor } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
 import { LINE_EASE_METRES } from './line-ease';
@@ -112,6 +114,53 @@ describe('the open-world road past its first view — #2982', () => {
     // The next change is not a U-turn.
     const later = road.view.profile.totalDistance - OPEN_WORLD_REACH_FLOOR_METRES + 130;
     expect(road.follow(later)?.turned).toBe(false);
+  });
+
+  it('keys every view it hands on to the ride: the first view seed and range, and its own origin — #3055, #3065', () => {
+    const road = grid();
+    const seed = routeSeed(road.view.profile);
+    const band = elevationBand(road.view.profile);
+    // #3094: and one set of held streets and one frame for every view's places.
+    const first = sceneryAnchor(road.view.profile);
+    const { levels, frame } = first ?? {};
+    expect(levels).toBeDefined();
+    expect(frame).toEqual(corridorOrigin(road.view.profile));
+    expect(first).toEqual({ seed, origin: 0, levels, frame, band });
+    let views = 0;
+    for (let rider = 0; rider <= 6_000; rider += 50) {
+      if (rider === 3_000) road.route.uTurn(rider);
+      const next = road.follow(rider);
+      if (next === undefined) continue;
+      views += 1;
+      const anchor = sceneryAnchor(next.profile);
+      expect(anchor, `at ${rider} m`).toEqual({ seed, origin: next.origin, levels, frame, band });
+      expect(anchor?.levels, `at ${rider} m`).toBe(levels);
+      // The view's own seed is not the ride's: it is the view that changed.
+      expect(routeSeed(next.profile)).not.toBe(seed);
+    }
+    expect(views).toBeGreaterThan(3);
+    expect(road.view.origin).toBeGreaterThan(0);
+  });
+
+  it('keys each view before the session plans buildings against it — #3094', () => {
+    // The session plans the buildings round the rider against `route.view()`
+    // from the `ahead` hook, and hands the worker what that view is keyed on.
+    const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+    const route = new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
+    const seen: { readonly origin: number; readonly anchor: unknown }[] = [];
+    const road = new OpenWorldRoad(route, {
+      ahead: (each) => seen.push({ origin: each.origin, anchor: sceneryAnchor(each.view()) }),
+    });
+    const seed = sceneryAnchor(road.view.profile)?.seed;
+    let changes = 0;
+    for (let rider = 0; rider <= 6_000; rider += 50) {
+      if (rider === 3_000) road.route.uTurn(rider);
+      if (road.follow(rider) !== undefined) changes += 1;
+    }
+    expect(changes).toBeGreaterThan(3);
+    for (const { origin, anchor } of seen) {
+      expect(anchor).toMatchObject({ seed, origin });
+    }
   });
 
   it('advances nothing for a rider distance that is not a finite number', () => {
@@ -216,10 +265,79 @@ describe('the path an open-world ride is drawn along — #2989', () => {
     expect(road.drawnPath(ride + LINE_EASE_METRES + 1)).toBe(own);
   });
 
-  it('draws a U-turn’s line at once: the road under the rider changed', () => {
-    const road = riddenTo(900);
-    road.route.uTurn(900);
-    expect(road.follow(900)?.turned).toBe(true);
-    expect(road.drawnPath(900)).toBe(drawnLine(road.view.profile));
+  it('draws a U-turn from where the rider was drawn, round a half-turn onto the road back — #3066', () => {
+    // Before #3066 a U-turn's line was drawn at once, a sample behind the
+    // rider on the view's own U-turn: the drawn rider stepped metres.
+    // At 1 505 m the U-turn's view also starts 490 m further on, in a new frame.
+    const ride = 1_505;
+    const road = riddenTo(1_500);
+    road.drawnPath(ride);
+    const frame = corridorOrigin(road.view.profile);
+    const before = placeOn(road, ride, frame);
+    road.route.uTurn(ride);
+    expect(road.follow(ride)?.turned).toBe(true);
+    const path = road.drawnPath(ride);
+    // On the frame of the press: where it was drawn the frame before.
+    const after = placeOn(road, ride, frame);
+    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeLessThan(1e-3);
+    // And half a metre on, into the half-turn, half a metre from there: it
+    // starts in the new view's frame, on the old path's heading.
+    const into = placeOn(road, ride + 0.5, frame);
+    expect(Math.abs(Math.hypot(into.x - before.x, into.z - before.z) - 0.5)).toBeLessThan(0.1);
+    // Round a half-turn of its own, and not the view's U-turn at the press.
+    const own = drawnLine(road.view.profile);
+    const turnSample = Math.ceil(ride / 10) - road.view.origin / 10;
+    expect(own.uTurns).toContain(turnSample);
+    expect(path.uTurns).not.toContain(turnSample);
+    expect(path.pressed?.pieces.length).toBe(2);
+    // And ridden past it, on the view's own line.
+    const end = path.pressed?.pieces[1]?.to as number;
+    const out = road.view.origin + end + 30;
+    const drawnThere = drawnLineAt(road.drawnPath(out), alongView(road.view, out));
+    const ownThere = drawnLineAt(own, alongView(road.view, out));
+    expect(Math.hypot(drawnThere.x - ownThere.x, drawnThere.z - ownThere.z)).toBeLessThan(1e-6);
   });
+
+  /**
+   * The most the pressed half-turn's path may bend the drawn rider's move,
+   * per metre of odometer squared: **0.28**. A frame's change of move is this
+   * times the odometer a frame covers, squared, so it holds
+   * `u-turn-press.test.tsx` §`JUMP_METRES`' 0.05 m at 30 fps up to 45 km/h.
+   * Drawn with `drawn-line.ts` §`halfTurnAt`'s half-circle for both pieces,
+   * as the press was first drawn, every press here was over it (#3066's
+   * review).
+   */
+  const MOST_PULL_PER_SQUARE_METRE = 0.28;
+
+  it.each([70, 100, 120, 1_501, 1_502, 1_503, 1_504, 1_505, 1_506, 1_507, 1_508, 1_509, 1_905])(
+    'pressed at %i m, draws the U-turn at least 3 m across, with no pull on the drawn rider past the bound — #3066',
+    (ride) => {
+      const road = riddenTo(Math.floor(ride / 10) * 10);
+      road.drawnPath(ride);
+      road.route.uTurn(ride);
+      expect(road.follow(ride)?.turned).toBe(true);
+      const path = road.drawnPath(ride);
+      const pieces = path.pressed?.pieces ?? [];
+      expect(pieces.length).toBe(2);
+      // A half-turn, not a spin on the spot: the rider is 1.75 m off the
+      // middle here, so the road has room for 3 m across on one side. Pressed
+      // on a sample (70, 100, 120 m) the new line runs back within a metre of
+      // them on the near side, which was all the room it was first given.
+      const turn = pieces[0] as NonNullable<(typeof pieces)[number]>;
+      const across = Math.hypot(turn.end.x - turn.start.x, turn.end.z - turn.start.z);
+      expect(across, `${String(ride)} m`).toBeGreaterThanOrEqual(3 - 1e-9);
+      const from = (pieces[0]?.from as number) + 0.5;
+      const to = pieces[pieces.length - 1]?.to as number;
+      const step = 0.25;
+      let most = 0;
+      for (let at = from; at + step <= to; at += step) {
+        const a = drawnLineAt(path, at - step);
+        const b = drawnLineAt(path, at);
+        const c = drawnLineAt(path, at + step);
+        const pull = Math.hypot(c.x - 2 * b.x + a.x, c.z - 2 * b.z + a.z) / step ** 2;
+        most = Math.max(most, pull);
+      }
+      expect(most, JSON.stringify({ from, to, pieces })).toBeLessThan(MOST_PULL_PER_SQUARE_METRE);
+    },
+  );
 });

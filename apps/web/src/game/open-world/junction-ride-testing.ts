@@ -34,7 +34,7 @@ export function newRide() {
   const start = graph.edgesFrom('0,3').find((edge) => edge.id === 'h0,3');
   if (start === undefined) throw new Error('no start street');
   const route = new RollingRoute(graph, start);
-  return { route, choice: createJunctionChoice(route) };
+  return { route, choice: createJunctionChoice(route, () => 0) };
 }
 
 /**
@@ -106,9 +106,15 @@ export function rideTrace(
  * A ride east along a 500 m street to one junction, whose ways on leave it at
  * `turns` (degrees, negative left), each 400 m long and of road class 1 unless
  * `roadClasses` says otherwise. The rider is 200 m short of it, inside the
- * prompt and before the lock.
+ * prompt and before the lock. #3052: each way named `names[i]`, and the
+ * street ridden in `approachName`, where given; unnamed otherwise.
  */
-export function starRide(turns: readonly number[], roadClasses: readonly number[] = []) {
+export function starRide(
+  turns: readonly number[],
+  roadClasses: readonly number[] = [],
+  names: readonly (string | undefined)[] = [],
+  approachName?: string,
+) {
   const approach = {
     id: 'in',
     from: 'start',
@@ -121,6 +127,7 @@ export function starRide(turns: readonly number[], roadClasses: readonly number[
       roughGround,
     ),
     roadClass: 1,
+    ...(approachName === undefined ? {} : { name: approachName }),
   };
   const ways = turns.map((turn, index) => {
     const radians = (turn * Math.PI) / 180;
@@ -136,10 +143,11 @@ export function starRide(turns: readonly number[], roadClasses: readonly number[
         roughGround,
       ),
       roadClass: roadClasses[index] ?? 1,
+      ...(names[index] === undefined ? {} : { name: names[index] }),
     };
   });
   const route = new RollingRoute(graphOf([approach, ...ways]), approach);
-  const choice = createJunctionChoice(route);
+  const choice = createJunctionChoice(route, () => 0);
   const junction = route.junctionsAfter(0)[0];
   if (junction === undefined || Math.abs(junction.distance - 500) > 10) {
     throw new Error('no junction at the end of the 500 m street');
