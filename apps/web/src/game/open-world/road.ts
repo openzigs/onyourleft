@@ -120,7 +120,7 @@ import type { MappedBuildings } from '../mapped-buildings';
 import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
 import { routeSeed } from '../scatter';
-import { anchorScenery } from '../scenery-anchor';
+import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
 import { StreetLevels } from '../street-levels';
@@ -478,6 +478,8 @@ export class OpenWorldRoad {
   readonly #hooks: OpenWorldRoadHooks;
   /** The ride's scenery seed, from its first view (#3055). */
   readonly #seed: number;
+  /** The ride's elevation range, from its first view (#3065). */
+  readonly #band: ElevationBand;
   /**
    * #3094: the streets the ride holds, which every view's ground is levelled
    * beside — one for the ride, so every view reads the same ground.
@@ -511,6 +513,7 @@ export class OpenWorldRoad {
     this.#levels = new StreetLevels(() => hooks.streets?.()?.streets);
     const profile = this.#framed(route.view());
     this.#seed = routeSeed(profile);
+    this.#band = elevationBand(profile);
     this.#placeFrame = corridorOrigin(profile);
     this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
@@ -785,7 +788,7 @@ export class OpenWorldRoad {
     return this.#view;
   }
 
-  /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
+  /** `view`, its scenery keyed on the ride's seed, distance (#3055) and elevation range (#3065). */
   #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
     this.#keyed(view.profile, view.origin);
     return view;
@@ -798,6 +801,7 @@ export class OpenWorldRoad {
       origin,
       levels: this.#levels,
       frame: this.#placeFrame,
+      band: this.#band,
     });
   }
 

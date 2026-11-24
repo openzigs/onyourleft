@@ -1884,6 +1884,12 @@ function heightIn(
  *
  * Seeded and stateless like the rest of this file, and lifted by the route's
  * own elevation range so that a mountain route's horizon is a mountain one.
+ *
+ * ⚠️ **On an open-world view, by the ride's range, not the view's** — #3065.
+ * A view's range moves as road is added ahead and dropped behind, and the
+ * hills, standing on its middle, rose or sank at a view change. Their middle
+ * is the ride's (`scenery-anchor.ts` §`SceneryAnchor.band`). Their foot and
+ * the skirt's base are still the view's, under the ground in view.
  */
 export function horizonRelief(
   profile: RouteProfile,
@@ -1898,8 +1904,11 @@ export function horizonRelief(
     lowest = Math.min(lowest, each);
     highest = Math.max(highest, each);
   }
+  const band = sceneryAnchor(profile)?.band;
   const low = lowest - origin.elevation;
-  const middle = (lowest + highest) / 2 - origin.elevation;
+  const middle =
+    (band === undefined ? (lowest + highest) / 2 : (band.lowest + band.highest) / 2) -
+    origin.elevation;
   const [rise, most] = HORIZON_RISE_METRES;
   const tops = new Float32Array(HORIZON_SEGMENTS);
   // Eight coarse hills round the ring, smoothed, with a little of each
