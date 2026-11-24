@@ -5263,9 +5263,25 @@ interface PartyWall {
   readonly from: number;
   readonly to: number;
   readonly neighbourEaves: number;
+  /**
+   * #3132: whether the two are a terrace (#1635: both in {@link TERRACE_CLASSES},
+   * or mapped as a `terrace`), whose roofs are flat behind a parapet. A flush
+   * wall shared outside a terrace ({@link PARTY_WALL_FLUSH_METRES}) is drawn
+   * once as a party wall is, and changes nothing else about either building.
+   */
+  readonly terrace: boolean;
 }
 
 const NO_PARTY_WALLS: readonly PartyWall[] = [];
+
+/**
+ * Two edges of buildings that are not a terrace are one wall within this
+ * perpendicular offset: **1 cm** — #3132. Such a wall was drawn by both: their
+ * parapets on one plane, one of them facing the way the other's wall does,
+ * flickered (z-fighting) on the owner's tablet ride of 2026-11-24. Flush, so a
+ * gap between two detached buildings, however narrow, keeps both its walls.
+ */
+export const PARTY_WALL_FLUSH_METRES = 0.01;
 
 /** The side of a cell of {@link partyWallsOf}' edge grid: **16 m**. */
 const PARTY_CELL_METRES = 16;
@@ -5282,7 +5298,11 @@ const PARTY_CELL_METRES = 16;
  */
 function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, PartyWall[]> {
   const walls = new Map<number, PartyWall[]>();
-  // Every edge of every terraced candidate, as `owner, edge` pairs, in the cells its box reaches.
+  // #1791: a footprint mapped as a terrace is a candidate whatever its class.
+  const terraced = (each: Measured): boolean =>
+    TERRACE_CLASSES.has(each.urbanClass) || each.family === 'terrace';
+  // Every edge of every building, as `owner, edge` pairs, in the cells its box reaches.
+  // #3132: in any class: outside a terrace a wall is shared only where it is flush.
   const owners: number[] = [];
   const edges: number[] = [];
   const cells = new Map<number, number[]>();
@@ -5304,8 +5324,6 @@ function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, 
   };
   for (const [owner, each] of measured.entries()) {
     if (each === undefined || each.part) continue;
-    // #1791: a footprint mapped as a terrace is a candidate whatever its class.
-    if (!TERRACE_CLASSES.has(each.urbanClass) && each.family !== 'terrace') continue;
     const n = each.drawn.length / 2;
     for (let edge = 0; edge < n; edge += 1) {
       const index = owners.length;
@@ -5347,14 +5365,26 @@ function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, 
         seen.add(other);
         const b = measured[otherOwner] as Measured;
         const otherEdge = edges[other] as number;
-        const shared = sharedStretch(px, pz, dx, dz, length, b.drawn, otherEdge, sinLimit);
+        const terrace = terraced(a) && terraced(b);
+        const shared = sharedStretch(
+          px,
+          pz,
+          dx,
+          dz,
+          length,
+          b.drawn,
+          otherEdge,
+          sinLimit,
+          terrace ? PARTY_WALL_OFFSET_METRES : PARTY_WALL_FLUSH_METRES,
+        );
         if (shared === undefined) continue;
-        add(owner, { edge, from: shared[0], to: shared[1], neighbourEaves: b.eaves });
+        add(owner, { edge, from: shared[0], to: shared[1], neighbourEaves: b.eaves, terrace });
         add(otherOwner, {
           edge: otherEdge,
           from: shared[2],
           to: shared[3],
           neighbourEaves: a.eaves,
+          terrace,
         });
       }
     });
@@ -5377,6 +5407,8 @@ function sharedStretch(
   ring: Ring,
   edge: number,
   sinLimit: number,
+  /** #3132: how far off this edge's line the other may stand. */
+  offset: number = PARTY_WALL_OFFSET_METRES,
 ): readonly [number, number, number, number] | undefined {
   const n = ring.length / 2;
   const j = (edge + 1) % n;
@@ -5401,7 +5433,7 @@ function sharedStretch(
     const z = qz + (rz - qz) * t - pz;
     return Math.abs(x * dz - z * dx);
   };
-  if (offsetAt(from) > PARTY_WALL_OFFSET_METRES || offsetAt(to) > PARTY_WALL_OFFSET_METRES) {
+  if (offsetAt(from) > offset || offsetAt(to) > offset) {
     return undefined;
   }
   // The same stretch along the other edge.
@@ -7511,7 +7543,8 @@ function planFootprint(
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
   // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
-  const terraced = party.length > 0;
+  // #3132: a terrace's party wall; a flush wall shared outside one changes no roof.
+  const terraced = party.some((wall) => wall.terrace);
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
   const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
@@ -7622,9 +7655,10 @@ function planFootprint(
           // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
           (buildingArchetype === 'garden-apartment' &&
             wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
+  // #3132: and a flush wall shared outside a terrace, drawn once as a party wall is.
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
-  } = terraced ? { party: { walls: party, eaves } } : {};
+  } = party.length > 0 ? { party: { walls: party, eaves } } : {};
   const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house

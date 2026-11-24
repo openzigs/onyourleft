@@ -1523,7 +1523,7 @@ function scenery(
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
   // #2428: and none across a mapped building's driveway, a roadside hedge
-  // row the likeliest.
+  // row the likeliest. #3132: and no building on a mapped building's plot.
   const built = clearOfDriveways(
     clearOfSideRoads(structures, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
     input.mappedBuildings,
