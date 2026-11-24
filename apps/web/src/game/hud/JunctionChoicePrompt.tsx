@@ -10,7 +10,11 @@
  * direction** (its turn from the rider's heading: the owner's ruling of
  * 2026-11-20 recorded on ADR 0088), its name, whether it is the default and
  * whether it is chosen, and the key and pad button that take it. Over them,
- * how far until the choice is final, or that it is (D-1.5). A U-turn button
+ * how far until the choice is final, or that it is (D-1.5), or, for a junction
+ * whose choice was final before it was ever offered, that it was too close to
+ * the last junction to choose (#3129). Its title says which junction it is
+ * for when that is not the next one: "At the 2nd junction" (#3129,
+ * `junction-choice.ts` §`promptedJunction`). A U-turn button
  * stands with the ride controls for the whole ride (D-1.6, D-3):
  * {@link JunctionUTurn}.
  *
@@ -102,7 +106,8 @@ import {
   JUNCTION_CHOSEN_WORD,
   JUNCTION_DEFAULT_WORD,
   JUNCTION_LOCKED_LINE,
-  JUNCTION_PROMPT_TITLE,
+  JUNCTION_TOO_CLOSE_LINE,
+  junctionTitle,
   lockLine,
   TURN_NOTICE_WORDS,
   U_TURN_NAME,
@@ -325,10 +330,14 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
       <div role="group" aria-labelledby={TITLE_ID} className="oyl-hud__junction-prompt">
         <div className="oyl-hud__junction-head">
           <p id={TITLE_ID} className="oyl-hud__junction-title">
-            {JUNCTION_PROMPT_TITLE}
+            {junctionTitle(shown)}
           </p>
           <p className="oyl-hud__junction-lock">
-            {shown.locked ? JUNCTION_LOCKED_LINE : lockLine(shown.toLock, units)}
+            {shown.locked
+              ? shown.tooClose
+                ? JUNCTION_TOO_CLOSE_LINE
+                : JUNCTION_LOCKED_LINE
+              : lockLine(shown.toLock, units)}
           </p>
         </div>
         <ul className="oyl-hud__junction-ways">

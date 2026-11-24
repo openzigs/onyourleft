@@ -10,6 +10,27 @@ export { corridorTileCover, tileBox } from './cover';
 export { decodeTile } from './decode';
 export { clipToBox, rasterise, simplifyRing, triangulate } from './geometry';
 export {
+  checkHeightTileBytes,
+  describeHeightTileRefusal,
+  HEIGHT_DECODE_TIMEOUT_MS,
+  HEIGHT_TILE_PIXELS,
+  HEIGHT_TILE_ZOOM,
+  heightPixelMetres,
+  heightTileFromRgba,
+  heightTilePosition,
+  isHeightTileRefusal,
+  losslessWebpSize,
+  MAX_HEIGHT_METRES,
+  MIN_HEIGHT_METRES,
+  NO_DATA_REACH_PIXELS,
+  sampleHeightTile,
+  terrariumMetres,
+  type HeightTile,
+  type HeightTileId,
+  type HeightTilePosition,
+  type HeightTileRefusal,
+} from './height-tile';
+export {
   DEFAULT_DECODE_LIMITS,
   MAX_FEATURES_PER_LAYER,
   MAX_PLACES_PER_TILE,

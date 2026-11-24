@@ -36,6 +36,7 @@ import {
 } from '../routing/history';
 import { EMPTY_PLANNER_VIEW } from '../routing/map-edit';
 import { RIDING_DEFAULTS } from '../routing/preferences';
+import type { RouteHeights } from '../terrain/heights';
 import {
   canReturnToStart,
   distanceAt,
@@ -107,6 +108,11 @@ export interface RouteEditorViewProps {
   readonly selected?: string | undefined;
   /** A routing service, or `undefined` where there is none: every stretch is then freehand. */
   readonly provider?: RoutingProvider | undefined;
+  /**
+   * Heights from the terrain archive (#2013), or `undefined` for a build with
+   * none: with no routing service, a redrawn stretch takes the ground's heights.
+   */
+  readonly heights?: RouteHeights | undefined;
   /** How to get a map engine, or `undefined` where there is none. */
   readonly map?: (() => Promise<MapPort>) | undefined;
   /** Where the basemap is, or `undefined` for a build configured with none. */
@@ -125,6 +131,12 @@ export const NO_ROUTE_TO_EDIT_TEXT =
 export const FREEHAND_STRETCH_TEXT =
   'Nothing can work out the roads until a routing service is configured, so a redrawn stretch ' +
   'is a straight line, and its heights are an even slope between its two ends.';
+
+/** What it says with no routing service and the terrain archive to read (#2013). */
+export const FREEHAND_TERRAIN_STRETCH_TEXT =
+  'Nothing can work out the roads until a routing service is configured, so a redrawn stretch ' +
+  'is a straight line. Its heights are the ground’s under that line, or an even slope between ' +
+  'its two ends when the terrain cannot be read.';
 
 /** What the editor's map does, in one line. */
 export const EDITOR_MAP_TEXT =
@@ -154,6 +166,7 @@ export function RouteEditorView({
   routes,
   selected,
   provider,
+  heights,
   map,
   basemap,
   preferences: tilePreferences,
@@ -196,6 +209,7 @@ export function RouteEditorView({
       route={loaded.route}
       routes={routes}
       provider={provider}
+      heights={heights}
       map={map}
       basemap={basemap}
       tilePreferences={tilePreferences}
@@ -208,6 +222,7 @@ interface EditorProps {
   readonly route: RouteRecord;
   readonly routes: RoutePort;
   readonly provider: RoutingProvider | undefined;
+  readonly heights: RouteHeights | undefined;
   readonly map: (() => Promise<MapPort>) | undefined;
   readonly basemap: BasemapConfig | undefined;
   readonly tilePreferences: PreferenceStorage | undefined;
@@ -218,6 +233,7 @@ function Editor({
   route,
   routes,
   provider,
+  heights,
   map,
   basemap,
   tilePreferences,
@@ -303,7 +319,7 @@ function Editor({
   const withStretch = async (
     from: GeographicPosition,
     to: GeographicPosition,
-    heights: Parameters<typeof drawStretch>[2],
+    ends: Parameters<typeof drawStretch>[2],
     then: (stretch: Stretch) => { readonly next: EditedLine; readonly text: string },
   ): Promise<void> => {
     // A press while a stretch is being drawn is refused: the button says it is busy.
@@ -311,7 +327,7 @@ function Editor({
     const startedOn = line;
     setBusy(true);
     try {
-      const stretch = await drawStretch(from, to, heights, provider, RIDING_DEFAULTS);
+      const stretch = await drawStretch(from, to, ends, provider, RIDING_DEFAULTS, heights);
       // Reverse, Out and back, Undo and Redo stay pressable while a stretch is
       // being drawn, so the line may have moved on: say so, rather than
       // announcing a redraw that was thrown away.
@@ -542,7 +558,7 @@ function Editor({
       <h2>{route.name}</h2>
       {provider === undefined ? (
         <StatusMessage tone="warning" label="No routing service">
-          {FREEHAND_STRETCH_TEXT}
+          {heights === undefined ? FREEHAND_STRETCH_TEXT : FREEHAND_TERRAIN_STRETCH_TEXT}
         </StatusMessage>
       ) : null}
       <p>

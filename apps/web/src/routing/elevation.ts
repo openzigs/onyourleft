@@ -154,7 +154,11 @@ export function plannedShape(draft: RouteDraft): readonly GeographicPosition[] {
 }
 
 /**
- * Ask the engine for heights along a drawn route, and build its profile.
+ * Ask for heights along a drawn route, and build its profile.
+ *
+ * `provider` is whatever answers `heights`: a routing engine, or, with no
+ * engine and no instance, the terrain archive read in the app
+ * (`terrain/heights.ts`, #2013), which is asked at its own `interval`.
  *
  * @throws {RoutingError} from the provider. Unlike {@link resolveDraft} this
  * does **not** swallow it: a failed elevation lookup is one thing about the
@@ -163,7 +167,7 @@ export function plannedShape(draft: RouteDraft): readonly GeographicPosition[] {
  */
 export async function planElevation(
   draft: RouteDraft,
-  provider: RoutingProvider,
+  provider: Pick<RoutingProvider, 'heights'>,
   interval: Metres = metres(ELEVATION_INTERVAL_METRES),
 ): Promise<PlannedElevation | undefined> {
   const shape = plannedShape(draft);

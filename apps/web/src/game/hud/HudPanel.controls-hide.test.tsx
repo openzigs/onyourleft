@@ -424,7 +424,10 @@ describe('the ride controls hide until touched — #2600', () => {
 
     it('shows the chosen way alone once the choice is final, and then goes', async () => {
       const ride = starRide([-90, 0, 90]);
+      // Offered before it locked, so the line is the lock's, not too close (#3129).
+      ride.choice.prompt(ride.rider);
       const locked = ride.choice.prompt(ride.junction.distance - 50);
+
       expect(locked?.locked).toBe(true);
       await hud({ junction: { prompt: locked, press: () => undefined } });
       expect(ways().map((each) => each.dataset['oylWay'])).toEqual([locked?.chosen]);

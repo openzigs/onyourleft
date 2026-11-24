@@ -1391,6 +1391,34 @@ describe('the ride map’s tiles — the owner’s decision of 2026-09-25', () =
     theirs.unmount();
   });
 
+  it('says the switch governs a drawn route’s heights too, and names the terrain archive’s host — #2013', async () => {
+    const withTerrain = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={disk()}
+        basemap={PUBLISHED}
+        terrain={{ archiveUrl: 'https://heights.example.net/terrain.pmtiles' }}
+      />,
+    );
+    const copy = (withTerrain.container.querySelector('.oyl-map-tiles')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(copy).toContain(
+      'Drawing or redrawing a route also asks heights.example.net for the heights of the ground along it, in squares several kilometres across.',
+    );
+    withTerrain.unmount();
+
+    // A build that reads no heights does not say it does.
+    const without = await settings(disk(), PUBLISHED);
+    expect(without.container.querySelector('.oyl-map-tiles')?.textContent).not.toContain(
+      'heights of the ground',
+    );
+    without.unmount();
+  });
+
   it('offers no switch in a build with no map, and says it asks for nothing', async () => {
     const mounted = await settings(disk(), undefined);
     expect(toggleIn(mounted)).toBeNull();
