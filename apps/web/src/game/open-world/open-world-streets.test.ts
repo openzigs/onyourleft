@@ -330,7 +330,7 @@ describe('an open-world ride draws its side streets, and keeps its buildings off
     const lost = (near - kept) / near;
     // Stated in the PR: the share this fixture loses, against the threshold
     // proposed there. A loss over it is said rather than shipped silently.
-    // 512 since #3055's ride-keyed plots (merged in from main): an open-world
+    // 512 since #3055's ride-keyed plots (merged in for #3051): an open-world
     // view's terraced block is a whole plot or none, so three fewer
     // footprints give way to a terrace than #2903 measured (515).
     expect({ lost: near - kept, of: near }).toStrictEqual({ lost: 512, of: 1_681 });
