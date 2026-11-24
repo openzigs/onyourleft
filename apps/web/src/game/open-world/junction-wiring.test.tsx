@@ -38,7 +38,9 @@ import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { GameView, type GamePort } from '../GameView';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
+import { tap } from '../../design/touch-lock-testing';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../hud/announce-preference';
+import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from '../hud/controls-reveal';
 import { JUNCTION_PROMPT_TITLE } from '../hud/junction-text';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
@@ -197,9 +199,15 @@ function rideButton(): HTMLButtonElement | undefined {
   );
 }
 
-/** The prompt's way buttons, from the furthest left to the furthest right. */
+/**
+ * The prompt's way buttons, from the furthest left to the furthest right: in
+ * the junction's pop-up and nowhere else (#3053).
+ */
 function wayButtons(): HTMLButtonElement[] {
-  return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button[data-oyl-way]');
+  return queryAll<HTMLButtonElement>(
+    mounted?.container ?? document,
+    '.oyl-hud__junction-popup button[data-oyl-way]',
+  );
 }
 
 const wayIds = (): string[] => wayButtons().map((button) => button.dataset['oylWay'] ?? '');
@@ -338,6 +346,53 @@ describe('an open-world ride offers its junctions, and turns where the rider cho
       await pumpUntil(() => closestTo(downColumn) < 15);
     } finally {
       Reflect.deleteProperty(navigator, 'getGamepads');
+    }
+  });
+
+  /**
+   * #3053: the prompt was drawn in the ride controls' panel, which fades and
+   * is clipped after `CONTROLS_HIDE_MILLISECONDS` with no touch, and a rider
+   * who was not touching the screen did not see the junction coming. It is a
+   * pop-up of the HUD's own now: drawn whatever the wait, and its first tap
+   * takes the way, up to the lock.
+   */
+  it('keeps the pop-up drawn and pressable with no touch for longer than the fade, up to the lock', async () => {
+    // From the first render, so the controls' wait is one this test can run.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await startRide([]);
+      await pumpUntil(() => wayIds().length > 0, 5);
+      await act(async () => {
+        vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS + 500);
+        await Promise.resolve();
+      });
+      const hud = mounted?.container.querySelector('.oyl-hud');
+      expect(hud?.getAttribute('data-oyl-controls')).toBe('hidden');
+      const drawn = (): void => {
+        const popup = mounted?.container.querySelector('.oyl-hud__junction-popup');
+        expect(popup?.parentElement).toBe(hud);
+        for (const way of wayButtons()) {
+          expect(popup?.contains(way)).toBe(true);
+          expect(way.closest(`[${HIDES_ATTRIBUTE}], .oyl-hud__actions`)).toBeNull();
+        }
+      };
+      drawn();
+      // The first tap, a finger's, takes the furthest-left way.
+      tap(wayButtons()[0] as HTMLButtonElement);
+      expect(chosen()).toBe('v1,3');
+      // And it stays drawn, with no touch, until the choice is final.
+      await act(async () => {
+        vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS + 500);
+        await Promise.resolve();
+      });
+      expect(hud?.getAttribute('data-oyl-controls')).toBe('hidden');
+      await pumpUntil(() => {
+        drawn();
+        return wayButtons()[0]?.getAttribute('aria-disabled') === 'true';
+      });
+      expect(chosen()).toBe('v1,3');
+    } finally {
+      vi.useRealTimers();
     }
   });
 

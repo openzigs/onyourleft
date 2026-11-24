@@ -87,7 +87,11 @@ function junctionRide(turns: readonly number[]) {
   });
   const route = new RollingRoute(graphOf([approach, ...ways]), approach);
   const junction = route.nextJunctionAfter(0);
-  return { route, choice: createJunctionChoice(route), rider: (junction?.distance ?? 500) - 200 };
+  return {
+    route,
+    choice: createJunctionChoice(route, () => 0),
+    rider: (junction?.distance ?? 500) - 200,
+  };
 }
 
 const RIDE = junctionRide(WAYS === 'tee' ? [-90, 0] : [-90, 0, 90]);

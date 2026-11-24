@@ -547,11 +547,12 @@ export function streetsAt(
   urban?: UrbanClassMap,
   junctions: readonly Junction[] = NO_JUNCTIONS,
 ): readonly VillageStreet[] {
-  const { sites, span } = siteSpacing(profile);
+  // #3055: counted in ride distance on an open-world view. @see siteSpacing
+  const { sites, span, shift } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
-  const first = Math.floor((fromMetres - reach) / span);
+  const first = Math.floor((fromMetres - reach + shift) / span);
   // Never more sites than the route has — `settlements.ts` §`settlementsAt`'s bound.
-  const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
+  const last = Math.min(Math.floor((toMetres + reach + shift) / span), first + sites + 1);
   const byJunctions = entryOf(built, urban ?? NO_CLASS, () => new WeakMap());
   const byLand = entryOf(byJunctions, junctions, () => new WeakMap());
   const bySides = entryOf(byLand, land, () => new WeakMap());

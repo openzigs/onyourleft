@@ -15,14 +15,21 @@
  * its worker, is red here.
  */
 
+import type { TileId } from '@onyourleft/map-features';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
 import { countingSource } from '../../world-data/archive-testing';
 import { fixtureStart, openWorldFixtureArchive, START_COLUMN, START_ROW } from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
-import { createOpenWorldSession } from './session';
-import { describeTilePlanFailure, tilePlanWorkerCore, type TilePlanRequest } from './tile-planner';
+import { createOpenWorldSession, TILE_ASK_METRES } from './session';
+import {
+  createTilePlanner,
+  describeTilePlanFailure,
+  tilePlanWorkerCore,
+  type TilePlanner,
+  type TilePlanRequest,
+} from './tile-planner';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,7 +79,10 @@ function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
   return made;
 }
 
-async function openRide(log?: (line: string) => void) {
+async function openRide(
+  log?: (line: string) => void,
+  wrap?: (planner: TilePlanner) => TilePlanner,
+) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
   const session = createOpenWorldSession({
     start: fixtureStart(START_COLUMN, START_ROW),
@@ -81,6 +91,7 @@ async function openRide(log?: (line: string) => void) {
     yieldToIdle: () => Promise.resolve(),
     random: () => 0,
     log,
+    tilePlanner: wrap === undefined ? undefined : (options) => wrap(createTilePlanner(options)),
   });
   const ready = await session.ready;
   if (ready.kind !== 'ready') throw new Error(`no ride: ${ready.kind}`);
@@ -118,6 +129,26 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
     expect(road.buildings()?.plans).toStrictEqual([]);
+    session.stop();
+  });
+
+  it('asks again once the rider has ridden on, so the tiles past the start are planned', async () => {
+    stubWorkers();
+    const wants: (readonly TileId[])[] = [];
+    const { session, road } = await openRide(undefined, (planner) => ({
+      ...planner,
+      want: (tiles) => {
+        wants.push(tiles);
+        planner.want(tiles);
+      },
+    }));
+    road.follow(0);
+    expect(wants).toHaveLength(1);
+    // Within TILE_ASK_METRES on the same view: the same answer, not asked again.
+    road.follow(TILE_ASK_METRES / 2);
+    expect(wants).toHaveLength(1);
+    road.follow(TILE_ASK_METRES * 2);
+    expect(wants).toHaveLength(2);
     session.stop();
   });
 

@@ -62,6 +62,13 @@
  * drawn rider nor the camera on the frame it is made (ADR 0089 C-6, #2989). A
  * U-turn's line is drawn at once: the road under the rider changed.
  *
+ * ## What a change means for the scenery (#3055)
+ *
+ * Every view is anchored (`scenery-anchor.ts`): its scenery is seeded from
+ * the ride's FIRST view, never its own, and placed on cells counted in ride
+ * distance. So a view change keeps every tree, house and field short of the
+ * change where it was, rather than regenerating the world on that frame.
+ *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
@@ -77,6 +84,8 @@ import {
 import { drawnLine, type DrawnLine } from '../drawn-line';
 import type { MappedBuildings } from '../mapped-buildings';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
+import { routeSeed } from '../scatter';
+import { anchorScenery } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import {
   corridorOrigin,
@@ -160,6 +169,8 @@ export class OpenWorldRoad {
   /** The rolling route itself: #2897's junction choice presses through it. */
   readonly route: RollingRoute;
   readonly #hooks: OpenWorldRoadHooks;
+  /** The ride's scenery seed, from its first view (#3055). */
+  readonly #seed: number;
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
@@ -173,7 +184,9 @@ export class OpenWorldRoad {
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
-    this.#view = { profile: this.#framed(route.view()), origin: route.origin, turned: false };
+    const profile = this.#framed(route.view());
+    this.#seed = routeSeed(profile);
+    this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
 
   /** `profile`, drawn in the ride's frame where it has one. @see OpenWorldRoadHooks.frame */
@@ -269,8 +282,14 @@ export class OpenWorldRoad {
         ? undefined
         : { from: heldLine(drawn, this.#view.origin), at: rider };
     this.#drawn = undefined;
-    this.#view = { profile, origin: route.origin, turned };
+    this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;
+  }
+
+  /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
+  #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
+    anchorScenery(view.profile, { seed: this.#seed, origin: view.origin });
+    return view;
   }
 
   /**

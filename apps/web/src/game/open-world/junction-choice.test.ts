@@ -32,6 +32,7 @@ import {
   createJunctionChoice,
   JUNCTION_PROMPT_METRES,
   pressesOfWays,
+  TURN_NOTICE_SECONDS,
   TURN_PRESSES,
   WAY_PRESSES,
 } from './junction-choice';
@@ -367,12 +368,68 @@ describe('turning round (ADR 0088 D-1.6, D-1.7)', () => {
     const street = lone.edgesFrom('0,0')[0];
     if (street === undefined) throw new Error('no street');
     const route = new RollingRoute(lone, street);
-    const choice = createJunctionChoice(route);
+    const choice = createJunctionChoice(route, () => 0);
     expect(route.legs[1]?.kind).toBe('turn-round');
     expect(choice.prompt(0)).toBeUndefined();
     const out = readAt(route, 300 - 40).position;
     const back = readAt(route, 300 + 40).position;
     expect(distanceBetween(out, back)).toBeLessThan(0.01);
+  });
+});
+
+describe('what a turn says, and a second U-turn press — #3058', () => {
+  it('stands Turning round for its time after a U-turn, and a second press inside it turns nothing', () => {
+    let now = 10;
+    const { route } = newRide();
+    const choice = createJunctionChoice(route, () => now);
+    route.advance(300);
+    expect(choice.notice(300)).toBeUndefined();
+    choice.press('u-turn', 300);
+    expect(choice.notice(300)).toEqual({ kind: 'turning-round', since: 10 });
+    // A double tap: the second press is harmless.
+    now = 10 + TURN_NOTICE_SECONDS - 0.1;
+    choice.press('u-turn', 301);
+    expect(route.uTurns).toBe(1);
+    // Its time over, the notice goes and a press turns the rider round again.
+    now = 10 + TURN_NOTICE_SECONDS;
+    expect(choice.notice(302)).toBeUndefined();
+    choice.press('u-turn', 302);
+    expect(route.uTurns).toBe(2);
+    expect(choice.notice(302)).toEqual({ kind: 'turning-round', since: now });
+  });
+
+  it('stands No junction yet for a way pressed with no junction near, and chooses nothing', () => {
+    const { route } = newRide();
+    const choice = createJunctionChoice(route, () => 5);
+    const junction = theJunction(route);
+    const rider = junction.distance - JUNCTION_PROMPT_METRES - 5;
+    const legs = route.legs;
+    for (const press of WAY_PRESSES) {
+      choice.press(press, rider);
+      expect(choice.notice(rider), press).toEqual({ kind: 'no-junction', since: 5 });
+    }
+    expect(route.legs).toEqual(legs);
+    // Within reach of a junction, a press chooses and begins no notice.
+    const near = createJunctionChoice(route, () => 5);
+    near.press('left', junction.distance - 200);
+    expect(near.notice(junction.distance - 200)).toBeUndefined();
+  });
+
+  it('stands Dead end once the rider passes where a dead end turns them round, and not before', () => {
+    let now = 0;
+    const lone = gridGraph([0, 300], [0], undefined).graph;
+    const street = lone.edgesFrom('0,0')[0];
+    if (street === undefined) throw new Error('no street');
+    const route = new RollingRoute(lone, street);
+    const choice = createJunctionChoice(route, () => now);
+    expect(choice.notice(0)).toBeUndefined();
+    now = 25;
+    expect(choice.notice(299)).toBeUndefined();
+    now = 26;
+    expect(choice.notice(301)).toEqual({ kind: 'dead-end', since: 26 });
+    // Passed once: reading on past it begins nothing new, and it goes in its time.
+    now = 26 + TURN_NOTICE_SECONDS;
+    expect(choice.notice(320)).toBeUndefined();
   });
 });
 
