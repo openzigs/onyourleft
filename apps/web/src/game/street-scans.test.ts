@@ -28,7 +28,7 @@ import {
 } from './nearby-streets';
 import { footwayWalks } from './people';
 import { northRoute } from './route-fixtures-testing';
-import { scatterSeed } from './scatter';
+import { scatterSeed, WaysOutPlacing } from './scatter';
 import { sceneFrame } from './scene';
 import { anchorScenery } from './scenery-anchor';
 import { atStartLine } from './simulation';
@@ -304,7 +304,11 @@ describe('one ride’s junctions, read a slice a frame — #3107', () => {
   it('is told by the scene where each view starts on the ride, so a trimmed view draws the stubs it had', () => {
     // PR #3117's review: the scene's hand-over of a view's ride origin was held by no test.
     const { corridor } = counted([...FAR, ...TOWN]);
-    const streetScans = { nearby: new NearbyStreetScan(), junctions: new JunctionScan() };
+    const streetScans = {
+      nearby: new NearbyStreetScan(),
+      junctions: new JunctionScan(),
+      ways: new WaysOutPlacing(),
+    };
     // An open-world ride's first view, and the same road trimmed 650 m behind:
     // each keyed, as `open-world/road.ts` keys it, on where it starts on the ride.
     const first = northRoute(6_000, () => 40);

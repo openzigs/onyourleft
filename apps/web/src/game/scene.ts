@@ -93,6 +93,7 @@ import {
   type ScatterItem,
   type ScatterWay,
   type StructureKind,
+  type WaysOutPlacing,
 } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
@@ -576,6 +577,10 @@ export interface SceneInput {
    * is kept across the views and corridors the ride goes through. Absent,
    * every other ride's, the streets are read whole, once, as they were:
    * a route ride's road and corridor are fixed when it starts.
+   *
+   * #3119: and where the scenery along its ways out ({@link waysOut}) is
+   * placed a few ways a frame (`scatter.ts` §`WaysOutPlacing`). Absent,
+   * every way handed is placed on the frame it is handed.
    */
   readonly streetScans?: StreetScans | undefined;
   /**
@@ -740,10 +745,30 @@ export interface RemoteRiderInput {
 export interface StreetScans {
   readonly nearby: NearbyStreetScan;
   readonly junctions: JunctionScan;
+  /** #3119: and the ways out whose scenery a frame may place. */
+  readonly ways: WaysOutPlacing;
+}
+
+/**
+ * `input` with the ways out a frame may place the scenery along — #3119: of
+ * an open-world ride's, those its {@link StreetScans.ways} hands on; every
+ * other ride's as handed. The same object where that is every way.
+ */
+function withWaysPlaced(input: SceneInput): SceneInput {
+  // Called on a frame with no ways too: that spends the ride's first call (PR #3125's review).
+  if (input.streetScans === undefined) return input;
+  const ways = input.waysOut ?? [];
+  const placed = input.streetScans.ways.placing(
+    ways,
+    (input.state.ride.distance as number) + (sceneryAnchor(input.profile)?.origin ?? 0),
+  );
+  return placed === ways ? input : { ...input, waysOut: placed };
 }
 
 /** Builds one frame. */
-export function sceneFrame(input: SceneInput): SceneFrame {
+export function sceneFrame(handed: SceneInput): SceneFrame {
+  // #3119: the ways out whose scenery this frame may place, a few new ones a frame.
+  const input = withWaysPlaced(handed);
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
   // where the corridor, the camera and the scenery are built around.
   const riderDistance: number = drawnRider(input).distance;
@@ -780,10 +805,12 @@ export function sceneFrame(input: SceneInput): SceneFrame {
           );
   // #3095: the ways out the route does not take that this frame's view
   // reaches, each as far along it as the view reaches through its junction.
-  const reached = waysReached(
-    input,
-    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
-  );
+  const reachesTo = (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along;
+  const reached = waysReached(input, reachesTo);
+  // #3119: but every way handed is drawn as road where nothing else draws it,
+  // placed or not: a way the junction prompt offers is never a turn into a
+  // hedge, and the way roads keep to their own bound a frame.
+  const reachedRoads = input === handed ? reached : waysReached(handed, reachesTo);
   const roadSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
@@ -878,7 +905,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       ? NO_SIDE_ROADS
       : wayRoads(
           // #3123: and the road the rider turned off, each way from the junction.
-          withTurnedOff(reached, input, riderDistance),
+          // #3119: on every way handed, placed or not (`reachedRoads`).
+          withTurnedOff(reachedRoads, input, riderDistance),
           {
             profile: input.profile,
             origin: input.origin,
