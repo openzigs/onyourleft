@@ -161,6 +161,7 @@ import {
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { nearbyStreets, nearbyStreetsAt, routeGround } from './nearby-streets';
+import { wayRoads } from './way-roads';
 import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -785,10 +786,28 @@ export function sceneFrame(input: SceneInput): SceneFrame {
           riderDistance,
           input.landClass ?? NO_LAND_CLASS,
         );
-  const sideRoads =
+  const streetRoads =
     crossings.roads.length === 0 && nearby.length === 0
       ? crossSideRoads
       : [...crossSideRoads, ...crossings.roads, ...nearby];
+  // #3106: and every way out of an open-world junction, wherever none of the
+  // above draws it — a fork, a street mapped on a bridge — so no way the
+  // junction prompt offers is a turn into a hedge. Side roads too. Off with
+  // the nearby streets, whose control would otherwise be drawn back in here.
+  const onWays =
+    input.nearbyStreetsOff === true
+      ? NO_SIDE_ROADS
+      : wayRoads(
+          reached,
+          {
+            profile: input.profile,
+            origin: input.origin,
+            seed,
+            land: input.landClass ?? NO_LAND_CLASS,
+          },
+          streetRoads,
+        );
+  const sideRoads = onWays.length === 0 ? streetRoads : [...streetRoads, ...onWays];
   const { scatter: items, billboards } = scenery(
     corridor,
     input,

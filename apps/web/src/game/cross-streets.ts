@@ -108,7 +108,12 @@ import type { StreetFeature } from '@onyourleft/map-features';
 
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
-import { nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
+import {
+  nearestOnDrawnRoad,
+  roadNeighbourhood,
+  type NearestOnRoad,
+  type RoadNeighbourhood,
+} from './road-grid';
 import type { ScatterItem } from './scatter';
 import {
   siteAt,
@@ -285,6 +290,13 @@ export interface SideRoad {
  * decoded tile bounds vertices, not length, so a hostile tile of long segments
  * would otherwise become hundreds of millions of points; past this the rest of
  * the streets are not read, as `FOOTWAY_MAX_METRES` stops the footways.
+ *
+ * ⚠️ #3106: {@link mappedJunctions} and `nearby-streets.ts` count only the
+ * segments near the drawn road against it (`road-grid.ts`
+ * §`RoadNeighbourhood`). Counted over every street held, an open-world ride's
+ * nine blocks, where they hold more street than this, spent it on blocks a
+ * kilometre from the road, in the order they were read, and the blocks read
+ * last, the ones ahead of the rider, were not read at all.
  */
 export const STREET_MAX_METRES = 400_000;
 
@@ -297,10 +309,30 @@ export function meetsAtGrade(street: Pick<StreetFeature, 'kind' | 'grade'>): boo
 }
 
 /**
+ * How far from the drawn road a street's points can matter to a junction, in
+ * metres: **72** — a point on the route is within
+ * {@link JUNCTION_TOLERANCE_METRES} of it, and an arm is read
+ * {@link SIDE_ROAD_METRES} and a step along the street from there, and a step
+ * more. #3106: {@link mappedJunctions} resamples nothing farther off
+ * (`road-grid.ts` §`roadNeighbourhood`).
+ */
+export const ARM_REACH_METRES =
+  JUNCTION_TOLERANCE_METRES + SIDE_ROAD_METRES + 2 * SIDE_ROAD_STEP_METRES;
+
+/**
  * A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`.
  * `overpasses.ts` resamples the streets that cross the route over or under it with it — #2661.
+ *
+ * #3106: with `near`, a segment off the road's neighbourhood
+ * (`road-grid.ts` §`RoadNeighbourhood`) is left as its two ends and takes
+ * nothing from `budget`: the bound is spent on the streets that can matter to
+ * this road, never on the order a corridor's blocks were read in.
  */
-export function resampled(line: Float32Array, budget: { metres: number }): number[] {
+export function resampled(
+  line: Float32Array,
+  budget: { metres: number },
+  near?: RoadNeighbourhood,
+): number[] {
   const out: number[] = [];
   for (let at = 0; at + 1 < line.length; at += 2) {
     const ax = line[at] as number;
@@ -311,6 +343,13 @@ export function resampled(line: Float32Array, budget: { metres: number }): numbe
     const bx = line[at + 2] as number;
     const bz = line[at + 3] as number;
     if (!Number.isFinite(bx) || !Number.isFinite(bz)) return out;
+    if (
+      near !== undefined &&
+      !near.near(Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz))
+    ) {
+      out.push(bx, bz);
+      continue;
+    }
     const length = Math.hypot(bx - ax, bz - az);
     if (length > budget.metres) {
       budget.metres = 0;
@@ -354,6 +393,47 @@ function roadAt(
     normalX: frame.normalX,
     normalZ: frame.normalZ,
   };
+}
+
+/**
+ * Whether the street through `points` (`x, z` pairs), leaving the route at
+ * `points[start]` in direction `step` (`+2` or `−2` floats), leaves it at an
+ * angle an arm is taken at: {@link armFrom}'s own heading — from the point on
+ * the route to the first point {@link HEADING_METRES} along the street — at
+ * least {@link JUNCTION_MIN_ANGLE_DEGREES} from the road's, either way. #3106:
+ * `nearby-streets.ts` asks it, so a street that only forks off the route,
+ * which has no stub, is not drawn as though it had one.
+ */
+export function leavesAtJunctionAngle(
+  points: readonly number[],
+  start: number,
+  step: number,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): boolean {
+  const x0 = points[start] as number;
+  const z0 = points[start + 1] as number;
+  const leaves = nearestOnDrawnRoad(profile, origin, x0, z0, JUNCTION_TOLERANCE_METRES);
+  if (leaves === undefined) return false;
+  let metres = 0;
+  let px = x0;
+  let pz = z0;
+  for (let at = start + step; at >= 0 && at + 1 < points.length; at += step) {
+    const x = points[at] as number;
+    const z = points[at + 1] as number;
+    metres += Math.hypot(x - px, z - pz);
+    px = x;
+    pz = z;
+    if (metres >= HEADING_METRES) break;
+  }
+  const length = Math.hypot(px - x0, pz - z0);
+  if (!(length > 0)) return false;
+  const there = roadAt(profile, origin, leaves.along);
+  const cosine = ((px - x0) * there.forwardX + (pz - z0) * there.forwardZ) / length;
+  const angleDegrees = (Math.acos(Math.max(-1, Math.min(1, cosine))) * 180) / Math.PI;
+  return (
+    angleDegrees >= JUNCTION_MIN_ANGLE_DEGREES && angleDegrees <= 180 - JUNCTION_MIN_ANGLE_DEGREES
+  );
 }
 
 /** Whether a point is on another stretch of the route than the one at `along`. */
@@ -523,9 +603,11 @@ export function mappedJunctions(
   if (cached?.profile === profile && cached.land === land) return cached.junctions;
   const candidates: Candidate[] = [];
   const budget = { metres: STREET_MAX_METRES };
+  // #3106: only what an arm can be made of is resampled, and counted.
+  const near = roadNeighbourhood(profile, origin, ARM_REACH_METRES);
   for (const street of corridor.streets) {
     if (!meetsAtGrade(street)) continue;
-    const points = resampled(street.line, budget);
+    const points = resampled(street.line, budget, near);
     armsLeaving(points, widthClassOf(street), corridor, profile, origin, seed, land, candidates);
   }
   const junctions = grouped(candidates, 'mapped');
