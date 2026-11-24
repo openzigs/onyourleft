@@ -2428,7 +2428,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         them and the scenery is kept off them; worked out
                         again when the ways, the side roads or the reach in
                         40 m steps change; at most 1 024 stations a frame.
-                        Off with the `-nearby-streets` lever
+                        Off with the `-nearby-streets` lever.
+                        ⚠️ **Since #3123 also the road turned off**: once
+                        the rider passes a junction where the route left
+                        the road it came along (`open-world/road.ts`
+                        §`turnedOff`, `SceneInput.turnedOff`), that road on
+                        past the junction and back from it, 400 m each way,
+                        read right after the next junction's ways. The road
+                        covers it only where the frame draws the road (from
+                        60 m behind the rider, in 40 m steps): the road back
+                        is the route still, which nothing else draws
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

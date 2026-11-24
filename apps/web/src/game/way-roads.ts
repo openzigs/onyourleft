@@ -92,6 +92,25 @@
  * the next junction's own, and with a crossroads every 40 m the offered way
  * went unread from 40 m short of its junction to 20 m short of it.
  *
+ * ## A road turned off
+ *
+ * #3123, the owner's tablet ride of 2026-11-24: after a junction turn, the
+ * road turned off stopped at the junction although it carries on. The frame
+ * draws the road from `terrain.ts` §`VIEW_BEHIND_METRES` behind the rider;
+ * the streets' own drawing keeps off the route, which the road back from the
+ * junction still is, and off the way on past it until it reads the streets
+ * again; and a way out is handed on only that far behind. So for each
+ * junction the rider has passed where the route left the road it came along
+ * (`scene.ts` §`SceneInput.turnedOff`), that road is read here both ways
+ * from the junction to {@link TURNED_OFF_REACH_METRES}: on along the way the
+ * route would have taken, and back along the road's own view
+ * ({@link WayReached.turnedOff}). The road covers either only where the frame
+ * draws it, counted from {@link WayRoadsRoad.drawnFromMetres} in whole
+ * {@link WAY_ROAD_REFRESH_METRES}, so it is worked out again every 40 m and
+ * not every frame; the road back runs on a station into where it is drawn.
+ * They are read straight after the next junction's ways: as the rider turns,
+ * the road turned off is what the camera swings across.
+ *
  * ⚠️ **Location data** (ADR 0004 D): nothing here formats a message, and it
  * reads no name.
  *
@@ -109,7 +128,12 @@ import {
   streetRibbon,
 } from './nearby-streets';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
-import { localGroundPosition, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import {
+  localGroundPosition,
+  ROAD_WIDTH_METRES,
+  VIEW_AHEAD_METRES,
+  type CorridorOrigin,
+} from './terrain';
 
 /** How far apart a way road's stations are, in metres: the nearby streets' **4**. */
 export const WAY_ROAD_STEP_METRES = NEARBY_STREET_STEP_METRES;
@@ -132,6 +156,14 @@ export const WAY_ROAD_STATIONS_PER_FRAME = 1_024;
  */
 export const WAY_ROAD_MOUTH_METRES = 0.5;
 
+/**
+ * How far a road turned off is drawn from its junction, each way, and how far
+ * from the rider such a junction is handed on, in metres: **400**, the view's
+ * reach ahead — #3123. Past that the road turned off is in the fog from
+ * anywhere on the road.
+ */
+export const TURNED_OFF_REACH_METRES = VIEW_AHEAD_METRES;
+
 /** Half the main carriageway, in metres: **3.5**. */
 const ROAD_HALF_WIDTH_METRES = ROAD_WIDTH_METRES / 2;
 
@@ -149,6 +181,22 @@ export interface WayReached {
   readonly toMetres: number;
   /** What a distance on the way's view is short of the same ride distance on the road's. */
   readonly shift: number;
+  /**
+   * #3123: a stretch of a road the rider turned off at a junction they have
+   * passed — the way the route would have taken, on past the junction, or
+   * (`back`) the road itself from the junction back towards where the ride
+   * came from, read from `fromMetres` DOWN to `toMetres`. The road covers
+   * such a stretch only where the frame draws the road
+   * ({@link WayRoadsRoad.drawnFromMetres}), since the road behind that is
+   * the route still and drawn by nothing. @see the header's "A road turned off"
+   */
+  readonly turnedOff?:
+    | {
+        /** The junction's distance on the road's view. */
+        readonly junctionMetres: number;
+        readonly back: boolean;
+      }
+    | undefined;
 }
 
 /** The road the frame draws, the ground it draws beside it, and where the rider is on it. */
@@ -159,6 +207,12 @@ export interface WayRoadsRoad {
   readonly land: LandClassMask;
   /** The rider's distance on {@link profile}: a junction short of it is behind them. */
   readonly riderMetres: number;
+  /**
+   * #3123: where on {@link profile} the frame's road starts (`terrain.ts`
+   * §`roadCorridor`, `VIEW_BEHIND_METRES` behind the rider). Read
+   * only for a {@link WayReached.turnedOff} stretch; absent is the whole road.
+   */
+  readonly drawnFromMetres?: number | undefined;
 }
 
 const NO_WAY_ROADS: readonly SideRoad[] = [];
@@ -240,18 +294,28 @@ function aheadOf(road: WayRoadsRoad, { way, shift }: WayReached): number {
  * junction along another way otherwise.
  */
 function readingOrder(ways: readonly WayReached[], road: WayRoadsRoad): WayReached[] {
+  let next = Number.POSITIVE_INFINITY;
   const ranked = ways.map((each) => {
     const ahead = aheadOf(road, each);
     let rank = 2;
-    if (ahead >= 0) {
+    if (each.turnedOff === undefined && ahead >= 0) {
       const { x, z } = localGroundPosition(
         road.origin,
         positionAt(each.way.profile, each.way.fromMetres),
       );
       rank = toRoad(road, x, z) <= ROAD_WIDTH_METRES ? 0 : 1;
+      if (rank === 0) next = Math.min(next, ahead);
     }
     return { each, rank, near: Math.abs(ahead) };
   });
+  // #3123: a road turned off straight after the next junction's ways, which
+  // the prompt offers: as the rider turns, it is what the camera swings across.
+  for (const each of ranked) {
+    if (each.each.turnedOff !== undefined) {
+      each.rank = 0;
+      each.near = Number.isFinite(next) ? next + 0.5 : 0;
+    }
+  }
   ranked.sort((a, b) => a.rank - b.rank || a.near - b.near);
   return ranked.map(({ each }) => each);
 }
@@ -271,10 +335,26 @@ export function wayRoads(
   if (ways.length === 0) return NO_WAY_ROADS;
   // A junction passed changes the order the ways are read in, and so what is drawn.
   let behind = 0;
-  for (const each of ways) if (aheadOf(road, each) < 0) behind += 1;
-  const key: (RouteProfile | number)[] = [behind];
-  for (const { way, toMetres } of ways) {
-    key.push(way.profile, way.fromMetres, Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES));
+  let turned = false;
+  for (const each of ways) {
+    if (aheadOf(road, each) < 0) behind += 1;
+    if (each.turnedOff !== undefined) turned = true;
+  }
+  // #3123: where the frame's road starts, in whole refreshes, so a road
+  // turned off is worked out again every 40 m ridden and not every frame. The
+  // road is drawn from a little short of it, so what is counted as drawn is.
+  const coverFrom =
+    road.drawnFromMetres === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Math.ceil(road.drawnFromMetres / WAY_ROAD_REFRESH_METRES) * WAY_ROAD_REFRESH_METRES;
+  const key: (RouteProfile | number)[] = [behind, turned ? coverFrom : 0];
+  for (const { way, toMetres, turnedOff } of ways) {
+    key.push(
+      way.profile,
+      way.fromMetres,
+      Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES),
+      turnedOff === undefined ? 0 : turnedOff.back ? 2 : 1,
+    );
   }
   const last = held.get(road.profile);
   if (
@@ -294,13 +374,16 @@ export function wayRoads(
       : new WeakMap<RouteProfile, Map<string, SideRoad>>();
   const roads: SideRoad[] = [];
   let left = WAY_ROAD_STATIONS_PER_FRAME;
-  for (const { way, toMetres } of readingOrder(ways, road)) {
+  for (const { way, toMetres, turnedOff } of readingOrder(ways, road)) {
     const total: number = way.profile.totalDistance;
-    const to = Math.min(
-      total,
-      Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES) * WAY_ROAD_REFRESH_METRES,
+    const back = turnedOff?.back === true;
+    const to = back
+      ? Math.max(0, toMetres)
+      : Math.min(total, Math.ceil(toMetres / WAY_ROAD_REFRESH_METRES) * WAY_ROAD_REFRESH_METRES);
+    const count = Math.min(
+      left,
+      Math.floor((back ? way.fromMetres - to : to - way.fromMetres) / WAY_ROAD_STEP_METRES) + 1,
     );
-    const count = Math.min(left, Math.floor((to - way.fromMetres) / WAY_ROAD_STEP_METRES) + 1);
     if (!(count >= 2)) continue;
     left -= count;
     let byStretch = ribbons.get(way.profile);
@@ -308,7 +391,10 @@ export function wayRoads(
       byStretch = new Map();
       ribbons.set(way.profile, byStretch);
     }
-    for (const each of roadsOfWay(way, count, road, drawn, byStretch)) roads.push(each);
+    const covering = turnedOff === undefined ? undefined : { ...turnedOff, from: coverFrom };
+    for (const each of roadsOfWay(way, count, road, drawn, byStretch, covering)) {
+      roads.push(each);
+    }
   }
   const result = roads.length === 0 ? NO_WAY_ROADS : roads;
   // A copy of `drawn`: the caller's array may be one it writes again.
@@ -328,14 +414,23 @@ function toRoad(road: WayRoadsRoad, x: number, z: number): number {
   return distanceToDrawnRoad(road.profile, road.origin, x, z, ROAD_WIDTH_METRES);
 }
 
-/** One way's undrawn stretches, each as a side road. @see wayRoads */
+/**
+ * One way's undrawn stretches, each as a side road. A road turned off
+ * (`turned`, #3123) is read backwards when it is the road back from its
+ * junction, and is covered by the road only where its place on the road —
+ * the station's own for the road back, the junction's for the way on — is
+ * at or past `turned.from`, where the frame draws the road. @see wayRoads
+ */
 function roadsOfWay(
   way: WayReached['way'],
   count: number,
   road: WayRoadsRoad,
   drawn: readonly SideRoad[],
   byStretch: Map<string, SideRoad>,
+  turned:
+    { readonly junctionMetres: number; readonly back: boolean; readonly from: number } | undefined,
 ): SideRoad[] {
+  const step = turned?.back === true ? -WAY_ROAD_STEP_METRES : WAY_ROAD_STEP_METRES;
   const xs = new Float64Array(count);
   const zs = new Float64Array(count);
   let minX = Number.POSITIVE_INFINITY;
@@ -345,7 +440,7 @@ function roadsOfWay(
   for (let index = 0; index < count; index += 1) {
     const local = localGroundPosition(
       road.origin,
-      positionAt(way.profile, way.fromMetres + index * WAY_ROAD_STEP_METRES),
+      positionAt(way.profile, way.fromMetres + index * step),
     );
     xs[index] = local.x;
     zs[index] = local.z;
@@ -366,8 +461,17 @@ function roadsOfWay(
   for (let index = 0; index < count; index += 1) {
     const x = xs[index] as number;
     const z = zs[index] as number;
-    if (toRoad(road, x, z) <= onRoad) covered[index] = 1;
-    else if (onOneOf(beside, x, z)) covered[index] = 2;
+    // #3123: the road back from a junction turned off at IS the road, so it
+    // is run on a station into where the frame draws it, as into a side road.
+    const roadAt =
+      turned === undefined
+        ? undefined
+        : turned.back
+          ? way.fromMetres + index * step
+          : turned.junctionMetres;
+    if ((roadAt === undefined || roadAt >= (turned?.from ?? 0)) && toRoad(road, x, z) <= onRoad) {
+      covered[index] = turned?.back === true ? 2 : 1;
+    } else if (onOneOf(beside, x, z)) covered[index] = 2;
     else any = true;
   }
   if (!any) return [];
@@ -381,7 +485,9 @@ function roadsOfWay(
     let end = start;
     while (end + 1 < count && covered[end + 1] === 0) end += 1;
     // What the ribbon is made of: its stations, what it starts from, and whether it runs on a station.
-    const stretch = `${String(start)}:${String(end)}:${String(covered[start - 1] ?? 0)}:${
+    // A road turned off is read from its junction, and the road back from
+    // two junctions on the one view is two stretches of it.
+    const stretch = `${turned === undefined ? '' : `${String(way.fromMetres)}:${String(step)}:`}${String(start)}:${String(end)}:${String(covered[start - 1] ?? 0)}:${
       end + 1 < count ? '1' : '0'
     }`;
     let ribbon = byStretch.get(stretch);
