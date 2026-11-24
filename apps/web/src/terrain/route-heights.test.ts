@@ -272,6 +272,34 @@ describe('what is asked of the host', () => {
     expect(source.calls).toHaveLength(asked);
   });
 
+  it('holds the last four tiles it decoded and no more: an older one is asked for again', async () => {
+    // Six tiles in a row, and a line through all six.
+    const row = Array.from({ length: 6 }, (_, index) => ({
+      tile: { z: 12 as const, x: 850 + index, y: 1550 },
+      bytes: flatHeightTile(),
+    }));
+    const { heights, source } = await readerOver(row);
+    const across = await heights.heights({
+      shape: row.map(({ tile }) => placeInTile(tile, 256, 256)),
+      interval: heights.interval,
+    });
+    expect(across.samples.map((sample) => sample.elevation)).toStrictEqual(
+      row.map(() => FLAT_HEIGHT_METRES),
+    );
+    const asked = source.calls.length;
+    // The last tile is still held; the first was let go.
+    await heights.heights({
+      shape: [placeInTile(row[5]!.tile, 100, 100)],
+      interval: heights.interval,
+    });
+    expect(source.calls).toHaveLength(asked);
+    await heights.heights({
+      shape: [placeInTile(row[0]!.tile, 100, 100)],
+      interval: heights.interval,
+    });
+    expect(source.calls.length).toBeGreaterThan(asked);
+  });
+
   it('refuses a line that crosses more tiles than it reads for one route, asking nothing', async () => {
     const { heights, source } = await readerOver(tiles);
     // One point in each of 201 tiles along a row of the grid.

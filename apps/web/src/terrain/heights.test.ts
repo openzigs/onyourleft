@@ -47,6 +47,14 @@ describe('lazyRouteHeights', () => {
     expect(loaded.asked).toBe(2);
   });
 
+  it('loads the product’s own reader when no loader is handed in', async () => {
+    // The real `import()`s. A line with no point asks the archive for nothing.
+    const heights = lazyRouteHeights({ config: CONFIG, mapTilesOn: () => true });
+    const answer = await heights.heights(REQUEST);
+    expect(answer.samples).toStrictEqual([]);
+    expect(answer.source.name).toBe('Mapterhorn terrain');
+  });
+
   it('with map tiles off loads nothing, asks nothing and says why', async () => {
     const loaded = reader();
     const load = vi.fn(() => Promise.resolve(loaded));
