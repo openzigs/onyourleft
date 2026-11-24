@@ -70,8 +70,13 @@ export const TILES_DIRECTORY = 'tiles';
 /** The SDK refuses a manifest or a configuration over 4 MiB (`METADATA_LIMIT` upstream). */
 export const METADATA_LIMIT_BYTES = 4 * 1024 * 1024;
 
-/** The largest decoded-tile budget the SDK accepts, and the one the measurement uses. */
-export const TILE_BUDGET_BYTES = 128 * 1024 * 1024;
+/**
+ * The SDK refuses a manifest that lists any tile over 64 MiB (`LIMIT` in
+ * `valhalla-core`'s loader, checked again in its WebAssembly's transport), and
+ * then the whole graph fails to open with `DATASET` (#2347). A tile of exactly
+ * 64 MiB is accepted.
+ */
+export const TILE_LIMIT_BYTES = 64 * 1024 * 1024;
 
 /** Valhalla's tile size per hierarchy level, in degrees: 0 is highways, 1 arterials, 2 local roads. */
 const LEVEL_TILE_DEGREES: Readonly<Record<number, number>> = { 0: 4, 1: 1, 2: 0.25 };
@@ -374,6 +379,24 @@ export function extractDateFromName(name: string): string | undefined {
   return DATE.test(date) ? date : undefined;
 }
 
+/**
+ * Throws, naming every tile over `TILE_LIMIT_BYTES` by id, path and size, if
+ * there is one: a release holding it is one no session can open. The tile id
+ * is the maintainer's to look up, so the message carries no coordinate.
+ * `docs/spikes/0042-dense-city-tiles-over-the-browser-sdk-limit.md` says what
+ * can be done about such a tile.
+ */
+export function refuseTilesOverLimit(tiles: readonly GraphTile[]): void {
+  const over = tiles.filter((tile) => tile.size > TILE_LIMIT_BYTES);
+  if (over.length === 0) return;
+  const list = over.map((tile) => `tile ${tile.id} (${tile.path}) is ${tile.size} bytes`);
+  throw new Error(
+    `graph.tar has ${over.length} tile${over.length === 1 ? '' : 's'} over valhalla-browser's ` +
+      `${TILE_LIMIT_BYTES}-byte (64 MiB) per-tile limit, and the SDK would refuse the whole graph: ` +
+      `${list.join('; ')}. See docs/spikes/0042-dense-city-tiles-over-the-browser-sdk-limit.md`,
+  );
+}
+
 /** Inputs to one release. */
 export interface ReleaseInputs {
   readonly archive: GraphArchive;
@@ -404,6 +427,7 @@ export function planRelease(inputs: ReleaseInputs): Release {
   if (inputs.extractDate !== undefined && !DATE.test(inputs.extractDate)) {
     throw new Error('--extract-date must be YYYY-MM-DD');
   }
+  refuseTilesOverLimit(inputs.archive.tiles);
   const config = jsonBytes(runtimeConfig(inputs.nativeConfig));
   if (config.length > METADATA_LIMIT_BYTES)
     throw new Error('config.json is over the SDK’s 4 MiB limit');
@@ -590,13 +614,10 @@ export interface MakeReleaseOptions {
 /**
  * Reads `<work>/graph.tar` and `<work>/native-config.json` and writes the
  * release. Refuses tiles built by another Valhalla than the SDK's WASM, which
- * the SDK would refuse at run time as `INCOMPATIBLE_DATASET`.
+ * the SDK would refuse at run time as `INCOMPATIBLE_DATASET`, and a tile over
+ * its per-tile limit (`refuseTilesOverLimit`), which it would refuse as `DATASET`.
  */
-export function makeRelease(options: MakeReleaseOptions): {
-  id: string;
-  path: string;
-  largestTileBytes: number;
-} {
+export function makeRelease(options: MakeReleaseOptions): { id: string; path: string } {
   const runtime = sdkRuntime(options.runtimeJson);
   if (options.valhallaVersion.trim() !== runtime.release) {
     throw new Error(
@@ -629,11 +650,7 @@ export function makeRelease(options: MakeReleaseOptions): {
       valhallaVersion: runtime.release,
     },
   });
-  return {
-    id: release.id,
-    path,
-    largestTileBytes: Math.max(...archive.tiles.map((tile) => tile.size)),
-  };
+  return { id: release.id, path };
 }
 
 /** `--flag value` pairs into a map; a flag twice, or one with no value, is an error. */
@@ -680,11 +697,6 @@ function main(): void {
     extractDate: values.get('--extract-date'),
   });
   console.log(`make-release: wrote ${made.id} to ${made.path}`);
-  if (made.largestTileBytes > TILE_BUDGET_BYTES) {
-    console.warn(
-      `make-release: the largest tile is ${made.largestTileBytes} bytes, over the SDK's 128 MiB decoded-tile budget; routes through it cannot be cached`,
-    );
-  }
 }
 
 if (process.argv[1]?.endsWith('make-release.ts') === true) {
