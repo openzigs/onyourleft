@@ -281,6 +281,12 @@ export interface SideRoad {
   readonly segments: Float32Array;
   /** Each segment's half-width, one float a segment. */
   readonly halfWidths: Float32Array;
+  /**
+   * #3105: a side street on a mapped bridge, drawn as a deck at the road's
+   * level across whatever is under it (`nearby-streets.ts` §`deckGround`);
+   * `mapped-spans.ts` §`sideDeckParts` stands a parapet along each edge.
+   */
+  readonly deck?: true;
 }
 
 // --- Mapped junctions ----------------------------------------------------
