@@ -228,7 +228,14 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
       'reduced',
     );
     let beside: TilePlan[] = [];
-    const { session, road } = await openRide(undefined, undefined, () => beside);
+    const held: ReadonlyMap<string, TileBlockFeatures>[] = [];
+    const { session, road } = await openRide(undefined, held, () => beside);
+    // Every block is held with its water lines, which each tile plans its own of
+    // (`real-water.test.ts`); the fixture's map has none, and says so as a list.
+    expect(held.length).toBeGreaterThan(0);
+    for (const blocks of held) {
+      for (const features of blocks.values()) expect(features.waterLines).toStrictEqual([]);
+    }
     // Before any tile is planned there is no water, and the road says so.
     expect(road.water()).toBeUndefined();
     beside = [pond];

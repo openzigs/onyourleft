@@ -11,7 +11,10 @@
  * ## Which streets
  *
  * Every `ground` street of `WorldCorridor.streets` — a bridge or a tunnel is
- * `overpasses.ts`'s where it crosses the route, and is not drawn here. A
+ * `overpasses.ts`'s where it crosses the route, and is not drawn here. ⚠️
+ * **Since #3105 an open-world ride draws a bridge too**, as a deck at the
+ * road's level ({@link deckGround}), by the same rules as a street on the
+ * ground but that it does not stop at water; a route ride does not. A
  * `highway` at ground is drawn too, at its class's width. Each is resampled
  * every {@link NEARBY_STREET_STEP_METRES} along its line, and a station is
  * drawn only:

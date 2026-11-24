@@ -64,6 +64,10 @@ import {
   MAXIMUM_BRIDGE_PARTS,
   PARAPET_THICKNESS_METRES,
   STREAM_HALF_WIDTH_METRES,
+  inWater,
+  onOpenWater,
+  waterNearRoute,
+  waterShaping,
   waterways,
   type BridgePart,
 } from '../waterways';
@@ -77,12 +81,7 @@ import {
   type TilePlan,
 } from './tile-plan';
 import { tilePlanWorkerCore } from './tile-planner';
-import {
-  openWorldWaterMask,
-  REAL_WATER_BUFFER_METRES,
-  WATER_BUFFER_CELL_METRES,
-  WaterMaskKeeper,
-} from './water-mask';
+import { REAL_WATER_BUFFER_METRES, WATER_BUFFER_CELL_METRES, WaterMaskKeeper } from './water-mask';
 
 const FRAME = { latitude: 40, longitude: -105, elevation: 0 };
 /** Where the ridden street starts, metres north of the frame's origin. */
@@ -273,7 +272,7 @@ function worldOf(fixture: Fixture = {}): World {
   const block = blockOf(fixture);
   const plans = plansOf(block);
   const corridor = openWorldStreetCorridor(FRAME, [block]);
-  const land = openWorldWaterMask(plans);
+  const land = new WaterMaskKeeper().of(plans);
   const road = new OpenWorldRoad(rolling(), {
     frame: FRAME,
     streets: () => corridor,
@@ -400,7 +399,7 @@ describe('the tiles hold the real water — #3105', () => {
       kind: 'wetland',
       rings: [Float32Array.from(corners.flatMap((corner) => [corner.x, corner.z]))],
     };
-    const land = openWorldWaterMask(plansOf({ ...blockOf({ dry: true }), landUse: [marsh] }));
+    const land = new WaterMaskKeeper().of(plansOf({ ...blockOf({ dry: true }), landUse: [marsh] }));
     expect(land).toBeDefined();
     if (land === undefined) return;
     const at = local(0, 330);
@@ -414,7 +413,7 @@ describe('the tiles hold the real water — #3105', () => {
       ),
     ).toStrictEqual([]);
     // Control: the same polygon as open water is a crossing.
-    const open = openWorldWaterMask(
+    const open = new WaterMaskKeeper().of(
       plansOf({
         ...blockOf({ dry: true }),
         landUse: [{ ...marsh, layer: 'water', kind: 'river' }],
@@ -427,9 +426,31 @@ describe('the tiles hold the real water — #3105', () => {
     ).toHaveLength(1);
   });
 
+  it('leaves water under the centre line and on one side of the road to the lakes', () => {
+    // A shore the map draws a few metres over the road: water from 600 m west to 2 m east of it.
+    const corners = [local(-600, 300), local(2, 300), local(2, 360), local(-600, 360)];
+    const shore: LandUseFeature = {
+      layer: 'water',
+      kind: 'ocean',
+      rings: [Float32Array.from(corners.flatMap((corner) => [corner.x, corner.z]))],
+    };
+    const land = new WaterMaskKeeper().of(plansOf({ ...blockOf({ dry: true }), landUse: [shore] }));
+    expect(land).toBeDefined();
+    if (land === undefined) return;
+    // Control: the mask does hold water under the centre line there.
+    expect(land.classAt(local(0, 330).x, local(0, 330).z)).toBe('water');
+    expect(land.classAt(local(12, 330).x, local(12, 330).z)).toBe('unknown');
+    const profile = dry.profile;
+    expect(
+      waterways(profile, scatterSeed(profile), land).crossings.filter(
+        (crossing) => crossing.halfWidth !== undefined,
+      ),
+    ).toStrictEqual([]);
+  });
+
   it('is no mask at all where no tile holds water', () => {
     expect(dry.land).toBeUndefined();
-    expect(openWorldWaterMask([])).toBeUndefined();
+    expect(new WaterMaskKeeper().of([])).toBeUndefined();
   });
 
   it('keeps one mask until a tile that holds water is planned or let go', () => {
@@ -592,11 +613,12 @@ describe('an open-world ride draws a real river and the bridge over it — #3105
                         ],
                         'bridge',
                       ),
-                      // And a bridge that crosses the road square is an overpass, not the road.
+                      // And a bridge that crosses the road at 45° is an overpass, not the
+                      // road: it is within the tolerance of the road for 11 m of it.
                       street(
                         [
-                          [-100, 100],
-                          [100, 100],
+                          [-100, 0],
+                          [100, 200],
                         ],
                         'bridge',
                       ),
@@ -704,6 +726,28 @@ describe('the budgets hold on a long bridge — #3105', () => {
     );
     expect(river?.halfWidth).toBeGreaterThan(110);
     expect(river?.halfWidth).toBeLessThan(140);
+    // The ground is cut and nothing stands for the river's whole width: 100 m
+    // from its middle, where a stream's channel has long since let go.
+    const ways = waterways(profile, scatterSeed(profile), land);
+    const origin = corridorOrigin(profile);
+    for (const north of [RIVER.south + 20, RIVER.south + 230]) {
+      const along = alongOf(north);
+      expect(inWater(ways, profile, along, 40)).toBe(true);
+      expect(onOpenWater(ways, profile, along, 40)).toBe(true);
+      expect(waterNearRoute(ways, profile, along)).toBe(true);
+      const road = elevationAt(profile, along) - origin.elevation;
+      const shaping = waterShaping(ways, profile, origin, along, 40, road);
+      // The bed: under the water, which is a bridge's clearance under the road's middle.
+      expect(shaping.ceiling).toBeLessThan((river?.waterElevation ?? 0) - origin.elevation);
+    }
+    // Control: the same places beside the stream-wide crossing of the narrow river's
+    // world are dry ground, 100 m and more from its middle.
+    const narrow = waterways(
+      world.profile,
+      scatterSeed(world.profile),
+      world.land ?? NO_LAND_CLASS,
+    );
+    expect(inWater(narrow, world.profile, alongOf(RIVER.south + 230), 40)).toBe(false);
     const streamTriangles = see(world, 200).waterTriangles;
     for (const north of [100, 200, 300, 425, 520]) {
       const seen = see(wide, north);

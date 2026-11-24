@@ -10,7 +10,7 @@
  * §`findWaterways`). Everything that draws the map's water already reads it
  * off a `LandClassMask` (`waterways.ts` §`besideTheMap`: the lakes and the
  * coast beside the road, the crossings the road is bridged over, the channels
- * beside it), so {@link openWorldWaterMask} is that mask for an open world,
+ * beside it), so {@link WaterMaskKeeper}'s is that mask for an open world,
  * put together from the tiles the planner holds (`tile-plan.ts`
  * §`TilePlan.land` and §`TileWater`) and in their frame, the session's, which
  * is the one the whole ride is drawn in.
@@ -243,17 +243,10 @@ function maskOf(tiles: readonly TilePlan[]): LandClassMask {
 }
 
 /**
- * The real water of `plans` as a land mask, or `undefined` where none of them
- * holds any. See the file's header for what it answers and what it does not.
- */
-export function openWorldWaterMask(plans: Iterable<TilePlan>): LandClassMask | undefined {
-  const tiles = [...plans].filter(tileHoldsWater);
-  return tiles.length === 0 ? undefined : maskOf(tiles);
-}
-
-/**
- * A ride's water mask, the same object while the tiles that hold water are
- * the same plans: a new one only when one is planned or let go.
+ * A ride's real water as a land mask, or `undefined` where no tile planned
+ * holds any — the same object while the tiles that hold water are the same
+ * plans, a new one only when one is planned or let go. See the file's header
+ * for what the mask answers and what it does not.
  */
 export class WaterMaskKeeper {
   #tiles = new Set<TilePlan>();

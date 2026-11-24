@@ -573,7 +573,7 @@ function besideTheMap(profile: RouteProfile, invented: Waterways, land: LandClas
       !bridged.some(
         (mappedCrossing) =>
           Math.abs(routeOffset(profile, mappedCrossing.distance, crossing.distance)) <
-          MAPPED_CROSSING_SPACING_METRES + crossingWiden(mappedCrossing),
+          MAPPED_CROSSING_SPACING_METRES,
       ),
   );
   if (
