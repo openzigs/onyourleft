@@ -340,10 +340,16 @@ const CELL_METRES = 2;
  * The topmost drawn surface at a point in plan — the ground's or the road's,
  * whichever is higher there, as a camera above them sees it — or `undefined`
  * where neither is drawn. Every triangle the renderer is handed, not the
- * mesh's own rows: the oracle is not the code.
+ * mesh's own rows: the oracle is not the code. Asked only within `box`.
  */
 function surfaceOf(
   frame: ReturnType<typeof sceneFrame>,
+  box: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+  },
 ): (x: number, z: number) => { readonly y: number; readonly road: boolean } | undefined {
   const cells = new Map<string, Facet[]>();
   const add = (vertices: Float32Array, indices: Uint32Array, road: boolean): void => {
@@ -364,13 +370,23 @@ function surfaceOf(
         cz: vertices[c + 2] as number,
         road,
       };
-      const x0 = Math.floor(Math.min(facet.ax, facet.bx, facet.cx) / CELL_METRES);
-      const x1 = Math.floor(Math.max(facet.ax, facet.bx, facet.cx) / CELL_METRES);
-      const z0 = Math.floor(Math.min(facet.az, facet.bz, facet.cz) / CELL_METRES);
-      const z1 = Math.floor(Math.max(facet.az, facet.bz, facet.cz) / CELL_METRES);
-      // The far fields' triangles are hundreds of metres across, and nothing
-      // here is judged out there.
-      if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4_000) continue;
+      // Only the cells of the box it will be asked within.
+      const x0 = Math.max(
+        Math.floor(Math.min(facet.ax, facet.bx, facet.cx) / CELL_METRES),
+        Math.floor(box.minX / CELL_METRES),
+      );
+      const x1 = Math.min(
+        Math.floor(Math.max(facet.ax, facet.bx, facet.cx) / CELL_METRES),
+        Math.floor(box.maxX / CELL_METRES),
+      );
+      const z0 = Math.max(
+        Math.floor(Math.min(facet.az, facet.bz, facet.cz) / CELL_METRES),
+        Math.floor(box.minZ / CELL_METRES),
+      );
+      const z1 = Math.min(
+        Math.floor(Math.max(facet.az, facet.bz, facet.cz) / CELL_METRES),
+        Math.floor(box.maxZ / CELL_METRES),
+      );
       for (let x = x0; x <= x1; x += 1) {
         for (let z = z0; z <= z1; z += 1) {
           const key = `${String(x)},${String(z)}`;
@@ -431,24 +447,64 @@ const MOST_STEP_METRES = 0.3;
  */
 const DEEPER_THAN_VERGE_METRES = 0.15;
 
+/** The worst of a measure over many points, and where it was. */
+interface Worst {
+  value: number;
+  at: string;
+}
+
+/**
+ * {@link drawnRoadAt} over `rows`, asked only of the rows within
+ * {@link BESIDE_METRES} of a point: the rows are put in a grid of cells that
+ * size once, so a lattice of tens of thousands of points does not walk every
+ * row for each. `Infinity` across, as {@link drawnRoadAt}'s, past that.
+ */
+function nearestOf(
+  centre: readonly CorridorPoint[],
+  rows: readonly number[],
+): (x: number, z: number) => { readonly across: number; readonly height: number } {
+  const cells = new Map<string, number[]>();
+  const cellOf = (value: number): number => Math.floor(value / BESIDE_METRES);
+  for (const row of rows) {
+    const from = centre[row] as CorridorPoint;
+    const to = centre[row + 1] as CorridorPoint;
+    const x0 = cellOf(Math.min(from.x, to.x)) - 1;
+    const x1 = cellOf(Math.max(from.x, to.x)) + 1;
+    const z0 = cellOf(Math.min(from.z, to.z)) - 1;
+    const z1 = cellOf(Math.max(from.z, to.z)) + 1;
+    for (let x = x0; x <= x1; x += 1) {
+      for (let z = z0; z <= z1; z += 1) {
+        const key = `${String(x)},${String(z)}`;
+        const list = cells.get(key);
+        if (list === undefined) cells.set(key, [row]);
+        else list.push(row);
+      }
+    }
+  }
+  return (x, z) =>
+    drawnRoadAt(centre, cells.get(`${String(cellOf(x))},${String(cellOf(z))}`) ?? [], x, z);
+}
+
 describe('one surface between the two passes of a one-point turnaround — #3122', () => {
   it.each([1, 3])(
     'draws the ground between and beside the two passes with no step and no pit, the way back %d m over',
     (lane) => {
       const profile = coastReversal(lane);
       const land = coast(profile);
+      const step: Worst = { value: 0, at: 'nowhere' };
+      const deep: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
       let judgedPoints = 0;
       let besideRoad = 0;
       for (const offset of RIDER) {
         const { frame, segments, near } = judged(profile, land, profile.totalDistance / 2 + offset);
         const { centre } = frame.corridor;
-        const top = surfaceOf(frame);
         // Every piece of either pass's centreline in view near the turn,
         // drawn or not.
         const pieces: number[] = [];
         for (let row = 0; row + 1 < centre.length; row += 1) {
           if (near(row) && near(row + 1)) pieces.push(row);
         }
+        if (pieces.length === 0) continue;
         let minX = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let minZ = Number.POSITIVE_INFINITY;
@@ -460,40 +516,50 @@ describe('one surface between the two passes of a one-point turnaround — #3122
           minZ = Math.min(minZ, point.z - BESIDE_METRES);
           maxZ = Math.max(maxZ, point.z + BESIDE_METRES);
         }
-        const beside = (x: number, z: number): boolean =>
-          drawnRoadAt(centre, pieces, x, z).across <= BESIDE_METRES;
-        const ground = (x: number, z: number): number | undefined => {
-          const surface = top(x, z);
-          return surface === undefined || surface.road ? undefined : surface.y;
-        };
-        for (let x = Math.floor(minX); x <= maxX; x += LATTICE_METRES) {
-          for (let z = Math.floor(minZ); z <= maxZ; z += LATTICE_METRES) {
-            if (!beside(x, z)) continue;
-            const here = ground(x, z);
-            if (here === undefined) continue;
+        const top = surfaceOf(frame, { minX, maxX, minZ, maxZ });
+        const passes = nearestOf(centre, pieces);
+        const drawn = nearestOf(centre, segments);
+        // The ground at each lattice point beside either pass: `NaN` where it
+        // is not beside one, or where the road is on top.
+        const columns = Math.ceil((maxX - minX) / LATTICE_METRES) + 1;
+        const lines = Math.ceil((maxZ - minZ) / LATTICE_METRES) + 1;
+        const ground = new Float64Array(columns * lines).fill(Number.NaN);
+        for (let i = 0; i < columns; i += 1) {
+          for (let j = 0; j < lines; j += 1) {
+            const x = minX + i * LATTICE_METRES;
+            const z = minZ + j * LATTICE_METRES;
+            if (!(passes(x, z).across <= BESIDE_METRES)) continue;
+            const surface = top(x, z);
+            if (surface !== undefined && !surface.road) ground[i * lines + j] = surface.y;
+          }
+        }
+        for (let i = 0; i < columns; i += 1) {
+          for (let j = 0; j < lines; j += 1) {
+            const here = ground[i * lines + j] as number;
+            if (Number.isNaN(here)) continue;
+            const x = minX + i * LATTICE_METRES;
+            const z = minZ + j * LATTICE_METRES;
+            const where = `${String(offset)} m from the turn at (${x.toFixed(1)}, ${z.toFixed(1)})`;
             judgedPoints += 1;
-            for (const [nx, nz] of [
-              [x + LATTICE_METRES, z],
-              [x, z + LATTICE_METRES],
-            ] as const) {
-              if (!beside(nx, nz)) continue;
-              const there = ground(nx, nz);
-              if (there === undefined) continue;
-              expect(
-                Math.abs(there - here),
-                `${String(offset)} m from the turn: a step at (${x.toFixed(1)}, ${z.toFixed(1)})`,
-              ).toBeLessThanOrEqual(MOST_STEP_METRES);
+            for (const there of [
+              i + 1 < columns ? (ground[(i + 1) * lines + j] as number) : Number.NaN,
+              j + 1 < lines ? (ground[i * lines + j + 1] as number) : Number.NaN,
+            ]) {
+              if (!(Math.abs(there - here) > step.value)) continue;
+              step.value = Math.abs(there - here);
+              step.at = `a step ${where}`;
             }
-            const road = drawnRoadAt(centre, segments, x, z);
+            const road = drawn(x, z);
             if (!(road.across >= ROAD_HALF_METRES && road.across <= BESIDE_METRES)) continue;
             besideRoad += 1;
-            expect(
-              road.height - here,
-              `${String(offset)} m from the turn at (${x.toFixed(1)}, ${z.toFixed(1)}), ${road.across.toFixed(1)} m from the road`,
-            ).toBeLessThanOrEqual(VERGE_DROP_METRES + DEEPER_THAN_VERGE_METRES);
+            if (!(road.height - here > deep.value)) continue;
+            deep.value = road.height - here;
+            deep.at = `${where}, ${road.across.toFixed(1)} m from the road`;
           }
         }
       }
+      expect(step.value, step.at).toBeLessThanOrEqual(MOST_STEP_METRES);
+      expect(deep.value, deep.at).toBeLessThanOrEqual(VERGE_DROP_METRES + DEEPER_THAN_VERGE_METRES);
       // Non-vacuity: the lattice covers the ground beside the road in view.
       expect(judgedPoints).toBeGreaterThan(50_000);
       expect(besideRoad).toBeGreaterThan(20_000);
@@ -519,14 +585,30 @@ const CHASE_ABOVE_SLACK_METRES = 0.5;
  */
 const MOST_EYE_JERK_METRES = 0.02;
 
+/**
+ * Where the camera is ridden, metres from the turn: the pivot eased in
+ * (`scene.ts` §`U_TURN_CAMERA_METRES`: from 45 m before the turn on this
+ * fixture), the turn itself, and the pivot handed back (by 50 m after). A
+ * stretch at a time, each from a frame of its own, so that no one case draws
+ * more frames than a CI runner's default time for a test allows.
+ */
+const STRETCHES = {
+  easedIn: [-50, -15],
+  turn: [-22, 22],
+  handedBack: [15, 55],
+  whole: [-50, 55],
+} as const;
+
 describe('the chase camera through a one-point turnaround on the coast — #3122', () => {
   it.each([
-    [1, 30, 60],
-    [3, 30, 60],
-    [3, 40, 20],
-  ])(
-    'stays behind and above the rider and never jumps, the way back %d m over at %d km/h, %d fps',
-    (lane, kmh, fps) => {
+    [3, 30, 60, 'easedIn'],
+    [3, 30, 60, 'turn'],
+    [3, 30, 60, 'handedBack'],
+    [1, 30, 60, 'turn'],
+    [3, 40, 20, 'whole'],
+  ] as const)(
+    'stays behind and above the rider and never jumps, the way back %d m over at %d km/h, %d fps: %s',
+    (lane, kmh, fps, stretch) => {
       const profile = coastReversal(lane);
       const land = coast(profile);
       const origin = corridorOrigin(profile);
@@ -534,6 +616,12 @@ describe('the chase camera through a one-point turnaround on the coast — #3122
       const turn = profile.totalDistance / 2;
       const speed = kmh / 3.6;
       const seconds = 1 / fps;
+      const [from, to] = STRETCHES[stretch];
+      const nearest: Worst = { value: Number.POSITIVE_INFINITY, at: 'nowhere' };
+      const farthest: Worst = { value: Number.NEGATIVE_INFINITY, at: 'nowhere' };
+      const across: Worst = { value: 0, at: 'nowhere' };
+      const above: Worst = { value: 0, at: 'nowhere' };
+      const jerk: Worst = { value: 0, at: 'nowhere' };
       let heading: GroundHeading | undefined;
       let lookAhead: number | undefined;
       let lastEye: { readonly x: number; readonly z: number } | undefined;
@@ -541,7 +629,7 @@ describe('the chase camera through a one-point turnaround on the coast — #3122
       let lastYaw: number | undefined;
       let turned = 0;
       let frames = 0;
-      for (let along = turn - 60; along <= turn + 60; along += speed * seconds) {
+      for (let along = turn + from; along <= turn + to; along += speed * seconds) {
         // As `GameView` composes it: the frame's pose, its heading and
         // look-ahead damped by the clock, turned to that heading.
         const frame = sceneFrame({
@@ -560,21 +648,19 @@ describe('the chase camera through a one-point turnaround on the coast — #3122
         if (rider === undefined) throw new Error('no rider drawn');
         const at = `${(along - turn).toFixed(1)} m from the turn`;
         const behind = (rider.x - eye.x) * heading.headingX + (rider.z - eye.z) * heading.headingZ;
-        const across = (rider.x - eye.x) * heading.headingZ - (rider.z - eye.z) * heading.headingX;
-        expect(behind, `${at}: behind`).toBeGreaterThanOrEqual(CHASE_BEHIND_METRES[0]);
-        expect(behind, `${at}: behind`).toBeLessThanOrEqual(CHASE_BEHIND_METRES[1]);
-        expect(Math.abs(across), `${at}: across`).toBeLessThanOrEqual(CHASE_ACROSS_METRES);
-        expect(
-          Math.abs(eye.y - rider.y - CAMERA_ABOVE_METRES),
-          `${at}: above the rider's road`,
-        ).toBeLessThanOrEqual(CHASE_ABOVE_SLACK_METRES);
+        const aside = Math.abs(
+          (rider.x - eye.x) * heading.headingZ - (rider.z - eye.z) * heading.headingX,
+        );
+        const off = Math.abs(eye.y - rider.y - CAMERA_ABOVE_METRES);
+        if (behind < nearest.value) Object.assign(nearest, { value: behind, at });
+        if (behind > farthest.value) Object.assign(farthest, { value: behind, at });
+        if (aside > across.value) Object.assign(across, { value: aside, at });
+        if (off > above.value) Object.assign(above, { value: off, at });
         if (lastEye !== undefined) {
           const step = { x: eye.x - lastEye.x, z: eye.z - lastEye.z };
           if (lastStep !== undefined) {
-            expect(
-              Math.hypot(step.x - lastStep.x, step.z - lastStep.z),
-              `${at}: the eye's step changed`,
-            ).toBeLessThanOrEqual(MOST_EYE_JERK_METRES * (60 / fps) ** 2);
+            const change = Math.hypot(step.x - lastStep.x, step.z - lastStep.z);
+            if (change > jerk.value) Object.assign(jerk, { value: change, at });
           }
           lastStep = step;
         }
@@ -586,9 +672,21 @@ describe('the chase camera through a one-point turnaround on the coast — #3122
         lastYaw = yaw;
         frames += 1;
       }
-      // Non-vacuity: it rode through the turn and the camera turned round.
-      expect(frames).toBeGreaterThan(100);
-      expect(turned).toBeGreaterThan((160 * Math.PI) / 180);
+      expect(nearest.value, `behind, ${nearest.at}`).toBeGreaterThanOrEqual(CHASE_BEHIND_METRES[0]);
+      expect(farthest.value, `behind, ${farthest.at}`).toBeLessThanOrEqual(CHASE_BEHIND_METRES[1]);
+      expect(across.value, `across, ${across.at}`).toBeLessThanOrEqual(CHASE_ACROSS_METRES);
+      expect(above.value, `above the rider's road, ${above.at}`).toBeLessThanOrEqual(
+        CHASE_ABOVE_SLACK_METRES,
+      );
+      expect(jerk.value, `the eye's step changed, ${jerk.at}`).toBeLessThanOrEqual(
+        MOST_EYE_JERK_METRES * (60 / fps) ** 2,
+      );
+      // Non-vacuity: it rode the stretch, and through the turn the camera
+      // turned round.
+      expect(frames).toBeGreaterThan(60);
+      if (stretch === 'turn' || stretch === 'whole') {
+        expect(turned).toBeGreaterThan((160 * Math.PI) / 180);
+      }
     },
   );
 });
