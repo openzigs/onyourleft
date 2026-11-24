@@ -287,6 +287,11 @@ export default defineConfig({
         // origin; and the planner's profile of that route.
         // `terrain-harness.tsx` says what it does not prove.
         terrain: 'browser/terrain.html',
+        // #3107: the real game screen, renderer and open-world session over
+        // fixture streets, ridden through new areas a frame at a time while
+        // every program link is counted. `open-world-harness.tsx` says what
+        // it does not prove.
+        'open-world': 'browser/open-world.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

@@ -326,4 +326,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'DOM order with no `dense` packing, so the tab order is not this layout’s to change; ' +
       'still required are #1026’s row balance in this spec, and `controls-first` and `reflow`.',
   },
+  {
+    spec: 'open-world.browser.spec.ts',
+    describe: 'an open-world ride in the realistic world — #3107',
+    seconds:
+      '44 s on the required runner beside two other workers (run 45325883207), of a 60 s case: ' +
+      'one load of the open-world page in the realistic world',
+    why:
+      'that an open-world ride in the opt-in realistic world links no shader program when its ' +
+      'first mapped buildings arrive (PR #3117’s review). A stall, not a safety gate, in a ' +
+      'world a rider chooses. Still required: the same ride in the DEFAULT world links none ' +
+      '(this spec’s first case), and the buildings’ programs are compiled from meshes that ' +
+      'wear every material on a belt’s own attributes (`mapped-building-materials.test.ts`).',
+  },
 ];

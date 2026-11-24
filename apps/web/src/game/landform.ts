@@ -34,6 +34,21 @@
  * place looks the same on lap two as on lap one, and a route ridden twice looks
  * the same twice.
  *
+ * ## ⚠️ An open-world view's ground is the place's — #3094
+ *
+ * A route's relief is keyed on "this far along the road, this far to its
+ * side". An open-world view's road is the street the route takes, so a
+ * junction choice made another street the road past the junction and redrew
+ * every hill along every way out on the frame of the press. So on a view
+ * `scenery-anchor.ts` keys (every open-world view, never a route) the relief
+ * is read at the PLACE, in the ride's frame ({@link placeFields}), and measured
+ * from the nearest street the ride holds where that is nearer than this road
+ * ({@link levelledAt}, `street-levels.ts`): levelled beside every street, the
+ * road's and the side streets' alike. What is still the road's: its own
+ * height under the verge, which is level on the open world's flat streets
+ * until #2899, and the verge itself. A route reads what it always read;
+ * `arrangement-unchanged.test.ts` says so.
+ *
  * ## ⚠️ The ground never rises into the carriageway
  *
  * Three rules, each with its own constant, and `landform.test.ts` holds every
@@ -121,7 +136,7 @@ import {
 
 import { treeLineHeight } from './ground-blend';
 import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
-import { sceneryAnchor, sceneryGrid } from './scenery-anchor';
+import { sceneryAnchor, sceneryGrid, type SceneryAnchor } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   DRY,
@@ -139,6 +154,7 @@ import {
   corridorOrigin,
   drawnRoadFrame,
   localGroundPosition,
+  reframedGround,
   ribbonNormals,
   type CorridorOrigin,
   type CorridorPoint,
@@ -513,15 +529,20 @@ export function terrainHeightAt(
       Number.POSITIVE_INFINITY,
     );
   }
+  // #3094: an open-world view's relief is the place's, not the road's.
+  const anchor = sceneryAnchor(profile);
   // The far field starts to count at the blend's near end; a bracket that
   // ends inside it reads only the near field, and no bracket reads the mottle.
-  const fields = reliefFields(
-    profile,
-    seed,
-    wrapped,
-    side,
-    lateral < (RELIEF_BLEND_METRES[0] as number) ? 'height-near-the-road' : 'everything',
-  );
+  const fields =
+    anchor === undefined
+      ? reliefFields(
+          profile,
+          seed,
+          wrapped,
+          side,
+          lateral < (RELIEF_BLEND_METRES[0] as number) ? 'height-near-the-road' : 'everything',
+        )
+      : NO_RELIEF;
   const sign = side === 0 ? 1 : -1;
   const shaped = (offset: number): WaterShaping =>
     waterShaping(ways, profile, origin, wrapped, offset * sign, road);
@@ -534,11 +555,10 @@ export function terrainHeightAt(
   const share = Math.min(1, (lateral - inner) / (outer - inner));
   // #1547: each column's own hold, at where that column stands beside the
   // drawn road — the point the mesh's vertex is built at.
+  const levelsLand = land.levellingBytes > 0 && lateral > RELIEF_CLEAR_METRES;
   const frame =
-    land.levellingBytes > 0 && lateral > RELIEF_CLEAR_METRES
-      ? drawnRoadFrame(profile, origin, wrapped)
-      : undefined;
-  if (frame === undefined) {
+    levelsLand || anchor !== undefined ? drawnRoadFrame(profile, origin, wrapped) : undefined;
+  if (frame === undefined || !levelsLand) {
     LEVEL_HOLDS[0] = Number.POSITIVE_INFINITY;
     LEVEL_HOLDS[1] = Number.POSITIVE_INFINITY;
   } else {
@@ -550,6 +570,17 @@ export function terrainHeightAt(
   }
   const fromHold = LEVEL_HOLDS[0] as number;
   const toHold = LEVEL_HOLDS[1] as number;
+  if (anchor !== undefined && frame !== undefined) {
+    // #3094: each column's own place, where the mesh's vertex is built.
+    const height = (offset: number, hold: number): number => {
+      const x = frame.x + frame.normalX * offset * sign;
+      const z = frame.z + frame.normalZ * offset * sign;
+      const here = atPlace(anchor, origin, seed, x, z, offset);
+      return groundHeight(road, here, offset, shaped(offset), hold, hold, placeLevelled);
+    };
+    const near = height(inner, fromHold);
+    return near + (height(outer, toHold) - near) * share;
+  }
   const from = groundHeight(road, fields, inner, shaped(inner), fromHold, fromHold);
   const to = groundHeight(road, fields, outer, shaped(outer), toHold, toHold);
   return from + (to - from) * share;
@@ -660,7 +691,9 @@ export function terrainCorridor(
     const under = corridor.retraced[row] === 1 ? RETRACE_UNDER_METRES : 0;
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
-      const relief = reliefFields(profile, seed, point.distance, side);
+      // #3094: on an open-world view, each vertex reads its own place's.
+      const relief =
+        anchor === undefined ? reliefFields(profile, seed, point.distance, side) : NO_RELIEF;
       const limit = reach[row * 2 + side] as number;
       const seam = seams[row * 2 + side] as number;
       const held = shallow[row * 2 + side] as number;
@@ -724,9 +757,13 @@ export function terrainCorridor(
         // 2026-11-04. @see SEAM_CREST_FADE_METRES
         const crest = flat * crestShare;
         const fall = Math.min(hold, RELIEF_SLOPE * Math.abs(line - lateral));
+        // #3094: an open-world view's relief is its place's, levelled beside
+        // every street the ride holds as well as this road.
+        const here = anchor === undefined ? relief : atPlace(anchor, origin, seed, x, z, lateral);
+        const measured = anchor === undefined ? lateral : placeLevelled;
         const met = Math.min(
           shaping.ceiling,
-          groundHeight(point.y, relief, lateral, shaping, fall, crest) +
+          groundHeight(point.y, here, lateral, shaping, fall, crest, measured) +
             meet * towardsSeam(lateral, line, from),
         );
         const height = Number.isFinite(held)
@@ -742,9 +779,10 @@ export function terrainCorridor(
         // wet, so the road's verge stays the road's. And only on the shore:
         // ground far from the water is dry however low it lies (#501 review).
         const wet = column === 0 ? 0 : wetness(height, shaping.level) * shaping.shore;
-        colours[at * 3] = tint * (1 + (WET_GROUND_TINT[0] - 1) * wet);
-        colours[at * 3 + 1] = tint * (1 + (WET_GROUND_TINT[1] - 1) * wet);
-        colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);
+        const shade = anchor === undefined ? tint : 1 + TERRAIN_MOTTLE * here.mottle;
+        colours[at * 3] = shade * (1 + (WET_GROUND_TINT[0] - 1) * wet);
+        colours[at * 3 + 1] = shade * (1 + (WET_GROUND_TINT[1] - 1) * wet);
+        colours[at * 3 + 2] = shade * (1 + (WET_GROUND_TINT[2] - 1) * wet);
         fields[at * 2] = point.along + shift;
         fields[at * 2 + 1] = lateral * sign;
         if (mapped) surfaces[at] = surfaceByte(land.bareSurfaceAt(x, z));
@@ -938,7 +976,8 @@ function retracedGround(
   const rows = centre.length;
   const { capAnchor, capAngle, capWay, vertices, colours, fields, surfaces } = lent;
   // #3055: ride distance on an open-world view, as {@link terrainCorridor}'s own rows.
-  const shift = sceneryAnchor(profile)?.origin ?? 0;
+  const placed = sceneryAnchor(profile);
+  const shift = placed?.origin ?? 0;
   const perRow = COLUMNS * 2;
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const levelled = land.levellingBytes > 0;
@@ -1003,13 +1042,20 @@ function retracedGround(
       const hold = levelled ? (LEVEL_HOLDS[column] as number) : Number.POSITIVE_INFINITY;
       const x = point.x + towardsX * lateral;
       const z = point.z + towardsZ * lateral;
+      // #3094: an open-world view's ground past the road's end is its place's too.
+      const here = placed === undefined ? relief : atPlace(placed, origin, seed, x, z, lateral);
+      const measured = placed === undefined ? lateral : placeLevelled;
       vertices[at * 3] = x;
       vertices[at * 3 + 1] =
         column === 0
           ? Math.min(shaping.ceiling, point.y - VERGE_DROP_METRES)
-          : groundHeight(point.y, relief, lateral, shaping, hold, hold);
+          : groundHeight(point.y, here, lateral, shaping, hold, hold, measured);
       vertices[at * 3 + 2] = z;
-      colours.fill(tint, at * 3, at * 3 + 3);
+      colours.fill(
+        placed === undefined ? tint : 1 + TERRAIN_MOTTLE * here.mottle,
+        at * 3,
+        at * 3 + 3,
+      );
       fields[at * 2] = point.along + shift + lateral * sin;
       fields[at * 2 + 1] = lateral * cos;
       surfaces[at] = mapped ? surfaceByte(land.bareSurfaceAt(x, z)) : 0;
@@ -1838,6 +1884,12 @@ function heightIn(
  *
  * Seeded and stateless like the rest of this file, and lifted by the route's
  * own elevation range so that a mountain route's horizon is a mountain one.
+ *
+ * ⚠️ **On an open-world view, by the ride's range, not the view's** — #3065.
+ * A view's range moves as road is added ahead and dropped behind, and the
+ * hills, standing on its middle, rose or sank at a view change. Their middle
+ * is the ride's (`scenery-anchor.ts` §`SceneryAnchor.band`). Their foot and
+ * the skirt's base are still the view's, under the ground in view.
  */
 export function horizonRelief(
   profile: RouteProfile,
@@ -1852,8 +1904,11 @@ export function horizonRelief(
     lowest = Math.min(lowest, each);
     highest = Math.max(highest, each);
   }
+  const band = sceneryAnchor(profile)?.band;
   const low = lowest - origin.elevation;
-  const middle = (lowest + highest) / 2 - origin.elevation;
+  const middle =
+    (band === undefined ? (lowest + highest) / 2 : (band.lowest + band.highest) / 2) -
+    origin.elevation;
   const [rise, most] = HORIZON_RISE_METRES;
   const tops = new Float32Array(HORIZON_SEGMENTS);
   // Eight coarse hills round the ring, smoothed, with a little of each
@@ -1874,6 +1929,159 @@ export function horizonRelief(
 
 /** Relief fields that contribute nothing — for the clear band, where there is none. */
 const NO_RELIEF: ReliefFields = { near: 0, far: 0, mottle: 0, tilt: 0 };
+
+/**
+ * The band {@link slotHash} hashes an open-world view's relief nodes under —
+ * #3094: past {@link RELIEF_KEY}'s own layers and the horizon's.
+ */
+const PLACE_KEY = RELIEF_KEY + 16;
+
+/** How many fields a place node holds: the near and far relief, and the mottle. */
+const PLACE_LAYERS = 3;
+
+/** The most place nodes {@link placeNode} keeps: a view reads some thirty. */
+const PLACE_NODE_LIMIT = 4_096;
+
+/** The place nodes read, by column and row, for {@link placeNodesSeed}. */
+const placeNodes = new Map<number, Float64Array>();
+let placeNodesSeed = Number.NaN;
+
+/** One node of the place lattice: its three fields, each in [0, 1). */
+function placeNode(seed: number, column: number, row: number): Float64Array {
+  if (seed !== placeNodesSeed) {
+    placeNodes.clear();
+    placeNodesSeed = seed;
+  }
+  const key = column * 100_003 + row;
+  let node = placeNodes.get(key);
+  if (node === undefined) {
+    if (placeNodes.size >= PLACE_NODE_LIMIT) placeNodes.clear();
+    node = new Float64Array(PLACE_LAYERS);
+    const base = slotHash(seed, column, PLACE_KEY);
+    for (let layer = 0; layer < PLACE_LAYERS; layer += 1) {
+      node[layer] = uniformFrom(slotHash(base, row, PLACE_KEY + 1 + layer), 0);
+    }
+    placeNodes.set(key, node);
+  }
+  return node;
+}
+
+/** Where {@link atPlace} reads a place, in the ride's frame. */
+const PLACE_AT = { x: 0, z: 0 };
+
+/** How far from a street {@link atPlace}'s place is measured. @see levelledAt */
+let placeLevelled = 0;
+
+/**
+ * The relief fields at `(x, z)` of an anchored view drawn about `origin`, and,
+ * into {@link placeLevelled}, how far from a street they are measured — #3094.
+ * The place is read in the ride's frame ({@link SceneryAnchor.frame}): every
+ * open-world view of a session is drawn in that frame already, and a view
+ * drawn about its own first point is read there too, so a place is the same
+ * place on every view.
+ */
+function atPlace(
+  anchor: SceneryAnchor,
+  origin: CorridorOrigin,
+  seed: number,
+  x: number,
+  z: number,
+  lateral: number,
+): ReliefFields {
+  const frame = anchor.frame;
+  if (
+    frame === undefined ||
+    (frame.latitude === origin.latitude && frame.longitude === origin.longitude)
+  ) {
+    PLACE_AT.x = x;
+    PLACE_AT.z = z;
+  } else {
+    reframedGround(origin, frame, x, z, PLACE_AT);
+  }
+  placeLevelled =
+    lateral <= RELIEF_CLEAR_METRES ? lateral : levelledAt(anchor, PLACE_AT.x, PLACE_AT.z, lateral);
+  return placeFields(seed, PLACE_AT.x, PLACE_AT.z);
+}
+
+/** The cell {@link placeFields} last read, and its four nodes. */
+const PLACE_CELL: {
+  seed: number;
+  column: number;
+  row: number;
+  a: Float64Array;
+  b: Float64Array;
+  c: Float64Array;
+  d: Float64Array;
+} = {
+  seed: Number.NaN,
+  column: Number.NaN,
+  row: Number.NaN,
+  a: new Float64Array(PLACE_LAYERS),
+  b: new Float64Array(PLACE_LAYERS),
+  c: new Float64Array(PLACE_LAYERS),
+  d: new Float64Array(PLACE_LAYERS),
+};
+
+/** What {@link placeFields} writes and hands back: read before the next call. */
+const PLACE_FIELDS = { near: 0, far: 0, mottle: 0, tilt: 0 };
+
+/**
+ * The relief fields at a place `(x, z)` in an open-world ride's frame — #3094.
+ *
+ * ⚠️ **The place's, not the road's.** A route's fields are keyed on how far
+ * along the road a point is beside and on which side ({@link reliefFields}),
+ * and an open-world view's road is the street the route takes: a junction
+ * choice made another street the road past the junction, and every hill along
+ * every way out was redrawn on the frame of the press (35–49 % of the ground
+ * from 110 m to 300 m moved, by up to 32 m). So an open-world view's fields
+ * are a smooth lattice over the ride's own frame, nodes
+ * {@link RELIEF_SPAN_METRES} apart east and north, hashed from the ride's seed
+ * — the same hills whichever street a frame is built along. No cross-slope:
+ * that is the road's gradient's, and the open world's streets are flat until
+ * #2899.
+ */
+function placeFields(seed: number, x: number, z: number): ReliefFields {
+  const u = x / RELIEF_SPAN_METRES;
+  const v = z / RELIEF_SPAN_METRES;
+  const column = Math.floor(u);
+  const row = Math.floor(v);
+  const s = smoothstep01(u - column);
+  const t = smoothstep01(v - row);
+  // The cell's four nodes, kept from the last place read: a cross-section's
+  // columns fall in two or three cells, so most reads are the last one's.
+  const cell = PLACE_CELL;
+  if (cell.seed !== seed || cell.column !== column || cell.row !== row) {
+    cell.seed = seed;
+    cell.column = column;
+    cell.row = row;
+    cell.a = placeNode(seed, column, row);
+    cell.b = placeNode(seed, column + 1, row);
+    cell.c = placeNode(seed, column, row + 1);
+    cell.d = placeNode(seed, column + 1, row + 1);
+  }
+  const { a, b, c, d } = cell;
+  const field = (layer: number): number => {
+    const south = (a[layer] as number) + ((b[layer] as number) - (a[layer] as number)) * s;
+    const north = (c[layer] as number) + ((d[layer] as number) - (c[layer] as number)) * s;
+    return (south + (north - south) * t) * 2 - 1;
+  };
+  PLACE_FIELDS.near = field(0);
+  PLACE_FIELDS.far = field(1);
+  PLACE_FIELDS.mottle = field(2);
+  return PLACE_FIELDS;
+}
+
+/**
+ * How far from a street the relief at `(x, z)` is measured, on an open-world
+ * view — #3094: `lateral`, from this view's road, or from the nearest street
+ * the ride holds where that is nearer (`street-levels.ts`). So the ground is
+ * levelled beside every street drawn, the road's and the side streets' alike,
+ * and a choice that swaps which of them is the road levels none of it afresh.
+ */
+function levelledAt(anchor: SceneryAnchor, x: number, z: number, lateral: number): number {
+  const levels = anchor.levels;
+  return levels === undefined ? lateral : Math.min(lateral, levels.distance(x, z));
+}
 
 /** The relief fields beside one point of the route, on one side. */
 interface ReliefFields {
@@ -2294,15 +2502,21 @@ function groundHeight(
   water: WaterShaping,
   hold: number,
   crest: number,
+  /**
+   * #3094: how far from a street the relief is measured: `lateral`, this
+   * road's, but on an open-world view the nearest street the ride holds where
+   * one is nearer ({@link levelledAt}). The verge is this road's alone.
+   */
+  levelled: number = lateral,
 ): number {
   const drop =
     lateral <= ROAD_HALF_WIDTH_METRES
       ? 0
       : Math.min(1, (lateral - ROAD_HALF_WIDTH_METRES) / VERGE_METRES) * VERGE_DROP_METRES;
   const [nearEnd, farStart] = RELIEF_BLEND_METRES;
-  const blend = smoothstep01((lateral - nearEnd) / (farStart - nearEnd));
+  const blend = smoothstep01((levelled - nearEnd) / (farStart - nearEnd));
   const field = fields.near + (fields.far - fields.near) * blend;
-  const beyond = Math.max(0, lateral - RELIEF_CLEAR_METRES);
+  const beyond = Math.max(0, levelled - RELIEF_CLEAR_METRES);
   const amplitude = Math.min(RELIEF_MAX_METRES, beyond * RELIEF_SLOPE);
   const relief = (amplitude * field + fields.tilt * beyond) * water.relief;
   // #1547: held to the town's; `Math.min` of `Infinity` is the relief's own

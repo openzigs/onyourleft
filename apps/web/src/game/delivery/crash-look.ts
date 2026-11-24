@@ -23,16 +23,16 @@
  * - **Back up** — the respawn — over {@link CRASH_RISE_SECONDS}: eased back to
  *   the ride's own lean, so the rider rejoins the ride with no jump.
  *
- * ## Where: at the simulated position, so the camera does nothing new
+ * ## Where: held where they fell, on the round's drawn distance (ADR 0094)
  *
- * The rider is drawn where the simulation has them throughout, which is where
- * they were drawn before #2454: the crash changes the drawn ATTITUDE and
- * nothing else. So the chase camera follows the odometer as it always does,
- * and there is nothing to rejoin: the respawn is the bicycle standing up where
- * it already is. A crash that held the drawn rider back would need the camera
- * to choose between them and a jump back; one that really paused the rider
- * would change the trainer's timing, which ADR 0059 D-2 item 4 forbids
- * without an amendment and an owner ruling. Neither is done.
+ * Since ADR 0094 (#3021, superseding ADR 0059 D-2.4 for Delivery rounds) the
+ * rider is drawn where the ROUND has them: `ride-round.ts` holds its drawn
+ * distance still for the crash's whole length, {@link CRASH_SECONDS}
+ * (`ride-round.ts` §`CRASH_STOP_SECONDS` is this constant), and pays the
+ * distance out after. The chase camera follows that drawn rider, so it stops
+ * with them and there is no jump back: the respawn is the bicycle standing up
+ * where it fell, and riding on. The simulation is never paused or moved back:
+ * that would change the trainer's timing, which ADR 0059 D-2.1 still forbids.
  *
  * ## Reduced motion (§4e)
  *

@@ -920,6 +920,22 @@ export function routeSeed(profile: RouteProfile): number {
 }
 
 /**
+ * #2902: the seed an open-world ride's frame implies — its start, rounded as
+ * {@link scatterSeed} rounds a route's first coordinate. An open-world ride's
+ * view changes every kilometre or so, and with it the view's
+ * {@link scatterSeed}; the frame does not, so what is seeded from it stays.
+ */
+export function frameSeed(frame: {
+  readonly latitude: number;
+  readonly longitude: number;
+}): number {
+  let seed = SEED_BASIS;
+  seed = mix(seed, Math.round(frame.latitude * SEED_COORDINATE_SCALE));
+  seed = mix(seed, Math.round(frame.longitude * SEED_COORDINATE_SCALE));
+  return seed >>> 0;
+}
+
+/**
  * Everything standing beside the road between two odometer readings.
  *
  * Pure, total and **stateless**: the answer for a span depends on the span and
@@ -935,6 +951,12 @@ export function routeSeed(profile: RouteProfile): number {
  * today's world. Since #1542 a wood, farmland and a park are planted as what
  * they are ({@link landPlanting}), each lever of `countryside` switching one
  * change off; where the mask is `unknown` nothing here reads it.
+ *
+ * `ways` is an open-world ride's ways out of the junctions in view that its
+ * route does not take (#3051, {@link ScatterWay}): what stands along each is
+ * placed as it is along the road, and the ONE budget is thinned over them
+ * all, so what a frame carries does not depend on which of them the route
+ * takes. None, the default, is every ride but an open-world one.
  */
 export function scatterAt(
   profile: RouteProfile,
@@ -945,7 +967,271 @@ export function scatterAt(
   budget: ScatterBudget,
   land: LandClassMask = NO_LAND_CLASS,
   countryside: Countryside = COUNTRYSIDE,
+  ways: readonly ScatterWay[] = NO_WAYS,
 ): readonly ScatterItem[] {
+  const found = placedBetween(profile, origin, seed, fromMetres, toMetres, land, countryside);
+  if (ways.length === 0) return thin(found, budget);
+  // #3051. Every candidate, the road's first: its item, rank, and distance on
+  // `profile` through its junction. Both views count ride distance from their
+  // own first sample.
+  const items: ScatterItem[] = [];
+  const ranks: number[] = [];
+  const alongs: number[] = [];
+  for (const placed of found) {
+    items.push(placed.item);
+    ranks.push(placed.rank);
+    alongs.push(placed.along);
+  }
+  const own = items.length;
+  const rides = sceneryAnchor(profile)?.origin ?? 0;
+  for (const way of ways) {
+    const shift = (sceneryAnchor(way.profile)?.origin ?? 0) - rides;
+    for (const placed of placedOnWay(way, origin, seed, toMetres - shift, land, countryside)) {
+      // No way reaches back past the span by more than a look: its junction
+      // is handed on only while the view still reaches it
+      // (`open-world/road.ts` §`WAYS_OUT_LOOK_METRES`).
+      const along = placed.along + shift;
+      if (along < toMetres) {
+        items.push(placed.item);
+        ranks.push(placed.rank);
+        alongs.push(along);
+      }
+    }
+  }
+  // The budget first, over the road's and the ways' alike ({@link thin}'s
+  // rule), and only then each of the ways' held off THIS road by the
+  // clearance an item keeps from its own: a way leaves the road at its
+  // junction, and its first cells lie across it. Several times the budget
+  // stands along the ways in view, so the budget's items are picked out
+  // without sorting them all.
+  const kept = thinned(ranks, alongs, budget);
+  const clearance = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+  const out: ScatterItem[] = [];
+  for (const index of kept) {
+    const item = items[index] as ScatterItem;
+    if (
+      index < own ||
+      !(distanceToDrawnRoad(profile, origin, item.x, item.z, clearance) < clearance)
+    ) {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of the candidates {@link thin} would keep, by index, in the order it
+ * would return them: its rule, for more candidates than are worth sorting.
+ * The budget's lowest priorities are found by selection, and only those are
+ * put in order.
+ */
+function thinned(
+  ranks: readonly number[],
+  alongs: readonly number[],
+  budget: ScatterBudget,
+): readonly number[] {
+  const count = ranks.length;
+  const keep = Math.max(0, budget.maxItems);
+  const all: number[] = [];
+  if (count <= keep) {
+    for (let index = 0; index < count; index += 1) all.push(index);
+    return all;
+  }
+  if (keep === 0) return all;
+  let reach = 1;
+  for (let index = 0; index < count; index += 1) {
+    reach = Math.max(reach, Math.abs((alongs[index] as number) - budget.riderMetres));
+  }
+  const priority = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    priority[index] =
+      (ranks[index] as number) *
+      (1 + (SCATTER_NEAR_BIAS * Math.abs((alongs[index] as number) - budget.riderMetres)) / reach);
+  }
+  const most = smallestOf(priority, keep);
+  for (let index = 0; index < count; index += 1) {
+    if ((priority[index] as number) < most) all.push(index);
+  }
+  // And those level with the last of them, in placing order, to the budget.
+  for (let index = 0; index < count && all.length < keep; index += 1) {
+    if (priority[index] === most) all.push(index);
+  }
+  return all.sort(
+    (first, second) => (priority[first] as number) - (priority[second] as number) || first - second,
+  );
+}
+
+/** The `nth` smallest of `values`, counted from 1, by selection: `values` is left as it was. */
+function smallestOf(values: Float64Array, nth: number): number {
+  const work = values.slice();
+  let low = 0;
+  let high = work.length - 1;
+  const at = nth - 1;
+  while (low < high) {
+    const pivot = work[(low + high) >> 1] as number;
+    let left = low;
+    let right = high;
+    while (left <= right) {
+      while ((work[left] as number) < pivot) left += 1;
+      while ((work[right] as number) > pivot) right -= 1;
+      if (left <= right) {
+        const swap = work[left] as number;
+        work[left] = work[right] as number;
+        work[right] = swap;
+        left += 1;
+        right -= 1;
+      }
+    }
+    if (at <= right) high = right;
+    else if (at >= left) low = left;
+    else break;
+  }
+  return work[at] as number;
+}
+
+/**
+ * A way out of a junction that an open-world ride's route does not take —
+ * #3051. `open-world/road.ts` §`OpenWorldRoad.waysOut` hands the scene each
+ * as the view the route would hand out were it taken, keyed on the ride as
+ * every view is (`scenery-anchor.ts`), so the cells past the junction are the
+ * ones that view's own scenery is placed on: a choice at the junction moves
+ * nothing that stands along either way.
+ *
+ * ⚠️ **An item along a way carries the height of the way's own ground**,
+ * which is not the ground a frame of the road draws there. `scene.ts`
+ * §`sceneFrame` stands every item on the frame's own mesh, and drops what the
+ * mesh does not reach (`landform.ts` §`standingOnGround`); a caller that
+ * draws {@link scatterAt}'s items without that would float them.
+ */
+export interface ScatterWay {
+  /** The view that takes this way: the same object for as long as the way is handed on. */
+  readonly profile: RouteProfile;
+  /** The junction's distance on {@link profile}: the way's scenery starts there. */
+  readonly fromMetres: number;
+}
+
+const NO_WAYS: readonly ScatterWay[] = [];
+
+/**
+ * How far along a way out from its junction scenery is placed, metres:
+ * **400**, the view's reach ahead (`terrain.ts` §`VIEW_AHEAD_METRES`), which
+ * no frame draws past.
+ */
+export const SCATTER_WAY_REACH_METRES = 400;
+
+/**
+ * How much further along a way out its scenery is placed at a time, metres:
+ * **48**, four cells. A way's scenery is placed as the view's reach comes to
+ * it, never all at once, so a junction coming into view costs a frame a few
+ * cells and not 400 m of them.
+ */
+const SCATTER_WAY_STEP_METRES = 4 * SCATTER_CELL_METRES;
+
+/** Whether two frames of reference are the same one: a view with no fixed frame makes its own each time it is asked. */
+export function sameOrigin(a: CorridorOrigin, b: CorridorOrigin): boolean {
+  return (
+    a === b ||
+    (a.latitude === b.latitude && a.longitude === b.longitude && a.elevation === b.elevation)
+  );
+}
+
+/**
+ * Whether two sets of the countryside's levers are the same set: `scene.ts`
+ * makes one each frame (`land-class.ts` §`countrysideWithout`), so what is
+ * kept for a way is kept by what the levers say, not by the object.
+ */
+export function sameCountryside(a: Countryside, b: Countryside): boolean {
+  return (
+    a === b ||
+    (a.planting === b.planting &&
+      a.boundaries === b.boundaries &&
+      a.clutter === b.clutter &&
+      a['hedge-breaks'] === b['hedge-breaks'] &&
+      a['small-stones'] === b['small-stones'])
+  );
+}
+
+/** What stands along a way out, as placed on the way's own view. @see placedOnWay */
+const placedAlongWays = new WeakMap<
+  RouteProfile,
+  {
+    readonly origin: CorridorOrigin;
+    readonly seed: number;
+    readonly fromMetres: number;
+    readonly land: LandClassMask;
+    readonly countryside: Countryside;
+    readonly placed: Placed[];
+    /** How far along the way's own view {@link placed} reaches. */
+    upTo: number;
+  }
+>();
+
+/**
+ * What stands along `way` from its junction as far as `toMetres` on its own
+ * view, and no further than {@link SCATTER_WAY_REACH_METRES} past the
+ * junction: **placed on the way's own view**, so each item is where that
+ * view's own scenery puts it. Kept for as long as the way's view is, and
+ * placed {@link SCATTER_WAY_STEP_METRES} further at a time as `toMetres`
+ * grows: {@link placedBetween} is stateless, so two spans placed one after
+ * the other are the one span.
+ */
+function placedOnWay(
+  way: ScatterWay,
+  origin: CorridorOrigin,
+  seed: number,
+  toMetres: number,
+  land: LandClassMask,
+  countryside: Countryside,
+): readonly Placed[] {
+  let held = placedAlongWays.get(way.profile);
+  if (
+    held === undefined ||
+    !sameOrigin(held.origin, origin) ||
+    held.seed !== seed ||
+    held.fromMetres !== way.fromMetres ||
+    held.land !== land ||
+    !sameCountryside(held.countryside, countryside)
+  ) {
+    held = {
+      origin,
+      seed,
+      fromMetres: way.fromMetres,
+      land,
+      countryside,
+      placed: [],
+      upTo: way.fromMetres,
+    };
+    placedAlongWays.set(way.profile, held);
+  }
+  const last = way.fromMetres + SCATTER_WAY_REACH_METRES;
+  while (held.upTo < toMetres && held.upTo < last) {
+    const next = Math.min(last, held.upTo + SCATTER_WAY_STEP_METRES);
+    for (const placed of placedBetween(
+      way.profile,
+      origin,
+      seed,
+      held.upTo,
+      next,
+      land,
+      countryside,
+    )) {
+      held.placed.push(placed);
+    }
+    held.upTo = next;
+  }
+  return held.placed;
+}
+
+/** Every item placed beside `profile`'s road between two odometer readings, before the budget. */
+function placedBetween(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  fromMetres: number,
+  toMetres: number,
+  land: LandClassMask,
+  countryside: Countryside,
+): Placed[] {
   // ⚠️ **There is deliberately no early return for a degenerate call**, and
   // three of them were written here and then removed because no mutation could
   // turn any of them red:
@@ -1014,7 +1300,7 @@ export function scatterAt(
     );
   }
 
-  return thin(found, budget);
+  return found;
 }
 
 /** An item, with the odometer reading it was placed at. @see thin */

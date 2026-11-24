@@ -99,6 +99,19 @@ describe('the street map is a picture with a sentence — #2290', () => {
     expect(root.querySelectorAll('svg')).toHaveLength(2);
   });
 
+  it('on an open-world ride names the road ahead, and no share of a route ridden — #3106', async () => {
+    mounted = await mount(
+      <UnitsProvider units="imperial">
+        <StreetMap corridor={northCorridor()} profile={northRoute()} distance={300} openEnded />
+      </UnitsProvider>,
+    );
+    // The profile is a view of the road, which goes nowhere in particular:
+    // "20 per cent of the way along the route" would be of the view.
+    expect(mounted.container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Street map around you, north up, about 0.6 miles from top to bottom, with the road ahead on it.',
+    );
+  });
+
   it('says the span in the rider’s own units', async () => {
     mounted = await mount(
       <UnitsProvider units="imperial">

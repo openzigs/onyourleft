@@ -363,3 +363,23 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   parenthesis is unchanged. Nothing in this reaches the trainer: a press still changes only which
   branch the rolling route appends (D-5.1). The ruling is posted on
   [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
+- **2026-11-22** — **The owner ruled that the prompt is a pop-up in the middle of the screen, which
+  the ride controls' fade does not reach.** The owner reported on 2026-11-22, on the Pixel Tablet:
+  *"the controls also disappear in the box. I was thinking we would see popups in the middle of the
+  screen when possible turns were upcoming to make turns"*.
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898) had drawn D-1.2's prompt and D-3.1's
+  symbols in the HUD's ride-controls panel. That panel fades and is then clipped after a few seconds
+  with no touch ([ADR 0075](0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md)), and its
+  first tap only brings it back. So D-1.2 and D-3.1 now read as follows. The prompt's ways are a
+  pop-up in the upper middle of the view, clear of the drawn rider and of the road just ahead. It is
+  drawn from the prompt distance until the choice is final, then shows the chosen way alone briefly
+  and goes away. It is never subject to the controls' fade, and its first tap is that way's press.
+  The U-turn button of D-3's screen row stays with the ride controls and fades with them, because it
+  is not a junction's. D-3.1's taps and D-3's keys, pad and numbered buttons go through the same
+  press path as before. D-3.1.3 is unchanged: the pop-up is inside the HUD's touch-locked region and
+  carries no `TOUCH_LOCK_EXEMPT`. The owner also asked for a semi-transparent pop-up. The HUD's
+  surface stays opaque, because translucency needs its own ADR (#423, ADR 0063). The pop-up paints
+  nothing between its parts, and each part a rider reads is on the opaque surface. Nothing in this
+  reaches the trainer (D-5). The ruling is posted on
+  [#3053](https://github.com/openzigs/onyourleft/issues/3053), whose pull request implements it.
+  (#3053)

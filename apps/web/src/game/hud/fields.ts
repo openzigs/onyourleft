@@ -1829,15 +1829,28 @@ export interface ProfileReading {
  * (`format.ts` §`DurationHours`); with nothing recording there is no lap
  * time, and the sentence is the one it always was.
  *
+ * ⚠️ **An open-ended ride states no share of anything — #3056.** Its profile
+ * is only the rolling view of the road held round the rider
+ * ({@link HudInput.openEnded}), and a new view replaces it every 2–3 km, so
+ * `16% complete` and then `38% complete` on a ride with no end were the
+ * rider's place in a view, read aloud as progress. The marker still stands at
+ * that place, which is true of the picture it is drawn on; the words say only
+ * that the road is open.
+ *
  * @param lapSeconds {@link HudInput.lapSeconds}.
+ * @param openEnded {@link HudInput.openEnded}.
  */
 export function profileReading(
   state: GameState,
   profile: RouteProfile,
   lapSeconds?: number,
+  openEnded?: boolean,
 ): ProfileReading {
   const distance = state.ride.distance as number;
   const position = planProgress(profile, distance);
+  if (openEnded === true) {
+    return { position, text: 'Open road', label: 'Road profile, open road' };
+  }
   const lap = planLap(profile, distance);
   const percent = String(Math.round(position * 100));
   // One phrase, so the sentence and the accessible name cannot describe

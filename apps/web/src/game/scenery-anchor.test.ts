@@ -34,7 +34,13 @@ import {
   scatterSeed,
   type ScatterItem,
 } from './scatter';
-import { anchorScenery, sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
+import {
+  anchorScenery,
+  elevationBand,
+  sceneryAnchor,
+  sceneryGrid,
+  wrappedCell,
+} from './scenery-anchor';
 import { townAt } from './scenery-cyclists';
 import {
   NO_MAPPED_TOWN,
@@ -115,7 +121,7 @@ describe('a route is keyed as it was before #3055', () => {
 describe('an anchored view is keyed on its ride — #3055', () => {
   it('is seeded from the ride, whatever its own first point and length', () => {
     const profile = northRoute(51.5, -0.12, 3_000);
-    anchorScenery(profile, { seed: 12_345, origin: 4_210 });
+    anchorScenery(profile, { seed: 12_345, origin: 4_210, band: elevationBand(profile) });
     expect(scatterSeed(profile)).toBe(12_345);
     // The route's own seed is still there for the ride to be seeded from.
     expect(routeSeed(profile)).toBe(ROUTE_SEEDS[0]);
@@ -123,7 +129,7 @@ describe('an anchored view is keyed on its ride — #3055', () => {
 
   it('is placed on the nominal grids, counted in ride distance', () => {
     const profile = northRoute(51.5, -0.12, 3_005);
-    anchorScenery(profile, { seed: 1, origin: 4_210 });
+    anchorScenery(profile, { seed: 1, origin: 4_210, band: elevationBand(profile) });
     expect(cellSpanMetres(profile)).toBe(SCATTER_CELL_METRES);
     expect(fieldSpanMetres(profile)).toBe(FIELD_SPAN_METRES);
     const grid = sceneryGrid(profile, 100);
@@ -144,7 +150,7 @@ describe('an anchored view is keyed on its ride — #3055', () => {
 
   it('is the profile object that is anchored, not one like it', () => {
     const anchored = northRoute(51.5, -0.12, 3_000);
-    anchorScenery(anchored, { seed: 1, origin: 10 });
+    anchorScenery(anchored, { seed: 1, origin: 10, band: elevationBand(anchored) });
     expect(sceneryAnchor(northRoute(51.5, -0.12, 3_000))).toBeUndefined();
   });
 });
@@ -159,8 +165,13 @@ describe('every generator reads an anchored view in ride distance — #3055', ()
   const whole = eastRoad(0, 12_000);
   const late = eastRoad(7_000, 12_000);
   const trimmed = (whole.totalDistance as number) - (late.totalDistance as number);
-  anchorScenery(whole, { seed, origin: 0 });
-  anchorScenery(late, { seed, origin: trimmed });
+  // The ride's range is its first view's, on both (#3065); #3094: and one
+  // frame its places are read in, the first view's, as `open-world/road.ts`
+  // keys every view of a ride.
+  const band = elevationBand(whole);
+  const rideFrame = corridorOrigin(whole);
+  anchorScenery(whole, { seed, origin: 0, frame: rideFrame, band });
+  anchorScenery(late, { seed, origin: trimmed, frame: rideFrame, band });
   const views = [
     { profile: whole, shift: 0, origin: corridorOrigin(whole) },
     { profile: late, shift: trimmed, origin: corridorOrigin(late) },

@@ -134,6 +134,36 @@ export interface DrawnLine extends RacingLine {
    * on a route with none. @see uTurnSamples
    */
   readonly uTurns: readonly number[];
+  /**
+   * A U-turn pressed in an open-world ride, drawn as a half-turn from where
+   * the rider was drawn when it was pressed — #3066. Absent on every other
+   * line. @see PressedTurn
+   */
+  readonly pressed?: PressedTurn | undefined;
+}
+
+/**
+ * A U-turn pressed in an open-world ride — #3066: over each piece, from
+ * odometer `from` to `to` on the line's view, the path is {@link hermiteAt}
+ * from `start` to `end` instead of the line's own spline.
+ *
+ * ⚠️ **Why the press does not jump the drawn rider.** A U-turn turns the road
+ * round at the next sample (ADR 0088 D-1.6, `RollingRoute.uTurn`), so the new
+ * view's line turns back within a sample of the rider, and its own U-turn
+ * (@see uTurnSamples) starts a sample behind them: drawn on it, the rider
+ * stepped metres back and across the road on the frame of the press. The
+ * first piece starts where the path drawn the frame before had them, with
+ * that heading and pace, and the last ends on the new line, with its heading
+ * and pace; each piece ends where the next begins, at the same heading and
+ * pace. `open-world/road.ts` §`pressedTurn` makes one.
+ */
+export interface PressedTurn {
+  readonly pieces: readonly {
+    readonly from: number;
+    readonly to: number;
+    readonly start: PathPoint;
+    readonly end: PathPoint;
+  }[];
 }
 
 const computed = new WeakMap<RouteProfile, DrawnLine>();
@@ -203,7 +233,7 @@ export function drawnLineAt(line: DrawnLine, distance: number): DrawnPoint {
   const fraction = Math.max(0, Math.min(1, raw - index));
   const x = splineAt(line.xs, line.bendXs, index, fraction, resolution);
   const z = splineAt(line.zs, line.bendZs, index, fraction, resolution);
-  const turned = uTurned(line, raw, resolution);
+  const turned = pressedAt(line.pressed, distance) ?? uTurned(line, raw, resolution);
   const slopeX = turned?.slopeX ?? x.slope;
   const slopeZ = turned?.slopeZ ?? z.slope;
   const atX = turned?.x ?? x.value;
@@ -227,56 +257,129 @@ export function drawnLineAt(line: DrawnLine, distance: number): DrawnPoint {
  * drawn rider's speed has no step either: they slow into the turn and pick
  * up out of it, as a rider does.
  */
-function uTurned(
-  line: DrawnLine,
-  raw: number,
-  resolution: number,
-):
-  | { readonly x: number; readonly z: number; readonly slopeX: number; readonly slopeZ: number }
-  | undefined {
+/** The path at odometer `distance` where that is inside a pressed U-turn, or undefined. */
+function pressedAt(turn: PressedTurn | undefined, distance: number): PathPoint | undefined {
+  if (turn === undefined) return undefined;
+  for (const piece of turn.pieces) {
+    // Closed at both ends (#3066's review): where two pieces meet, and where
+    // the last meets the line, both are in one place, and a frame landing
+    // exactly there was drawn on the line's own spline, metres away.
+    if (!(distance >= piece.from && distance <= piece.to)) continue;
+    const span = piece.to - piece.from;
+    return hermiteAt(piece.start, piece.end, span, (distance - piece.from) / span);
+  }
+  return undefined;
+}
+
+/**
+ * The cubic in the odometer from `start` to `end`, `u` of the way along the
+ * `span` metres it is ridden over, whose slope per metre of odometer is each
+ * end's own there — a pressed U-turn's piece, #3066's review.
+ *
+ * A cubic Hermite: its Bezier handles a third of `span` times each end's
+ * slope, and its parameter the odometer's share itself. So the drawn rider's
+ * place and speed run on into the next piece's with no step, and the pull on
+ * them, the second derivative, is linear along the piece and largest at its
+ * ends, where it is `6(P₀ − 2P₁ + P₂)/span²` and `6(P₁ − 2P₂ + P₃)/span²`.
+ * {@link halfTurnAt}'s half-circle with both ends facing one way, as a
+ * merge's do, has handles two thirds of the way along: its speed fell to a
+ * quarter of its ends' midway, and the drawn rider slowed and picked up again
+ * by 6 to 10 cm a frame's move.
+ */
+function hermiteAt(start: PathPoint, end: PathPoint, span: number, u: number): PathPoint {
+  const handle = span / 3;
+  const p1x = start.x + start.slopeX * handle;
+  const p1z = start.z + start.slopeZ * handle;
+  const p2x = end.x - end.slopeX * handle;
+  const p2z = end.z - end.slopeZ * handle;
+  const w = 1 - u;
+  const x = w * w * w * start.x + 3 * w * w * u * p1x + 3 * w * u * u * p2x + u * u * u * end.x;
+  const z = w * w * w * start.z + 3 * w * w * u * p1z + 3 * w * u * u * p2z + u * u * u * end.z;
+  const dx = 3 * (w * w * (p1x - start.x) + 2 * w * u * (p2x - p1x) + u * u * (end.x - p2x));
+  const dz = 3 * (w * w * (p1z - start.z) + 2 * w * u * (p2z - p1z) + u * u * (end.z - p2z));
+  return { x, z, slopeX: dx / span, slopeZ: dz / span };
+}
+
+function uTurned(line: DrawnLine, raw: number, resolution: number): PathPoint | undefined {
   for (const sample of line.uTurns) {
     const u = (raw - (sample - 1)) / 2;
     if (!(u > 0 && u < 1)) continue;
-    const span = 2 * resolution;
     // The spline where the U-turn starts and ends: its two neighbours, and
     // which way, and how fast a metre of odometer, it runs there.
     const startX = splineAt(line.xs, line.bendXs, sample - 1, 0, resolution);
     const startZ = splineAt(line.zs, line.bendZs, sample - 1, 0, resolution);
     const endX = splineAt(line.xs, line.bendXs, sample, 1, resolution);
     const endZ = splineAt(line.zs, line.bendZs, sample, 1, resolution);
-    const entry = Math.hypot(startX.slope, startZ.slope);
-    const exit = Math.hypot(endX.slope, endZ.slope);
-    const radius = Math.hypot(endX.value - startX.value, endZ.value - startZ.value) / 2;
-    if (!(entry > 0 && exit > 0 && radius > 0)) continue;
-    // A cubic Bézier half-circle from one to the other, its handles 4r/3
-    // along the spline's own heading at each end: its tangent, 4r over the
-    // curve, the heading the spline has there.
-    const handle = (4 / 3) * radius;
-    const p0x = startX.value;
-    const p0z = startZ.value;
-    const p1x = p0x + (startX.slope / entry) * handle;
-    const p1z = p0z + (startZ.slope / entry) * handle;
-    const p3x = endX.value;
-    const p3z = endZ.value;
-    const p2x = p3x - (endX.slope / exit) * handle;
-    const p2z = p3z - (endZ.slope / exit) * handle;
-    // The curve's parameter t(u): a cubic with t(0) = 0, t(1) = 1, whose
-    // slope at each end runs the curve at the spline's pace there, so the
-    // drawn rider's speed has no step where the U-turn begins or ends.
-    const startRate = (entry * span) / (4 * radius);
-    const endRate = (exit * span) / (4 * radius);
-    const c3 = startRate + endRate - 2;
-    const c2 = 3 - 2 * startRate - endRate;
-    const t = ((c3 * u + c2) * u + startRate) * u;
-    const tSlope = ((3 * c3 * u + 2 * c2) * u + startRate) / span;
-    const w = 1 - t;
-    const x = w * w * w * p0x + 3 * w * w * t * p1x + 3 * w * t * t * p2x + t * t * t * p3x;
-    const z = w * w * w * p0z + 3 * w * w * t * p1z + 3 * w * t * t * p2z + t * t * t * p3z;
-    const dx = 3 * (w * w * (p1x - p0x) + 2 * w * t * (p2x - p1x) + t * t * (p3x - p2x));
-    const dz = 3 * (w * w * (p1z - p0z) + 2 * w * t * (p2z - p1z) + t * t * (p3z - p2z));
-    return { x, z, slopeX: dx * tSlope, slopeZ: dz * tSlope };
+    const turned = halfTurnAt(
+      { x: startX.value, z: startZ.value, slopeX: startX.slope, slopeZ: startZ.slope },
+      { x: endX.value, z: endZ.value, slopeX: endX.slope, slopeZ: endZ.slope },
+      2 * resolution,
+      u,
+    );
+    if (turned !== undefined) return turned;
   }
   return undefined;
+}
+
+/** A place on the path, and its slope per metre of odometer. */
+export interface PathPoint {
+  readonly x: number;
+  readonly z: number;
+  readonly slopeX: number;
+  readonly slopeZ: number;
+}
+
+/**
+ * The half-turn from `start` to `end`, `u` of the way along the `span`
+ * metres of odometer it is ridden over: a recorded U-turn's (#3045; a
+ * pressed one's pieces are {@link hermiteAt}'s). Undefined where either end
+ * has no heading or the two are in one place.
+ *
+ * A cubic Bezier: its handles `4r/3` long, `r` half the way across between
+ * the two ends, the length that draws a half-circle, and laid along the
+ * path's own heading at each end, so the path's heading runs on into the
+ * spline's with no step. Its parameter is a cubic in the odometer whose slope
+ * at each end runs the curve at the path's own pace there, so the drawn
+ * rider's speed has no step either: they slow into the turn and pick up out
+ * of it, as a rider does.
+ */
+export function halfTurnAt(
+  start: PathPoint,
+  end: PathPoint,
+  span: number,
+  u: number,
+): PathPoint | undefined {
+  const entry = Math.hypot(start.slopeX, start.slopeZ);
+  const exit = Math.hypot(end.slopeX, end.slopeZ);
+  const radius = Math.hypot(end.x - start.x, end.z - start.z) / 2;
+  if (!(entry > 0 && exit > 0 && radius > 0)) return undefined;
+  // A cubic Bezier half-circle from one to the other, its handles 4r/3
+  // along the path's own heading at each end: its tangent, 4r over the
+  // curve, the heading the path has there.
+  const handle = (4 / 3) * radius;
+  const p0x = start.x;
+  const p0z = start.z;
+  const p1x = p0x + (start.slopeX / entry) * handle;
+  const p1z = p0z + (start.slopeZ / entry) * handle;
+  const p3x = end.x;
+  const p3z = end.z;
+  const p2x = p3x - (end.slopeX / exit) * handle;
+  const p2z = p3z - (end.slopeZ / exit) * handle;
+  // The curve's parameter t(u): a cubic with t(0) = 0, t(1) = 1, whose
+  // slope at each end runs the curve at the path's pace there, so the
+  // drawn rider's speed has no step where the turn begins or ends.
+  const startRate = (entry * span) / (4 * radius);
+  const endRate = (exit * span) / (4 * radius);
+  const c3 = startRate + endRate - 2;
+  const c2 = 3 - 2 * startRate - endRate;
+  const t = ((c3 * u + c2) * u + startRate) * u;
+  const tSlope = ((3 * c3 * u + 2 * c2) * u + startRate) / span;
+  const w = 1 - t;
+  const x = w * w * w * p0x + 3 * w * w * t * p1x + 3 * w * t * t * p2x + t * t * t * p3x;
+  const z = w * w * w * p0z + 3 * w * w * t * p1z + 3 * w * t * t * p2z + t * t * t * p3z;
+  const dx = 3 * (w * w * (p1x - p0x) + 2 * w * t * (p2x - p1x) + t * t * (p3x - p2x));
+  const dz = 3 * (w * w * (p1z - p0z) + 2 * w * t * (p2z - p1z) + t * t * (p3z - p2z));
+  return { x, z, slopeX: dx * tSlope, slopeZ: dz * tSlope };
 }
 
 /** A cubic spline segment's value and slope, `fraction` of the way along a segment `span` long. */

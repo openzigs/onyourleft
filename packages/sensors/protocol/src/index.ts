@@ -148,6 +148,7 @@ export {
 
 export type {
   ControlLossReason,
+  ControlRefusal,
   ControlRequest,
   ControlResponse,
   ControlResult,
@@ -164,6 +165,7 @@ export type {
 export {
   CONTROL_NOT_PERMITTED_GUIDANCE,
   CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS,
+  controlRefusalOf,
   createTrainerControl,
   decodeControlResponse,
   decodeFitnessMachineStatus,
