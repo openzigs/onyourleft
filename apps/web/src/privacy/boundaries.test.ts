@@ -74,6 +74,7 @@ import { routeShare } from '../routes/share';
 import { sharedRoomRoute } from '../rooms/share';
 import { exportActivity } from '../transfer/export-activity';
 import { createInstancePort } from '../instance/instance-port';
+import { createRoutingPort } from '../instance/routing-port';
 import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
@@ -160,10 +161,11 @@ const BOUNDARIES: readonly Boundary[] = [
     module: 'instance/instance-transport.ts',
     what: 'a device’s public key, a signed statement and a display name, sent to an instance the rider chose (#777) — and since #784 a room’s route, which `rooms/share.ts` declares and checks',
     // ⚠️ Departing: an instance is somebody's server — the rider's own, the
-    // project's, or a third party's (ADR 0036 D-3 (d)). This build sends it no
-    // ride and no position; the walk below reads every body a connection
-    // sends and finds no coordinate at all, and when sync (#776) starts
-    // sending a ride through this module it is here that the trim is asserted.
+    // project's, or a third party's (ADR 0036 D-3 (d)). A CONNECTION sends it
+    // no position; the walk below reads every body a connection sends and
+    // finds no coordinate at all. The route planner's waypoints (#2008) do
+    // pass through this module, sealed, and `instance/routing-port.ts` is the
+    // entry that declares and checks them.
     direction: 'departing',
   },
   {
@@ -187,6 +189,17 @@ const BOUNDARIES: readonly Boundary[] = [
     // and nothing that reaches the builder holds one — the session that fills
     // it is handed power, heart rate and cadence and nothing else. The case
     // below reads the body that is sent.
+    direction: 'departing',
+  },
+  {
+    module: 'instance/routing-port.ts',
+    what: 'the waypoints of a route being drawn, and the line its climbing is asked along, sent sealed to the rider’s instance for roads and heights (#2008)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)), and this is the first boundary that sends it positions
+    // on purpose — the places a rider means to ride. A leg with a waypoint in
+    // a zone, or a line with any point in one, is REFUSED on the device before
+    // a session is read (a leg missing its end is a different leg). The case
+    // below reads what reached the routing engine behind the instance.
     direction: 'departing',
   },
   {
@@ -282,6 +295,7 @@ function boundaryModulesOnDisk(): readonly string[] {
         entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
         entry === 'replan-job.ts' ||
+        entry === 'routing-port.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
@@ -494,6 +508,113 @@ describe('a room’s route leaves only when none of it is in a zone — #784', (
     expect(insideZone(found, far, route.id)).toStrictEqual([]);
     // And the zone the route crosses WOULD have been found in it.
     expect(insideZone(found, zone, route.id).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the route planner sends its instance no point inside a zone — #2008', () => {
+  interface Asked {
+    readonly action: string;
+    readonly body: Record<string, unknown>;
+  }
+  interface RoutingWorld {
+    readonly instance: { handler(request: Request): Promise<Response> };
+    readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+    close(): Promise<void>;
+  }
+  const INSTANCE = (path: string): string =>
+    new URL(`../../../instance/src/${path}`, import.meta.url).href;
+
+  /** What the engine behind the instance was asked, as positions the walk recognises. */
+  function positionsAsked(asked: readonly Asked[]): unknown[] {
+    return asked.flatMap((each) =>
+      [
+        ...((each.body.locations as { lat: number; lon: number }[] | undefined) ?? []),
+        ...((each.body.shape as { lat: number; lon: number }[] | undefined) ?? []),
+      ].map(({ lat, lon }) => ({ latitude: lat, longitude: lon })),
+    );
+  }
+
+  it('refuses every leg and line that touches a zone, and what does reach the engine has no point in any', async () => {
+    const testing = (await import(/* @vite-ignore */ INSTANCE('auth/identity-testing.ts'))) as {
+      TEST_ORIGIN: string;
+      startIdentityInstance(options: object): Promise<RoutingWorld>;
+    };
+    const valhallaTesting = (await import(
+      /* @vite-ignore */ INSTANCE('routing/valhalla-testing.ts')
+    )) as { fakeValhalla(): { requests: Asked[]; engine(): unknown } };
+    const valhalla = valhallaTesting.fakeValhalla();
+    const world = await testing.startIdentityInstance({
+      bodyLimitBytes: 1024 * 1024,
+      routing: { engine: valhalla.engine() },
+    });
+    const harness = createStoreHarness();
+    try {
+      const route = routeFor(ATHLETE_A, { loop: false, spacingMetres: 10, sideMetres: 400 });
+      const positions = route.profile.positions;
+      const zone = zoneOver(positions);
+      const map = new Map<string, string>();
+      const sealing = {
+        loadedFrom: { native: false, href: 'http://localhost:5173/' },
+        storage: {
+          getItem: (key: string) => map.get(key) ?? null,
+          setItem: (key: string, value: string) => void map.set(key, value),
+          removeItem: (key: string) => void map.delete(key),
+        },
+        signingKey: () =>
+          harness.write(async (open) => {
+            await ensureLocalAthlete(open, unixSeconds(1_790_000_000));
+            return ensureDeviceSigningKey(open, LOCAL_ATHLETE, {
+              now: () => unixSeconds(1_790_000_000),
+            });
+          }),
+        send: (url: string, init: RequestInit) => world.instance.handler(new Request(url, init)),
+        now: () => 1_790_000_000_000,
+      };
+      const instance = createInstancePort({
+        ...sealing,
+        ensureLocalAthlete: () =>
+          harness.write(async (open) => ensureLocalAthlete(open, unixSeconds(1_790_000_000))),
+      });
+      const card = (await world.instanceKeys.show()).card;
+      expect(await instance.connect(testing.TEST_ORIGIN, 'Anna', card)).toMatchObject({
+        kind: 'connected',
+      });
+      const routing = createRoutingPort({ ...sealing, zones: () => Promise.resolve([zone]) });
+      // A leg every 40 samples along the track — and one waypoint at the
+      // zone's centre, so two legs end in it — and heights along the whole.
+      const middle = Math.floor(positions.length / 2);
+      const waypoints = positions.filter((_, index) => index % 40 === 0 || index === middle);
+      let refused = 0;
+      for (let index = 0; index + 1 < waypoints.length; index += 1) {
+        await routing
+          .route({
+            waypoints: [{ position: waypoints[index]! }, { position: waypoints[index + 1]! }],
+            preferences: { bicycle: 'road', hills: 'neutral', surface: 'any' },
+          })
+          .catch(() => {
+            refused += 1;
+          });
+      }
+      await routing.heights({ shape: positions, interval: metres(30) }).catch(() => {
+        refused += 1;
+      });
+      expect(refused).toBeGreaterThan(0);
+      const found = coordinatesIn(positionsAsked(valhalla.requests));
+      // Something really left, so "nothing inside" is not vacuous…
+      expect(found.length).toBeGreaterThan(0);
+      expect(insideZone(found, zone, route.id)).toStrictEqual([]);
+      // …and the walk would have seen a point in the zone had one been sent.
+      expect(
+        insideZone(
+          coordinatesIn(positions.map(({ latitude, longitude }) => ({ latitude, longitude }))),
+          zone,
+          route.id,
+        ).length,
+      ).toBeGreaterThan(0);
+    } finally {
+      await world.close();
+      await harness.destroy();
+    }
   });
 });
 

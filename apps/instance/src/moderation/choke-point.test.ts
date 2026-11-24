@@ -292,6 +292,10 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   decision: 'free text a moderator writes: what the rider or the notifier is told (#911, #912)',
   step: 'which step a moderator records on a notice (#912)',
   logId: 'a moderation log entry, read only on the moderators’ routes (#912)',
+  waypoints: 'the places the CALLER’s own route planner asks roads between (#2008)',
+  preferences: 'the CALLER’s own riding preferences for a route: bicycle, hills, surface (#2008)',
+  shape: 'a line the CALLER’s own route planner asks the heights along (#2008)',
+  interval: 'the metres between the height samples the CALLER asks for (#2008)',
 };
 
 const bodyFields = (route: Route): string[] =>

@@ -132,11 +132,15 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * reviewer who remembers this paragraph saying there is no tile archive is
  * reading the old file.
  *
- * ⚠️ **There is no routing engine.** `routing/testing.ts` says why at length:
- * ADR 0010 D-4 chose Valhalla and nothing is running, so the provider arrives
- * as a prop and this screen explains itself when there is none. With none, a
- * new leg is freehand — a straight line whose distance is a lower bound — so
- * a route can still be drawn and saved (#2006).
+ * ## The routing engine — #2008
+ *
+ * The provider arrives as a prop: the rider's instance's Valhalla
+ * (`instance/routing-port.ts`) when this device is connected to an instance
+ * it can seal to, and nothing otherwise. With none this screen explains
+ * itself, and a new leg is freehand — a straight line whose distance is a
+ * lower bound — so a route can still be drawn and saved (#2006). ⚠️ A
+ * reviewer who remembers this paragraph saying nothing is running is reading
+ * the old file.
  *
  * ## Saving it — #2006
  *
@@ -507,9 +511,9 @@ export function RouteBuilderView({
     <>
       {provider === undefined ? (
         <StatusMessage tone="warning" label="No routing service">
-          Nothing can work out the roads between waypoints until a routing service is configured, so
-          each leg is a straight line: the distance is at least the one shown, and climbing stays
-          empty.
+          Lines are drawn straight between your points: the distance is at least the one shown, and
+          climbing stays empty. Connect a home instance that runs road routing to follow roads and
+          see surfaces and climbing.
         </StatusMessage>
       ) : null}
 

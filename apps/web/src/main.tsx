@@ -198,6 +198,7 @@ import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
+import { createRoutingPort, type RoutingPort } from './instance/routing-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -1322,6 +1323,29 @@ function buildPacerPort(): PacerPort | undefined {
 }
 
 /**
+ * The route planner's roads (#2008): the ONE production place a routing port
+ * is built, so `check:wiring` reports `createRoutingPort` if this goes. Over
+ * the sealed session the Connect screen keeps, through the one instance
+ * module (ADR 0036 D-3 (a)), and only when this device is connected to an
+ * instance it can seal to: with none, the planner is handed no provider and
+ * draws straight lines, sending nothing. Read when the shell is drawn, so a
+ * rider who connects an instance has roads the next time the app starts.
+ */
+function buildRoutingPort(): RoutingPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const port = createRoutingPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    // A waypoint inside one of this device's zones is never sent.
+    zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
+  });
+  return port.offered() ? port : undefined;
+}
+
+/**
  * The trainer game's way to another rider's ghost (#331): the ONE production
  * place a ghost port is built, so `check:wiring` reports `createGhostPort` if
  * this goes. Over the sealed session the Connect screen keeps, through the one
@@ -2047,6 +2071,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           segments={buildSegmentPort()}
           match={buildMatchPort()}
           routes={buildRoutePort(worldCorridorPort)}
+          // #2008: roads from the rider's instance, or none and straight lines.
+          routing={buildRoutingPort()}
           openWorld={buildOpenWorldStartPort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}

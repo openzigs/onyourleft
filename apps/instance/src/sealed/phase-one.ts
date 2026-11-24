@@ -80,6 +80,9 @@ const PACER_ROW = 'A ride’s pacer state, and the line a model answered for it'
 /** The row ADR 0050 D-2 adds to ADR 0047 D-7's table (#1106). */
 const PICTURE_ROW = 'A side-camera picture and the model’s answer about it';
 
+/** #2008's row: a rider's waypoints or line, and the roads or heights answered. */
+const ROUTING_ROW = 'A route planner’s waypoints or line, and the roads or heights along it';
+
 const only = (method: PhaseOneRoute['method'], path: string, row: string): PhaseOneRoute => ({
   method,
   path,
@@ -188,6 +191,12 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
   // refused unsealed on an instance with no keys too (`camera/routes.ts`).
   only('POST', '/v1/camera/side-pose', PICTURE_ROW),
+  // The route planner's roads and heights (#2008): born sealed, and refused
+  // unsealed on an instance with no keys too (`routing/routes.ts`), because
+  // a rider's waypoints may be where they live. Not a row of D-7's table as
+  // written; #2008 is where a reviewer reads it.
+  only('POST', '/v1/routing/route', ROUTING_ROW),
+  only('POST', '/v1/routing/heights', ROUTING_ROW),
 ];
 
 /**

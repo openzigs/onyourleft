@@ -8,12 +8,13 @@
  * product options, not raw engine numbers, and the mapping is documented.
  * `use_hills: 0.25` is meaningless in a UI."*
  *
- * ⚠️ **The mapping is a table here rather than code in an adapter, because
- * there is no adapter yet and this table is the thing that would be wrong
- * if there were.** ADR 0010 D-4 chose Valhalla and read its API reference on
- * 2026-09-03; the numbers below are that read, and nothing in this repository
- * has ever sent one to a running engine. They are recorded so the adapter
- * #53 unblocks starts from a decision rather than from a guess:
+ * ⚠️ **The mapping is a table here, and code on the instance.** ADR 0010 D-4
+ * chose Valhalla and read its API reference on 2026-09-03; the numbers below
+ * are that read. Since #2008 the adapter that sends them is
+ * `apps/instance/src/routing/valhalla.ts` §`bicycleCosting`, which a rider's
+ * app reaches through its instance (`instance/routing-port.ts`) and which was
+ * run against a real engine. The app sends the named options; the instance
+ * owns the numbers:
  *
  * | This program | Valhalla `costing_options.bicycle` | Source |
  * |---|---|---|

@@ -21,6 +21,7 @@ import {
   readAnalysisModelSettings,
   readConfig,
   readHistorySettings,
+  readRoutingSettings,
   REMOTE_PATH_ADDRESS_HEADER,
 } from './config.ts';
 import { readServerConfig } from './server-config.ts';
@@ -328,6 +329,57 @@ describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)'
       'utf8',
     );
     for (const text of [COMPOSE, env]) expect(text).not.toMatch(/gemma/i);
+  });
+});
+
+describe('deploy/home/compose.yaml — the routing engine (#2008)', () => {
+  const build = service('routing-build');
+  const engine = service('routing');
+  /** A service's uncommented lines. */
+  const code = (text: string): string =>
+    text
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+  it('builds and runs Valhalla each behind its own profile, one image pinned by digest', () => {
+    expect(build).toMatch(/profiles: \['routing-build'\]/);
+    expect(engine).toMatch(/profiles: \['routing'\]/);
+    expect(build).toMatch(
+      /image: &valhalla-image ghcr\.io\/valhalla\/valhalla:3\.9\.1@sha256:[0-9a-f]{64}$/m,
+    );
+    expect(engine).toMatch(/image: \*valhalla-image$/m);
+  });
+
+  it('publishes no port for it, and exposes none: its API has no authentication', () => {
+    for (const text of [build, engine]) {
+      expect(text).not.toBe('');
+      expect(code(text)).not.toMatch(/^\s*(ports|expose|network_mode):/m);
+    }
+  });
+
+  it('builds with heights, prints what it measures, and serves the graph it built read-only', () => {
+    expect(build).toContain('valhalla_build_elevation --from-tiles');
+    // Tiles are built again once the heights are there, so edges carry grades.
+    expect(build.indexOf('step tiles-with-heights')).toBeGreaterThan(
+      build.indexOf('step elevation'),
+    );
+    for (const said of ['peak memory', 'disk', 'done in']) expect(build).toContain(said);
+    expect(build).toContain('- ${OYL_ROUTING_PBF:-/dev/null}:/input/extract.osm.pbf:ro');
+    expect(engine).toContain("command: ['valhalla_service', '/data/graph/valhalla.json',");
+    expect(engine).toContain('- routing:/data:ro');
+  });
+
+  it('is reached by a service name the instance accepts as local, set from .env', () => {
+    expect(readRoutingSettings({ routingUrl: 'http://routing:8002' }).kind).toBe('on');
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_ROUTING_URL: \$\{OYL_INSTANCE_ROUTING_URL:-\}$/m);
+    const env = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    for (const name of ['OYL_INSTANCE_ROUTING_URL', 'OYL_ROUTING_PBF', 'OYL_ROUTING_THREADS']) {
+      expect(env).toMatch(new RegExp(`^${name}=$`, 'm'));
+    }
   });
 });
 

@@ -30,16 +30,17 @@ import from `packages/*` into `apps/*` in both spellings (§4d), so a Valhalla t
 `lib: ["ES2024"]` / `types: []` closure is the second half: that file could not name `fetch`,
 `Response` or `URL` even if somebody wanted it to.
 
-⚠️ **Why there is no adapter, and why writing one would be worse than not.** Nothing is running.
-Standing up Valhalla is [#53](https://github.com/openzigs/onyourleft/issues/53), and #70's own
-criteria — *"the same test suite passes against two different engines"* and *"repointed from a
-bootstrap endpoint to a self-hosted instance"* — cannot be met without one. An adapter written
-against an API nobody in the loop can call is §4a's *"a documented command nobody has run is the
-most expensive kind of wrong"* in a new place, and it is **worse than absent**: a reviewer reads
-request-shaping code as evidence the engine was talked to. `apps/web/src/routing/testing.ts` says
-this at the point somebody would go looking, and `routing/preferences.ts` carries the named-option
-→ costing mapping as a table so the adapter starts from ADR 0010's recorded read rather than a
-guess.
+⚠️ **The engine runs on the rider's instance, since #2008** — a reviewer who remembers this
+paragraph saying *"Nothing is running"* is reading the old file. Valhalla `3.9.1` is an optional
+add-on in `apps/instance/deploy/home/compose.yaml` (profiles `routing-build` and `routing`), and the
+**HTTP adapter is on the instance**, `apps/instance/src/routing/valhalla.ts`, which owns the
+named-option → costing table and was run against a real one-state build. The client never calls
+the engine: `apps/web/src/instance/routing-port.ts` is a `RoutingProvider` that asks the instance,
+sealed, through the one #777 module, and refuses on the device any leg or line touching a privacy
+zone (a `departing` boundary in `privacy/boundaries.test.ts`). `main.tsx` hands the planner that
+provider only when the device is connected to an instance it can seal to; otherwise there is none,
+and legs are straight lines. Still not done: #70's *"the same suite against two engines"* (OSRM),
+and an in-browser engine for a rider with no instance (#2734).
 
 **What is real, and what the tests therefore prove.** The interface; the validation every engine's
 numbers must pass; the draft, its undo and its stale-leg accounting; the elevation profile and its
