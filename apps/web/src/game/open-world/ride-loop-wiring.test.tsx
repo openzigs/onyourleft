@@ -682,6 +682,16 @@ describe('an open-world road with real heights — #2899', () => {
     // It climbed the 6 %, and ended on 0 %.
     expect(Math.max(...grades)).toBeGreaterThan(5.5);
     expect(Math.abs(grades.at(-1) ?? Number.NaN)).toBeLessThan(0.1);
+    // The grid ends 2.4 km east, where the route turns round: riding back
+    // onto ground whose heights are known, the notice goes.
+    for (
+      let frames = 0;
+      frames < 400 && text().includes(HEIGHTS_UNAVAILABLE_NOTICE.text);
+      frames += 1
+    ) {
+      await pump();
+    }
+    expect(text()).not.toContain(HEIGHTS_UNAVAILABLE_NOTICE.text);
     // ADR 0087 D-7: from the climb to flat by the bounded path — a write a
     // second, a percent a write — never the road's own drop in one write,
     // which is 6 % here.

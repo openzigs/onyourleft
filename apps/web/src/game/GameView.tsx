@@ -4298,14 +4298,16 @@ function GameScreen({
       // heights are not known. The road reads 0 % there, and the grade sent
       // walks to it and back at the same bounded rate.
       const heightsUnknown =
-        road.follower !== undefined &&
+        road.follower?.realHeights === true &&
         !road.follower.heightsKnownAt(simulation.state.ride.distance);
       gradientRef.current?.sample(
         simulation.state.elapsed,
         simulation.state.ride.distance,
         simulation.correcting || heightsUnknown,
       );
-      if (road.follower?.realHeights === true && heightsUnknown !== heightsUnknownRef.current) {
+      // On any change, whatever the road: a ride on a road with no height
+      // source after one that ended on unknown ground must not keep its notice.
+      if (heightsUnknown !== heightsUnknownRef.current) {
         heightsUnknownRef.current = heightsUnknown;
         setHeightsUnknown(heightsUnknown);
       }
