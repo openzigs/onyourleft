@@ -33,7 +33,14 @@
 
 import { geographicPosition, degreesLatitude, degreesLongitude } from '@onyourleft/domain';
 import type { GeographicPosition } from '@onyourleft/domain';
-import { FIXTURE_EXTENT, FIXTURE_TILE, graphFixtureTile } from '@onyourleft/map-features/testing';
+import {
+  FIXTURE_EXTENT,
+  FIXTURE_TILE,
+  graphFixtureTile,
+  outerRing,
+  polygon,
+  rectangle,
+} from '@onyourleft/map-features/testing';
 import type { GraphFixtureStreet } from '@onyourleft/map-features/testing';
 import type { TileId } from '@onyourleft/map-features';
 
@@ -193,14 +200,36 @@ function cutTo(streets: readonly GraphFixtureStreet[], tile: TileId): GraphFixtu
     }));
 }
 
+/** A fixture house: its footprint's west, north, east and south edges, in fixture pixels. */
+export type FixtureHouse = readonly [west: number, north: number, east: number, south: number];
+
+/** The `buildings` layer of `tile`: each of `houses` whose north-west corner is in it, in the tile's own pixels. */
+function housesIn(houses: readonly FixtureHouse[], tile: TileId) {
+  const dx = (tile.x - FIXTURE_TILE.x) * FIXTURE_EXTENT;
+  const dy = (tile.y - FIXTURE_TILE.y) * FIXTURE_EXTENT;
+  const within = (pixel: number): boolean => pixel >= 0 && pixel < FIXTURE_EXTENT;
+  return {
+    name: 'buildings',
+    features: houses
+      .filter(([west, north]) => within(west - dx) && within(north - dy))
+      .map(([west, north, east, south]) => ({
+        type: 3,
+        tags: { kind: 'building' },
+        geometry: polygon([outerRing(rectangle(west - dx, north - dy, east - dx, south - dy))]),
+      })),
+  };
+}
+
 /**
  * The archive's bytes: the block's four tiles of `streets`, and nothing round
  * them — or, with `blocksEast` (#2990), the tiles of that many blocks east of
- * it too, so a street drawn on past the block runs on into them.
+ * it too, so a street drawn on past the block runs on into them. With `houses`
+ * (#3107), each tile carries the footprints that stand in it too.
  */
 export function openWorldFixtureArchive(
   streets: readonly GraphFixtureStreet[] = OPEN_WORLD_FIXTURE_STREETS,
   blocksEast = 0,
+  houses: readonly FixtureHouse[] = [],
 ): Promise<Uint8Array> {
   const tiles: TileId[] = [];
   for (let east = 0; east <= blocksEast; east += 1) tiles.push(...fixtureBlockTiles(east));
@@ -208,7 +237,11 @@ export function openWorldFixtureArchive(
     tiles: tiles.map((tile) => ({
       x: tile.x,
       y: tile.y,
-      bytes: graphFixtureTile(blocksEast === 0 ? streets : cutTo(streets, tile), tile),
+      bytes: graphFixtureTile(
+        blocksEast === 0 ? streets : cutTo(streets, tile),
+        tile,
+        houses.length === 0 ? [] : [housesIn(houses, tile)],
+      ),
     })),
   });
 }
@@ -424,3 +457,25 @@ export const OPEN_WORLD_NEW_AREA_STREETS: readonly GraphFixtureStreet[] = [
     ] as const,
   })),
 ];
+
+/**
+ * #3107: **houses along Main street that begin 700 m from the start pin** — one
+ * each side of the street in the middle of every block of
+ * {@link OPEN_WORLD_NEW_AREA_STREETS} from there on, 10 m square and 20 m back
+ * from the street. The first is past what an open-world ride plans its
+ * buildings to (`tile-buildings.ts` §`OPEN_WORLD_BUILDINGS_REACH_METRES`), so
+ * a ride east from the start pin is handed sets of buildings with none in
+ * them, and then, mid-ride, the first with houses: whatever the renderer
+ * builds for a mapped building it builds then, unless it was made ready
+ * before the first frame.
+ */
+export const OPEN_WORLD_NEW_AREA_HOUSES: readonly FixtureHouse[] = DENSE_COLUMNS.slice(
+  11,
+  41,
+).flatMap((column) => {
+  const west = column + 215 - 22;
+  return [
+    [west, MAIN_STREET_ROW - 130, west + 44, MAIN_STREET_ROW - 86],
+    [west, MAIN_STREET_ROW + 86, west + 44, MAIN_STREET_ROW + 130],
+  ] as const;
+});

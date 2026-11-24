@@ -24349,6 +24349,66 @@ export function disposeMappedBuildingMaterials(materials: MappedBuildingMaterial
   materials.models.dispose();
 }
 
+/**
+ * Two meshes that draw nothing, in every one of the mapped buildings'
+ * materials: what `prepare` compiles their programs from — #3107, PR #3117's
+ * review. @see RealisticDrawing.readyMapped
+ *
+ * An open-world ride asks for its buildings once its tiles are planned, so
+ * its first frame carries none and no belt is in the scene `prepare`
+ * compiles: every surface's program, and the house models', was linked
+ * inside the frame the first plan arrived on. And a belt's mesh wears only
+ * the surfaces its last refill opened, six of the eight at most, so even a
+ * ride that starts with buildings linked a program on the refill that first
+ * opened another.
+ *
+ * ⚠️ **Each geometry carries a belt's attributes, by name and size, with no
+ * vertex in them**: three keys a program on the material and on what its
+ * geometry carries, so these are compiled as the programs a belt draws with
+ * (`mapped-building-materials.test.ts` holds the two to the same attributes).
+ * Hidden, as a belt with nothing to draw is: `compile` reads hidden objects,
+ * and nothing is ever drawn from them.
+ */
+export function mappedBuildingWarmUp(materials: MappedBuildingMaterials): {
+  readonly surfaces: Mesh;
+  readonly models: Mesh;
+} {
+  const empty = (attributes: readonly (readonly [string, number])[]): BufferGeometry => {
+    const geometry = new BufferGeometry();
+    for (const [name, size] of attributes) {
+      geometry.setAttribute(name, new BufferAttribute(new Float32Array(0), size));
+    }
+    geometry.setDrawRange(0, 0);
+    return geometry;
+  };
+  const hidden = (mesh: Mesh): Mesh => {
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    return mesh;
+  };
+  const shared: readonly (readonly [string, number])[] = [
+    ['position', 3],
+    ['normal', 3],
+    ['uv', 2],
+    ['color', 3],
+    ['oylTint', 1],
+  ];
+  return {
+    surfaces: hidden(
+      new Mesh(
+        empty([
+          ...shared,
+          ['oylFacade', FACADE_FLOATS],
+          ['oylTrim', 3],
+          ['oylStyle', STYLE_FLOATS],
+        ]),
+        [...materials.surfaces.values()],
+      ),
+    ),
+    models: hidden(new Mesh(empty(shared), materials.models)),
+  };
+}
+
 export class MappedBuildingBelt {
   readonly mesh: Mesh;
   readonly buildings: MappedBuildings;
@@ -25645,8 +25705,10 @@ class RealisticDrawing {
   #procedural: readonly ScatterItem[] = [];
   /** The ride's buildings from map data, once a frame has carried them — #1549. */
   #mapped: MappedBuildingBelt | undefined;
-  /** #3107: the materials every {@link #mapped} belt of this world draws in, made with the first. */
+  /** #3107: the materials every {@link #mapped} belt of this world draws in. @see readyMapped */
   #mappedMaterials: MappedBuildingMaterials | undefined;
+  /** #3107: what `prepare` compiles those materials' programs from. @see readyMapped */
+  #mappedWarmUp: ReturnType<typeof mappedBuildingWarmUp> | undefined;
   /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
   #mappedOn = true;
   #shown = true;
@@ -25797,6 +25859,8 @@ class RealisticDrawing {
 
   addTo(scene: Scene): void {
     this.#scene = scene;
+    if (this.#mappedWarmUp !== undefined)
+      scene.add(this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models);
     this.#mapped?.addTo(scene);
     this.vegetation.addTo(scene);
     this.structures.addTo(scene);
@@ -25919,12 +25983,11 @@ class RealisticDrawing {
       this.#mapped?.dispose();
       // #3107: every belt this world builds draws in the one set of
       // materials, so a new set of buildings links no program.
-      this.#mappedMaterials ??= mappedBuildingMaterials(this.#world.structures, this.#world.houses);
       this.#mapped = new MappedBuildingBelt(
         view.buildings,
         this.#world.structures,
         this.#world.houses,
-        this.#mappedMaterials,
+        this.readyMapped(),
       );
       this.#mapped.setShown(this.#shown);
       if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
@@ -25940,6 +26003,28 @@ class RealisticDrawing {
     if (cap !== undefined) this.#mappedCap = cap;
     this.#capStructures(this.#mappedCap);
     this.#mapped.clearOf(near);
+  }
+
+  /**
+   * Makes the mapped buildings' materials, and puts their programs in the
+   * scene `prepare` compiles — #3107, PR #3117's review. Called on every frame
+   * of a ride that carries mapped buildings **or may come to** (an open-world
+   * ride, whose first frames carry none: `ThreeGameView` §`#stage`), so by
+   * the frame a view is prepared with; it makes them once.
+   *
+   * Not made with the drawing: a ride with no map data draws no mapped
+   * building, and would link nine programs for nothing behind its loading
+   * screen.
+   *
+   * @see mappedBuildingWarmUp
+   */
+  readyMapped(): MappedBuildingMaterials {
+    if (this.#mappedMaterials === undefined) {
+      this.#mappedMaterials = mappedBuildingMaterials(this.#world.structures, this.#world.houses);
+      this.#mappedWarmUp = mappedBuildingWarmUp(this.#mappedMaterials);
+      this.#scene?.add(this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models);
+    }
+    return this.#mappedMaterials;
   }
 
   /** Holds the procedural structures to `cap` items. @see updateMapped */
@@ -26009,6 +26094,12 @@ class RealisticDrawing {
 
   dispose(): void {
     this.#mapped?.dispose();
+    for (const mesh of this.#mappedWarmUp === undefined
+      ? []
+      : [this.#mappedWarmUp.surfaces, this.#mappedWarmUp.models]) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
     if (this.#mappedMaterials !== undefined) disposeMappedBuildingMaterials(this.#mappedMaterials);
     this.vegetation.dispose();
     this.structures.dispose();
@@ -27677,6 +27768,12 @@ class ThreeGameView implements GameView {
       this.#clearOfTheCamera && this.#drawing === 'realistic'
         ? nearPyramid(rig, this.#camera.aspect)
         : undefined;
+    // #3107: an open-world ride's buildings are planned after its first frame.
+    // Its frames say which ride it is by carrying its street names, named or
+    // not, so the buildings' programs are in the scene `prepare` compiles.
+    if (frame.mappedBuildings !== undefined || frame.streetNames !== undefined) {
+      this.#realistic?.readyMapped();
+    }
     // #1549: the buildings from map data, refilled only at a chunk — before
     // the structures, whose share of the rung it may change.
     this.#realistic?.updateMapped(

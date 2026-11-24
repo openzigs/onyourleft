@@ -21,7 +21,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { mappedBuildingsOf } from './mapped-buildings';
-import { MappedBuildingBelt, mappedBuildingMaterials } from './three-renderer';
+import {
+  MappedBuildingBelt,
+  mappedBuildingMaterials,
+  mappedBuildingWarmUp,
+} from './three-renderer';
 
 /** A material, as far as this file reads one: `three-seam.test.ts` keeps `three` to the renderer. */
 type Material = MappedBuildingBelt['modelMesh']['material'] extends infer Held
@@ -82,5 +86,33 @@ describe('the mapped buildings’ materials outlive a belt — #3107', () => {
     const other = new MappedBuildingBelt(mappedBuildingsOf([]), new Map());
     for (const material of drawnIn(other)) expect(own.has(material)).toBe(false);
     other.dispose();
+  });
+
+  it('the warm-up meshes wear every material, on a belt’s own attributes, and draw nothing', () => {
+    // PR #3117's review: an open-world ride's first frame carries no building,
+    // so `prepare` compiles the buildings' programs from these. Three keys a
+    // program on the material and on what its geometry carries.
+    const shared = mappedBuildingMaterials(new Map());
+    const warmUp = mappedBuildingWarmUp(shared);
+    const belt = new MappedBuildingBelt(mappedBuildingsOf([]), new Map(), undefined, shared);
+    const carried = (mesh: MappedBuildingBelt['mesh']): string[] =>
+      Object.entries(mesh.geometry.attributes)
+        .map(([name, attribute]) => `${name}:${String(attribute.itemSize)}`)
+        .sort();
+    expect(carried(warmUp.surfaces)).toStrictEqual(carried(belt.mesh));
+    expect(carried(warmUp.models)).toStrictEqual(carried(belt.modelMesh));
+    // Every surface's material, not only the six a belt's refill opens.
+    const worn = warmUp.surfaces.material;
+    expect(new Set(Array.isArray(worn) ? worn : [worn])).toStrictEqual(
+      new Set(shared.surfaces.values()),
+    );
+    expect(shared.surfaces.size).toBeGreaterThan(6);
+    expect(warmUp.models.material).toBe(shared.models);
+    // And nothing is drawn from them: hidden, with no vertex.
+    for (const mesh of [warmUp.surfaces, warmUp.models]) {
+      expect(mesh.visible).toBe(false);
+      expect(mesh.geometry.getAttribute('position').count).toBe(0);
+    }
+    belt.dispose();
   });
 });

@@ -22,14 +22,19 @@
  *
  * ## What it does not prove
  *
- * - **The realistic world.** The page rides the stylised one. The realistic
- *   world's materials are another renderer state, loaded from files; it has
- *   nightly specs of its own, and none of them rides an open world.
+ * - **A realistic world of map data.** `?world=realistic` rides the same town
+ *   in the realistic world, loaded before the game is mounted as a second
+ *   realistic ride of a visit finds it, with houses along the street that
+ *   begin 700 m on (`fixture-testing.ts` §`OPEN_WORLD_NEW_AREA_HOUSES`), so
+ *   the first set of mapped buildings with a house in it arrives mid-ride.
+ *   What it counts there is the programs of what the fixture carries: its
+ *   houses are plain footprints, and it has no land use, footway or village.
  * - **A tablet's milliseconds.** SwiftShader offers no
  *   `KHR_parallel_shader_compile`, and what a link costs here is not what it
  *   costs a phone. A link counted is a link, whatever it costs.
- * - **Map data.** The fixture carries streets and their names: no building,
- *   no land use. What those add mid-ride is not ridden here.
+ * - **Map data.** The fixture carries streets, their names and, in the
+ *   realistic world, plain houses: no land use. What that adds mid-ride is
+ *   not ridden here.
  */
 
 import { StrictMode } from 'react';
@@ -41,6 +46,7 @@ import { GameView, type GamePort } from '../src/game/GameView';
 import { createOpenWorldEntry } from '../src/game/open-world/entry';
 import {
   fixtureStart,
+  OPEN_WORLD_NEW_AREA_HOUSES,
   OPEN_WORLD_NEW_AREA_STREETS,
   openWorldFixtureArchive,
   START_COLUMN,
@@ -52,11 +58,15 @@ import { createOpenWorldSession } from '../src/game/open-world/session';
 import { lazyOpenWorldSessions } from '../src/game/open-world/session-lazy';
 import type { GameRenderer, GameView as RenderedView, SceneFrame } from '../src/game/port';
 import {
+  drawnWorldOf,
   loadGameWordmark,
+  loadRealisticWorld,
   loadSceneryModels,
+  mappedBuildingsDrawnOf,
   programsOf,
   threeGameRenderer,
 } from '../src/game/three-renderer';
+import { REALISTIC_WORLD_STORAGE_KEY } from '../src/game/world-preference';
 import { countingSource } from '../src/world-data/archive-testing';
 import { corridorArchiveFrom } from '../src/world-data/corridor-source';
 
@@ -80,12 +90,20 @@ export interface OpenWorldRideReport {
   readonly corridorChanges: number;
   /** Street-name letters the last frame carried. */
   readonly nameLetters: number;
+  /** The most mapped buildings any frame of the stretch drew: none in the stylised world. */
+  readonly buildings: number;
+  /** The world the last frame was drawn in. */
+  readonly world: string;
 }
 
 export interface OpenWorldHarness {
   readonly ready: boolean;
   readonly errors: readonly string[];
-  /** Presses *Ride Open world* and draws the ride's first frame. Resolves to the links so far. */
+  /**
+   * Presses *Ride Open world* and draws the ride's first frame — in the
+   * realistic world, where the page asked for it, which the game prepares the
+   * view for again once it is handed it. Resolves to the links so far.
+   */
   start(): Promise<number>;
   /** Rides on to `metres` from the start, a frame every `frameMs` of ride time. */
   ride(metres: number, frameMs: number): Promise<OpenWorldRideReport>;
@@ -189,9 +207,26 @@ function ridden(): number {
   return rider === undefined ? 0 : Math.hypot(rider.x, rider.z);
 }
 
+/** Whether the page was asked for the realistic world: `?world=realistic`. */
+const realistic = new URLSearchParams(location.search).get('world') === 'realistic';
+
 async function main(): Promise<void> {
   await Promise.all([loadSceneryModels(), loadGameWordmark()]);
-  const source = countingSource(await openWorldFixtureArchive(OPEN_WORLD_NEW_AREA_STREETS, 2));
+  if (realistic) {
+    // The rider's choice, as Settings writes it, and the world already here,
+    // as a visit's second realistic ride finds it: the game is handed it
+    // with the view, and prepares the view for it before the ride is drawn.
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    const outcome = await loadRealisticWorld();
+    if (!outcome.loaded) throw new Error(`the realistic world did not load: ${outcome.detail}`);
+  }
+  const source = countingSource(
+    await openWorldFixtureArchive(
+      OPEN_WORLD_NEW_AREA_STREETS,
+      2,
+      realistic ? OPEN_WORLD_NEW_AREA_HOUSES : [],
+    ),
+  );
   const entry = createOpenWorldEntry();
   entry.hand(fixtureStart(START_COLUMN, START_ROW));
   const real = lazyOpenWorldSessions(
@@ -280,6 +315,19 @@ async function main(): Promise<void> {
         await sleep(10);
       }
       if (framesDrawn === 0) throw new Error('the ride drew no frame');
+      if (realistic) {
+        // And on until a frame is drawn in the realistic world: the game
+        // draws none while the view is prepared for it.
+        let drawnIn = -1;
+        for (let waited = 0; waited < 60_000; waited += 10) {
+          const world = view === undefined ? undefined : drawnWorldOf(view);
+          if (world === 'realistic' && drawnIn < 0) drawnIn = framesDrawn;
+          if (drawnIn >= 0 && framesDrawn > drawnIn + 1) break;
+          pump(1000 / 60);
+          await sleep(10);
+        }
+        if (drawnIn < 0) throw new Error('the ride never drew the realistic world');
+      }
       return links;
     },
     ride: async (metres, frameMs) => {
@@ -291,11 +339,14 @@ async function main(): Promise<void> {
       let corridorChanges = 0;
       let profile = road?.view.profile;
       let corridor = road?.streets();
+      let buildings = 0;
       for (let idle = 0; ridden() < metres && idle < 2_000;) {
         const before = links;
         if (pump(frameMs)) idle = 0;
         else idle += 1;
         if (links !== before) linkedAt.push([Math.round(ridden()), links - before]);
+        if (view !== undefined)
+          buildings = Math.max(buildings, mappedBuildingsDrawnOf(view).length);
         if (road !== undefined && road.view.profile !== profile) {
           viewChanges += 1;
           profile = road.view.profile;
@@ -318,6 +369,8 @@ async function main(): Promise<void> {
         viewChanges,
         corridorChanges,
         nameLetters: lastFrame?.streetNames?.cells.length ?? 0,
+        buildings,
+        world: view === undefined ? 'none' : drawnWorldOf(view),
       };
     },
     shaderErrorsChecked: () => (view === undefined ? undefined : programsOf(view)?.checked),

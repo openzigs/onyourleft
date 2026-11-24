@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { metres } from '@onyourleft/domain';
 import type { StreetFeature } from '@onyourleft/map-features';
 
 import { JUNCTION_SLICE_UNITS, JunctionScan, mappedJunctions } from './cross-streets';
@@ -28,6 +29,9 @@ import {
 import { footwayWalks } from './people';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
+import { sceneFrame } from './scene';
+import { anchorScenery } from './scenery-anchor';
+import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -295,6 +299,42 @@ describe('one ride’s junctions, read a slice a frame — #3107', () => {
     const handed = scan.junctions(corridor, elsewhere, ORIGIN, SEED, NO_LAND_CLASS, AT_START);
     expect(scan.lastUnits).toBeGreaterThan(0);
     expect(handed).toHaveLength(0);
+  });
+
+  it('is told by the scene where each view starts on the ride, so a trimmed view draws the stubs it had', () => {
+    // PR #3117's review: the scene's hand-over of a view's ride origin was held by no test.
+    const { corridor } = counted([...FAR, ...TOWN]);
+    const streetScans = { nearby: new NearbyStreetScan(), junctions: new JunctionScan() };
+    // An open-world ride's first view, and the same road trimmed 650 m behind:
+    // each keyed, as `open-world/road.ts` keys it, on where it starts on the ride.
+    const first = northRoute(6_000, () => 40);
+    const trimmed = northRoute(5_300, () => 40, { latitude: 51.5 + 650 / 111_320 });
+    anchorScenery(first, { seed: SEED, origin: 0 });
+    anchorScenery(trimmed, { seed: SEED, origin: 650 });
+    const drawn = (profile: typeof first, distance: number): readonly number[] => {
+      const start = atStartLine(profile);
+      const frame = sceneFrame({
+        profile,
+        origin: ORIGIN,
+        state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+        worldCorridor: corridor,
+        streetScans,
+      });
+      return frame.sideRoads
+        .filter((road) => road.junction.source === 'mapped')
+        .map((road) => road.junction.along);
+    };
+    // 750 m on: the first reading, whole. Then the same place on the trimmed view.
+    const before = drawn(first, 750);
+    expect(streetScans.junctions.lastUnits).toBeGreaterThan(JUNCTION_SLICE_UNITS);
+    expect(before.length).toBeGreaterThan(3);
+    const after = drawn(trimmed, 100);
+    // The new view's reading is a slice in, and the stubs are the ones before, 650 m nearer its start.
+    expect(streetScans.junctions.lastUnits).toBeGreaterThan(0);
+    expect(streetScans.junctions.lastUnits).toBeLessThan(JUNCTION_SLICE_UNITS * 2);
+    expect(alongs(after.map((along) => ({ along })))).toStrictEqual(
+      alongs(before.map((along) => ({ along: along - 650 }))),
+    );
   });
 
   it('reads another corridor on the same view too, a slice a call, and finds its new junction', () => {
