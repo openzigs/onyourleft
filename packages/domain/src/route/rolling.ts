@@ -223,6 +223,13 @@ interface Leg extends RollingLeg {
   readonly enter: number;
   /** Whether it reaches `edge.to`: false once a U-turn cut it. */
   readonly atNode: boolean;
+  /**
+   * The id of the way that is the default at `edge.to` in place of D-1.4's:
+   * the way back onto the street ridden in on, on the road back of a U-turn
+   * made within {@link JUNCTION_LOCK_METRES} of the junction just turned at
+   * (#3129, ADR 0088's amendment of 2026-11-24). Absent on every other leg.
+   */
+  readonly back?: string;
 }
 
 /** Cumulative distance along `points`, from 0. */
@@ -564,6 +571,15 @@ export class RollingRoute {
    * U-turn leg that starts on it, and it is the U-turn leg, the way the rider
    * now faces, that is turned. On a sample where one street meets the next at
    * a node, it is the street ridden in on that is turned, as before.
+   *
+   * **A U-turn within {@link JUNCTION_LOCK_METRES} past a junction undoes the
+   * turn** (#3129, ADR 0088's amendment of 2026-11-24): the road back takes,
+   * as its default at that junction, the way back onto the street the rider
+   * came along, in place of D-1.4's. That junction is inside the lock as soon
+   * as the rider faces it, so no press could choose it; the U-turn sets it,
+   * and the U-turn already changes the road under the rider at once (ADR 0087
+   * D-6.4). Further past the junction D-1.4's default stands, and a press
+   * before the lock chooses there as at any junction.
    */
   uTurn(rider: number): void {
     if (!Number.isFinite(rider)) return;
@@ -581,7 +597,16 @@ export class RollingRoute {
     this.#legs[index] = { ...leg, end: turn, atNode: false };
     this.#cutAfter(index, turn);
     const length = leg.along[leg.along.length - 1] as number;
-    this.#push(reversed(leg.edge), 'u-turn', turn, length - cut);
+    // The street ridden in on, when the leg turned on began at the junction
+    // whose lock the rider is now inside.
+    const before = this.#legs[index - 1];
+    const back =
+      before?.atNode === true &&
+      before.end === leg.start &&
+      turn - leg.start <= JUNCTION_LOCK_METRES
+        ? before.edge.id
+        : undefined;
+    this.#push(reversed(leg.edge), 'u-turn', turn, length - cut, back);
     this.#uTurns += 1;
     this.#settle(rider);
   }
@@ -650,14 +675,29 @@ export class RollingRoute {
     };
   }
 
+  /** The ways on from `leg`'s end, and its default: D-1.4's, or the way {@link Leg.back} names. */
   #waysAfter(leg: Leg): ReturnType<typeof waysOn> {
-    return waysOn(leg.edge, this.#graph.edgesFrom(leg.edge.to));
+    const found = waysOn(leg.edge, this.#graph.edgesFrom(leg.edge.to));
+    if (leg.back === undefined) return found;
+    const back = found.ways.find((way) => way.edge.id === leg.back);
+    return back === undefined ? found : { ways: found.ways, defaultWay: back };
   }
 
-  #push(edge: RollingEdge, kind: RollingLegKind, start: number, enter: number): void {
+  #push(
+    edge: RollingEdge,
+    kind: RollingLegKind,
+    start: number,
+    enter: number,
+    back?: string,
+  ): void {
     const along = cumulative(edge.points);
     const length = along[along.length - 1] as number;
-    this.#legs.push({ edge, kind, start, end: start + length - enter, along, enter, atNode: true });
+    const end = start + length - enter;
+    this.#legs.push(
+      back === undefined
+        ? { edge, kind, start, end, along, enter, atNode: true }
+        : { edge, kind, start, end, along, enter, atNode: true, back },
+    );
   }
 
   /** Drops every leg after `index` and every sample past ride distance `distance`. */

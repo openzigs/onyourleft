@@ -25,27 +25,39 @@
  *   offers no choice, and the limit's words are in the open-world start
  *   screen's help. A service road, a private road, a motorway, a footway, a
  *   farm track and a street mapped to stop 6 m short of the road, along one
- *   street, raise no pop-up at all, while a public crossroads after them does;
- *   a junction 70 m after the last one is shown locked, its default alone; and
- *   so is the junction a U-turn 60 m past it rides back to, which is how the
- *   owner's U-turn was not offered the street turned off from.
+ *   street, raise no pop-up at all, while a public crossroads after them does.
  *
- * ⚠️ **The U-turn case is not a defect past the lock.** Turned round more than
- * 100 m from the junction, the rider is offered the street turned off from,
- * both ways, before and after this change. Within 100 m the choice is already
- * final (ADR 0088 D-1.5, ADR 0087 D-6.2), and that is a rule kept on purpose,
- * now written down.
+ * #3129, the owner's rulings of 2026-11-24 on #3124's questions (ADR 0088's
+ * amendment of that date):
+ *
+ * - **A town of blocks 60 to 90 m long** offers every way of every junction
+ *   before its choice is final: while the next junction's choice is final,
+ *   the pop-up is for the first junction after it whose choice is not, and
+ *   says which junction ahead it is ("At the 2nd junction").
+ * - **A U-turn 60 m past the junction turned at** rides back onto the street
+ *   the rider came along: the way back is that junction's default, set by
+ *   the U-turn, since the junction is inside its lock from then on.
+ * - **A junction locked on the first frame it is prompted** says "Too close
+ *   to the last junction to choose" in place of "Choice locked"; a junction
+ *   offered first, then locked, says only "Choice locked".
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { JUNCTION_LOCK_METRES } from '@onyourleft/domain';
+import {
+  distanceBetween,
+  geographicPosition,
+  JUNCTION_LOCK_METRES,
+  positionAt,
+} from '@onyourleft/domain';
 
 import type { GraphFixtureStreet } from '@onyourleft/map-features/testing';
 
 import { OPEN_WORLD_ROUTE } from '../../shell/routes';
+import { JUNCTION_LOCKED_LINE, JUNCTION_TOO_CLOSE_LINE } from '../hud/junction-text';
 import type { SceneInput } from '../scene';
 import {
+  fixturePosition,
   MAIN_STREET_ROW,
   OPEN_WORLD_GRID_STREETS,
   START_COLUMN,
@@ -138,19 +150,43 @@ const LIMITS_ALONG: readonly TurnLimit[] = [
   'not-joined',
 ];
 
-/** The column of {@link CLOSE_STREETS}' second crossroads: 300 pixels, about 70 m, after the first. */
-const CLOSE_COLUMN = -1700;
-
-/** #3124: two public crossroads 70 m apart, then the grid's next. */
-const CLOSE_STREETS: readonly GraphFixtureStreet[] = [
-  MAIN,
-  ...[-2000, CLOSE_COLUMN, -500].map((column): GraphFixtureStreet => ({
+/** A public street across Main street, north to south, at `column`. */
+function across(column: number): GraphFixtureStreet {
+  return {
     tags: { kind: 'minor_road', kind_detail: 'residential' },
     line: [
       [column, 300],
       [column, SOUTH_ROW],
     ],
-  })),
+  };
+}
+
+/**
+ * #3129: the columns of a town of blocks 60 to 90 m long (260 to 380 pixels),
+ * after a first block of about 260 m from the start, so the first junction is
+ * prompted whole.
+ */
+const DENSE_TOWN_COLUMNS: readonly number[] = [-1900, -1640, -1340, -1000, -620, -340, -20];
+
+/** #3129: Main street, crossed by a public street at each of {@link DENSE_TOWN_COLUMNS}. */
+const DENSE_TOWN_STREETS: readonly GraphFixtureStreet[] = [MAIN, ...DENSE_TOWN_COLUMNS.map(across)];
+
+/** The column of {@link NEAR_START_STREETS}' second crossroads: about 330 m from the start. */
+const FAR_COLUMN_NEAR_START = -1600;
+
+/** Where the junction across {@link DENSE_TOWN_COLUMNS}' `index`th column is, in ride metres. */
+function denseAt(index: number): number {
+  return ((DENSE_TOWN_COLUMNS[index] as number) - START_COLUMN) * METRES_PER_PIXEL;
+}
+
+/**
+ * #3129: a crossroads 300 pixels (about 70 m) from the start, so its choice is
+ * final on the ride's first frame, and a second about 260 m after it.
+ */
+const NEAR_START_STREETS: readonly GraphFixtureStreet[] = [
+  MAIN,
+  across(START_COLUMN + 300),
+  across(FAR_COLUMN_NEAR_START),
 ];
 
 let ride: OfferedWaysRide | undefined;
@@ -214,7 +250,7 @@ describe('a town of crossroads: a turn at every junction, and after a U-turn the
     // Turned round 200 m down the street turned into, past the lock's 100 m.
     await ride.rideTo(turnedAt + 200);
     uTurnAt = ride.frames.at(-1)?.odometer ?? 0;
-    await ride.press('ArrowDown' as 'ArrowUp');
+    await ride.press('ArrowDown');
     // Back to the junction and through it.
     await ride.rideTo(uTurnAt + 260);
   });
@@ -251,6 +287,105 @@ describe('a town of crossroads: a turn at every junction, and after a U-turn the
     expect(offered?.filter((words) => words.includes('Main Street'))).toHaveLength(2);
     expect(offered?.some((words) => words.startsWith('Left onto Main Street'))).toBe(true);
     expect(offered?.some((words) => words.startsWith('Right onto Main Street'))).toBe(true);
+  });
+});
+
+describe('a town of blocks 60 to 90 m long: every junction offered before its lock, the pop-up saying which — #3129', () => {
+  beforeAll(async () => {
+    ride = await startOfferedWaysRide(DENSE_TOWN_STREETS, START_COLUMN, START_ROW);
+    await ride.rideTo(denseAt(DENSE_TOWN_COLUMNS.length - 1) + 10);
+  });
+  afterAll(() => {
+    ride?.end();
+    ride = undefined;
+  });
+
+  it('offers every way of every junction before its choice is final', () => {
+    const frames = (ride as OfferedWaysRide).frames;
+    const junctions = prompted(frames);
+    expect(junctions).toHaveLength(DENSE_TOWN_COLUMNS.length);
+    for (const [index, junction] of junctions.entries()) {
+      expect(Math.abs(junction - denseAt(index)), `junction ${index + 1}`).toBeLessThan(10);
+      expectEveryWayOffered(frames, junction, 3);
+    }
+  });
+
+  it('says which junction the pop-up is for while it is not the next one', () => {
+    const frames = (ride as OfferedWaysRide).frames;
+    const junctions = prompted(frames);
+    for (const junction of junctions.slice(1)) {
+      // Offered while the junction before it is still ahead, its choice final.
+      const early = promptsFor(frames, junction).filter(
+        (frame) =>
+          frame.next !== undefined && frame.next.distance < junction && frame.offered.length === 3,
+      );
+      expect(early.length, `the junction at ${junction.toFixed(0)} m`).toBeGreaterThan(3);
+      expect(early.map((frame) => frame.title)).toContain('At the 2nd junction');
+    }
+    // And the next junction is the junction ahead.
+    expect(promptsFor(frames, junctions[0] as number).map((frame) => frame.title)).toContain(
+      'Junction ahead',
+    );
+  });
+});
+
+describe('a U-turn 60 m past the junction turned at rides back onto the street came along — #3129', () => {
+  let uTurnAt = 0;
+  let back = 0;
+  beforeAll(async () => {
+    ride = await startOfferedWaysRide(OPEN_WORLD_GRID_STREETS, START_COLUMN, START_ROW);
+    for (let frame = 0; frame < 400 && prompted(ride.frames).length < 2; frame += 1) {
+      await ride.ridePumped(1, 500);
+    }
+    const turnedAt = prompted(ride.frames)[1] as number;
+    await ride.rideTo(turnedAt - 115);
+    await ride.press('ArrowRight');
+    await ride.rideTo(turnedAt + 60);
+    uTurnAt = ride.frames.at(-1)?.odometer ?? 0;
+    await ride.press('ArrowDown');
+    // The turn is on the next 10 m sample, so the junction is up to 20 m further.
+    await ride.rideTo(turnedAt + (uTurnAt - turnedAt) * 2 + 120);
+    back = prompted(ride.frames.filter((frame) => frame.odometer > uTurnAt))[0] ?? 0;
+  });
+  afterAll(() => {
+    ride?.end();
+    ride = undefined;
+  });
+
+  it('rides west along Main street past the junction, undoing the turn', () => {
+    const frames = (ride as OfferedWaysRide).frames;
+    const last = frames.at(-1) as RiddenFrame;
+    // Read off the road the scene was handed, as the game draws the rider.
+    const origin = last.odometer - (last.input.state.ride.distance as number);
+    const at = (ride: number) => positionAt(last.input.profile, ride - origin);
+    const junction = at(back);
+    const main = fixturePosition(0, MAIN_STREET_ROW).latitude;
+    for (const past of [40, 100]) {
+      const here = at(back + past);
+      // On Main street's line, and that far west of the junction.
+      expect(distanceBetween(geographicPosition(main, here.longitude), here)).toBeLessThan(1);
+      expect(here.longitude).toBeLessThan(junction.longitude);
+      expect(distanceBetween(junction, here)).toBeGreaterThan(past - 5);
+    }
+  });
+
+  it('shows the way back onto Main street as the junction’s way, with no choice made inside its lock', () => {
+    const frames = (ride as OfferedWaysRide).frames;
+    const shown = promptsFor(frames, back);
+    expect(shown.length).toBeGreaterThan(5);
+    // The junction turned at, ridden back to: inside its lock from the U-turn on.
+    expect(back - uTurnAt).toBeLessThanOrEqual(JUNCTION_LOCK_METRES);
+    const junction = (shown.at(-1) as RiddenFrame).junction;
+    const taken = junction?.ways.find((way) => way.edge.id === junction.taken);
+    expect(taken?.edge.name).toBe('Main Street');
+    expect(junction?.taken).toBe(junction?.defaultWay);
+    for (const frame of shown) {
+      // Locked from the U-turn on: the way back alone, when the pop-up shows.
+      expect(frame.offered.length, `at ${frame.odometer.toFixed(0)} m`).toBeLessThanOrEqual(1);
+      for (const words of frame.offered) expect(words).toContain('onto Main Street');
+    }
+    // Once the U-turn's notice has gone, the pop-up shows it.
+    expect(shown.some((frame) => frame.offered[0]?.startsWith('Left onto Main Street'))).toBe(true);
   });
 });
 
@@ -294,80 +429,43 @@ describe('the limits kept on purpose: no choice there, and the reason written do
     });
   });
 
-  describe('a junction 70 m after the last one', () => {
+  describe('a junction locked on the first frame it is prompted, and one that is not — #3129', () => {
     beforeAll(async () => {
-      ride = await startOfferedWaysRide(CLOSE_STREETS, START_COLUMN, START_ROW);
-      const second = (CLOSE_COLUMN - START_COLUMN) * METRES_PER_PIXEL;
-      await ride.rideTo(second - 40);
-      // A turn pressed for it, which the lock refuses.
-      await ride.press('ArrowRight');
-      await ride.rideTo(second + 20);
+      ride = await startOfferedWaysRide(NEAR_START_STREETS, START_COLUMN, START_ROW);
+      await ride.rideTo((FAR_COLUMN_NEAR_START - START_COLUMN) * METRES_PER_PIXEL - 60);
     });
     afterAll(() => {
       ride?.end();
       ride = undefined;
     });
 
-    it('is shown locked from the moment it is prompted, its default alone, and a press changes nothing', () => {
+    it('says the first was too close to choose, in place of Choice locked, and the second only that its choice is locked', () => {
       const frames = (ride as OfferedWaysRide).frames;
-      const [first, second] = prompted(frames);
-      if (first === undefined || second === undefined)
-        throw new Error('two junctions not prompted');
-      expect(second - first).toBeGreaterThan(65);
-      expect(second - first).toBeLessThan(75);
-      // The first is offered whole.
-      expectEveryWayOffered(frames, first, 3);
-      // The second: inside the lock from its first frame, one way shown, never more.
-      const shown = promptsFor(frames, second);
-      expect(shown.length).toBeGreaterThan(5);
-      expect(second - (shown[0] as RiddenFrame).odometer).toBeLessThan(100);
-      for (const frame of shown.slice(1)) {
-        expect(frame.offered.length, `at ${frame.odometer.toFixed(0)} m`).toBeLessThanOrEqual(1);
+      const [near, far] = prompted(frames);
+      if (near === undefined || far === undefined) throw new Error('two junctions not prompted');
+      // The first is inside the lock from the ride's first frame: never offered.
+      const nearShown = promptsFor(frames, near).filter((frame) => frame.lockLine !== undefined);
+      expect(nearShown.length).toBeGreaterThan(0);
+      for (const frame of nearShown) {
+        expect(frame.lockLine, `at ${frame.odometer.toFixed(0)} m`).toBe(JUNCTION_TOO_CLOSE_LINE);
       }
-      expect(shown.at(-1)?.junction?.taken).toBe(shown.at(-1)?.junction?.defaultWay);
-    });
-
-    it('says why in the open-world start screen’s help', () => {
-      expect(startScreenHelp()).toContain(TURN_LIMIT_WORDS['too-close']);
-    });
-  });
-
-  describe('the junction a U-turn 60 m past it rides back to', () => {
-    let uTurnAt = 0;
-    beforeAll(async () => {
-      ride = await startOfferedWaysRide(OPEN_WORLD_GRID_STREETS, START_COLUMN, START_ROW);
-      for (let frame = 0; frame < 400 && prompted(ride.frames).length < 2; frame += 1) {
-        await ride.ridePumped(1, 500);
+      // The second is offered, then locked: said so, and never too close.
+      expectEveryWayOffered(frames, far, 3);
+      const farLocked = promptsFor(frames, far).filter(
+        (frame) => far - frame.odometer < JUNCTION_LOCK_METRES - 10 && frame.lockLine !== undefined,
+      );
+      expect(farLocked.length).toBeGreaterThan(0);
+      for (const frame of farLocked) {
+        expect(frame.lockLine, `at ${frame.odometer.toFixed(0)} m`).toBe(JUNCTION_LOCKED_LINE);
       }
-      const turnedAt = prompted(ride.frames)[1] as number;
-      await ride.rideTo(turnedAt - 115);
-      await ride.press('ArrowRight');
-      await ride.rideTo(turnedAt + 60);
-      uTurnAt = ride.frames.at(-1)?.odometer ?? 0;
-      await ride.press('ArrowDown' as 'ArrowUp');
-      await ride.rideTo(uTurnAt + 100);
-    });
-    afterAll(() => {
-      ride?.end();
-      ride = undefined;
+      expect(frames.map((frame) => frame.lockLine)).toContain(JUNCTION_TOO_CLOSE_LINE);
     });
 
-    it('is shown locked, the way straight on alone: the street turned off from is not offered', () => {
-      const frames = (ride as OfferedWaysRide).frames;
-      const back = prompted(frames.filter((frame) => frame.odometer > uTurnAt))[0];
-      if (back === undefined) throw new Error('no junction after the U-turn');
-      expect(back - uTurnAt).toBeLessThan(100);
-      const shown = promptsFor(frames, back);
-      expect(shown.length).toBeGreaterThan(5);
-      expect(shown[0]?.junction?.ways).toHaveLength(3);
-      for (const frame of shown) {
-        expect(frame.offered.length, `at ${frame.odometer.toFixed(0)} m`).toBeLessThanOrEqual(1);
-        expect(frame.offered.join(' ')).not.toContain('Main Street');
-      }
-    });
-
-    it('says why in the open-world start screen’s help', () => {
-      expect(startScreenHelp()).toContain(TURN_LIMIT_WORDS['too-close']);
+    it('says the 100 m rule, as rulings 1 and 2 of #3129 left it, in the open-world start screen’s help', () => {
+      const help = startScreenHelp();
+      expect(help).toContain(TURN_LIMIT_WORDS['too-close']);
+      expect(help).toContain('says which junction it is for');
+      expect(help).toContain('back onto the street you came along');
     });
   });
 });

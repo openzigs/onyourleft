@@ -35,7 +35,7 @@ import type { SceneInput } from '../scene';
 import { corridorOrigin, localGroundPosition, ROAD_WIDTH_METRES } from '../terrain';
 import { createOpenWorldEntry } from './entry';
 import { fixtureStart, openWorldFixtureArchive } from './fixture-testing';
-import { JUNCTION_PROMPT_METRES } from './junction-choice';
+import { promptedJunction } from './junction-choice';
 import type { OpenWorldSessions } from './ride';
 import type { OpenWorldRoad } from './road';
 import { createOpenWorldSession } from './session';
@@ -49,8 +49,16 @@ export interface RiddenFrame {
   readonly odometer: number;
   /** What each of the junction pop-up's way buttons said on this frame; none while it is not shown. */
   readonly offered: readonly string[];
-  /** The junction the prompt is for, read from the ride's own rolling route as the prompt reads it. */
+  /**
+   * The junction the prompt is for, read from the ride's own rolling route
+   * by the prompt's own rule (`junction-choice.ts` §`promptedJunction`).
+   */
   readonly junction: RollingJunction | undefined;
+  /** The next junction on the route, prompted or not: not {@link junction} while its choice is final (#3129). */
+  readonly next: RollingJunction | undefined;
+  /** The pop-up's title on this frame, and the line under it; none while it is not shown (#3129). */
+  readonly title: string | undefined;
+  readonly lockLine: string | undefined;
   /** For each way of {@link junction}, the view the route would hand out were it taken, and the junction on it. */
   readonly ways: readonly OfferedWay[];
 }
@@ -72,7 +80,7 @@ export interface OfferedWaysRide {
   /** Draws `count` more frames, `frameMs` of ride time apart. */
   ridePumped(count: number, frameMs: number): Promise<void>;
   /** Presses a turn key, as a keyboard would. */
-  press(key: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp'): Promise<void>;
+  press(key: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'): Promise<void>;
   /** The mounted game screen. */
   readonly mounted: Mounted;
   end(): void;
@@ -112,6 +120,8 @@ export async function startOfferedWaysRide(
     queryAll<HTMLButtonElement>(document, '.oyl-hud__junction-popup button[data-oyl-way]').map(
       (button) => button.textContent ?? '',
     );
+  const popupText = (selector: string): string | undefined =>
+    document.querySelector(`.oyl-hud__junction-popup ${selector}`)?.textContent ?? undefined;
 
   const renderer: GameRenderer = {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
@@ -122,14 +132,10 @@ export async function startOfferedWaysRide(
         const input = sceneInputs[sceneInputs.length - 1];
         if (input === undefined || road === undefined) return;
         const odometer = input.state.ride.distance as number;
-        // The prompt's own question of the route (`junction-choice.ts`), and
-        // its own reach, in ride distance: the scene's input is in the view's.
+        // The prompt's own question of the route (`junction-choice.ts`), in
+        // ride distance: the scene's input is in the view's.
         const rideDistance = odometer + road.view.origin;
-        const next = road.route.nextJunctionAfter(rideDistance);
-        const junction =
-          next !== undefined && next.distance - rideDistance <= JUNCTION_PROMPT_METRES
-            ? next
-            : undefined;
+        const junction = promptedJunction(road.route, rideDistance)?.junction;
         const ways: OfferedWay[] = [];
         for (const way of junction?.ways ?? []) {
           const taking = road.route.taking((junction as RollingJunction).distance, way.edge.id);
@@ -147,6 +153,9 @@ export async function startOfferedWaysRide(
           odometer: rideDistance,
           offered: offeredNow(),
           junction,
+          next: road.route.nextJunctionAfter(rideDistance),
+          title: popupText('.oyl-hud__junction-title'),
+          lockLine: popupText('.oyl-hud__junction-lock'),
           ways,
         });
       },

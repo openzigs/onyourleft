@@ -65,6 +65,30 @@ export const U_TURN_NAME = 'U-turn';
 export const JUNCTION_LOCKED_LINE = 'Choice locked';
 
 /**
+ * The line the prompt shows in place of {@link JUNCTION_LOCKED_LINE} for a
+ * junction whose choice was already final on the first frame it was prompted
+ * (`JunctionPrompt.tooClose`), and only then — #3129, the owner's Q4 ruling of
+ * 2026-11-24, in the owner's words.
+ */
+export const JUNCTION_TOO_CLOSE_LINE = 'Too close to the last junction to choose';
+
+const ORDINAL_SUFFIX: Readonly<Record<string, string>> = { one: 'st', two: 'nd', few: 'rd' };
+const ORDINALS = new Intl.PluralRules('en-GB', { type: 'ordinal' });
+
+/**
+ * The prompt's title, and the name of its group, for the junction it is for
+ * (#3129): {@link JUNCTION_PROMPT_TITLE} for the next junction, and "At the
+ * 2nd junction" for the one after it, which is prompted while the next one's
+ * choice is final (`junction-choice.ts` §`promptedJunction`). New wording,
+ * drafted for the owner's approval.
+ */
+export function junctionTitle(shown: Pick<JunctionPrompt, 'ordinal'>): string {
+  if (shown.ordinal <= 1) return JUNCTION_PROMPT_TITLE;
+  const suffix = ORDINAL_SUFFIX[ORDINALS.select(shown.ordinal)] ?? 'th';
+  return `At the ${String(shown.ordinal)}${suffix} junction`;
+}
+
+/**
  * What the prompt says while the HUD's touch lock is on (D-3.1.3): the ways
  * still show the choice and take no tap, and a key, a pad or a remote still
  * chooses.
@@ -143,15 +167,15 @@ function listed(words: readonly string[]): string {
   return `${words.slice(0, -1).join(', ')} or ${words[words.length - 1] as string}`;
 }
 
-/** The sentence said as a junction's prompt appears: its ways, and the default. */
+/** The sentence said as a junction's prompt appears: which junction, its ways, and the default. */
 function aheadSentence(shown: JunctionPrompt): string {
   const ways = listed(shown.ways.map(wayPhrase));
-  return `${JUNCTION_PROMPT_TITLE}: ${ways}. The default is ${wordOf(shown, shown.defaultWay)}.`;
+  return `${junctionTitle(shown)}: ${ways}. The default is ${wordOf(shown, shown.defaultWay)}.`;
 }
 
 /** The sentence said when the prompt appears with its choice already final (D-1.5). */
 function tooCloseSentence(shown: JunctionPrompt): string {
-  return `${JUNCTION_PROMPT_TITLE}, too close to choose: ${wordOf(shown, shown.chosen)}.`;
+  return `${junctionTitle(shown)}, too close to choose: ${wordOf(shown, shown.chosen)}.`;
 }
 
 /** The sentence said when the choice changes. */
