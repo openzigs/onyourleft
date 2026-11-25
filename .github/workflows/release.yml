@@ -53,6 +53,44 @@ jobs:
           # v6.3.0 turned this default off; kept on so a compile error is still annotated.
           problem-matcher: true
 
+      # ⚠️ The first thing that can refuse a release, before a minute of Gradle
+      # is spent on it (#3221). Google Play files an upload under the
+      # `versionName` the build declares, and the GitHub Release under the tag,
+      # so a tag that names a different number than the build ships a release
+      # whose two labels disagree. `apps/mobile/package.json` is the third
+      # copy and is read for the same reason: nothing else compares them. The
+      # tag comparison runs on a tag only, a `workflow_dispatch` run having no
+      # version to be compared with. Executed by
+      # apps/mobile/src/android/release-pipeline.test.ts, so each refusal is
+      # seen to fire.
+      - name: Check the release tag names the app's version
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gradle="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*"\([^"]*\)".*/\1/p' \
+            apps/mobile/android/app/build.gradle | head -1)"
+          package="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' \
+            apps/mobile/package.json | head -1)"
+          if [ -z "${gradle}" ] || [ -z "${package}" ]; then
+            echo "::error::Could not read versionName (got '${gradle}') and the package version (got '${package}')."
+            exit 1
+          fi
+          if [ "${gradle}" != "${package}" ]; then
+            echo "::error::versionName ${gradle} in build.gradle disagrees with version ${package} in apps/mobile/package.json."
+            exit 1
+          fi
+          case "${REF}" in
+            refs/tags/*)
+              if [ "${REF_NAME}" != "v${gradle}" ]; then
+                echo "::error::The tag ${REF_NAME} does not name the app's version; expected v${gradle}."
+                exit 1
+              fi
+              ;;
+          esac
+          echo "Version ${gradle}."
+
       # Node 26 ships no corepack (#1597): rules.yml's setup says why it is
       # installed from npm, at this pinned version.
       - run: npm install --global --ignore-scripts corepack@0.36.0
