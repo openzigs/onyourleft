@@ -45,6 +45,7 @@ import { buildGhostTrack, watts, type GhostTrack } from '@onyourleft/domain';
 
 import type { PreferenceStorage } from './hud/announce-preference';
 import type { LapRaceChoice } from './lap-race/choice';
+import type { WayPress } from './open-world/junction-choice';
 import type { GameSensors } from './sensors';
 import type { SimulatedRider } from './simulated-rider';
 
@@ -77,13 +78,18 @@ export const CAPTURE_SCENE_MARK = 'oyl-capture-scene:';
  * - `throw`: *Throw* toward the next house (`delivery/throw-input.ts`), at
  *   the instant a parcel thrown then would land on its step, as a rider aims,
  *   so a script written in seconds lands where the seed put the houses;
+ * - `turn` (#3154): at the next junction of a free ride, once its prompt is
+ *   up and its choice still open, the press that takes the way `press` names
+ *   (`open-world/junction-choice.ts`), as the HUD's turn buttons press it —
+ *   one a junction, so a second waits for the junction after;
  * - `item`: *Use item* in a lap race (`lap-race/ride-race.ts` §`askRaceItem`),
  *   once the rider holds one from a pick-up (a quarter of the way round a lap
  *   is the first, `@onyourleft/domain` §`PICK_UP_FRACTIONS`).
  */
 export type CaptureCue =
   | { readonly kind: 'throw'; readonly second: number }
-  | { readonly kind: 'item'; readonly second: number };
+  | { readonly kind: 'item'; readonly second: number }
+  | { readonly kind: 'turn'; readonly second: number; readonly press: WayPress };
 
 /**
  * A built-in workout ridden in the game — #3153: its Ride screen address
@@ -110,10 +116,17 @@ export interface CaptureScene {
   /**
    * #3153: the built-in route the scene opens the game on — a level
    * (`level:<id>`) or a circuit (`circuit:<id>`), as `#/game?route=` names
-   * it — with the name its *Ride* button reads. Absent, the capture tool's
-   * own synthetic route (`tools/capture/capture-args.ts`).
+   * it — with the name its *Ride* button reads; #3154: a name alone for a
+   * card the game chooses itself, the open world's. Absent, the capture
+   * tool's own synthetic route (`tools/capture/capture-args.ts`).
    */
-  readonly route?: { readonly id: string; readonly name: string } | undefined;
+  readonly route?: { readonly id?: string | undefined; readonly name: string } | undefined;
+  /**
+   * #3154: the scene rides the open world, from the start the capture
+   * command names (`capture-free-ride.ts` §`captureOpenWorldStart`), with
+   * every street shown by a placeholder name (§`captureStreetName`).
+   */
+  readonly openWorld?: boolean | undefined;
   /**
    * #3153: how far along the road the ride starts, metres — a simulated
    * ride's own start (`simulated-rider.ts` §`startMetres`), so a scene is
@@ -153,6 +166,8 @@ export interface CaptureScene {
  * - `workout` (#3153): a tailored built-in workout, from just before its
  *   warm-up ends, so the first block change is in frame.
  * - `pacer` (#3153): beside the pacer, racing a bundled synthetic best.
+ * - `free-ride` (#3154): the open world from the command's start, taking the
+ *   left at the first junction and the right at the next.
  */
 export const CAPTURE_SCENES: Readonly<Record<string, CaptureScene>> = {
   'route-hud': {
@@ -217,6 +232,20 @@ export const CAPTURE_SCENES: Readonly<Record<string, CaptureScene>> = {
     ],
     pacer: { wattsPerKilogram: 3.1 },
     ghost: true,
+  },
+  'free-ride': {
+    id: 'oyl-capture-scene:free-ride',
+    keys: [
+      { second: 0, watts: 190, cadence: 84, heartRate: 122 },
+      { second: 10, watts: 230, cadence: 89, heartRate: 136 },
+      { second: 40, watts: 215, cadence: 87, heartRate: 140 },
+    ],
+    route: { name: 'Open world' },
+    openWorld: true,
+    cues: [
+      { kind: 'turn', second: 2, press: 'left' },
+      { kind: 'turn', second: 2, press: 'right' },
+    ],
   },
 };
 

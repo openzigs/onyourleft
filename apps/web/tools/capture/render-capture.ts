@@ -31,12 +31,22 @@
  * of the video that is not the ride at its time.
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 
 import { chromium, type Page } from '@playwright/test';
 
 import { LAUNCH_ARGS } from '../../playwright.config';
+import { readBasemapConfig } from '../../src/map/basemap';
 import type { CaptureEvent, CaptureSnapshot } from '../../src/game/capture-scene';
 import { encoders, startEncoder } from '../demo/render-video';
 import { hasEncoder } from '../demo/video';
@@ -103,6 +113,65 @@ export function servedFile(dist: string, pathname: string): string | undefined {
   return file;
 }
 
+/**
+ * #3154: what a local archive answers a `Range: bytes=<first>-<last>` request
+ * with: the bytes, from disk, as the archive's host would send them — a range
+ * that runs past the end cut at it, as RFC 9110 §14.1.2 has it (the reader
+ * asks for 16 KiB of header whatever the file's size) — and a 416 for a range
+ * that is not one or starts past the end.
+ */
+export function archiveRange(
+  file: string,
+  range: string | undefined,
+):
+  | { readonly status: 206; readonly headers: Record<string, string>; readonly body: Buffer }
+  | { readonly status: 416; readonly headers: Record<string, string>; readonly body: Buffer } {
+  const size = statSync(file).size;
+  const asked = /^bytes=(\d+)-(\d+)$/u.exec(range ?? '');
+  const first = Number(asked?.[1]);
+  const last = Math.min(Number(asked?.[2]), size - 1);
+  if (asked === null || first > last) {
+    return {
+      status: 416,
+      headers: { 'content-range': `bytes */${String(size)}` },
+      body: Buffer.alloc(0),
+    };
+  }
+  const body = Buffer.alloc(last - first + 1);
+  const handle = openSync(file, 'r');
+  try {
+    readSync(handle, body, 0, body.length, first);
+  } finally {
+    closeSync(handle);
+  }
+  return {
+    status: 206,
+    headers: {
+      'content-range': `bytes ${String(first)}-${String(last)}/${String(size)}`,
+      'content-length': String(body.length),
+      'accept-ranges': 'bytes',
+      // The app's origin is not the archive's: the read is a CORS one.
+      'access-control-allow-origin': '*',
+      'access-control-expose-headers': 'content-range, content-length',
+    },
+    body,
+  };
+}
+
+/**
+ * #3154: the capture's request log: every request the page made, and how it
+ * was answered — the app's files and the archive's blocks from this machine,
+ * everything else refused in the browser — so none left it.
+ */
+export interface CaptureRequests {
+  /** Requests for the app's own files, answered from the built app. */
+  readonly app: number;
+  /** Range requests for the basemap archive, answered from the local copy. */
+  readonly archive: number;
+  /** Every other request, by origin and path (never a query) and count: refused, never sent. */
+  readonly refused: Readonly<Record<string, number>>;
+}
+
 /** What a capture needs beyond the request. */
 export interface CaptureOptions {
   /** The built app: `apps/web/capture/dist/app` (#3153). */
@@ -129,6 +198,13 @@ export interface CaptureResult {
   readonly last: CaptureSnapshot;
   /** Origins the page asked for and was refused. */
   readonly refused: readonly string[];
+  /** #3154: the request log, written beside the video ({@link captureRequestsName}). */
+  readonly requests: string;
+}
+
+/** #3154: the request log's file name, beside the video's. */
+export function captureRequestsName(request: CaptureRequest): string {
+  return captureName(request).replace(/\.mp4$/u, '.requests.json');
 }
 
 /** Import the capture's synthetic route through the Routes page's form. */
@@ -215,12 +291,27 @@ export async function renderCapture(
       serviceWorkers: 'block',
     });
     const refused = new Set<string>();
+    const log = { app: 0, archive: 0, refused: {} as Record<string, number> };
+    // #3154: the archive a free ride's blocks are read from, answered from the
+    // local copy — the URL the capture build was made with (`map/basemap.ts`).
+    const archiveUrl =
+      request.archive === undefined
+        ? undefined
+        : readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: process.env['VITE_BASEMAP_PMTILES_URL'] })
+            ?.archiveUrl;
     await context.route('**/*', (route) => {
       const url = new URL(route.request().url());
+      if (request.archive !== undefined && url.toString() === archiveUrl) {
+        log.archive += 1;
+        return route.fulfill(archiveRange(request.archive, route.request().headers()['range']));
+      }
       if (url.origin !== CAPTURE_ORIGIN) {
         refused.add(url.origin);
+        const asked = `${url.origin}${url.pathname}`;
+        log.refused[asked] = (log.refused[asked] ?? 0) + 1;
         return route.abort();
       }
+      log.app += 1;
       const file = servedFile(dist, url.pathname);
       if (file === undefined) return route.fulfill({ status: 404, body: '' });
       return route.fulfill({
@@ -238,7 +329,7 @@ export async function renderCapture(
     await importRoute(page);
     await setRiderWeight(page);
 
-    await page.goto(`${CAPTURE_ORIGIN}/${captureHash(request.scene)}`);
+    await page.goto(`${CAPTURE_ORIGIN}/${captureHash(request.scene, request.start)}`);
     const ride = page.getByRole('button', { name: `Ride ${captureRideName(request.scene)}` });
     await ride.waitFor();
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
@@ -297,7 +388,10 @@ export async function renderCapture(
     if (last === undefined) throw new Error('capture: no frame was captured');
     const events = join(options.out, captureEventsName(request));
     writeFileSync(events, `${JSON.stringify(captureEventsFile(request, last), null, 2)}\n`);
-    return { mp4, events, frames, last, refused: [...refused] };
+    const requests = join(options.out, captureRequestsName(request));
+    const logged: CaptureRequests = log;
+    writeFileSync(requests, `${JSON.stringify(logged, null, 2)}\n`);
+    return { mp4, events, requests, frames, last, refused: [...refused] };
   } finally {
     await browser.close();
   }

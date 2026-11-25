@@ -11,12 +11,20 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { captureEventsFile, captureEventsName, servedFile } from './render-capture';
+import {
+  archiveRange,
+  captureEventsFile,
+  captureEventsName,
+  captureRequestsName,
+  servedFile,
+} from './render-capture';
 
 const DIST = mkdtempSync(join(tmpdir(), 'oyl-capture-dist-'));
 mkdirSync(join(DIST, 'assets'));
 writeFileSync(join(DIST, 'index.html'), '<!doctype html>');
 writeFileSync(join(DIST, 'assets', 'a b.js'), '');
+const ARCHIVE = join(DIST, 'basemap.pmtiles');
+writeFileSync(ARCHIVE, Buffer.from('0123456789abcdef'));
 
 afterAll(() => {
   rmSync(DIST, { recursive: true, force: true });
@@ -60,5 +68,46 @@ describe('the capture’s event log — #3153', () => {
       captureEventsFile(request, { drawn: 121, distance: 18, elapsed: 2, events: [...events] }),
     ).toEqual({ scene: 'delivery', fps: 60, frames: 120, events: [...events] });
     expect(captureEventsFile(request, { drawn: 1, distance: 0, elapsed: 0 }).events).toEqual([]);
+  });
+});
+
+describe('a free ride’s blocks, from the local archive — #3154', () => {
+  it('answers a range with its bytes from disk, as the archive’s host does', () => {
+    const answer = archiveRange(ARCHIVE, 'bytes=2-5');
+    expect(answer.status).toBe(206);
+    expect(answer.body.toString()).toBe('2345');
+    expect(answer.headers['content-range']).toBe('bytes 2-5/16');
+    expect(answer.headers['content-length']).toBe('4');
+    expect(answer.headers['access-control-allow-origin']).toBe('*');
+    expect(archiveRange(ARCHIVE, 'bytes=0-15').body.toString()).toBe('0123456789abcdef');
+    // Past the end: cut at it, as a host does — the reader asks for 16 KiB of header.
+    const cut = archiveRange(ARCHIVE, 'bytes=10-16383');
+    expect([cut.status, cut.body.toString(), cut.headers['content-range']]).toEqual([
+      206,
+      'abcdef',
+      'bytes 10-15/16',
+    ]);
+  });
+
+  it('refuses a range that is not one, or starts past the end, with a 416 and no bytes', () => {
+    for (const range of [undefined, 'bytes=5-2', 'bytes=16-20', 'bytes=-4', 'items=0-1']) {
+      const answer = archiveRange(ARCHIVE, range);
+      expect(answer.status, String(range)).toBe(416);
+      expect(answer.body.length).toBe(0);
+      expect(answer.headers['content-range']).toBe('bytes */16');
+    }
+  });
+
+  it('logs its requests beside the video', () => {
+    expect(
+      captureRequestsName({
+        scene: 'free-ride',
+        seconds: 2,
+        fps: 60,
+        width: 1920,
+        height: 1080,
+        out: undefined,
+      }),
+    ).toBe('free-ride-1920x1080-60fps.requests.json');
   });
 });

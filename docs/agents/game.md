@@ -2656,6 +2656,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Calories, folded in memory by `recording/totals.ts`
                         §`rideTotals` from the readings it rode, never stored;
                         and its laps over a course's line (#3153)
+    src/game/capture-free-ride.ts
+                        a free-ride capture (#3154): the command's start, read
+                        from `start=` in a capture build only, and the
+                        placeholder street names a capture shows every street
+                        by — handed to the open-world session's one source of
+                        names (`session.ts` §`renamedStreets`,
+                        `ride.ts` §`OpenWorldSessionExtras`), so the road's
+                        painted names and the junction prompt both read them.
+                        `capture-free-ride-wiring.test.tsx`
     src/game/capture-workout.ts
                         a capture's workout (#3153): the Ride screen's built-in
                         address, tailored and expanded as a rider's is, held at
