@@ -339,13 +339,15 @@ describe('a lap race scene — #3153', () => {
 describe('a lap race scene’s item — #3153', () => {
   it('is used once the rider holds one from a pick-up, as a rider uses it', async () => {
     // The scene's race, on a 377 m loop under the circuit's id: its first
-    // pick-up a quarter of the way round, seconds after Go.
+    // pick-up a quarter of the way round, seconds after Go. Level since #3198
+    // put the scene at the bots' 2.8 W/kg, which the fixture's own 8 m rise to
+    // that quarter would hold to a walking pace.
     circuits = () =>
       Promise.resolve([
         {
           id: 'circuit:bellwether',
           name: 'Bellwether Loop',
-          profile: circuitRoute(60),
+          profile: circuitRoute(60, () => 0),
           attempts: 0,
         },
       ]);
@@ -354,7 +356,9 @@ describe('a lap race scene’s item — #3153', () => {
       held.push(mounted?.container.querySelector('.oyl-hud__item [aria-disabled="true"]') === null);
     });
     const used = events.filter((event) => event.kind === 'cue');
-    expect(used.map((event) => event.kind === 'cue' && event.taken)).toEqual([true]);
+    // Both of the scene's cues, each once the rider holds an item: on the
+    // level loop the second pick-up comes inside the capture too (#3198).
+    expect(used.map((event) => event.kind === 'cue' && event.taken)).toEqual([true, true]);
     const first = used[0]?.frame ?? 0;
     // Held after the frame before the use, and gone after the frame that used it.
     expect(first).toBeGreaterThan(1);

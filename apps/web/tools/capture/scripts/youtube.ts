@@ -203,6 +203,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           callout: 'standings',
           // The tactics they ride include attack, chase and sit-in
           // (`packages/domain/src/lap-race/tactics.ts` §`BotTactic`).
+          // The owner's wording of 2026-11-25 on #3177. #3198: a bot attacks
+          // from Go and is still away, in frame, while this is up.
           text: 'Bots that attack, chase and sit in',
         },
         { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },

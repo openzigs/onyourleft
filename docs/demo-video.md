@@ -312,7 +312,7 @@ it has no buildings and is never the video's.
 | Scene | Opens on | What is scripted |
 |---|---|---|
 | `delivery` | the first built-in level, *Morning Round*, 680 m in | the round's seed; a throw at each house as a rider aims it, so the parcel lands on the step |
-| `lap-race` | the built-in circuit *Bellwether Loop* | the race's seed, five seeded bots (no instance), two laps; an item used once one is held, after its second |
+| `lap-race` | the built-in circuit *Bellwether Loop* | the race's seed, five seeded `brisk` bots (no instance), four laps, the rider at the bots' own 2.8 W/kg so the scene stays in the group, with a bot's attack from Go in frame (#3198, `capture-lap-race-wiring.test.tsx`); an item used once one is held, after its second |
 | `workout` | the synthetic route | a tailored built-in (`#/ride?workout=built-in:sweet-spot-3x12&length=45&intensity=5`) from 10 s before its warm-up ends, its ERG target held at a 250 W threshold |
 | `pacer` | the synthetic route | the pacer at 3.1 W/kg, and the rider's "own best" as a bundled synthetic ride at 31 km/h |
 
