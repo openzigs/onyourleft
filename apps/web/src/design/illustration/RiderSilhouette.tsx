@@ -160,6 +160,11 @@ function sideView(
         />
       );
     }
+    // #3211: the realistic world's stand-in rider is built from these two, and
+    // the illustration draws the stylised rider, which has neither.
+    case 'lathe':
+    case 'ellipsoid':
+      return null;
   }
 }
 
