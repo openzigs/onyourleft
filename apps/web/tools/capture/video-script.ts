@@ -92,10 +92,44 @@ export const CALLOUT_PANELS = {
   houses: { selector: '.oyl-hud__field', label: 'Houses', feature: 'delivery' },
   throw: { selector: '.oyl-hud__throws', feature: 'delivery' },
   junction: { selector: '.oyl-hud__junction-prompt', feature: 'junction' },
+  // #3175: Pause, End ride and the rest, drawn only while not faded.
+  controls: { selector: '.oyl-hud__controls' },
 } as const satisfies Readonly<Record<string, CalloutPanel>>;
 
 /** A panel's name in {@link CALLOUT_PANELS}. */
 export type CalloutPanelName = keyof typeof CALLOUT_PANELS;
+
+/**
+ * The panels every riding scene's HUD draws — #3175, the owner's ruling of
+ * 2026-11-25: *"make sure the video shows all of the hud"*: the readings in
+ * full and the ride's totals, the elevation profile and the map, and the
+ * ride's controls, not faded.
+ */
+export const RIDING_PANELS = [
+  'readings',
+  'totals',
+  'elevation',
+  'map',
+  'controls',
+] as const satisfies readonly CalloutPanelName[];
+
+/**
+ * Every panel a frame of `scene` must show, drawn and not faded — #3175:
+ * {@link RIDING_PANELS}, and the panels of each mode the scene rides (the
+ * workout's strip, the pacer's and the best ride's readings, the race's
+ * standings and item, the round's houses and throws). The render stops on a
+ * captioned frame where one is missing (`render-script.ts`). The junction's
+ * prompt is not among them: it is drawn only as a junction comes up.
+ */
+export function scenePanels(scene: CaptureScene): CalloutPanelName[] {
+  const panels: CalloutPanelName[] = [...RIDING_PANELS];
+  if (scene.workout !== undefined) panels.push('workout');
+  if (scene.pacer !== undefined) panels.push('pacer');
+  if (scene.ghost === true) panels.push('best');
+  if (captureSceneShows('lap-race', scene, 0)) panels.push('standings', 'item');
+  if (captureSceneShows('delivery', scene, 0)) panels.push('houses', 'throw');
+  return panels;
+}
 
 /** The map credit, which no caption may cover. */
 export const CREDIT_SELECTOR = '.oyl-hud__attribution';
@@ -108,7 +142,8 @@ export interface VideoCaption {
   readonly seconds: number;
   readonly text: string;
   /**
-   * - `title`: centred above the middle;
+   * - `title`: centred above the middle, under the project's logo when it
+   *   has {@link logo};
    * - `lower-third`: low in the frame (the default);
    * - `card`: over the whole frame, opaque, with the map credit and the
    *   project's address under the words ({@link cardLines}): the closing card.
@@ -118,13 +153,20 @@ export interface VideoCaption {
   readonly placement?: 'title' | 'lower-third' | 'card' | undefined;
   /** The HUD panel the caption explains, with a leader line to it. */
   readonly callout?: CalloutPanelName | undefined;
+  /**
+   * #3175: draw the project's logo above a `title`'s words, centred, no
+   * larger than its own pixels so it is sharp (`render-script.ts`). Only a
+   * title has it.
+   */
+  readonly logo?: boolean | undefined;
   /** The feature the caption claims, which its scene must show. */
   readonly feature?: VideoFeature | undefined;
   /**
-   * A `card`'s statements under its words, before the credit: what the card
-   * says of the product as a whole, not of a scene. Only a card has them, and
-   * only the closing card may state an instance-only feature, worded as
-   * {@link INSTANCE_ONLY_STATEMENT} ({@link instanceOnlyProblem}).
+   * A `card`'s or a `title`'s statements under its words — for a card,
+   * before the credit: what it says of the product as a whole, not of a
+   * scene, such as the platforms it runs on (#3175). Only a card or a title
+   * has them, and only the closing card may state an instance-only feature,
+   * worded as {@link INSTANCE_ONLY_STATEMENT} ({@link instanceOnlyProblem}).
    */
   readonly lines?: readonly string[] | undefined;
 }
@@ -289,8 +331,15 @@ export function scriptProblems(
       if (caption.callout !== undefined && caption.placement !== undefined) {
         problems.push(`${said}: a callout is drawn beside its panel, so it has no placement`);
       }
-      if (caption.lines !== undefined && caption.placement !== 'card') {
-        problems.push(`${said}: only a card has lines under its words`);
+      if (
+        caption.lines !== undefined &&
+        caption.placement !== 'card' &&
+        caption.placement !== 'title'
+      ) {
+        problems.push(`${said}: only a card or a title has lines under its words`);
+      }
+      if (caption.logo === true && caption.placement !== 'title') {
+        problems.push(`${said}: only a title is drawn under the logo`);
       }
       const onClosingCard = scene === closing && caption.placement === 'card';
       for (const text of [caption.text, ...(caption.lines ?? [])]) {
@@ -376,7 +425,7 @@ export function cardLines(): readonly string[] {
 export function shownLines(caption: VideoCaption): readonly string[] {
   return caption.placement === 'card'
     ? [caption.text, ...(caption.lines ?? []), ...cardLines()]
-    : [caption.text];
+    : [caption.text, ...(caption.lines ?? [])];
 }
 
 /** A caption on screen: which, and how opaque it is now. */

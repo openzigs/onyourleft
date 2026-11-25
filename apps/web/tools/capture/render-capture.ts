@@ -18,8 +18,9 @@
  *    a simulated ride, with no trainer, room or recording, whose power,
  *    cadence and heart rate follow the scene's script;
  * 3. HOLDS the clocks, presses *Ride*, and runs animation frames at that one
- *    instant until the ride has drawn the world — so the first counted frame
- *    is not a blank one, and no ride time has passed;
+ *    instant until the ride has drawn the REALISTIC world ({@link warmUp},
+ *    #3175) — so the first counted frame is neither a blank one nor the
+ *    stylised world the realistic one replaces, and no ride time has passed;
  * 4. for each frame, steps every clock by exactly `1000 / fps` ms, lets React
  *    commit, and takes `page.screenshot` — the WebGL world AND the full
  *    `HudPanel` over it — into `ffmpeg` (`tools/demo/render-video.ts`
@@ -28,7 +29,9 @@
  *
  * Each frame must draw the world exactly once (`window.__oylCapture.drawn`
  * moves by one), or the capture stops: a frame that drew nothing is a frame
- * of the video that is not the ride at its time.
+ * of the video that is not the ride at its time. #3175: and in the realistic
+ * world ({@link frameProblem}), which the profile asked for before the app
+ * loaded (`capture-device.ts`).
  */
 
 import {
@@ -65,6 +68,7 @@ import {
 } from './capture-args';
 import { CAPTURE_BUILD_MODE } from './capture-stays-out';
 import { installCaptureClock, type CaptureClockControl } from './capture-clock';
+import { captureStorageState } from './capture-device';
 
 declare global {
   interface Window {
@@ -80,8 +84,70 @@ declare global {
  */
 export const CAPTURE_ORIGIN = 'http://app.localhost';
 
-/** How long the ride may take to draw its first frame before the capture gives up. */
-const FIRST_FRAME_LIMIT_MS = 120_000;
+/**
+ * How long the ride may take to draw its first frame in the realistic world
+ * before the capture gives up: the realistic world's files are answered from
+ * disk, and the view is prepared again once they are here (#2663).
+ */
+export const WARM_UP_LIMIT_MS = 120_000;
+
+/**
+ * Run the ride's warm-up frames — #3175: each at the instant of the press, so
+ * no ride time passes, until one has drawn the world AND drawn it realistic.
+ * None of them is in the video, so no frame of the stylised world the
+ * realistic one replaces is ever written, and no swap is recorded.
+ *
+ * `frame` runs one animation frame and answers what the ride then published;
+ * `wait` lets the page's own work (the world's files, the GPU's warm-up)
+ * move between frames. Answers the snapshot that ended the warm-up; throws
+ * once `limitMs` has passed by `now` without one.
+ */
+export async function warmUp(
+  frame: () => Promise<CaptureSnapshot | undefined>,
+  wait: () => Promise<void>,
+  now: () => number,
+  limitMs: number = WARM_UP_LIMIT_MS,
+): Promise<CaptureSnapshot> {
+  const startedAt = now();
+  for (;;) {
+    const snapshot = await frame();
+    if (snapshot !== undefined && snapshot.drawn > 0 && snapshot.world === 'realistic') {
+      return snapshot;
+    }
+    if (now() - startedAt > limitMs) {
+      throw new Error(
+        snapshot === undefined || snapshot.drawn === 0
+          ? 'capture: the ride never drew its first frame'
+          : 'capture: the realistic world did not arrive within the warm-up',
+      );
+    }
+    await wait();
+  }
+}
+
+/**
+ * Why counted frame `frame` may not go in the video, or `undefined` — #3152,
+ * #3175: its step ran `ran` animation frames, which must be one, and drew the
+ * world once since `drawnBefore`, in the realistic world.
+ */
+export function frameProblem(
+  frame: number,
+  ran: number,
+  drawnBefore: number,
+  snapshot: CaptureSnapshot | undefined,
+): string | undefined {
+  const drawn = snapshot?.drawn ?? 0;
+  if (ran !== 1 || drawn !== drawnBefore + 1) {
+    return (
+      `capture: frame ${String(frame)} ran ${String(ran)} animation frames ` +
+      `and drew the world ${String(drawn - drawnBefore)} times, not once`
+    );
+  }
+  if (snapshot?.world !== 'realistic') {
+    return `capture: frame ${String(frame)} was drawn in the stylised world, not the realistic one`;
+  }
+  return undefined;
+}
 
 const TYPES: Readonly<Record<string, string>> = {
   '.html': 'text/html',
@@ -327,6 +393,9 @@ export async function renderCapture(
       // The offline worker would answer the app's files from its own cache,
       // round `context.route`.
       serviceWorkers: 'block',
+      // #3175: the device's choices, written before the app's first page:
+      // the realistic world, and the whole HUD. @see captureDeviceSettings
+      storageState: captureStorageState(CAPTURE_ORIGIN),
     });
     const refused = new Set<string>();
     const log = { app: 0, archive: 0, refused: {} as Record<string, number> };
@@ -373,27 +442,24 @@ export async function renderCapture(
     await ride.click();
 
     // The ride's first frames, all at the instant of the press, until one
-    // has drawn the world: none of them is in the video.
-    const startedAt = Date.now();
-    for (;;) {
-      const drawn = await page.evaluate(async () => {
-        const clock = window.__oylCaptureClock;
-        clock?.frame();
-        await clock?.settled();
-        return window.__oylCapture?.drawn ?? 0;
-      });
-      if (drawn > 0) break;
-      if (Date.now() - startedAt > FIRST_FRAME_LIMIT_MS) {
-        throw new Error('capture: the ride never drew its first frame');
-      }
-      await page.waitForTimeout(50);
-    }
+    // has drawn the realistic world: none of them is in the video.
+    const warm = await warmUp(
+      () =>
+        page.evaluate(async () => {
+          const clock = window.__oylCaptureClock;
+          clock?.frame();
+          await clock?.settled();
+          return window.__oylCapture;
+        }),
+      () => page.waitForTimeout(50),
+      () => Date.now(),
+    );
 
     const encoder = options.encoder?.into ?? startEncoder(ffmpeg, captureMp4Args(request.fps, mp4));
     const stepMs = 1000 / request.fps;
     const frames = captureFrames(request);
     let last: CaptureSnapshot | undefined;
-    let drawnBefore = (await page.evaluate(() => window.__oylCapture))?.drawn ?? 0;
+    let drawnBefore = warm.drawn;
     try {
       for (let frame = 1; frame <= frames; frame += 1) {
         const stepped = await page.evaluate(async (ms) => {
@@ -402,14 +468,9 @@ export async function renderCapture(
           await clock?.settled();
           return { ran, snapshot: window.__oylCapture };
         }, stepMs);
-        const drawn = stepped.snapshot?.drawn ?? 0;
-        if (stepped.ran !== 1 || drawn !== drawnBefore + 1) {
-          throw new Error(
-            `capture: frame ${String(frame)} ran ${String(stepped.ran)} animation frames ` +
-              `and drew the world ${String(drawn - drawnBefore)} times, not once`,
-          );
-        }
-        drawnBefore = drawn;
+        const problem = frameProblem(frame, stepped.ran, drawnBefore, stepped.snapshot);
+        if (problem !== undefined) throw new Error(problem);
+        drawnBefore = stepped.snapshot?.drawn ?? 0;
         last = stepped.snapshot;
         if (frame <= skip) continue;
         await options.beforeShot?.(page, frame / request.fps);

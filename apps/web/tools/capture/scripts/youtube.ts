@@ -44,7 +44,7 @@ import type { VideoScript } from '../video-script';
 export const YOUTUBE_SCRIPT: VideoScript = {
   id: 'youtube',
   scenes: [
-    // 1. Cold open: the world at speed, then the title.
+    // 1. Cold open: the world at speed, then the logo and the title.
     {
       id: 'opening',
       chapter: 'On Your Left',
@@ -56,7 +56,11 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 1,
           seconds: 6,
           placement: 'title',
+          // Owner ruling 2026-11-25 on #3175: the logo, centred, with the
+          // platforms line beneath it.
+          logo: true,
           text: 'On Your Left — free, open-source indoor and outdoor cycling',
+          lines: ['On Android. Coming to iOS soon.'],
         },
       ],
     },
@@ -233,7 +237,11 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           text: 'Free and open source',
           // Owner ruling 2026-11-25: they exist but are not filmed, as each
           // needs an instance; only the closing card may say so, and only so.
-          lines: ['Optional on your own instance: an AI pacer and AI bots'],
+          // #3175, the owner's the same day: the platforms line, as on the opening.
+          lines: [
+            'On Android. Coming to iOS soon.',
+            'Optional on your own instance: an AI pacer and AI bots',
+          ],
         },
       ],
     },

@@ -26,10 +26,16 @@
  * A frame where a callout's panel is missing, or where no place keeps the
  * caption off the panel it explains, the map credit and the title-safe
  * margin, stops the render: a video that breaks the epic's rules is not made.
+ *
+ * #3175: so does a captioned frame where any panel the scene's mode draws
+ * (`video-script.ts` §`scenePanels`) is missing or faded — the owner's "make
+ * sure the video shows all of the hud" — and the opening title is drawn under
+ * the project's logo ({@link installLogo}).
  */
 
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
@@ -53,11 +59,41 @@ import {
   scriptChapters,
   scriptProblems,
   scriptSeconds,
+  scenePanels,
   scriptSrt,
   shownLines,
   type CalloutPanel,
   type VideoScene,
 } from './video-script';
+
+/**
+ * #3175: the project's logo, as the app ships it (`src/brand/`, the owner's
+ * art, CC-BY-4.0): the dark palette's, which is the capture's. It is drawn no
+ * larger than its own 512 × 408 pixels, so it is sharp at 1080p without a
+ * scaled copy.
+ */
+export const LOGO_FILE = fileURLToPath(new URL('../../src/brand/logo-dark.webp', import.meta.url));
+
+/** The logo as a `data:` address, so the page draws it without a request. */
+export function logoDataUrl(file: string = LOGO_FILE): string {
+  return `data:image/webp;base64,${readFileSync(file).toString('base64')}`;
+}
+
+/**
+ * In the page: add the logo's `<img>`, hidden, and wait until it is decoded,
+ * so the frame it is first drawn on has it. Once a page; a second call is
+ * nothing.
+ */
+async function installLogo(src: string): Promise<void> {
+  if (document.getElementById('oyl-capture-logo') !== null) return;
+  const img = document.createElement('img');
+  img.id = 'oyl-capture-logo';
+  img.alt = '';
+  img.style.display = 'none';
+  img.src = src;
+  document.body.append(img);
+  await img.decode();
+}
 
 /** The HUD's panels, every one of which a caption keeps off where the frame has room. */
 export const PANEL_SELECTOR = '.oyl-hud__panel, .oyl-hud__junction-prompt';
@@ -96,6 +132,8 @@ export interface Measured {
   readonly target: Box | undefined;
   readonly credit: Box | undefined;
   readonly panels: readonly Box[];
+  /** #3175: the names of the panels asked for that are not drawn, or are faded. */
+  readonly missing: readonly string[];
 }
 
 /**
@@ -110,6 +148,14 @@ function measureOverlay(arg: {
   readonly label: string | undefined;
   readonly credit: string;
   readonly panels: string;
+  /** #3175: draw the logo above the words. */
+  readonly logo: boolean;
+  /** #3175: the panels the frame must show, by name, selector and label. */
+  readonly want: readonly {
+    readonly name: string;
+    readonly selector: string;
+    readonly label: string | undefined;
+  }[];
 }): Measured {
   const ID = 'oyl-capture-overlay';
   let root = document.getElementById(ID);
@@ -140,7 +186,25 @@ function measureOverlay(arg: {
   svg.style.visibility = 'hidden';
   const title = arg.kind === 'title';
   const whole = arg.kind === 'card';
+  // #3175: the logo is kept out of the caption between frames, so a caption
+  // that has none does not take it away with its own lines.
+  const logo = document.getElementById('oyl-capture-logo') as HTMLImageElement | null;
+  if (logo !== null) {
+    logo.style.display = 'none';
+    document.body.append(logo);
+  }
+  if (arg.logo && logo === null) throw new Error('the capture logo was not installed');
+  if (arg.logo && logo !== null) {
+    Object.assign(logo.style, {
+      display: 'block',
+      // Never larger than its own pixels, so never scaled up and blurred.
+      height: `min(34vh, ${String(logo.naturalHeight)}px)`,
+      width: 'auto',
+      margin: '0 auto 0.25em',
+    });
+  }
   card.replaceChildren(
+    ...(arg.logo && logo !== null ? [logo] : []),
     ...arg.lines.map((line, index) => {
       const p = document.createElement('p');
       p.textContent = line;
@@ -149,6 +213,7 @@ function measureOverlay(arg: {
         ...(whole && index > 0
           ? { fontFamily: 'inherit', fontSize: '2.2vh', fontWeight: '400', maxWidth: '70%' }
           : {}),
+        ...(title && index > 0 ? { fontSize: '3.6vh', fontWeight: '600' } : {}),
       });
       return p;
     }),
@@ -208,18 +273,15 @@ function measureOverlay(arg: {
     }
     return opacity >= 0.5;
   };
-  const target =
-    arg.selector === undefined
-      ? undefined
-      : [...document.querySelectorAll(arg.selector)].find(
-          (element) =>
-            shown(boxOf(element)) &&
-            drawn(element) &&
-            (arg.label === undefined ||
-              (element.querySelector('.oyl-hud__label')?.textContent ?? '')
-                .trim()
-                .startsWith(arg.label)),
-        );
+  const find = (selector: string, label: string | undefined): Element | undefined =>
+    [...document.querySelectorAll(selector)].find(
+      (element) =>
+        shown(boxOf(element)) &&
+        drawn(element) &&
+        (label === undefined ||
+          (element.querySelector('.oyl-hud__label')?.textContent ?? '').trim().startsWith(label)),
+    );
+  const target = arg.selector === undefined ? undefined : find(arg.selector, arg.label);
   const credit = document.querySelector(arg.credit);
   const creditBox = credit === null ? undefined : boxOf(credit);
   const size = boxOf(card);
@@ -228,6 +290,9 @@ function measureOverlay(arg: {
     target: target === undefined ? undefined : boxOf(target),
     credit: creditBox !== undefined && shown(creditBox) ? creditBox : undefined,
     panels: [...document.querySelectorAll(arg.panels)].map(boxOf).filter(shown),
+    missing: arg.want
+      .filter((panel) => find(panel.selector, panel.label) === undefined)
+      .map((panel) => panel.name),
   };
 }
 
@@ -333,12 +398,23 @@ export function drawnProblems(
   return problems;
 }
 
+/**
+ * #3175: what is wrong with a captioned frame's HUD: a panel its scene's mode
+ * draws (`video-script.ts` §`scenePanels`) that is not in the frame, or is
+ * faded. A card covers the whole frame, so it is not asked.
+ */
+export function hudProblems(missing: readonly string[], kind: Kind): string[] {
+  if (kind === 'card' || missing.length === 0) return [];
+  return [`the HUD does not show ${missing.join(', ')}, drawn and unfaded`];
+}
+
 /** Draw `scene`'s caption at `second` of it over the page, or none; throws on a frame that breaks the rules. */
 async function drawCaption(
   page: Page,
   scene: VideoScene,
   second: number,
   frame: { readonly width: number; readonly height: number },
+  logo: string,
 ): Promise<void> {
   const shown = captionAt(scene, second);
   if (shown === undefined) {
@@ -350,6 +426,8 @@ async function drawCaption(
   const panel: CalloutPanel | undefined =
     caption.callout === undefined ? undefined : CALLOUT_PANELS[caption.callout];
   const kind: Kind = panel === undefined ? (caption.placement ?? 'lower-third') : 'callout';
+  if (caption.logo === true) await page.evaluate(installLogo, logo);
+  const capture = CAPTURE_SCENES[scene.capture];
   const measured = await page.evaluate(measureOverlay, {
     lines: shownLines(caption),
     kind,
@@ -357,10 +435,17 @@ async function drawCaption(
     label: panel?.label,
     credit: CREDIT_SELECTOR,
     panels: PANEL_SELECTOR,
+    logo: caption.logo === true,
+    want: (capture === undefined ? [] : scenePanels(capture)).map((name) => {
+      const wanted: CalloutPanel = CALLOUT_PANELS[name];
+      return { name, selector: wanted.selector, label: wanted.label };
+    }),
   });
   if (panel !== undefined && measured.target === undefined) {
     throw new Error(`${where}: the ${String(caption.callout)} panel is not in the frame`);
   }
+  const hud = hudProblems(measured.missing, kind);
+  if (hud.length > 0) throw new Error(`${where}: ${hud.join('; ')}`);
   const place = placeCaption({
     frame,
     size: measured.size,
@@ -426,6 +511,7 @@ export async function renderScript(
   const partial = partialName(mp4);
   const frame = { width: request.width, height: request.height };
   const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, partial));
+  const logo = logoDataUrl();
   let frames = 0;
   try {
     for (const scene of script.scenes) {
@@ -448,7 +534,7 @@ export async function renderScript(
           ffmpeg,
           encoder: { into: encoder, mp4: partial },
           skipFrames: from * request.fps,
-          beforeShot: (page, second) => drawCaption(page, scene, second - from, frame),
+          beforeShot: (page, second) => drawCaption(page, scene, second - from, frame, logo),
           onFrame: (at, of) => options.onFrame?.(scene.id, at, of),
         },
       );

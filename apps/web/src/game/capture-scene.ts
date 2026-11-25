@@ -376,6 +376,14 @@ export interface CaptureSnapshot {
   /** The ride's elapsed seconds, on its own clock. */
   readonly elapsed: number;
   /**
+   * #3175: the world this frame was drawn in, as the view says
+   * (`port.ts` §`GameView.drawnWorld`): `realistic` once the realistic world
+   * has arrived and the view draws it, `stylised` before then and on a ride
+   * that fell back from it or left it. The capture tool shoots no frame until
+   * this says `realistic`, and stops on any frame after that does not.
+   */
+  readonly world?: 'realistic' | 'stylised' | undefined;
+  /**
    * #3153: what happened in the ride, at the frame it happened on
    * ({@link CaptureLog}): two captures of one scene are the same ride when
    * these are equal. Absent on a frame published before the log existed.

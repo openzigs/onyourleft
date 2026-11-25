@@ -5050,6 +5050,8 @@ function GameScreen({
               drawn: captureLog.drawn,
               distance: simulation.state.ride.distance,
               elapsed: simulation.state.elapsed,
+              // #3175: the world the view drew, as it says itself.
+              world: view.drawnWorld ?? 'stylised',
               events: captureLog.events(),
             });
           }
@@ -5164,11 +5166,17 @@ function GameScreen({
         // realistic world draws, so while one runs the ladder holds realism's
         // floor rather than leaving it (`quality.ts` §`nextWorldQuality`).
         const running = deliveryRef.current;
-        const next = nextWorldQuality(
-          previous,
-          sample,
-          running !== undefined && running.outcome === undefined,
-        );
+        // #3175: a capture is drawn offline on a stepped clock, so its frame
+        // times are the step's, not the device's: the ladder is not fed and
+        // the ride stays on the rung it started on, the realistic world's top.
+        const next =
+          captureRecordingRef.current === undefined
+            ? nextWorldQuality(
+                previous,
+                sample,
+                running !== undefined && running.outcome === undefined,
+              )
+            : previous;
         // #2289: why the realistic ladder moved, kept where the owner can read it.
         const report = realisticWatchRef.current?.observe(
           previous,

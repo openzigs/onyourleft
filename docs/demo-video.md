@@ -189,19 +189,23 @@ first script runs, `tools/capture/capture-clock.ts` replaces the page's `perform
 
 1. imports a synthetic route through the Routes page's own form. It is eight invented kilometres
    from 0° 0° under the placeholder name *Capture loop*, so no real street or place is on screen.
-   It also sets the rider's weight on the Settings page, so W/kg has one to read;
+   It also sets the rider's weight on the Settings page, so W/kg has one to read. Before that, the
+   browser profile already holds the device's choices (#3175, below);
 2. opens `#/game?capture=<scene>`, with `route=` the scene's built-in level or circuit when it
    names one, holds the clocks at 10:30 UTC on a midsummer morning, and presses that route's
    *Ride*;
-3. runs animation frames at that one instant until the ride has drawn its world. None of these
-   frames is in the video, and no ride time passes during them. The timers keep real time until
-   the first step, because the renderer's warm-up waits for the GPU on a timer;
+3. runs animation frames at that one instant until the ride has drawn the **realistic** world
+   (`render-capture.ts` §`warmUp`, #3175). None of these frames is in the video, and no ride time
+   passes during them, so no frame of the stylised world the realistic one replaces is written.
+   The timers keep real time until the first step, because the renderer's warm-up waits for the
+   GPU on a timer. The capture stops if the realistic world has not arrived within two minutes;
 4. for each frame, steps every clock by exactly `1000 / fps` ms, lets React commit, and screenshots
    the page: the WebGL world and the full `HudPanel` over it. The PNGs go to `ffmpeg`, through the
    demo's own encoder.
 
 So frame *n* is the ride at *n / fps* seconds, however long the machine takes to draw it. The
-capture stops if a step does not draw the world exactly once. Beside the video it writes the ride's
+capture stops if a step does not draw the world exactly once, or draws it in the stylised world
+(`render-capture.ts` §`frameProblem`). Beside the video it writes the ride's
 event log, `<scene>-<size>-<fps>fps.events.json` (#3153): the round's or race's seed and what it
 dealt, each scripted press, each change of score, each lap and each workout block, with the frame
 it happened on. Two captures of one scene are the same ride when their logs are equal.
@@ -231,6 +235,33 @@ table by the mark every scene's id begins with (`oyl-capture-scene:`), never by 
 built by hand after a capture never reads `?capture=` (#3153).
 `src/game/capture-wiring.test.tsx` proves the stepped clock, and `simulated-rider-wiring.test.tsx`
 proves that a capture reaches no trainer and starts no recording. The instance scenes are #3155.
+
+### Only the realistic world, and the whole HUD (#3175)
+
+The owner, 2026-11-25: *"Ensure it only has the realistic world"* and *"make sure the video shows
+all of the hud"*. A fresh browser profile reads every device setting as its default, and three
+defaults are not that video: the realistic world is off (ADR 0026 D-3), the ride controls fade after
+five seconds with no input, and a Delivery round draws its game strip, power and the round alone.
+
+- **The device's choices.** `tools/capture/capture-device.ts` writes the realistic world *on*, the
+  ride controls' auto-hide *off* and a Delivery round's HUD as *everything*, each through the
+  function Settings writes it with, under its own key, into the profile's `localStorage` before the
+  app's first page loads (Playwright's `storageState`). The app reads them as it reads any rider's;
+  the game and the HUD have no capture branch for any of the three. No scene opts out, and neither
+  `CaptureScene` nor a script's scene has a field to opt out with.
+- **No stylised frame.** Each frame of a capture ride tells the capture tool which world the view
+  drew (`window.__oylCapture.world`, read from the view itself, `port.ts` §`GameView.drawnWorld`).
+  The warm-up waits for `realistic`, and the capture stops on any counted frame that is not.
+- **The top rung, held.** A capture's frame times are the step's, not the device's: at 5 fps every
+  frame is 200 ms, which the ladder reads as a device far too slow for realism. So a capture ride
+  does not feed the quality ladder (`GameView.tsx`, beside `nextWorldQuality`), and stays on the
+  realistic world's top rung for the whole scene.
+- **The whole HUD.** On every captioned frame of a script, the page looks for every panel the
+  scene's mode draws (`video-script.ts` §`scenePanels`): the readings, the totals, the elevation
+  profile, the map and the ride controls, and the mode's own (the workout strip, the pacer's and
+  the best ride's readings, the race's standings and item, the round's houses and throw buttons).
+  The render stops on a frame where one is missing or faded. The closing card covers the frame and
+  is not asked.
 
 ### Free ride (#3154)
 
@@ -262,9 +293,16 @@ pnpm --filter @onyourleft/web run capture -- --scene free-ride --seconds 40 \
   names, and the open world's card is *Open world*. The other scenes ride a synthetic route, a
   built-in level or a built-in circuit, whose names are this project's own.
 
-To try it with no map at all, the open world's invented test block
-(`src/game/open-world/fixture-testing.ts` §`openWorldFixtureArchive`, no OpenStreetMap data) can be
-written to a file and handed to `--archive`, with `--start` at its start pin.
+**The final render uses the real basemap** (#3175): the project's basemap release on R2, the archive
+`VITE_BASEMAP_PMTILES_URL` names, or a local extract of it around the start
+(`pmtiles extract <release URL> extract.pmtiles --bbox=<west,south,east,north>`), handed to
+`--archive`. A few kilometres square is enough for the scene's sixteen seconds. So the free ride
+shows real roads, buildings and land use, with every street named by a placeholder.
+
+The open world's invented test block (`src/game/open-world/fixture-testing.ts`
+§`openWorldFixtureArchive`, no OpenStreetMap data) is for tests only: it can be written to a file
+and handed to `--archive`, with `--start` at its start pin, to try the scene with no map at all, but
+it has no buildings and is never the video's.
 
 ### The modes' scenes (#3153)
 
@@ -343,7 +381,18 @@ owner holds, and are left out of the script; comments in the file mark where the
   fit". The word list is `src/demo/caption-words.ts`, shared with the demo's tour;
 - a caption up for under 3 or over 6 seconds, one that runs past its scene, or one less than a
   second from the next; a scene under 6 seconds; a chapter list that YouTube would not read (the
-  first chapter at 0:00, three or more chapters, each 10 seconds or longer).
+  first chapter at 0:00, three or more chapters, each 10 seconds or longer);
+- lines under a caption's words on anything but a `title` or a `card`, and the logo on anything
+  but a `title`.
+
+#### The opening: the logo, and the platforms line (#3175)
+
+The opening title is drawn under the project's logo, centred: `src/brand/logo-dark.webp`, the
+app's own file, drawn no larger than its own 512 × 408 pixels (34 % of the frame's height, so
+367 pixels tall at 1080p) and never scaled up, so it is sharp at 1080p and no cleaned copy is
+needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
+halo. Beneath it is the owner's platforms line, **"On Android. Coming to iOS soon."**, which the
+closing card carries too; `video-script.test.ts` pins the wording.
 
 #### Captions and callouts are drawn by the page
 
@@ -373,7 +422,7 @@ controls once they have faded after five seconds without input. Such a video is 
   (#3154), so the open world's road is drawn level and the HUD says so. Hiding a true notice would
   show the product as it is not, so the scene keeps it.
   [#3173](https://github.com/openzigs/onyourleft/issues/3173) gives the capture a local terrain
-  archive.
+  archive; #3175 left it there.
 - **Single frames with no world drawn.** A capture of `route-hud` at 5 fps, from `main` before this
   change, has three frames in 200 where the world is not drawn: the sky is the page's background.
   This is a capture-mode defect from #3152:

@@ -16,10 +16,13 @@ import {
   captionAt,
   cardLines,
   chapterTime,
+  RIDING_PANELS,
+  scenePanels,
   scriptChapters,
   scriptProblems,
   scriptSeconds,
   scriptSrt,
+  shownLines,
   srtTime,
   type CalloutPanel,
   type VideoCaption,
@@ -160,9 +163,9 @@ describe('the demo video’s scene script — #3156', () => {
     ).toEqual([
       'test scene closing, “Race AI bots on your instance”: names a feature only an instance runs, so the card says “Optional on your own instance:”',
     ]);
-    // Lines are a card's, and the instance claim stays refused on the card.
+    // Lines are a card's or a title's, and the instance claim stays refused on the card.
     expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', lines: ['More'] }])).toEqual([
-      'test scene one, “Free”: only a card has lines under its words',
+      'test scene one, “Free”: only a card or a title has lines under its words',
     ]);
     expect(
       scriptProblems(
@@ -175,7 +178,58 @@ describe('the demo video’s scene script — #3156', () => {
       scene.captions.flatMap((caption) => [caption.text, ...(caption.lines ?? [])]),
     );
     expect(said.filter((text) => /\bAI\b|\binstance\b/iu.test(text))).toEqual([statement]);
-    expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([statement]);
+    expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([
+      'On Android. Coming to iOS soon.',
+      statement,
+    ]);
+  });
+
+  it('opens on the logo with the platforms line beneath it, and says the line again on the closing card — #3175', () => {
+    // The owner's words of 2026-11-25, as approved: "say on Android coming to IOS soon".
+    const platforms = 'On Android. Coming to iOS soon.';
+    const opening = YOUTUBE_SCRIPT.scenes[0]?.captions[0];
+    expect(opening).toMatchObject({ placement: 'title', logo: true, lines: [platforms] });
+    expect(shownLines(opening as VideoCaption)).toEqual([
+      'On Your Left — free, open-source indoor and outdoor cycling',
+      platforms,
+    ]);
+    const card = YOUTUBE_SCRIPT.scenes.at(-1)?.captions.find((c) => c.placement === 'card');
+    expect(card?.lines?.[0]).toBe(platforms);
+    expect(shownLines(card as VideoCaption).slice(0, 2)).toEqual([
+      'Free and open source',
+      platforms,
+    ]);
+  });
+
+  it('draws the logo over a title alone, and lets a title carry lines — #3175', () => {
+    expect(
+      problemsOf({}, [
+        { at: 0, seconds: 4, text: 'Free', placement: 'title', logo: true, lines: ['More'] },
+      ]),
+    ).toEqual([]);
+    expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', logo: true }])).toEqual([
+      'test scene one, “Free”: only a title is drawn under the logo',
+    ]);
+    expect(
+      problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', callout: 'map', logo: true }]),
+    ).toEqual(['test scene one, “Free”: only a title is drawn under the logo']);
+  });
+
+  it('asks every riding scene for the whole HUD, and each mode for its own panels — #3175', () => {
+    const of = (name: string): string[] => {
+      const scene = CAPTURE_SCENES[name];
+      if (scene === undefined) throw new Error(`no scene ${name}`);
+      return scenePanels(scene);
+    };
+    expect(RIDING_PANELS).toEqual(['readings', 'totals', 'elevation', 'map', 'controls']);
+    expect(of('route-hud')).toEqual([...RIDING_PANELS]);
+    expect(of('free-ride')).toEqual([...RIDING_PANELS]);
+    expect(of('workout')).toEqual([...RIDING_PANELS, 'workout']);
+    expect(of('pacer')).toEqual([...RIDING_PANELS, 'pacer', 'best']);
+    expect(of('lap-race')).toEqual([...RIDING_PANELS, 'standings', 'item']);
+    expect(of('delivery')).toEqual([...RIDING_PANELS, 'houses', 'throw']);
+    // Every one is a panel the page can find, the controls by the HUD's own class.
+    expect(CALLOUT_PANELS.controls.selector).toBe('.oyl-hud__controls');
   });
 
   it('says in the lap race that the bots race with tactics', () => {
