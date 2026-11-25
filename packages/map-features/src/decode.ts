@@ -1194,7 +1194,13 @@ const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
  */
 export function streetNameOf(value: unknown): string | undefined {
   if (typeof value !== 'string' || LONE_SURROGATE.test(value)) return undefined;
-  const bytes = new TextEncoder().encode(value).length;
+  // Its UTF-8 length, counted from its code points: this package names no
+  // platform encoder, and a string with no lone surrogate encodes exactly so.
+  let bytes = 0;
+  for (const character of value) {
+    const point = character.codePointAt(0) as number;
+    bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+  }
   if (bytes < 1 || bytes > STREET_NAME_MAX_BYTES) return undefined;
   return shownStreetName(value) ?? undefined;
 }

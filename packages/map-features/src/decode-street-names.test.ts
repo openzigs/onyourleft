@@ -171,6 +171,11 @@ describe('a hostile tile’s name is cleaned, bounded or dropped, and never refu
       expected: 'Avenue of the Very Long Name That Goes On And',
     },
     { label: 'past the byte bound, no name at all', name: 'A'.repeat(300), expected: null },
+    {
+      label: 'past the byte bound in two-byte letters, though under it in characters, no name',
+      name: 'é'.repeat(129),
+      expected: null,
+    },
   ];
 
   for (const nameCase of cases) {
