@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * #3156: the script render's checks that need no browser. The render holds
+ * each caption it draws to {@link drawnProblems} against the page's own boxes
+ * and stops on a frame that breaks it; what a whole render wrote was read
+ * back with `ffprobe` on the pull request.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import type { Box } from './caption-layout';
+import { drawnProblems, scriptName } from './render-script';
+
+const box = (x: number, y: number, width: number, height: number): Box => ({
+  x,
+  y,
+  width,
+  height,
+});
+const FRAME = { width: 1920, height: 1080 };
+
+describe('a drawn caption, held to the rules — #3156', () => {
+  const target = box(380, 17, 139, 101);
+  const credit = box(8, 706, 194, 20);
+
+  it('passes a caption clear of its panel and the credit, inside title-safe', () => {
+    expect(drawnProblems(box(600, 220, 500, 80), { target, credit }, 'callout', FRAME)).toEqual([]);
+  });
+
+  it('refuses one over its panel, over the credit, or outside title-safe', () => {
+    expect(drawnProblems(box(400, 30, 500, 80), { target, credit }, 'callout', FRAME)).toEqual([
+      'covers the panel it explains',
+      'is outside the title-safe area',
+    ]);
+    expect(
+      drawnProblems(box(150, 680, 500, 80), { target: undefined, credit }, 'lower-third', FRAME),
+    ).toEqual(['covers the map credit']);
+  });
+
+  it('lets a caption touch its panel’s edge, and a card fill the frame', () => {
+    // Touching to the half pixel the browser rounds to is not covering.
+    expect(
+      drawnProblems(box(519.5, 117.5, 400, 80), { target, credit: undefined }, 'callout', FRAME),
+    ).toEqual([]);
+    expect(
+      drawnProblems(box(0, 0, 1920, 1080), { target: undefined, credit: undefined }, 'card', FRAME),
+    ).toEqual([]);
+    expect(
+      drawnProblems(box(0, 0, 1920, 1080), { target: undefined, credit }, 'card', FRAME),
+    ).toEqual(['covers the map credit']);
+  });
+
+  it('names the video, its captions and chapters after the script and the frame', () => {
+    const request = { script: 'youtube', fps: 60, width: 1920, height: 1080, out: undefined };
+    expect(scriptName(request, '.mp4')).toBe('youtube-1920x1080-60fps.mp4');
+    expect(scriptName(request, '.srt')).toBe('youtube-1920x1080-60fps.srt');
+  });
+});

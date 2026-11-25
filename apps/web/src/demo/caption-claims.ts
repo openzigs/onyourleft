@@ -19,7 +19,8 @@
  *   page then draws it only when map data was given.
  * - **No word the project may not use**: the load-metric trademarks
  *   (CLAUDE.md section 6), a competitor's name, and the accuracy and fit
- *   claims ADR 0030 R6 rules out.
+ *   claims ADR 0030 R6 rules out (`caption-words.ts`, which the capture
+ *   video's script reads too: #3156).
  * - **Readable, and checkable**: a caption is up for at least
  *   {@link CAPTION_MIN_SECONDS}, inside its scene, and at least
  *   {@link CAPTION_GAP_SECONDS} from the next, so a render at one frame a
@@ -29,6 +30,7 @@
 import { seconds } from '@onyourleft/domain';
 
 import { inFrame, projectThrough } from './camera-tour-testing';
+import { refusedWords } from './caption-words';
 import type { CaptionFeature, CaptionScene, CaptionScript } from './caption-script';
 import { DEFAULT_FADE_SECONDS } from './caption-script';
 import { createDemoPlayer } from './player';
@@ -45,35 +47,6 @@ export const CLIMB_GRADE_PERCENT = 6;
 
 /** How often a ridden check samples the ride. */
 const SAMPLE_SECONDS = 0.25;
-
-/**
- * Whole words a caption may not say, matched as written: the load-metric
- * trademarks (CLAUDE.md section 6).
- */
-const TRADEMARK_WORDS = ['NP', 'TSS', 'IF', 'CTL', 'ATL', 'TSB'] as const;
-
-/**
- * Phrases a caption may not say, in any case: the metrics' long names,
- * competitors' names, and ADR 0030 R6's claims.
- */
-const REFUSED_PHRASES = [
-  'normalized power',
-  'normalised power',
-  'training stress score',
-  'intensity factor',
-  'strava',
-  'zwift',
-  'peloton',
-  'trainerroad',
-  'rouvy',
-  'mywhoosh',
-  'fulgaz',
-  'bkool',
-  'komoot',
-  'validated',
-  'accurate to',
-  'professional fit',
-] as const;
 
 /** Whether the lead rider of `preset`, on its own road, is on a climb from `from` to `to`. */
 function climbsThroughout(preset: DemoPreset, from: number, to: number): boolean {
@@ -130,15 +103,6 @@ function featureShown(
     case 'climb':
       return climbsThroughout(preset, from, to);
   }
-}
-
-/** Why `text` may not be said, if it may not. */
-function refusedWords(text: string): string | undefined {
-  for (const word of TRADEMARK_WORDS) {
-    if (new RegExp(`\\b${word}\\b`).test(text)) return word;
-  }
-  const lower = text.toLowerCase();
-  return REFUSED_PHRASES.find((phrase) => lower.includes(phrase));
 }
 
 /** Everything wrong with `script`, a sentence each; none for a script that may be rendered. */
