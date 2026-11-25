@@ -301,7 +301,8 @@ renders the whole video from **one scene script** and writes three files to
 
 - `youtube-1920x1080-60fps.mp4`: every scene in order, as **one** H.264 file. Each scene is
   ridden in the real app in turn, and every frame goes into the same encoder, so nothing is joined
-  or re-encoded;
+  or re-encoded. It is encoded as `youtube-1920x1080-60fps.partial.mp4` and renamed only once it
+  holds every frame, so a render that stops part-way leaves an earlier video as it was;
 - `youtube-1920x1080-60fps.srt`: every caption, timed in the whole video. The closing card's
   entry carries the map credit lines that the card shows;
 - `youtube-1920x1080-60fps.chapters.txt`: the chapter list for the YouTube description
@@ -334,7 +335,10 @@ owner holds, and are left out of the script; comments in the file mark where the
   throws), `lap-race` (a built-in circuit's race), `workout`, `junction` (a free ride, from its
   first scripted turn on), `pacer`, and `instance`, which no capture scene rides until #3155.
   A callout to a panel that only one mode draws, such as the standings or the throw buttons, claims
-  that mode;
+  that mode, whatever the caption claims itself;
+- a word for a feature only an instance runs ("AI", "instance") anywhere but a line of the closing
+  card that begins "Optional on your own instance:". The AI pacer and AI bots exist but are not
+  filmed until #3155, so the card may state them as optional and nothing else may name them;
 - the load-metric trademarks, a competitor's name, and "validated", "accurate to" or "professional
   fit". The word list is `src/demo/caption-words.ts`, shared with the demo's tour;
 - a caption up for under 3 or over 6 seconds, one that runs past its scene, or one less than a
@@ -354,7 +358,8 @@ HUD's tokens (`render-script.ts`):
    title-safe area and never over the map credit. A place over another HUD panel is used only when
    the frame has no other;
 3. the page draws the caption there, with a leader line and a ring round the panel. Each caption
-   fades in and out over half a second.
+   fades in and out over half a second, but for a card that ends its scene: the closing card holds
+   to the video's last frame.
 
 The drawn box is then measured again. The render **stops** on any frame where a caption covers the
 panel it explains or the map credit, or leaves the title-safe area. It also stops when a callout's

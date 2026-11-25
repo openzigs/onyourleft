@@ -22,6 +22,10 @@
  *   only a mode shows carries that mode's feature ({@link CALLOUT_PANELS}).
  * - **No word the project may not use** (`src/demo/caption-words.ts`, the
  *   demo tour's list).
+ * - **No instance-only feature but on the closing card**: an AI pacer, AI
+ *   bots and the rest exist only on a rider's own instance, which no scene
+ *   rides yet (#3155), so only a line of the closing card may name them, and
+ *   only as optional and on your own instance ({@link INSTANCE_ONLY_STATEMENT}).
  * - **The epic's timing**: a caption is up for 3 to 6 seconds, inside its
  *   scene and a second from the next; no scene is under 6 seconds; YouTube's
  *   chapter rules (the first at 0:00, three or more, each 10 s or longer).
@@ -116,6 +120,13 @@ export interface VideoCaption {
   readonly callout?: CalloutPanelName | undefined;
   /** The feature the caption claims, which its scene must show. */
   readonly feature?: VideoFeature | undefined;
+  /**
+   * A `card`'s statements under its words, before the credit: what the card
+   * says of the product as a whole, not of a scene. Only a card has them, and
+   * only the closing card may state an instance-only feature, worded as
+   * {@link INSTANCE_ONLY_STATEMENT} ({@link instanceOnlyProblem}).
+   */
+  readonly lines?: readonly string[] | undefined;
 }
 
 /** One scene of the video: part of a capture scene's ride, and its captions. */
@@ -180,14 +191,48 @@ export function captureSceneShows(feature: VideoFeature, scene: CaptureScene, at
   }
 }
 
-/** The feature a caption claims: its own, else its panel's. */
-function claimed(caption: VideoCaption): VideoFeature | undefined {
-  return (
-    caption.feature ??
-    (caption.callout === undefined
+/**
+ * The features a caption claims: its own, and its panel's. Both are held to
+ * the scene, so a caption's own claim cannot stand in for the mode its
+ * callout's panel needs.
+ */
+function claimed(caption: VideoCaption): VideoFeature[] {
+  const panel =
+    caption.callout === undefined
       ? undefined
-      : (CALLOUT_PANELS[caption.callout] as CalloutPanel).feature)
+      : (CALLOUT_PANELS[caption.callout] as CalloutPanel).feature;
+  return [...new Set([caption.feature, panel])].filter(
+    (feature): feature is VideoFeature => feature !== undefined,
   );
+}
+
+/**
+ * Words that name a feature only a self-hosted instance runs: an AI pacer,
+ * AI bots, the AI write-up (ADR 0046), the instance itself. No capture scene
+ * rides an instance (#3155), so no scene's caption may say them.
+ */
+const INSTANCE_ONLY_WORDS = /\bAI\b|\binstances?\b/iu;
+
+/**
+ * How the closing card states the instance-only features, which exist but
+ * are not filmed: optional, and on the rider's own instance (owner ruling of
+ * 2026-11-25 on #3174).
+ */
+export const INSTANCE_ONLY_STATEMENT = /^Optional on your own instance: /u;
+
+/**
+ * Why `text` may not be shown where it is, if it names an instance-only
+ * feature: only a statement on the script's closing card may, and only worded
+ * as {@link INSTANCE_ONLY_STATEMENT}.
+ */
+function instanceOnlyProblem(text: string, onClosingCard: boolean): string | undefined {
+  if (!INSTANCE_ONLY_WORDS.test(text)) return undefined;
+  if (!onClosingCard) {
+    return 'names a feature only an instance runs, which only the closing card may state';
+  }
+  return INSTANCE_ONLY_STATEMENT.test(text)
+    ? undefined
+    : 'names a feature only an instance runs, so the card says “Optional on your own instance:”';
 }
 
 /** Everything wrong with `script`, a sentence each; none for a script that may be rendered. */
@@ -198,6 +243,7 @@ export function scriptProblems(
   const problems: string[] = [];
   const ids = new Set<string>();
   if (script.scenes.length === 0) problems.push(`${script.id} has no scenes`);
+  const closing = script.scenes.at(-1);
   for (const scene of script.scenes) {
     const where = `${script.id} scene ${scene.id}`;
     if (!/^[a-z][a-z0-9-]{0,31}$/u.test(scene.id)) {
@@ -243,11 +289,20 @@ export function scriptProblems(
       if (caption.callout !== undefined && caption.placement !== undefined) {
         problems.push(`${said}: a callout is drawn beside its panel, so it has no placement`);
       }
-      const refused = refusedWords(caption.text);
-      if (refused !== undefined) problems.push(`${said}: may not say “${refused}”`);
-      const feature = claimed(caption);
-      if (feature !== undefined && !captureSceneShows(feature, capture, from + caption.at)) {
-        problems.push(`${said}: claims ${feature}, which the scene does not show`);
+      if (caption.lines !== undefined && caption.placement !== 'card') {
+        problems.push(`${said}: only a card has lines under its words`);
+      }
+      const onClosingCard = scene === closing && caption.placement === 'card';
+      for (const text of [caption.text, ...(caption.lines ?? [])]) {
+        const refused = refusedWords(text);
+        if (refused !== undefined) problems.push(`${where}, “${text}”: may not say “${refused}”`);
+        const instanceOnly = instanceOnlyProblem(text, onClosingCard && text !== caption.text);
+        if (instanceOnly !== undefined) problems.push(`${where}, “${text}”: ${instanceOnly}`);
+      }
+      for (const feature of claimed(caption)) {
+        if (!captureSceneShows(feature, capture, from + caption.at)) {
+          problems.push(`${said}: claims ${feature}, which the scene does not show`);
+        }
       }
     });
   }
@@ -319,7 +374,9 @@ export function cardLines(): readonly string[] {
 
 /** What a caption shows on the frame, line by line. */
 export function shownLines(caption: VideoCaption): readonly string[] {
-  return caption.placement === 'card' ? [caption.text, ...cardLines()] : [caption.text];
+  return caption.placement === 'card'
+    ? [caption.text, ...(caption.lines ?? []), ...cardLines()]
+    : [caption.text];
 }
 
 /** A caption on screen: which, and how opaque it is now. */
@@ -329,15 +386,23 @@ export interface ShownCaption {
   readonly opacity: number;
 }
 
-/** The caption on screen at `second` of `scene`, if any, with its fade. */
+/**
+ * The caption on screen at `second` of `scene`, if any, with its fade.
+ *
+ * A frame is taken at the end of its own time (`render-capture.ts` passes
+ * `frame / fps`), so a scene's last frame is at its last second exactly. A
+ * card that ends its scene therefore holds, with no fade out, up to and
+ * including that second: the closing card is the video's last frame.
+ */
 export function captionAt(scene: VideoScene, second: number): ShownCaption | undefined {
   for (const caption of scene.captions) {
     const end = caption.at + caption.seconds;
-    if (second < caption.at || second >= end) continue;
+    const holds = caption.placement === 'card' && end === scene.seconds;
+    if (second < caption.at || second > end || (second === end && !holds)) continue;
     const opacity = Math.min(
       1,
       (second - caption.at) / FADE_SECONDS,
-      (end - second) / FADE_SECONDS,
+      holds ? 1 : (end - second) / FADE_SECONDS,
     );
     if (opacity <= 0) continue;
     return { caption, opacity };

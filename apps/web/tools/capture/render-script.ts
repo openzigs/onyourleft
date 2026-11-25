@@ -28,7 +28,7 @@
  * margin, stops the render: a video that breaks the epic's rules is not made.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Page } from '@playwright/test';
@@ -384,6 +384,28 @@ async function drawCaption(
   if (problems.length > 0) throw new Error(`${where}: ${problems.join('; ')}`);
 }
 
+/**
+ * The name a video is encoded under until it is whole: beside its own, still
+ * ending `.mp4`, as ffmpeg chooses the container from it.
+ */
+export function partialName(mp4: string): string {
+  return mp4.replace(/\.mp4$/u, '.partial.mp4');
+}
+
+/**
+ * Give the encoded `partial` its final name `mp4`, only if it holds every
+ * frame the script asks for. A render that stopped part-way leaves its
+ * partial file, and an earlier whole video under `mp4` stays as it was.
+ */
+export function finishVideo(partial: string, mp4: string, frames: number, expected: number): void {
+  if (frames !== expected) {
+    throw new Error(
+      `capture: wrote ${String(frames)} frames, not the script’s ${String(expected)}`,
+    );
+  }
+  renameSync(partial, mp4);
+}
+
 /** Render `request`'s script into one MP4, with its `.srt` and chapters beside it. */
 export async function renderScript(
   request: ScriptRequest,
@@ -401,8 +423,9 @@ export async function renderScript(
   }
   mkdirSync(options.out, { recursive: true });
   const mp4 = join(options.out, scriptName(request, '.mp4'));
+  const partial = partialName(mp4);
   const frame = { width: request.width, height: request.height };
-  const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, mp4));
+  const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, partial));
   let frames = 0;
   try {
     for (const scene of script.scenes) {
@@ -423,7 +446,7 @@ export async function renderScript(
           // Each scene's event and request logs, by the scene's own name.
           out: join(options.out, `${script.id}-scenes`, scene.id),
           ffmpeg,
-          encoder: { into: encoder, mp4 },
+          encoder: { into: encoder, mp4: partial },
           skipFrames: from * request.fps,
           beforeShot: (page, second) => drawCaption(page, scene, second - from, frame),
           onFrame: (at, of) => options.onFrame?.(scene.id, at, of),
@@ -438,12 +461,7 @@ export async function renderScript(
   }
   await encoder.end();
   // The video is every scene, end to end: the captions' times say so.
-  const expected = scriptSeconds(script) * request.fps;
-  if (frames !== expected) {
-    throw new Error(
-      `capture: wrote ${String(frames)} frames, not the script’s ${String(expected)}`,
-    );
-  }
+  finishVideo(partial, mp4, frames, scriptSeconds(script) * request.fps);
   const srt = join(options.out, scriptName(request, '.srt'));
   writeFileSync(srt, scriptSrt(script));
   const chapters = join(options.out, scriptName(request, '.chapters.txt'));

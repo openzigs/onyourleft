@@ -83,6 +83,111 @@ describe('the demo video’s scene script — #3156', () => {
     ]);
   });
 
+  it('holds delivery to a round with throws, and a lap race to a circuit', () => {
+    const delivery = CAPTURE_SCENES.delivery;
+    const race = CAPTURE_SCENES['lap-race'];
+    if (delivery === undefined || race === undefined) throw new Error('no such capture scene');
+    const scenes = {
+      ...CAPTURE_SCENES,
+      // A level ridden with no throw, and a lap race off a circuit.
+      'no-throws': { ...delivery, cues: (delivery.cues ?? []).filter((c) => c.kind !== 'throw') },
+      'off-circuit': { ...race, route: { id: 'level:somewhere', name: 'Somewhere' } },
+    };
+    for (const [feature, capture] of [
+      ['delivery', 'no-throws'],
+      ['lap-race', 'off-circuit'],
+    ] as const) {
+      const caption: VideoCaption = { at: 0, seconds: 4, text: 'A feature', feature };
+      expect(scriptProblems(scriptOf({ capture }, [caption]), scenes)).toEqual([
+        `test scene one, “A feature”: claims ${feature}, which the scene does not show`,
+      ]);
+    }
+  });
+
+  it('holds a callout to its panel’s mode, whatever the caption claims itself', () => {
+    expect(
+      problemsOf({ capture: 'workout' }, [
+        { at: 0, seconds: 4, text: 'Houses', callout: 'houses', feature: 'workout' },
+      ]),
+    ).toEqual(['test scene one, “Houses”: claims delivery, which the scene does not show']);
+    expect(
+      problemsOf({ capture: 'delivery' }, [
+        { at: 0, seconds: 4, text: 'Houses', callout: 'houses', feature: 'delivery' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('lets only the closing card name an instance-only feature, as optional on your own instance', () => {
+    const statement = 'Optional on your own instance: an AI pacer and AI bots';
+    const card = (lines: readonly string[], text = 'Free'): VideoCaption => ({
+      at: 0,
+      seconds: 6,
+      text,
+      placement: 'card',
+      lines,
+    });
+    const withLast = (last: VideoScene, first: readonly VideoCaption[] = []): VideoScript => {
+      const script = scriptOf({}, first);
+      return { ...script, scenes: [...script.scenes, last] };
+    };
+    const closing = (caption: VideoCaption): VideoScene => ({
+      id: 'closing',
+      chapter: 'Closing',
+      capture: 'route-hud',
+      seconds: 10,
+      captions: [caption],
+    });
+    // The closing card, so worded.
+    expect(scriptProblems(withLast(closing(card([statement]))), CAPTURE_SCENES)).toEqual([]);
+    // Anywhere else: a scene's caption, or a card that is not the last scene's.
+    expect(problemsOf({ capture: 'lap-race' }, [{ at: 0, seconds: 4, text: 'AI bots' }])).toEqual([
+      'test scene one, “AI bots”: names a feature only an instance runs, which only the closing card may state',
+    ]);
+    expect(problemsOf({ capture: 'lap-race' }, [{ at: 0, seconds: 4, text: statement }])).toEqual([
+      `test scene one, “${statement}”: names a feature only an instance runs, which only the closing card may state`,
+    ]);
+    expect(
+      scriptProblems(withLast(closing(card([])), [card([statement])]), CAPTURE_SCENES),
+    ).toEqual([
+      `test scene one, “${statement}”: names a feature only an instance runs, which only the closing card may state`,
+    ]);
+    // On the closing card, but as the card's words, or not worded as optional.
+    expect(scriptProblems(withLast(closing(card([], statement))), CAPTURE_SCENES)).toEqual([
+      `test scene closing, “${statement}”: names a feature only an instance runs, which only the closing card may state`,
+    ]);
+    expect(
+      scriptProblems(withLast(closing(card(['Race AI bots on your instance']))), CAPTURE_SCENES),
+    ).toEqual([
+      'test scene closing, “Race AI bots on your instance”: names a feature only an instance runs, so the card says “Optional on your own instance:”',
+    ]);
+    // Lines are a card's, and the instance claim stays refused on the card.
+    expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', lines: ['More'] }])).toEqual([
+      'test scene one, “Free”: only a card has lines under its words',
+    ]);
+    expect(
+      scriptProblems(
+        withLast(closing({ ...card([statement]), feature: 'instance' })),
+        CAPTURE_SCENES,
+      ),
+    ).toEqual(['test scene closing, “Free”: claims instance, which the scene does not show']);
+    // The shipped closing card says it, and no other caption of the script does.
+    const said = YOUTUBE_SCRIPT.scenes.flatMap((scene) =>
+      scene.captions.flatMap((caption) => [caption.text, ...(caption.lines ?? [])]),
+    );
+    expect(said.filter((text) => /\bAI\b|\binstance\b/iu.test(text))).toEqual([statement]);
+    expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([statement]);
+  });
+
+  it('says in the lap race that the bots race with tactics', () => {
+    const race = YOUTUBE_SCRIPT.scenes.find((scene) => scene.capture === 'lap-race');
+    expect(race?.captions).toContainEqual(
+      expect.objectContaining({
+        text: 'Bots race with tactics that read the race',
+        callout: 'standings',
+      }),
+    );
+  });
+
   it('refuses an instance caption on every capture scene, until #3155 rides one', () => {
     for (const capture of Object.keys(CAPTURE_SCENES)) {
       expect(
@@ -215,6 +320,24 @@ describe('the demo video’s scene script — #3156', () => {
     expect(captionAt(scene, 4)?.opacity).toBe(1);
     expect(captionAt(scene, 5.75)?.opacity).toBeCloseTo(0.5);
     expect(captionAt(scene, 6)).toBeUndefined();
+  });
+
+  it('holds a card that ends its scene, with no fade out, to the scene’s last frame', () => {
+    const closing = YOUTUBE_SCRIPT.scenes.at(-1);
+    if (closing === undefined) throw new Error('no closing scene');
+    const card = closing.captions.find((caption) => caption.placement === 'card');
+    // A frame is taken at the end of its time: the last at the scene's last second.
+    expect(captionAt(closing, closing.seconds)).toEqual({ caption: card, opacity: 1 });
+    expect(captionAt(closing, closing.seconds - 0.1)?.opacity).toBe(1);
+    // A card that ends before its scene does fades out, as any caption.
+    const early: VideoScene = {
+      id: 'one',
+      capture: 'route-hud',
+      seconds: 10,
+      captions: [{ at: 2, seconds: 4, text: 'Card', placement: 'card' }],
+    };
+    expect(captionAt(early, 5.75)?.opacity).toBeCloseTo(0.5);
+    expect(captionAt(early, 6)).toBeUndefined();
   });
 
   it('writes every caption into the .srt, timed in the whole video', () => {

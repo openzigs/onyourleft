@@ -7,10 +7,14 @@
  * back with `ffprobe` on the pull request.
  */
 
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { Box } from './caption-layout';
-import { drawnProblems, scriptName } from './render-script';
+import { drawnProblems, finishVideo, partialName, scriptName } from './render-script';
 
 const box = (x: number, y: number, width: number, height: number): Box => ({
   x,
@@ -55,5 +59,29 @@ describe('a drawn caption, held to the rules — #3156', () => {
     const request = { script: 'youtube', fps: 60, width: 1920, height: 1080, out: undefined };
     expect(scriptName(request, '.mp4')).toBe('youtube-1920x1080-60fps.mp4');
     expect(scriptName(request, '.srt')).toBe('youtube-1920x1080-60fps.srt');
+  });
+});
+
+describe('the script’s video, named only when whole — #3156', () => {
+  it('encodes under a partial name, and renames it only with every frame written', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oyl-render-script-'));
+    try {
+      const mp4 = join(dir, 'youtube-1920x1080-60fps.mp4');
+      const partial = partialName(mp4);
+      expect(partial).toBe(join(dir, 'youtube-1920x1080-60fps.partial.mp4'));
+      writeFileSync(mp4, 'an earlier whole render');
+      writeFileSync(partial, 'cut off');
+      expect(() => {
+        finishVideo(partial, mp4, 9, 10);
+      }).toThrow('capture: wrote 9 frames, not the script’s 10');
+      expect(readFileSync(mp4, 'utf8')).toBe('an earlier whole render');
+      expect(existsSync(partial)).toBe(true);
+      writeFileSync(partial, 'whole');
+      finishVideo(partial, mp4, 10, 10);
+      expect(readFileSync(mp4, 'utf8')).toBe('whole');
+      expect(existsSync(partial)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

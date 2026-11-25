@@ -21,6 +21,9 @@
  *   to a panel only such a scene draws;
  * - a load-metric trademark, a competitor's name, or "validated", "accurate
  *   to" or "professional fit" (CLAUDE.md section 6, ADR 0030 R6);
+ * - a word for a feature only an instance runs ("AI", "instance") anywhere
+ *   but a line of the closing card that begins "Optional on your own
+ *   instance:";
  * - a caption up for under 3 or over 6 seconds, run past its scene, or less
  *   than a second from the next; a scene under 6 seconds; a chapter under 10.
  *
@@ -175,7 +178,7 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       chapter: 'Lap race',
       capture: 'lap-race',
       from: 12,
-      seconds: 16,
+      seconds: 21,
       captions: [
         {
           at: 1,
@@ -183,7 +186,15 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           callout: 'standings',
           text: 'Lap races on built-in circuits, against bots',
         },
-        { at: 9, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
+        // ADR 0067: the bots' tactics run on the device, with no instance.
+        // The AI bots need one, and the closing card names them (#3155).
+        {
+          at: 8,
+          seconds: 5,
+          callout: 'standings',
+          text: 'Bots race with tactics that read the race',
+        },
+        { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
       ],
     },
     // 9. Group ride: needs an instance, #3155.
@@ -220,6 +231,9 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           seconds: 6,
           placement: 'card',
           text: 'Free and open source',
+          // Owner ruling 2026-11-25: they exist but are not filmed, as each
+          // needs an instance; only the closing card may say so, and only so.
+          lines: ['Optional on your own instance: an AI pacer and AI bots'],
         },
       ],
     },
