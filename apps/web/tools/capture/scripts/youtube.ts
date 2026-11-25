@@ -200,7 +200,9 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 8,
           seconds: 5,
           callout: 'standings',
-          text: 'Bots race with tactics that read the race',
+          // The owner's wording of 2026-11-25 on #3177. #3198: a bot attacks
+          // from Go and is still away, in frame, while this is up.
+          text: 'Bots that attack, chase and sit in',
         },
         { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
       ],

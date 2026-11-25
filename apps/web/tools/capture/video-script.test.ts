@@ -243,7 +243,7 @@ describe('the demo video’s scene script — #3156', () => {
     const race = YOUTUBE_SCRIPT.scenes.find((scene) => scene.capture === 'lap-race');
     expect(race?.captions).toContainEqual(
       expect.objectContaining({
-        text: 'Bots race with tactics that read the race',
+        text: 'Bots that attack, chase and sit in',
         callout: 'standings',
       }),
     );
