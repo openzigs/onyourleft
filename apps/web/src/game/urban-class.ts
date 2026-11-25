@@ -202,7 +202,7 @@ const TOWN = 3;
 const CITY = 4;
 
 /** What one window measured. */
-interface WindowReadings {
+export interface WindowReadings {
   readonly coverage: number;
   readonly commercial: number;
   readonly builtUp: number;
@@ -485,6 +485,35 @@ export function urbanClassMap(
       // `NaN` fails both comparisons, so it is `unknown` too.
       if (!(along >= 0 && along <= total)) return 'unknown';
       const window = Math.min(windows - 1, Math.floor(along / URBAN_WINDOW_METRES));
+      return CLASS_OF_CODE[codes[window] as number] as UrbanClass;
+    },
+  };
+}
+
+/**
+ * The urban class of every window of `profile` from what each measured
+ * elsewhere — #3131, an open-world ride's (`open-world/urban-stretch.ts`),
+ * which holds no land mask to sweep: #1633's table for each window that has
+ * readings, `unknown` for each that has none, and the same smoothing. One
+ * window every {@link URBAN_WINDOW_METRES} from the profile's start.
+ */
+export function urbanClassFromReadings(
+  readings: readonly (WindowReadings | undefined)[],
+  profile: RouteProfile,
+): UrbanClassMap {
+  const total = profile.totalDistance;
+  const windows = readings.length;
+  if (!(total > 0) || windows === 0) return NO_URBAN_CLASS;
+  const codes = new Uint8Array(windows);
+  readings.forEach((each, window) => {
+    codes[window] = each === undefined ? UNKNOWN : classify(each);
+  });
+  smooth(codes, Math.ceil(URBAN_MIN_RUN_METRES / URBAN_WINDOW_METRES));
+  return {
+    classAt: (alongMetres: number): UrbanClass => {
+      // `NaN` fails both comparisons, so it is `unknown` too.
+      if (!(alongMetres >= 0 && alongMetres <= total)) return 'unknown';
+      const window = Math.min(windows - 1, Math.floor(alongMetres / URBAN_WINDOW_METRES));
       return CLASS_OF_CODE[codes[window] as number] as UrbanClass;
     },
   };

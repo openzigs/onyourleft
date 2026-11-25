@@ -144,6 +144,7 @@ import {
   structuresAt,
   structuresOnWay,
   structuresWithin,
+  urbanOfTown,
   type MappedTown,
   type SettlementFootprint,
 } from './settlements';
@@ -973,8 +974,9 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     input.landClass ?? NO_LAND_CLASS,
     // #1637: and a city centre's street wherever the ride's urban class says
     // so, broken over the mapped junctions' mouths — both fixed at the press,
-    // so this too is a lookup on every later frame.
-    input.mappedTown?.urban,
+    // so this too is a lookup on every later frame. #3131: an open-world
+    // view's own class, kept for the view and the plans it was read from.
+    urbanOfTown(input.mappedTown, input.profile),
     junctions,
     // #3095: in pieces either side of every junction of the road in view.
     junctionsOn(input.profile, input),
