@@ -29,10 +29,26 @@
  * `@onyourleft/domain/rolling-testing`'s grid; the game, the simulation, the
  * road, the turn input, the scene, the camera's damping and the trainer port
  * are the product's.
+ *
+ * ## On the ride's own clock — #3141
+ *
+ * The game screen makes its view a few event-loop turns after the ride
+ * starts, and the loop rides on the test's clock meanwhile with nothing drawn.
+ * The busier the machine, the more turns, so the first drawn frame stood
+ * further up the road: with the view held 300 ms, a press meant for 70 m was
+ * taken at 1 021 m, which is the shape CI read beside another suite (136 m,
+ * nightly run 45532616508). The clock now stands still until the first frame
+ * is drawn, and the press is checked on the frame it was handled on.
+ *
+ * Each press is one ride its cases share, in order (#3141): through the
+ * half-turn to {@link WATCH_SPLIT_METRES} past the press, then on to
+ * {@link WATCH_AFTER_METRES}. A case riding all of it ran past a test's 5 s
+ * under coverage on CI, and a case that times out leaves its ride pumping
+ * the next case's frames: the 0.7 s failures beside each timeout.
  */
 
 import { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   RollingRoute,
@@ -84,6 +100,16 @@ const PRESS_AT_METRES = [64, 70, 72, 75, 77, 79, 99, 109, 118, 125, 131, 138, 15
 const WATCH_BEFORE_METRES = 5;
 const WATCH_AFTER_METRES = 70;
 
+/**
+ * Where a press's ride is split between its two cases, metres past the press:
+ * **20**, past the half-turn (measured on 2026-11-25, the rider faces more
+ * than 170° round by 13 to 14.3 m past every press), so the first case rides
+ * the approach, the press and the half-turn, and the second the 50 m on. The
+ * largest jumps are in both: measured the same day, at 15 to 39 m past most
+ * presses and 69 m past the one at 64 m.
+ */
+const WATCH_SPLIT_METRES = 20;
+
 /** The frame rate the press is watched at. */
 const FPS = 30;
 
@@ -98,14 +124,13 @@ const APPROACH_FRAME_MS = 500;
 const JUMP_METRES = 0.05;
 
 let pending: FrameRequestCallback[] = [];
-/** The clock when ArrowDown was pressed, for the trainer's writes. */
-let pressedAtMs = 0;
 let nowMs = 0;
 let frameMs = APPROACH_FRAME_MS;
 let mounted: Mounted | undefined;
 const drawn: { readonly frame: SceneFrame; readonly input: SceneInput }[] = [];
 
-beforeEach(() => {
+/** A ride from nothing: no frame drawn or asked for, the clock at nought. */
+function freshRide(): void {
   inputs.length = 0;
   drawn.length = 0;
   pending = [];
@@ -116,14 +141,14 @@ beforeEach(() => {
     return pending.length;
   });
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
-});
+}
 
-afterEach(() => {
+function endRide(): void {
   mounted?.unmount();
   mounted = undefined;
   localStorage.clear();
   vi.unstubAllGlobals();
-});
+}
 
 async function pump(): Promise<void> {
   const next = pending.shift();
@@ -254,15 +279,29 @@ interface Watched {
   readonly riderYaw: number;
 }
 
+/** One press's ride, which its cases share in order — #3141. */
+interface PressRide {
+  readonly pressAt: number;
+  /** Every grade the trainer was asked for, and when. */
+  readonly written: { grade: number; atMs: number }[];
+  /** The clock when ArrowDown was pressed. */
+  pressedAtMs: number;
+  /** The first frame {@link watched} reads, and the first drawn after the press. */
+  watchedFrom: number;
+  pressedFrame: number;
+  /** How many of its two stretches the cases have ridden. */
+  ridden: number;
+}
+
 /**
  * Rides the real game screen up the major road, presses ArrowDown at
- * `pressAt` metres, and watches every frame the renderer was handed
- * at {@link FPS} around it.
+ * `pressAt` metres, and rides on to {@link WATCH_SPLIT_METRES} past it, every
+ * frame from {@link WATCH_BEFORE_METRES} before it drawn at {@link FPS}.
  */
-async function rideThePress(
+async function rideToThePress(
   pressAt: number,
   written: { grade: number; atMs: number }[] = [],
-): Promise<readonly Watched[]> {
+): Promise<PressRide> {
   mounted = await mount(
     <GameView
       port={port()}
@@ -280,6 +319,15 @@ async function rideThePress(
     await Promise.resolve();
   });
   await settle();
+  // #3141: the clock stands still until the first frame is drawn, however
+  // many event-loop turns the view takes to be made.
+  frameMs = 0;
+  for (let tries = 0; tries < 1_000 && drawn.length === 0; tries += 1) {
+    await pump();
+    if (drawn.length === 0) await settle();
+  }
+  expect(drawn.length).toBe(1);
+  frameMs = APPROACH_FRAME_MS;
   let watchedFrom: number | undefined;
   const watchFrom = (): void => {
     if (watchedFrom !== undefined || odometer() < pressAt - WATCH_BEFORE_METRES) return;
@@ -290,22 +338,64 @@ async function rideThePress(
     await pump();
     watchFrom();
   }
-  expect(odometer()).toBeLessThan(pressAt + 1);
+  const pressedFrame = drawn.length;
   await act(async () => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true }),
     );
     await Promise.resolve();
   });
-  pressedAtMs = nowMs;
-  const until = odometer() + WATCH_AFTER_METRES;
+  const ride: PressRide = {
+    pressAt,
+    written,
+    pressedAtMs: nowMs,
+    watchedFrom: watchedFrom ?? drawn.length,
+    pressedFrame,
+    ridden: 0,
+  };
+  await rideOn(ride, WATCH_SPLIT_METRES);
+  // The press was taken where it was meant to be, read off the frames: the
+  // last drawn before it and the first after it, the frame it was handled
+  // on, at or past `pressAt` by less than a metre.
+  const pressedAt = (at: number): number =>
+    (drawn[at] as (typeof drawn)[number]).input.state.ride.distance;
+  for (const at of [pressedFrame - 1, pressedFrame]) {
+    expect(pressedAt(at)).toBeGreaterThanOrEqual(pressAt);
+    expect(pressedAt(at)).toBeLessThan(pressAt + 1);
+  }
+  ride.ridden = 1;
+  return ride;
+}
+
+/** Rides `ride` on at {@link FPS} to `metres` past its press, as the last frame drawn reads it. */
+async function rideOn(ride: PressRide, metres: number): Promise<void> {
+  const from = drawn[ride.pressedFrame - 1]?.input.state.ride.distance as number;
+  const until = from + metres;
   for (let frame = 0; frame < 1_200 && odometer() < until; frame += 1) {
     await pump();
   }
   expect(odometer()).toBeGreaterThanOrEqual(until);
-  const frames = drawn.slice(watchedFrom ?? drawn.length);
-  const common = corridorOrigin((frames[0] as (typeof frames)[number]).input.profile);
-  return frames.map(({ frame, input }) => {
+}
+
+/**
+ * The second stretch of `ride`, on from {@link WATCH_SPLIT_METRES} to
+ * {@link WATCH_AFTER_METRES} past the press. A case that finds the ride
+ * elsewhere says so, rather than read another stretch's frames: the case
+ * before it failed.
+ */
+async function rideOnFromThePress(ride: PressRide | undefined): Promise<PressRide> {
+  if (ride?.ridden !== 1) {
+    throw new Error('the case before this one did not ride to the press and through the half-turn');
+  }
+  await rideOn(ride, WATCH_AFTER_METRES);
+  ride.ridden = 2;
+  return ride;
+}
+
+/** Every frame of `ride` the renderer was handed from `from`, in the first watched frame's local metres. */
+function watched(ride: PressRide, from: number = ride.watchedFrom): readonly Watched[] {
+  const common = corridorOrigin((drawn[ride.watchedFrom] as (typeof drawn)[number]).input.profile);
+  return drawn.slice(from).map(({ frame, input }) => {
     const origin = corridorOrigin(input.profile);
     const rider = frame.markers.find((marker) => marker.kind === 'rider');
     if (rider === undefined) throw new Error('no rider drawn');
@@ -333,19 +423,43 @@ function mostJump(places: readonly { readonly x: number; readonly z: number }[])
 const turnBetween = (from: number, to: number): number =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
+/**
+ * The frames of the second stretch of a ride, from the two frames before it,
+ * so that every frame's change from the one before is read by one of the two
+ * cases.
+ */
+const SECOND_STRETCH_OVERLAP = 2;
+
 describe('a U-turn press in an open-world ride, frame by frame — #3066', () => {
-  it.each(PRESS_AT_METRES)(
-    'pressed at %i m, moves neither the drawn rider nor the camera by a jump, and turns the rider round',
-    async (pressAt) => {
-      const frames = await rideThePress(pressAt);
+  describe.each(PRESS_AT_METRES)('pressed at %i m', (pressAt) => {
+    let ride: PressRide | undefined;
+    let split = 0;
+    beforeAll(freshRide);
+    afterAll(endRide);
+
+    it('moves neither the drawn rider nor the camera by a jump through the half-turn', async () => {
+      ride = await rideToThePress(pressAt);
+      const frames = watched(ride);
+      split = ride.watchedFrom + frames.length - SECOND_STRETCH_OVERLAP;
       const rider = mostJump(frames.map((frame) => frame.rider));
       const camera = mostJump(frames.map((frame) => frame.camera));
+      const facts = JSON.stringify({ pressAt, rider, camera });
+      expect(rider, facts).toBeLessThan(JUMP_METRES);
+      expect(camera, facts).toBeLessThan(JUMP_METRES);
+    });
+
+    it('moves neither by a jump on the way back, and turns the rider round', async () => {
+      const ridden = await rideOnFromThePress(ride);
+      const later = watched(ridden, split);
+      const rider = mostJump(later.map((frame) => frame.rider));
+      const camera = mostJump(later.map((frame) => frame.camera));
       const facts = JSON.stringify({ pressAt, rider, camera });
       expect(rider, facts).toBeLessThan(JUMP_METRES);
       expect(camera, facts).toBeLessThan(JUMP_METRES);
       // The rider was turned round, and round a half-turn: facing back down the
       // road at the end, and still facing more than a quarter of the way round
       // from where they started for more than a few metres of the ride.
+      const frames = watched(ridden);
       const first = frames[0] as Watched;
       const last = frames[frames.length - 1] as Watched;
       expect(Math.abs(turnBetween(first.riderYaw, last.riderYaw))).toBeGreaterThan(
@@ -357,40 +471,80 @@ describe('a U-turn press in an open-world ride, frame by frame — #3066', () =>
       });
       const across = turning.map((frame) => frame.odometer);
       expect(Math.max(...across) - Math.min(...across), facts).toBeGreaterThan(3);
-    },
-  );
+    });
+  });
 
-  it.each(PRESS_AT_METRES)(
-    'pressed at %i m, does not teleport the drawn rider under reduced motion',
-    async (pressAt) => {
+  describe.each(PRESS_AT_METRES)('pressed at %i m under reduced motion', (pressAt) => {
+    let ride: PressRide | undefined;
+    let split = 0;
+    beforeAll(() => {
+      freshRide();
       vi.stubGlobal('matchMedia', (query: string) => ({
         matches: query === '(prefers-reduced-motion: reduce)',
         addEventListener: () => undefined,
         removeEventListener: () => undefined,
       }));
-      const frames = await rideThePress(pressAt);
-      expect(mostJump(frames.map((frame) => frame.rider))).toBeLessThan(JUMP_METRES);
-    },
-  );
+    });
+    afterAll(endRide);
 
-  it('walks the grade to the road back at 1 % a second: the half-turn is drawn only', async () => {
-    const written: { grade: number; atMs: number }[] = [];
-    await rideThePress(70, written);
-    const after = written.filter((write) => write.atMs >= pressedAtMs);
-    // Non-vacuity: the trainer was written to through the turn, and the
-    // grade it was asked for changed.
-    expect(after.length).toBeGreaterThan(3);
-    const before = written.filter((write) => write.atMs < pressedAtMs).at(-1);
-    expect(before).toBeDefined();
-    expect(after.some((write) => write.grade !== before?.grade)).toBe(true);
-    let previous = before as { grade: number; atMs: number };
-    for (const write of after) {
-      const seconds = (write.atMs - previous.atMs) / 1000;
-      expect(
-        Math.abs(write.grade - previous.grade),
-        `the write at ${String(write.atMs)} ms`,
-      ).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
-      previous = write;
+    it('does not teleport the drawn rider through the half-turn', async () => {
+      ride = await rideToThePress(pressAt);
+      const frames = watched(ride);
+      split = ride.watchedFrom + frames.length - SECOND_STRETCH_OVERLAP;
+      expect(mostJump(frames.map((frame) => frame.rider))).toBeLessThan(JUMP_METRES);
+    });
+
+    it('does not teleport the drawn rider on the way back', async () => {
+      const ridden = await rideOnFromThePress(ride);
+      expect(mostJump(watched(ridden, split).map((frame) => frame.rider))).toBeLessThan(
+        JUMP_METRES,
+      );
+    });
+  });
+
+  describe('the grade', () => {
+    let ride: PressRide | undefined;
+    let checked = 0;
+    beforeAll(freshRide);
+    afterAll(endRide);
+
+    /** Holds every write from the `checked`th after the press to 1 % a second from the one before. */
+    function expectWalked(walked: PressRide): void {
+      const after = walked.written.filter((write) => write.atMs >= walked.pressedAtMs);
+      const before = walked.written.filter((write) => write.atMs < walked.pressedAtMs).at(-1);
+      expect(before).toBeDefined();
+      let previous = (checked === 0 ? before : after[checked - 1]) as {
+        grade: number;
+        atMs: number;
+      };
+      for (const write of after.slice(checked)) {
+        const seconds = (write.atMs - previous.atMs) / 1000;
+        expect(
+          Math.abs(write.grade - previous.grade),
+          `the write at ${String(write.atMs)} ms`,
+        ).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * seconds + 1e-9);
+        previous = write;
+      }
+      checked = after.length;
     }
+
+    it('walks the grade to the road back at 1 % a second through the half-turn: drawn only', async () => {
+      ride = await rideToThePress(70, []);
+      const after = ride.written.filter((write) => write.atMs >= (ride as PressRide).pressedAtMs);
+      // Non-vacuity: the trainer was written to through the turn, and the
+      // grade it was asked for changed.
+      expect(after.length).toBeGreaterThan(3);
+      const before = ride.written.filter((write) => write.atMs < (ride as PressRide).pressedAtMs);
+      expect(after.some((write) => write.grade !== before.at(-1)?.grade)).toBe(true);
+      expectWalked(ride);
+    });
+
+    it('walks it on at 1 % a second on the way back', async () => {
+      const ridden = await rideOnFromThePress(ride);
+      const written = checked;
+      expectWalked(ridden);
+      // Non-vacuity: the trainer was written to on this stretch too.
+      expect(checked).toBeGreaterThan(written);
+    });
   });
 });
