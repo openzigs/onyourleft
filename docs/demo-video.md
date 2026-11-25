@@ -189,6 +189,7 @@ first script runs, `tools/capture/capture-clock.ts` replaces the page's `perform
 
 1. imports a synthetic route through the Routes page's own form. It is eight invented kilometres
    from 0° 0° under the placeholder name *Capture loop*, so no real street or place is on screen.
+   It swings 1.2 km east and then west, so the HUD's map draws it as an S, not a straight line.
    It also sets the rider's weight on the Settings page, so W/kg has one to read. Before that, the
    browser profile already holds the device's choices (#3175, below);
 2. opens `#/game?capture=<scene>`, with `route=` the scene's built-in level or circuit when it

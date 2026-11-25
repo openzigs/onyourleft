@@ -341,10 +341,16 @@ export function captureRideName(scene: string): string {
 export const CAPTURE_ROUTE_NAME = 'Capture loop';
 
 /**
- * The route the capture rides, as GPX: eight kilometres from 0° 0°, bending
- * gently east and back, over two rises — invented, so no real street or place
- * is on screen (the epic's rule), with a gradient that changes for the HUD to
- * show. A point every ten metres.
+ * The route the capture rides, as GPX: eight kilometres north from 0° 0°,
+ * swinging 1.2 km east and then as far west, over two rises — invented, so no
+ * real street or place is on screen (the epic's rule), with a gradient that
+ * changes for the HUD to show. A point every ten metres north.
+ *
+ * The swing is the route's shape on the HUD's map (`hud/plan.ts`), fitted
+ * whole into its panel: the demo's "The whole route, and where you are on it"
+ * is said over it, and a route that only bends 120 m in 8 km is drawn there as
+ * a straight line (the owner's review of #3177, 2026-11-25). Its bends are
+ * over a kilometre in radius, so the ride itself still reads as a gentle road.
  */
 export function captureRouteGpx(): string {
   const points: string[] = [];
@@ -353,7 +359,7 @@ export function captureRouteGpx(): string {
   const COUNT = 800;
   for (let index = 0; index <= COUNT; index += 1) {
     const along = index * SPACING;
-    const east = 120 * Math.sin((along / 4000) * Math.PI);
+    const east = 1_200 * Math.sin((along / 4000) * Math.PI);
     const elevation = 40 + 18 * (1 - Math.cos((along / 2000) * Math.PI));
     points.push(
       `<trkpt lat="${(along / METRES_PER_DEGREE).toFixed(7)}" lon="${(east / METRES_PER_DEGREE).toFixed(7)}">` +
