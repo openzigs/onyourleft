@@ -59,7 +59,10 @@ describe('loadRoutingNoticesDocument (#2734)', () => {
     const notices = await loadNoticesDocument();
     for (const text of upstream) {
       // Line endings normalised, as the generator does; the words untouched.
-      const words = text.text.replace(/\r\n?/g, '\n').replace(/^\u{FEFF}/u, '').trim();
+      const words = text.text
+        .replace(/\r\n?/g, '\n')
+        .replace(/^\u{FEFF}/u, '')
+        .trim();
       expect(routing, text.url).toContain(words);
       expect(notices, text.url).toContain(`from ${text.url}`);
     }
