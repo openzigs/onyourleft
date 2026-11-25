@@ -342,9 +342,10 @@ export const CAPTURE_ROUTE_NAME = 'Capture loop';
 
 /**
  * The route the capture rides, as GPX: eight kilometres north from 0° 0°,
- * swinging 1.2 km east and then as far west, over two rises — invented, so no
- * real street or place is on screen (the epic's rule), with a gradient that
- * changes for the HUD to show. A point every ten metres north.
+ * swinging 1.2 km east and then as far west, about 9.5 km of road over two
+ * rises — invented, so no real street or place is on screen (the epic's
+ * rule), with a gradient that changes for the HUD to show. A point every ten
+ * metres north.
  *
  * The swing is the route's shape on the HUD's map (`hud/plan.ts`), fitted
  * whole into its panel: the demo's "The whole route, and where you are on it"
