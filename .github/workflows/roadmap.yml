@@ -70,7 +70,7 @@ jobs:
         id: app-token
         # Pinned to a full commit SHA (v3.3.0, released 2026-10-12):
         #   gh api repos/actions/create-github-app-token/git/ref/tags/v3.3.0 --jq .object.sha
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.ROADMAP_APP_CLIENT_ID }}
           private-key: ${{ secrets.ROADMAP_APP_PRIVATE_KEY }}
