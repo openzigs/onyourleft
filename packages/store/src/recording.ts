@@ -259,6 +259,14 @@ export interface RecordingSessionRecord {
    */
   readonly replansDropped?: number | undefined;
   /**
+   * `true` once some of this recording was ridden in the trainer game's open
+   * world — #3088. On the header for {@link courseLaps}' reason: a ride
+   * recovered after the app closed is saved with `RideFacts.openWorld`, so it
+   * is matched against no segment. Optional, so not a migration; anything but
+   * `true` on the way out reads as absent, and never refuses the header.
+   */
+  readonly openWorld?: true | undefined;
+  /**
    * The fields of the stored header that did not read — #1325. Absent when
    * every field read. Set by the read path only; the write path ignores it.
    *
@@ -382,6 +390,8 @@ export interface RecoveredRecording {
   readonly replans?: readonly ReplanRecord[] | undefined;
   /** @see RecordingSessionRecord.replansDropped */
   readonly replansDropped?: number | undefined;
+  /** The header's open-world mark; absent for a recording with none. @see RecordingSessionRecord.openWorld */
+  readonly openWorld?: true | undefined;
   /**
    * How many chunk rows made up the recovered prefix.
    *

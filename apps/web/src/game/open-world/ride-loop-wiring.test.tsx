@@ -631,6 +631,66 @@ describe('an open-world ride is ridden alone — #2982', () => {
   });
 });
 
+describe('an open-world ride marks the recording under it — #3088, the owner’s ruling of 2026-11-25', () => {
+  /** A trainer port over a source that counts each mark the game hands its recording. */
+  function marking(marks: { count: number }): GameTrainerPort {
+    const facts = { paired: true, controllable: true, canSimulate: true, hasControl: true };
+    return gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: facts, workout: undefined }),
+      simulationControl: () => ({
+        setSimulationParameters: () => Promise.resolve(),
+        letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+      }),
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      noteOpenWorld: () => {
+        marks.count += 1;
+      },
+      subscribe: () => () => undefined,
+    });
+  }
+
+  it('on every frame ridden, through the product’s own trainer port', async () => {
+    const marks = { count: 0 };
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    expect(marks.count).toBe(0);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBeGreaterThanOrEqual(inputs.length);
+  });
+
+  it('and never on a saved route’s ride', async () => {
+    const marks = { count: 0 };
+    const loop = squareLoop();
+    mounted = await mount(
+      <GameView
+        port={{ ...port(), listRoutes: () => Promise.resolve([loop]) }}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(cardRadio(loop.name));
+    expect(rideButton()?.textContent).toBe(`Ride ${loop.name}`);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBe(0);
+  });
+});
+
 describe('an open-world road with real heights — #2899', () => {
   /** How far east of the grid's corner a place is, in metres. */
   const eastOf = (place: GeographicPosition): number =>

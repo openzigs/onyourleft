@@ -14579,3 +14579,79 @@ describe('#2077 — the HUD’s time in each power zone is the saved ride’s', 
     rig.controller.dispose();
   });
 });
+
+describe('an open-world ride is saved marked, so it is matched against no segment — #3088', () => {
+  it('saves the mark the game’s own port gave, read back through the store, and the next ride carries none', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    // Told on every frame of an open-world ride.
+    game.rodeOpenWorld?.();
+    game.rodeOpenWorld?.();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(saved).toBeDefined();
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.openWorld).toBe(true);
+
+    // The next ride is ridden on a route, and must not inherit the mark.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(next).not.toBe(saved);
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.id).toBe(next);
+    expect(after?.rideFacts?.openWorld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('writes no checkpoint for a frame of the open world after the ride is saved', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBeDefined();
+    // Stopped and saved: the checkpoint is gone, and a frame now must not
+    // write its header back, which would offer a saved ride to recover.
+    game.rodeOpenWorld?.();
+    await ride(rig, 1);
+    rig.controller.dispose();
+    const next = benchWith({ rideSave: storeSavePort() });
+    await next.controller.refreshRecoverable();
+    expect(next.controller.getSnapshot().recoverable).toStrictEqual([]);
+    next.controller.dispose();
+  });
+
+  it('saves a ride the app closed on before Stop with the mark it was recovered with', async () => {
+    const rig = benchWith();
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    game.rodeOpenWorld?.();
+    await ride(rig, 6);
+    rig.controller.dispose();
+    const id = rig.sessionIds[0];
+    if (id === undefined) throw new Error('no recording was started');
+
+    const next = benchWith({ rideSave: storeSavePort() });
+    await next.controller.refreshRecoverable();
+    expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+    expect(await next.controller.saveRecovered(id)).toBe('saved');
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.rideFacts?.openWorld).toBe(true);
+    next.controller.dispose();
+  });
+});

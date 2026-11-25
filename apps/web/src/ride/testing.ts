@@ -322,6 +322,8 @@ export function stubRideController(
       calls.recordForRoom += 1;
       return Promise.resolve(false);
     },
+    // #3088: not counted, so the call record a snapshot holds does not move.
+    noteOpenWorld: () => undefined,
     noteLapRace: (race) => {
       calls.noteLapRace.push(race);
     },
