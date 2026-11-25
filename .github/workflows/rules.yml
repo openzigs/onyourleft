@@ -57,8 +57,9 @@ name: Repository rules
 # unchanged under it, against the merge group's commit. Unlike `pull_request`,
 # a queue run is in this repository's own context, as a push to `main` is: it
 # holds what the push after the merge would, and only a reviewed pull request
-# that someone with write access queued reaches it. Nothing below references a
-# secret, and the token stays `contents: read`.
+# that someone with write access queued reaches it. One step below references a
+# secret -- the private-term list of `Commit identity` (#3205), which is no
+# credential -- and the token stays `contents: read`.
 on:
   pull_request:
   merge_group:
@@ -158,6 +159,41 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+
+      # #3205. The tree checks read the TREE; a commit's author, committer and
+      # trailers are not in it, and a push publishes them all the same. This
+      # fails when any commit in the range carries a private term in its
+      # author or committer name or email, a trailer, or its message, and
+      # names only the commit and the field: the log is public.
+      #
+      # The range: a pull request's base..head, a merge-queue entry's
+      # base_sha..head_sha, a push's before..after -- or the last 50 commits
+      # when `before` is all zeros or the push was forced. The checkout is one
+      # commit deep, so the step first fetches the history it reads: commit
+      # objects only (`tree:0`), under a second on this repository.
+      #
+      # ⚠️ The ONE step of this workflow that is handed a secret, and the term
+      # list is all it is: it runs before the install, so no dependency's code
+      # has run in this job yet, and a step's `env` reaches no other step.
+      # nightly-split.test.ts fails a second `secrets.` here. A fork's pull
+      # request is given no secrets, so there the check skips and says so;
+      # everywhere else -- a push, a queue entry, a pull request from this
+      # repository -- REQUIRE_PRIVATE_TERMS makes a missing secret a failure,
+      # because there it means the check was disarmed, not withheld.
+      # Dependabot's runs are given Dependabot's secrets, not these, so its
+      # pull requests skip as a fork's do; its commits carry its own identity.
+      # Every value reaches the script as an environment variable, never as
+      # text spliced into the shell.
+      - name: Commit identity
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+          REQUIRE_PRIVATE_TERMS: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+          RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.event.after }}
+          RANGE_FORCED: ${{ github.event.forced }}
+        run: |
+          git fetch --no-tags --quiet --filter=tree:0 --unshallow origin "$RANGE_HEAD"
+          node scripts/check-commit-identity.mjs --base "$RANGE_BASE" --head "$RANGE_HEAD" --forced "$RANGE_FORCED"
 
       # pnpm comes from the `packageManager` field via corepack rather than from
       # a third-party setup action, so the version is pinned by the manifest that
@@ -364,6 +400,7 @@ jobs:
           'valhalla build script tests' 'bash apps/web/tools/valhalla/build-graph.test.sh'
           'valhalla upload script tests' 'bash apps/web/tools/valhalla/upload.test.sh'
           'shard results checker tests' 'bash scripts/check-shard-results.test.sh'
+          'commit identity checker tests' 'bash scripts/check-commit-identity.test.sh'
 
       # The generated-artefact gate (#299). `cap sync` writes two files this
       # repository commits, and pnpm's store path carries the PEER version as

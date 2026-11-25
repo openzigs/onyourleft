@@ -42,7 +42,10 @@ suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.co
 and — since #1285 — `bash scripts/check-shard-results.test.sh` in a shard and
 `bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`, and —
 since [#2272](https://github.com/openzigs/onyourleft/issues/2272) — `bash scripts/lint.test.sh`
-beside `lint` in the concurrent step (§"Lint, a project per process — #2272").
+beside `lint` in the concurrent step (§"Lint, a project per process — #2272"), and — since
+[#3205](https://github.com/openzigs/onyourleft/issues/3205) — `node scripts/check-commit-identity.mjs`
+as a `checks` step of its own before the install, with its suite `bash
+scripts/check-commit-identity.test.sh` in the concurrent step (§"Commit identity — #3205").
 ⚠️ **Since #1280 it takes no coverage and publishes none**: the coverage table and the HTML
 artefact are the NIGHTLY workflow's (§"The nightly job — #866"), where the two reporting steps
 still cannot fail the job: the run where coverage moved unexpectedly is exactly the one whose
@@ -149,7 +152,8 @@ each of those can do is turn `main` red on a day the service is down. For the ba
   exposed to one more registry than the job already was — the same trade as the install. Since
   #1231 that registry is GHCR rather than Docker Hub: the mirror moved the dependency rather than
   removing it, onto the host that already serves this repository and its Actions, and its push
-  credential is in the separate workflow above, so this job holds no secret at all. Removing `'instance image'` from `Checks, concurrently`
+  credential is in the separate workflow above, so this job holds no secret at all (⚠️ since #3205
+  one step holds one, the private-term list, which is no credential: §"Commit identity — #3205"). Removing `'instance image'` from `Checks, concurrently`
   is a one-line revert if an outage ever outlasts the patience of the day.
 
 | What | Where | Why |
@@ -314,7 +318,9 @@ request waits until the queue's timeout removes it; `cancel-in-progress` true fo
 alone, because a cancelled queue run is a failed required check; and no step reading the pull
 request's payload (`github.event.pull_request.*`, `github.base_ref`, `github.head_ref`), which is
 absent under `merge_group`. No step read it when the trigger was added, so every job runs there
-unchanged.
+unchanged. ⚠️ Since #3205 one step does, `Commit identity`, because only the payload tells a fork's
+pull request from this repository's; each of its reads falls back to the queue's own field or sits
+behind an `event_name` test, and the same file holds that (§"Commit identity — #3205").
 
 **`nightly.yml` does not run on `merge_group`, by decision.** It is not a required check, so a
 queue run of it could not hold a pull request back; its `report` job runs on every event but
@@ -2589,3 +2595,40 @@ fails it too.
 ⚠️ **When a row of this table brings a Vitest shard within five minutes of its stop**, re-read the
 per-file times from that run's log and move files between the parts by path or project, or add a
 fourth part and job (a script, a job in `needs:`, a column here). Not a longer stop.
+
+#### Commit identity — #3205
+
+Every other gate reads the **tree**. A commit's author, committer and trailers are not in it, and a
+push publishes them on this public repository all the same: one commit put a private machine's
+hostname into a `Co-authored-by:` trailer here, and it had to be scrubbed from history. On the
+owner's request of 2026-11-25 the `checks` shard runs `scripts/check-commit-identity.mjs` as a step
+of its own, `Commit identity`, and fails when any commit in the range carries a private term in its
+author or committer name or email, any trailer, or its message.
+
+- **The range**: a pull request's `base.sha..head.sha`, a merge-queue entry's
+  `base_sha..head_sha`, a push's `before..after`; the last 50 commits when `before` is all zeros
+  (a first push), not a commit the clone holds, or the push was forced. The checkout is one commit
+  deep, so the step first runs `git fetch --filter=tree:0 --unshallow`: commit objects only, under
+  a second on this repository (5 737 commits on 2026-11-25).
+- **The match is Metis's private-vocabulary gate's**: lowercase; a term of five or more
+  alphanumerics matches as a substring once non-alphanumerics are stripped from both; a shorter
+  one only as a whole token, split at non-alphanumerics and camelCase. No pattern is built from a
+  term.
+- **The list is never in the repository**: it is the repository secret `PRIVATE_TERMS`, one term a
+  line, `#` a comment. The suite uses invented words. A hit prints the SHA and the field
+  (`author email`, `Co-authored-by trailer`, `trailer 2 (key not shown)` for a key git's own list
+  does not name) and never the term or the text, because this log is public.
+- **The one secret in `Repository rules`**, in that step's `env` alone and before the install, so
+  no dependency's code has run in the job when it is read. It is a word list, not a credential.
+  `nightly-split.test.ts` fails a second `secrets.` reference anywhere in the file, and the step
+  moving after the install.
+- **No list**: a fork's pull request is given no secrets, and Dependabot's runs only Dependabot's,
+  so there it prints `private-terms secret not available: identity check skipped` (a warning
+  annotation too) and passes. On a push, a queue entry or a pull request from this repository,
+  `REQUIRE_PRIVATE_TERMS` makes it a failure: there a missing secret means the check was disarmed.
+  ⚠️ **Until the owner sets the secret**, every such run is red at this step.
+- **The step reads the pull request's payload**, which §"The merge queue — #2198" otherwise
+  forbids, because only the payload tells a fork from this repository. Each read falls back to the
+  queue's field or sits behind `event_name != 'pull_request'`; `nightly-split.test.ts` holds both.
+- **Locally**: `PRIVATE_TERMS_FILE=<your copy> node scripts/check-commit-identity.mjs --base
+  origin/main --head HEAD` (§4a). It read the whole history of `main` clean on 2026-11-25.
