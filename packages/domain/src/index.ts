@@ -593,10 +593,12 @@ export { heightsAcrossSpans } from './route/spans';
 export type {
   RollingChoice,
   RollingEdge,
+  RollingHeights,
   RollingJunction,
   RollingLeg,
   RollingLegKind,
   RollingPoint,
+  RollingRouteOptions,
   RollingStreetGraph,
   RollingWay,
 } from './route/rolling';
@@ -607,6 +609,7 @@ export {
   ROLLING_DESPIKE_SAMPLES,
   ROLLING_LEAST_WAY_METRES,
   ROLLING_MOST_SAMPLES,
+  ROLLING_MOST_STEP_METRES,
   ROLLING_RESOLUTION_METRES,
   ROLLING_SLOPE_SAMPLES,
   RollingRoute,

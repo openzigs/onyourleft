@@ -2066,6 +2066,23 @@ describe('the terrain archive is disclosed — #2013', () => {
     expect(why).toContain('near the rider’s privacy zones too (#2013)');
   });
 
+  it('says an open-world ride reads the ground’s heights as it goes, in the policy and the Play answer — #2899', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving).toContain(
+      'it reads the heights of the ground the same way, so the road has its real climbs: from the terrain archive on the same host, it requests the one to four squares, each about 7.5 to 9 km across, that hold those blocks',
+    );
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'An open-world ride reads the heights of the ground the same way, from the terrain archive on the same host, in squares about 7.5 to 9 km across (#2899)',
+    );
+  });
+
   it('is read by a module that holds no URL of its own, built in main.tsx from the configuration', () => {
     const read = (path: string): string =>
       stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));

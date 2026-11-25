@@ -888,6 +888,8 @@ function buildGamePort(
       entry: openWorldEntry,
       basemap: browserBasemapConfig,
       mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+      // #2899: the open-world road's real heights, from #2013's archive.
+      terrain: browserTerrainConfig,
     }),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.

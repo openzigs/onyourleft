@@ -292,7 +292,9 @@ own computer, which travels unencrypted when your computer's address starts with
   the block your start is in and of the eight blocks round it; a block is a fixed square of the map's
   own grid, about 1.6 to 2.2 km across, and never centred on your start, your home or you. As the ride
   goes on, each time you ride into a new block it requests the blocks that come into reach, after a
-  random wait of up to 30 seconds. So **for as long as an open-world ride goes on, the host sees
+  random wait of up to 30 seconds. It reads the heights of the ground the same way, so the road has
+  its real climbs: from the terrain archive on the same host, it requests the one to four squares,
+  each about 7.5 to 9 km across, that hold those blocks. So **for as long as an open-world ride goes on, the host sees
   requests that follow where you ride, block by block**: which blocks, in what order and when, from
   which someone could work out roughly where you rode and the streets you probably took. Unlike a
   route's read, an open-world ride reads the blocks round your privacy zones the same way as

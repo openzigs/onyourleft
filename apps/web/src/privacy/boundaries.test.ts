@@ -260,7 +260,7 @@ const BOUNDARIES: readonly Boundary[] = [
   },
   {
     module: 'terrain/terrain-source.ts',
-    what: 'byte ranges of the terrain archive under a route being drawn or redrawn, asked for so the route has its climbs with no instance (#2013, ADR 0087 D-2.3)',
+    what: 'byte ranges of the terrain archive under a route being drawn or redrawn, asked for so the route has its climbs with no instance (#2013, ADR 0087 D-2.3); and, in an open-world ride, the height tiles round the rider, which follow the rider for as long as the ride goes on (#2899, ADR 0087 D-2.2)',
     // ⚠️ Departing, and like the corridor read its payload carries NO
     // coordinate and is still a location: the host can tell which z12 height
     // tiles were read, each about 7.5 to 9 km across. It travels as byte
@@ -273,6 +273,13 @@ const BOUNDARIES: readonly Boundary[] = [
     // read); and with map tiles off nothing is asked at all. The case below,
     // "a drawn route's heights", holds the first two against a counting
     // archive, and `terrain/heights.test.ts` holds the switch.
+    // ⚠️ #2899, ADR 0087 D-2.2: an OPEN-WORLD ride reads through this module
+    // too, and its read follows the rider: the one to four z12 tiles that
+    // hold the 3 × 3 blocks round them, at the start and then after each
+    // block crossing's random wait of up to 30 s (ADR 0090 R-8). What it asks
+    // for is a function of the rider's block alone (R-1), the same inside a
+    // privacy zone (R-3), and nothing with map tiles off (R-6):
+    // `game/open-world/heights.test.ts` holds each.
     direction: 'departing',
   },
   {
