@@ -46,6 +46,7 @@ import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 
 import type { CueOutput } from './audio-port';
+import { CAPTURE_MODE } from './capture-scene';
 import { CUES_STORAGE_KEY, writeCuePreference } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { deviceStorage } from './hud/announce-preference';
@@ -189,6 +190,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   globalThis.location.hash = '';
   globalThis.localStorage.removeItem(CUES_STORAGE_KEY);
 });
@@ -886,6 +888,8 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
    * HUD carries no simulated mark. The two controls below are its controls too.
    */
   it('from a capture scene: writes nothing, records nothing, saves nothing and joins no room — #3152', async () => {
+    // The capture tool's build (`vite build --mode capture`): the only one that reads the switch.
+    vi.stubEnv('MODE', CAPTURE_MODE);
     const rig = await onTheBench();
     await openTheGame(rig, '#/game?capture=route-hud');
     await clickThrough(buttonStarting('Ride '));

@@ -28,7 +28,7 @@
     "demo:release": "node --import ./tools/ts-extensionless-resolve.mjs tools/demo/demo-release.ts",
     "demo:video": "node --import ./tools/ts-extensionless-resolve.mjs tools/demo/demo-video.ts",
     "demo:video:check": "playwright test --config playwright.video.config.ts",
-    "capture": "vite build && node --import ./tools/ts-extensionless-resolve.mjs tools/capture/capture.ts",
+    "capture": "vite build --mode capture && node --import ./tools/ts-extensionless-resolve.mjs tools/capture/capture.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",

@@ -1657,6 +1657,14 @@ function GameScreen({
    */
   const captureRecordingRef = useRef<CaptureRecording | undefined>(undefined);
   /**
+   * What the HUD shows of {@link captureRecordingRef}, copied out whenever it
+   * takes a second, so the HUD re-renders on state rather than reading a ref
+   * during render (PR #3160's review). `undefined` on every other ride.
+   */
+  const [captureFigures, setCaptureFigures] = useState<
+    { readonly seconds: number; readonly totals: RideTotals } | undefined
+  >(undefined);
+  /**
    * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
    * raw reading. Read by the HUD and the announcer, and by nothing else. A new
    * ride's clock starts again from nought, and a clock that goes back starts the
@@ -3152,7 +3160,9 @@ function GameScreen({
       // #3152: a capture's script and its figures start with the ride.
       if (captureSensors !== undefined) {
         captureSensors.start((props.now ?? performanceNow)());
-        captureRecordingRef.current = new CaptureRecording();
+        const recording = new CaptureRecording();
+        captureRecordingRef.current = recording;
+        setCaptureFigures({ seconds: recording.seconds, totals: recording.totals() });
       }
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
@@ -4005,13 +4015,17 @@ function GameScreen({
         });
         setRecentTrace({ samples: trace.read(), written: trace.written });
         // #3152: and a capture's recorder figures, from the same second.
-        captureRecordingRef.current?.sample(traceSecond, {
-          watts: sensors.rider.live ? sensors.rider.power : 0,
-          cadence: sensors.cadence.live ? sensors.cadence.value : undefined,
-          heartRate: sensors.heartRate.live ? sensors.heartRate.value : undefined,
-          speed: simulation.state.ride.speed,
-          altitude: elevationAt(road.profile, onRoad.ride.distance),
-        });
+        const capture = captureRecordingRef.current;
+        if (capture !== undefined) {
+          capture.sample(traceSecond, {
+            watts: sensors.rider.live ? sensors.rider.power : 0,
+            cadence: sensors.cadence.live ? sensors.cadence.value : undefined,
+            heartRate: sensors.heartRate.live ? sensors.heartRate.value : undefined,
+            speed: simulation.state.ride.speed,
+            altitude: elevationAt(road.profile, onRoad.ride.distance),
+          });
+          setCaptureFigures({ seconds: capture.seconds, totals: capture.totals() });
+        }
       }
       if (paced.draw) {
         setState(simulation.state);
@@ -5585,15 +5599,15 @@ function GameScreen({
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
         // #3152: a capture ride's, kept in memory, since it records nothing.
-        movingSeconds={captureRecordingRef.current?.seconds ?? movingSeconds}
+        movingSeconds={captureFigures?.seconds ?? movingSeconds}
         // #2072: and the elapsed time, the recorder's again — pauses included.
-        elapsedSeconds={captureRecordingRef.current?.seconds ?? elapsedSeconds}
+        elapsedSeconds={captureFigures?.seconds ?? elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
-        lapSeconds={captureRecordingRef.current?.seconds ?? lapSeconds}
+        lapSeconds={captureFigures?.seconds ?? lapSeconds}
         // #2080: and every lap it has stated, for the lap splits panel.
         laps={rideLaps}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
-        rideTotals={captureRecordingRef.current?.totals() ?? rideTotals}
+        rideTotals={captureFigures?.totals ?? rideTotals}
         // #2078: the last ten minutes, written once a second by the loop.
         recent={recentTrace}
         // #2079: the rider's panels and text size.

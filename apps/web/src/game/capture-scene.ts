@@ -11,13 +11,19 @@
  *
  *     #/game?capture=route-hud
  *
+ * read only in the capture tool's own build ({@link CAPTURE_MODE}). In any
+ * other build — every release — the query is read by nothing, the scenes
+ * are not in the bundle, and the product build fails if they are
+ * (`tools/capture/capture-stays-out.ts`), so a link carrying it opens an
+ * ordinary ride: the review of PR #3160.
+ *
  * The scene names a script of power, cadence and heart rate
  * ({@link CAPTURE_SCENES}); the rider still chooses the route and presses
  * *Ride*. The capture tool imports a synthetic route first and steps the
  * page's clocks (`tools/capture/capture-clock.ts`); this module never reads a
  * clock of its own, so the same ride is the same frames.
  *
- * ## Why it is as harmless as `?simulate=`
+ * ## Why it is harmless even in the capture build
  *
  * A capture ride IS a simulated ride: `GameView.tsx` §`useSimulatedRide`
  * builds it with no trainer port, no room, no rooms and no Delivery round,
@@ -32,7 +38,7 @@
  * captions (#3156).
  *
  * ⚠️ Nothing here is a reading from a device. These are a script's numbers,
- * which is why the mode is reachable only by typing its query.
+ * which is why the mode exists only in a build made to film it.
  */
 
 import { watts } from '@onyourleft/domain';
@@ -80,14 +86,30 @@ export const CAPTURE_SCENES: Readonly<Record<string, CaptureScene>> = {
   },
 };
 
+/**
+ * The Vite mode of the capture tool's build (`vite build --mode capture`,
+ * `package.json` §`capture`), and of no other: a release build is
+ * `production`, so in one {@link captureSceneFromHash} is always `undefined`
+ * and `?capture=` is a parameter nothing reads.
+ */
+export const CAPTURE_MODE = 'capture';
+
 /** The query of a `#/…?…` fragment, or `undefined` with none. */
 function queryOf(hash: string): URLSearchParams | undefined {
   const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
   return query === undefined ? undefined : new URLSearchParams(query);
 }
 
-/** The scene the game's fragment asks for, or `undefined`: any name not in {@link CAPTURE_SCENES} is none. */
+/**
+ * The scene the game's fragment asks for, or `undefined`: any name not in
+ * {@link CAPTURE_SCENES} is none, and so is every name outside a build made in
+ * {@link CAPTURE_MODE}.
+ */
 export function captureSceneFromHash(hash: string): CaptureScene | undefined {
+  // ⚠️ Inline, and read nowhere else: the bundler writes the build's mode in
+  // here, so outside a capture build this is `return undefined` and the
+  // scenes are dropped from the bundle (`tools/capture/capture-stays-out.ts`).
+  if (import.meta.env.MODE !== CAPTURE_MODE) return undefined;
   const name = queryOf(hash)?.get('capture');
   if (name === null || name === undefined || !Object.hasOwn(CAPTURE_SCENES, name)) {
     return undefined;

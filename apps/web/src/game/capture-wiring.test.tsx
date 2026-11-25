@@ -35,7 +35,7 @@ import { installCaptureClock, type CaptureClockControl } from '../../tools/captu
 import { riderMassFor } from '../athlete/mass';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { CAPTURE_SCENES, CaptureSensors, type CaptureTarget } from './capture-scene';
+import { CAPTURE_MODE, CAPTURE_SCENES, CaptureSensors, type CaptureTarget } from './capture-scene';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
@@ -129,12 +129,15 @@ let on: ReturnType<typeof stage>;
 
 beforeEach(() => {
   on = stage();
+  // The capture tool's build (`vite build --mode capture`): the only one that reads the switch.
+  vi.stubEnv('MODE', CAPTURE_MODE);
 });
 
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   globalThis.location.hash = '';
   delete (globalThis as CaptureTarget).__oylCapture;
 });
@@ -241,6 +244,16 @@ describe('capture mode rides on the stepped clock — #3152', () => {
     expect(physics.elapsed).toBeCloseTo(seconds, 9);
     expect(published()?.distance).toBe(physics.distance);
     expect(published()?.elapsed).toBe(physics.elapsed);
+  });
+
+  it('is an ordinary ride in a release build, ?capture= or not: no script, nothing published (PR #3160)', async () => {
+    vi.stubEnv('MODE', 'production');
+    await startCapture('#/game?capture=route-hud');
+    for (let frame = 1; frame <= 2 * FPS; frame += 1) await step();
+    expect(published()).toBeUndefined();
+    // The rider's own sensors, of which none is paired: no script's numbers.
+    expect(field('Cadence')).not.toMatch(/\d/u);
+    expect(field('Heart rate')).not.toMatch(/\d/u);
   });
 
   it('stands still on the stepped clock with the switch off — the control', async () => {

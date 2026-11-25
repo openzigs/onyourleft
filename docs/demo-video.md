@@ -202,8 +202,8 @@ capture stops if a step does not draw the world exactly once.
 
 `src/game/capture-scene.ts` holds the switch and the scenes. A capture ride is a simulated ride
 (`?simulate=`), built by `GameView.tsx` §`useSimulatedRide` with **no trainer port, no room, no
-rooms and no Delivery round**. It never writes to a trainer, records nothing and posts nothing, and
-it is as harmless in a release build as `?simulate=` is. It differs in three ways:
+rooms and no Delivery round**. It never writes to a trainer, records nothing and posts nothing. It
+differs in three ways:
 
 - its power, cadence and heart rate follow the scene's script on the ride's clock, so the HUD shows
   numbers where a simulated ride shows dashes;
@@ -212,7 +212,12 @@ it is as harmless in a release build as `?simulate=` is. It differs in three way
   from the same readings by `capture-recording.ts`, with the recorder's own `rideTotals`, and are
   dropped with the screen.
 
-A rider never sees the switch: it is typed into the address, and the tablet app has none.
+**Only the capture tool's build reads the switch.** `pnpm run capture` builds the app with
+`vite build --mode capture`; every other build, every release among them, is `production`, where
+`captureSceneFromHash` answers `undefined` before it reads the address, so a link carrying
+`?capture=` opens an ordinary ride. The scenes are not in that bundle, and
+`tools/capture/capture-stays-out.ts` fails a product build that carries one. The capture tool leaves
+its build in `apps/web/dist`: run `vite build` again before using that directory for anything else.
 `src/game/capture-wiring.test.tsx` proves the stepped clock, and `simulated-rider-wiring.test.tsx`
 proves that a capture reaches no trainer and starts no recording. The other scenes (Delivery, lap
 race, workouts, free ride and the instance) are #3153 to #3155.

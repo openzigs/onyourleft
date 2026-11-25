@@ -5,9 +5,10 @@
  * The screen is `capture-wiring.test.tsx`'s.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CAPTURE_MODE,
   CAPTURE_SCENES,
   captureReadingAt,
   captureRider,
@@ -29,6 +30,14 @@ const SCENE: CaptureScene = {
 };
 
 describe('the capture switch — #3152', () => {
+  // The capture tool's build: `vite build --mode capture`.
+  beforeEach(() => {
+    vi.stubEnv('MODE', CAPTURE_MODE);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('reads the scene the fragment names', () => {
     expect(captureSceneFromHash('#/game?capture=route-hud')).toBe(CAPTURE_SCENES['route-hud']);
     expect(captureSceneFromHash('#/game?simulate=200&capture=route-hud')?.id).toBe('route-hud');
@@ -40,6 +49,13 @@ describe('the capture switch — #3152', () => {
     expect(captureSceneFromHash('#/game?capture=delivery')).toBeUndefined();
     expect(captureSceneFromHash('#/game?capture=toString')).toBeUndefined();
     expect(captureSceneFromHash('#/game?capture=__proto__')).toBeUndefined();
+  });
+
+  it('is off in every other build, a release among them: the fragment is never read (PR #3160)', () => {
+    for (const mode of ['production', 'development', 'test', 'Capture', '']) {
+      vi.stubEnv('MODE', mode);
+      expect(captureSceneFromHash('#/game?capture=route-hud')).toBeUndefined();
+    }
   });
 
   it('rides as a simulated rider from the start line in real time, keyed apart from ?simulate=', () => {

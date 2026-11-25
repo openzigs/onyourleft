@@ -5,9 +5,9 @@
  * capture actually writes was read back with `ffprobe` on the pull request.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { captureSceneFromHash } from '../../src/game/capture-scene';
+import { CAPTURE_MODE, captureSceneFromHash } from '../../src/game/capture-scene';
 import {
   CAPTURE_DATE_MS,
   CAPTURE_ROUTE_NAME,
@@ -105,8 +105,13 @@ describe('a capture’s frames and file — #3152', () => {
 });
 
 describe('what the capture rides — #3152', () => {
-  it('opens the game at the scene the app reads', () => {
-    expect(captureSceneFromHash(captureHash('route-hud'))?.id).toBe('route-hud');
+  it('opens the game at the scene the app reads, in the capture tool’s build', () => {
+    vi.stubEnv('MODE', CAPTURE_MODE);
+    try {
+      expect(captureSceneFromHash(captureHash('route-hud'))?.id).toBe('route-hud');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('rides an invented route under a placeholder name, from 0° 0°', () => {

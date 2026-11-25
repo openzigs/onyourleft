@@ -84,6 +84,25 @@ const TYPES: Readonly<Record<string, string>> = {
   '.txt': 'text/plain',
 };
 
+/**
+ * The file under `dist` a request for `pathname` is answered with, or
+ * `undefined` for a 404: a path that leaves `dist`, names no file, or carries
+ * a malformed escape, which `decodeURIComponent` throws on.
+ */
+export function servedFile(dist: string, pathname: string): string | undefined {
+  let path: string;
+  try {
+    path = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1));
+  } catch {
+    return undefined;
+  }
+  const file = resolve(dist, path);
+  if (!file.startsWith(dist + sep) || !existsSync(file) || !statSync(file).isFile()) {
+    return undefined;
+  }
+  return file;
+}
+
 /** What a capture needs beyond the request. */
 export interface CaptureOptions {
   /** The built app: `apps/web/dist`. */
@@ -168,11 +187,8 @@ export async function renderCapture(
         refused.add(url.origin);
         return route.abort();
       }
-      const path = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
-      const file = resolve(dist, path);
-      if (!file.startsWith(dist + sep) || !existsSync(file) || !statSync(file).isFile()) {
-        return route.fulfill({ status: 404, body: '' });
-      }
+      const file = servedFile(dist, url.pathname);
+      if (file === undefined) return route.fulfill({ status: 404, body: '' });
       return route.fulfill({
         status: 200,
         contentType: TYPES[extname(file)] ?? 'application/octet-stream',
