@@ -13,12 +13,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { RouteHeights } from '../terrain/heights';
 
+import { addWaypoint, emptyDraft, resolveDraft } from './draft';
 import { RIDING_DEFAULTS } from './preferences';
 import { scriptedProvider } from './testing';
 import {
   CHOICES_NOT_APPLIED_TEXT,
   CHOICES_NOT_ON_FALLBACK_TEXT,
   heightIntervalOf,
+  INSTANCE_NO_ROAD_NEAR_TEXT,
   NO_HEIGHTS_TEXT,
   releaseRouting,
   ridingChoicesNote,
@@ -116,6 +118,58 @@ describe('which engine routes a leg (#2734)', () => {
     const tiers = routingTiers({ instance, browser });
     await expect(tiers?.route(REQUEST)).rejects.toMatchObject({ code: 'no-route' });
     expect(made.count).toBe(0);
+  });
+
+  /**
+   * An instance whose Valhalla moved the leg's second waypoint to a road about
+   * 11 km south of it, as one does with no road near the waypoint (#3179).
+   */
+  function snappingFar(): RoutingProvider & { asked: number } {
+    const double = scriptedProvider();
+    const instance = {
+      asked: 0,
+      route: (request: Parameters<RoutingProvider['route']>[0]) => {
+        instance.asked += 1;
+        const [first, second] = request.waypoints;
+        if (first === undefined || second === undefined) return double.route(request);
+        const moved = at(second.position.latitude - 0.1, second.position.longitude);
+        return double.route({ ...request, waypoints: [first, { position: moved }] });
+      },
+      heights: (request: Parameters<RoutingProvider['heights']>[0]) => double.heights(request),
+    };
+    return instance;
+  }
+
+  it('draws an instance’s leg straight when its line does not reach a waypoint, and does not make the browser engine for it (#3179)', async () => {
+    const instance = snappingFar();
+    const { made, browser } = countingBrowser();
+    const tiers = routingTiers({ instance, browser });
+    if (tiers === undefined) throw new Error('no tiers');
+    let draft = emptyDraft();
+    draft = addWaypoint(draft, at(0.25, 0.05), 'snapped').draft;
+    const added = addWaypoint(draft, at(0.26, 0.06), 'snapped');
+    const settled = await resolveDraft(added.draft, added.stale, tiers, RIDING_DEFAULTS);
+    expect(instance.asked).toBe(1);
+    expect(settled.legs[0]).toMatchObject({
+      mode: 'freehand',
+      state: 'routed',
+      failure: { message: INSTANCE_NO_ROAD_NEAR_TEXT, retryable: true },
+    });
+    expect(settled.legs[0]?.shape).toStrictEqual([at(0.25, 0.05), at(0.26, 0.06)]);
+    expect(made.count).toBe(0);
+    expect(INSTANCE_NO_ROAD_NEAR_TEXT).not.toMatch(/\d\.\d/);
+  });
+
+  it('keeps an instance’s legs that reach their waypoints, every one of a longer request', async () => {
+    const instance = scriptedProvider();
+    const tiers = routingTiers({ instance });
+    const legs = await tiers?.route({
+      waypoints: [at(0.05, 0.05), at(0.06, 0.06), at(0.07, 0.05)].map((position) => ({
+        position,
+      })),
+      preferences: RIDING_DEFAULTS,
+    });
+    expect(legs).toHaveLength(2);
   });
 
   it('with no instance, routes in the browser and measures on the terrain archive at its spacing', async () => {
