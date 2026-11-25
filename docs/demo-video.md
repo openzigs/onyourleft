@@ -392,7 +392,7 @@ The opening title is drawn under the project's logo, centred: `src/brand/logo-da
 app's own file, drawn no larger than its own 512 × 408 pixels (24 % of the frame's height, so
 259 pixels tall at 1080p, small enough that the title fits between the HUD's top and bottom
 panels) and never scaled up, so it is sharp at 1080p and no cleaned copy is needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
-halo. Beneath it is the owner's platforms line, **"On Android. Coming to iOS soon."**, which the
+halo. Beneath it is the owner's platforms line, **"On Android, and in Chrome or Edge on your computer. iOS coming soon."**, which the
 closing card carries too; `video-script.test.ts` pins the wording.
 
 #### Captions and callouts are drawn by the page

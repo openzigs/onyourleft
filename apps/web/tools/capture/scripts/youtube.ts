@@ -60,7 +60,7 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           // platforms line beneath it.
           logo: true,
           text: 'On Your Left — free, open-source indoor and outdoor cycling',
-          lines: ['On Android. Coming to iOS soon.'],
+          lines: ['On Android, and in Chrome or Edge on your computer. iOS coming soon.'],
         },
       ],
     },
@@ -239,7 +239,7 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           // needs an instance; only the closing card may say so, and only so.
           // #3175, the owner's the same day: the platforms line, as on the opening.
           lines: [
-            'On Android. Coming to iOS soon.',
+            'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
             'Optional on your own instance: an AI pacer and AI bots',
           ],
         },

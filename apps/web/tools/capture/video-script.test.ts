@@ -179,14 +179,14 @@ describe('the demo video’s scene script — #3156', () => {
     );
     expect(said.filter((text) => /\bAI\b|\binstance\b/iu.test(text))).toEqual([statement]);
     expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([
-      'On Android. Coming to iOS soon.',
+      'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
       statement,
     ]);
   });
 
   it('opens on the logo with the platforms line beneath it, and says the line again on the closing card — #3175', () => {
-    // The owner's words of 2026-11-25, as approved: "say on Android coming to IOS soon".
-    const platforms = 'On Android. Coming to iOS soon.';
+    // The owner's wording of 2026-11-25 11:20Z, which replaced "On Android. Coming to iOS soon.".
+    const platforms = 'On Android, and in Chrome or Edge on your computer. iOS coming soon.';
     const opening = YOUTUBE_SCRIPT.scenes[0]?.captions[0];
     expect(opening).toMatchObject({ placement: 'title', logo: true, lines: [platforms] });
     expect(shownLines(opening as VideoCaption)).toEqual([
