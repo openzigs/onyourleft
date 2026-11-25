@@ -18,6 +18,14 @@
  *   The baked route is the synthetic corridor fixture (D-9), never
  *   OpenStreetMap data. Its video ends with the closing card (D-8.3).
  *
+ * - **The YouTube tour's captions are where its script says** (#3074): its
+ *   script claims only what its scenes show (`caption-claims.ts`); each
+ *   caption's backing is in the pixels in the middle of its time and not just
+ *   before or after it; two renders decode to the same frames; on a baked
+ *   route the map-data caption is drawn and no caption covers the credit,
+ *   which is still in the pixels under it; on the synthetic road the map-data
+ *   caption is left out.
+ *
  * Small sizes and short rides with the realistic world answered 404: what is
  * checked is the render, which draws whichever world the page drew.
  */
@@ -36,6 +44,11 @@ import {
   FIXTURE_ROUTE_ID,
   routeFilesIn,
 } from '../../browser/demo-route-fixture';
+import { YOUTUBE_CAPTIONS } from '../../demo/captions/youtube';
+import { captionScriptProblems } from '../../src/demo/caption-claims';
+import { scriptSeconds } from '../../src/demo/caption-script';
+import { OSM_ATTRIBUTION } from '../../src/map/basemap';
+import { SOURCE_CODE_URL } from '../../src/privacy/policy';
 import { renderDemoVideo, type RenderResult } from './render-video';
 import {
   cardFrames,
@@ -44,6 +57,7 @@ import {
   rideFrames,
   sampledFrames,
   shareOfColour,
+  type PixelBox,
   type VideoRequest,
 } from './video';
 
@@ -123,6 +137,15 @@ function decoded(file: string, index: number): Uint8Array {
 
 function sha256(file: string): string {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function intersects(one: PixelBox, two: PixelBox): boolean {
+  return (
+    one.x < two.x + two.width &&
+    two.x < one.x + one.width &&
+    one.y < two.y + two.height &&
+    two.y < one.y + one.height
+  );
 }
 
 function files(result: RenderResult): string[] {
@@ -227,7 +250,7 @@ test.describe('the demo video — #1655', () => {
 
       // The ride's frames, then the closing card's, which only the baked route has.
       const ride = rideFrames(size);
-      const card = cardFrames({ route: FIXTURE_ROUTE_ID, fps: size.fps });
+      const card = cardFrames({ preset: 'climb', route: FIXTURE_ROUTE_ID, fps: size.fps });
       expect(card).toBe(CLOSING_CARD_SECONDS * size.fps);
       expect(countedFrames(baked.webm)).toBe(ride + card);
       expect(countedFrames(control.webm)).toBe(ride);
@@ -259,6 +282,133 @@ test.describe('the demo video — #1655', () => {
       );
       expect(carded).toBeGreaterThan(0.5);
       expect(ridden).toBeLessThan(0.2);
+    });
+  });
+});
+
+test.describe('the YouTube tour’s captions — #3074', () => {
+  // The corners layout a 1080p video is drawn in, at 720p, the size the
+  // captions must read at; one frame a second, so a caption's middle and the
+  // frames either side of it are each a frame.
+  const tour = request({
+    preset: 'youtube',
+    seconds: scriptSeconds(YOUTUBE_CAPTIONS),
+    fps: 1,
+    width: 1280,
+    height: 720,
+    mp4: 'off',
+  });
+  test('claims only what its scenes show', () => {
+    expect(captionScriptProblems(YOUTUBE_CAPTIONS)).toEqual([]);
+  });
+
+  test('draws each caption in the middle of its time and not either side of it', async () => {
+    const first = await renderDemoVideo(tour, { dist: DIST, out: join(OUT, 'tour') });
+    expect(countedFrames(first.webm)).toBe(first.rideFrames + first.cardFrames);
+    expect(first.rideFrames).toBe(tour.seconds);
+    expect(first.cardFrames).toBe(CLOSING_CARD_SECONDS);
+    // The project's address, and no map credit: no scene drew map data.
+    expect(first.cardLines).toEqual([`On Your Left: ${SOURCE_CODE_URL}`]);
+    expect(first.captions.map((each) => each.text)).toEqual(
+      YOUTUBE_CAPTIONS.scenes.flatMap((scene) => scene.captions.map((each) => each.text)),
+    );
+    for (const caption of first.captions) {
+      if (caption.feature === 'map-data') {
+        // The synthetic road is no map data: the caption is left out.
+        expect(caption.box, caption.text).toBeUndefined();
+        continue;
+      }
+      const box = caption.box;
+      if (box === undefined) throw new Error(`no caption drawn for “${caption.text}”`);
+      expect(caption.drawnText).toBe(caption.text);
+      // It covers no HUD panel: the readings, the route, Pause and Stop.
+      expect(caption.hud.length, caption.text).toBeGreaterThan(2);
+      for (const panel of caption.hud) expect(intersects(box, panel), caption.text).toBe(false);
+      const share = (frame: number): number =>
+        shareOfColour(decoded(first.webm, frame), tour.width, box, box.background, TOLERANCE);
+      const middle = share(caption.middle);
+      const either = [caption.before, caption.after].flatMap((frame) =>
+        frame === undefined ? [] : [share(frame)],
+      );
+      console.info(
+        `demo video: “${caption.text}” is ${String(middle)} its backing at frame ` +
+          `${String(caption.middle)}, ${either.join(' and ')} either side`,
+      );
+      expect(middle, caption.text).toBeGreaterThan(0.5);
+      expect(either.length, caption.text).toBeGreaterThan(0);
+      for (const outside of either) expect(outside, caption.text).toBeLessThan(0.2);
+    }
+  });
+
+  test('renders the same frames twice, every one of them', async () => {
+    // At the existing check's size. ⚠️ Not at 1280 × 720: there the WORLD
+    // differs between two renders in a few pixels at the far left horizon,
+    // from a frame that varies (the climb preset's 83rd second on main, before
+    // #3074), and VP9 carries that into every later frame. The captions are
+    // DOM over the world, so their sameness is shown where the world is the same.
+    const small = { ...tour, width: 320, height: 180 };
+    const one = await renderDemoVideo(small, { dist: DIST, out: join(OUT, 'tour-one') });
+    const two = await renderDemoVideo(small, { dist: DIST, out: join(OUT, 'tour-two') });
+    expect(one.captions.filter((each) => each.box !== undefined)).toHaveLength(
+      one.captions.filter((each) => each.feature !== 'map-data').length,
+    );
+    const a = digests(one.webm);
+    expect(a).toHaveLength(one.rideFrames + one.cardFrames);
+    expect(digests(two.webm)).toEqual(a);
+  });
+
+  test.describe('on a baked route', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'oyl-demo-tour-'));
+    let routes: Map<string, Uint8Array>;
+
+    test.beforeAll(async () => {
+      await bakeFixtureRouteInto(scratch);
+      routes = new Map(
+        [...routeFilesIn(scratch)].map(([path, bytes]) => [path.replace('./routes/', ''), bytes]),
+      );
+    });
+
+    test.afterAll(() => {
+      rmSync(scratch, { recursive: true, force: true });
+    });
+
+    test('draws the map-data caption, and no caption covers the credit, which stays in the pixels', async () => {
+      const baked = await renderDemoVideo(
+        { ...tour, route: FIXTURE_ROUTE_ID },
+        { dist: DIST, out: join(OUT, 'tour-route'), routes },
+      );
+      const [credit] = baked.credits;
+      if (credit === undefined) throw new Error('the baked route’s scene showed no credit');
+      expect(baked.credits).toHaveLength(
+        YOUTUBE_CAPTIONS.scenes.filter((scene) => scene.route === true).length,
+      );
+      // The card carries the credit, though the last scene rode its own road.
+      expect(baked.cardLines[0]).toBe(OSM_ATTRIBUTION);
+      expect(baked.cardLines.at(-1)).toBe(`On Your Left: ${SOURCE_CODE_URL}`);
+      const map = baked.captions.find((each) => each.feature === 'map-data');
+      expect(map?.box).toBeDefined();
+      expect(map?.drawnText).toBe(map?.text);
+      for (const caption of baked.captions) {
+        const box = caption.box;
+        if (box === undefined) throw new Error(`no caption drawn for “${caption.text}”`);
+        for (const each of [...baked.credits, ...caption.hud]) {
+          expect(intersects(box, each), caption.text).toBe(false);
+        }
+        if (caption.scene !== map?.scene) continue;
+        // In the scene that rides the route, the credit is still in the
+        // pixels while the caption is up.
+        const shown = shareOfColour(
+          decoded(baked.webm, caption.middle),
+          tour.width,
+          credit,
+          credit.background,
+          TOLERANCE,
+        );
+        console.info(
+          `demo video: under “${caption.text}” the credit's box is ${String(shown)} its backing`,
+        );
+        expect(shown, caption.text).toBeGreaterThan(0.5);
+      }
     });
   });
 });

@@ -40,6 +40,14 @@
  * ADR 0056 D-8.3 asks for (`DemoPage.tsx` §`ClosingCard`), after the ride's own
  * seconds. A render whose route did not load is refused rather than rendered
  * without its map data.
+ *
+ * ## A captioned tour — #3074
+ *
+ * `--preset youtube` renders a caption script (`src/demo/caption-script.ts`):
+ * each scene's page in turn (`video.ts` §`renderScenes`), its frames piped to
+ * the same encoders, and the closing card at the end, with the map credit if
+ * any scene rode the baked route. The page draws the captions; this measures
+ * where each one was drawn, in the middle of its time, for the checks.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -49,14 +57,16 @@ import { extname, join, resolve, sep } from 'node:path';
 import { chromium, type Page } from '@playwright/test';
 
 import { LAUNCH_ARGS } from '../../playwright.config';
+import { captionFrames, type CaptionFrames } from '../../src/demo/caption-script';
 import {
   cardFrames,
   hasEncoder,
   mp4Args,
   parseCssRgb,
-  renderUrl,
+  renderScenes,
   rideFrames,
   videoName,
+  videoTour,
   webmArgs,
   type PixelBox,
   type Rgb,
@@ -115,9 +125,31 @@ export interface RenderResult {
   readonly attribution: DrawnBox | undefined;
   /** The HUD's primary readings on the first frame: the panel the HUD check reads. */
   readonly readings: DrawnBox;
+  /**
+   * #3074: each of a tour's captions, in the script's order, and the box it
+   * was drawn in at {@link CaptionFrames.middle} — none if the page drew no
+   * caption there. Empty for a preset.
+   */
+  readonly captions: readonly DrawnCaption[];
+  /**
+   * #3074: the HUD's map credit at the first frame of each scene that rode the
+   * baked route; empty without one.
+   */
+  readonly credits: readonly DrawnBox[];
+  /** #3074: the closing card's lines, as the page wrote them; empty with no card. */
+  readonly cardLines: readonly string[];
   /** The world the first frame was drawn in, and why if not the realistic one. */
   readonly world: string;
   readonly notice: string | undefined;
+}
+
+/** A caption's frames, and where the page drew it. */
+export interface DrawnCaption extends CaptionFrames {
+  readonly box: DrawnBox | undefined;
+  /** The text the page drew in it, to tell one caption from another. */
+  readonly drawnText: string | undefined;
+  /** Every HUD panel, and the map credit, on screen in the same frame: what it must not cover. */
+  readonly hud: readonly PixelBox[];
 }
 
 interface Encoder {
@@ -240,57 +272,100 @@ export async function renderDemoVideo(
       });
     });
     const page = await context.newPage();
-    await page.goto(renderUrl(RENDER_ORIGIN, request));
-    await page.waitForFunction(
-      () => window.__oylDemoRender !== undefined && window.__oylDemo !== undefined,
-    );
-    // The realistic world loads whole or not at all (`port.ts`), and the
-    // first frame waits for it: drawn in the realistic world, or in the
-    // stylised one with the reason, never half of each.
-    await page.waitForFunction(
-      () => window.__oylDemo?.world === 'realistic' || window.__oylDemo?.notice !== undefined,
-      undefined,
-      { timeout: REALISTIC_LOAD_LIMIT_MS },
-    );
-    await page.evaluate(() => document.fonts.ready.then(() => undefined));
-    const start = await page.evaluate(() => window.__oylDemo);
-    if (request.route !== undefined && start?.mapData?.route !== request.route) {
-      throw new Error(
-        `demo:video: the route ${request.route} did not load, so it is not rendered ` +
-          '(the page says why when it is opened without ?render)',
-      );
-    }
-
-    const encoding = [startEncoder(ffmpeg, webmArgs(request.fps, webm))];
-    if (mp4 !== undefined) encoding.push(startEncoder(ffmpeg, mp4Args(request.fps, mp4)));
+    const scenes = renderScenes(RENDER_ORIGIN, request);
+    const tour = videoTour(request);
+    const wanted = tour === undefined ? [] : captionFrames(tour, request.fps);
+    const captions: DrawnCaption[] = [];
+    const credits: DrawnBox[] = [];
+    let encoding: Encoder[] | undefined;
     const send = async (frame: Buffer): Promise<void> => {
-      await Promise.all(encoding.map((encoder) => encoder.write(frame)));
+      await Promise.all((encoding ?? []).map((encoder) => encoder.write(frame)));
     };
     const shoot = (): Promise<Buffer> =>
       page.screenshot({ type: 'png', animations: 'disabled', caret: 'hide' });
 
     const stepMs = 1000 / request.fps;
-    const ride = rideFrames(request);
     let attribution: DrawnBox | undefined;
     let readings: DrawnBox | undefined;
-    for (let frame = 0; frame < ride; frame += 1) {
-      const drawn = await page.evaluate((ms) => window.__oylDemoRender?.step(ms), stepMs);
-      if (drawn !== 1) {
-        throw new Error(`demo:video: frame ${frame} drew ${String(drawn)} frames, not one`);
+    let world: string | undefined;
+    let notice: string | undefined;
+    let videoFrame = 0;
+    for (const scene of scenes) {
+      await page.goto(scene.url);
+      await page.waitForFunction(
+        () => window.__oylDemoRender !== undefined && window.__oylDemo !== undefined,
+      );
+      // The realistic world loads whole or not at all (`port.ts`), and the
+      // first frame waits for it: drawn in the realistic world, or in the
+      // stylised one with the reason, never half of each.
+      await page.waitForFunction(
+        () => window.__oylDemo?.world === 'realistic' || window.__oylDemo?.notice !== undefined,
+        undefined,
+        { timeout: REALISTIC_LOAD_LIMIT_MS },
+      );
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      const start = await page.evaluate(() => window.__oylDemo);
+      if (scene.route !== undefined && start?.mapData?.route !== scene.route) {
+        throw new Error(
+          `demo:video: the route ${scene.route} did not load, so it is not rendered ` +
+            '(the page says why when it is opened without ?render)',
+        );
       }
-      if (frame === 0) {
-        attribution = await drawnBox(page, '.oyl-hud__attribution');
-        readings = await drawnBox(page, '.oyl-hud__fields--primary');
+      world ??= start?.world;
+      notice ??= start?.notice;
+      if (encoding === undefined) {
+        encoding = [startEncoder(ffmpeg, webmArgs(request.fps, webm))];
+        if (mp4 !== undefined) encoding.push(startEncoder(ffmpeg, mp4Args(request.fps, mp4)));
       }
-      await send(await shoot());
+      for (let frame = 0; frame < scene.frames; frame += 1) {
+        const drawn = await page.evaluate((ms) => window.__oylDemoRender?.step(ms), stepMs);
+        if (drawn !== 1) {
+          throw new Error(`demo:video: frame ${videoFrame} drew ${String(drawn)} frames, not one`);
+        }
+        if (frame === 0) {
+          const credit = await drawnBox(page, '.oyl-hud__attribution');
+          if (videoFrame === 0) {
+            attribution = credit;
+            readings = await drawnBox(page, '.oyl-hud__fields--primary');
+          }
+          if (scene.route !== undefined && credit !== undefined) credits.push(credit);
+        }
+        for (const caption of wanted.filter((each) => each.middle === videoFrame)) {
+          const box = await drawnBox(page, '.oyl-demo__caption-card');
+          const drawnText = await page.evaluate(
+            () => document.querySelector('.oyl-demo__caption-card')?.textContent ?? undefined,
+          );
+          const hud = await page.evaluate(() =>
+            [...document.querySelectorAll('.oyl-hud__panel, .oyl-hud__attribution')]
+              .map((element) => element.getBoundingClientRect())
+              .filter((rect) => rect.width > 0 && rect.height > 0)
+              .map((rect) => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })),
+          );
+          captions.push({ ...caption, box, drawnText, hud });
+        }
+        await send(await shoot());
+        videoFrame += 1;
+      }
+    }
+    const ride = rideFrames(request);
+    if (videoFrame !== ride) {
+      throw new Error(`demo:video: rendered ${videoFrame} frames of ride, not ${ride}`);
     }
     const card = cardFrames(request);
+    let cardLines: string[] = [];
     if (card > 0) {
-      await page.evaluate(() => window.__oylDemoRender?.closingCard());
+      // D-8.3: the credit when any scene drew the baked route's map data.
+      const credit = scenes.some((scene) => scene.route !== undefined);
+      await page.evaluate((options) => window.__oylDemoRender?.closingCard(options), { credit });
+      cardLines = await page.evaluate(() =>
+        [...document.querySelectorAll('.oyl-demo__closing-card p')].map(
+          (line) => line.textContent ?? '',
+        ),
+      );
       const still = await shoot();
       for (let frame = 0; frame < card; frame += 1) await send(still);
     }
-    await Promise.all(encoding.map((encoder) => encoder.end()));
+    await Promise.all((encoding ?? []).map((encoder) => encoder.end()));
     if (refused.length > 0) {
       throw new Error(
         `demo:video: the page asked another origin: ${[...new Set(refused)].join(', ')}`,
@@ -304,8 +379,11 @@ export async function renderDemoVideo(
       cardFrames: card,
       attribution,
       readings,
-      world: start?.world ?? 'unknown',
-      notice: start?.notice,
+      captions,
+      credits,
+      cardLines,
+      world: world ?? 'unknown',
+      notice,
     };
   } finally {
     await browser.close();

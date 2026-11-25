@@ -22,6 +22,7 @@ import {
   parseFrameMd5,
   parseVideoArgs,
   renderUrl,
+  renderScenes,
   rideFrames,
   sampledFrames,
   shareOfColour,
@@ -93,7 +94,10 @@ describe('demo:video’s arguments — #1655', () => {
   });
 
   it.each([
-    [['--preset', 'descent'], 'demo:video: --preset is one of climb, sprint, group, not descent'],
+    [
+      ['--preset', 'descent'],
+      'demo:video: --preset is one of climb, sprint, group, hill, youtube, not descent',
+    ],
     [['--speed', '2'], 'demo:video has no option --speed'],
     [['--fps'], 'demo:video: --fps needs a value'],
     [['--fps', '--seconds'], 'demo:video: --fps needs a value'],
@@ -126,6 +130,16 @@ describe('demo:video’s arguments — #1655', () => {
     expect(parseVideoArgs(argv)).toEqual({ ok: false, message });
   });
 
+  it('takes a captioned tour as a preset, as long as its scenes, and no --seconds with it — #3074', () => {
+    const parsed = parseVideoArgs(['--preset', 'youtube', '--fps', '30']);
+    expect(parsed.ok && parsed.request).toMatchObject({ preset: 'youtube', seconds: 81, fps: 30 });
+    expect(parseVideoArgs(['--preset', 'youtube', '--seconds', '30'])).toEqual({
+      ok: false,
+      message: 'demo:video: the youtube tour is as long as its scenes, so it takes no --seconds',
+    });
+    expect(parseVideoArgs(['--preset', 'hill']).ok).toBe(true);
+  });
+
   it('holds its route id to the bake’s', () => {
     expect(VIDEO_ROUTE_ID.source).toBe(ROUTE_ID.source);
     expect(VIDEO_ROUTE_ID.flags).toBe(ROUTE_ID.flags);
@@ -136,8 +150,14 @@ describe('what a render writes — #1655', () => {
   it('is seconds × fps frames of ride, and a closing card on a baked route alone', () => {
     expect(rideFrames({ seconds: 30, fps: 30 })).toBe(900);
     expect(rideFrames({ seconds: 2.5, fps: 24 })).toBe(60);
-    expect(cardFrames({ route: undefined, fps: 30 })).toBe(0);
-    expect(cardFrames({ route: 'upstate-climb', fps: 30 })).toBe(CLOSING_CARD_SECONDS * 30);
+    expect(cardFrames({ preset: 'climb', route: undefined, fps: 30 })).toBe(0);
+    expect(cardFrames({ preset: 'climb', route: 'upstate-climb', fps: 30 })).toBe(
+      CLOSING_CARD_SECONDS * 30,
+    );
+    // #3074: a tour ends on the card for the project's address, route or none.
+    expect(cardFrames({ preset: 'youtube', route: undefined, fps: 30 })).toBe(
+      CLOSING_CARD_SECONDS * 30,
+    );
   });
 
   it('names its files as the issue does, with the route when there is one', () => {
@@ -147,6 +167,7 @@ describe('what a render writes — #1655', () => {
     expect(videoName({ ...climb, route: 'upstate-climb' }, 'webm')).toBe(
       'climb-upstate-climb-1920x1080.webm',
     );
+    expect(videoName({ ...climb, preset: 'youtube' }, 'mp4')).toBe('youtube-1920x1080.mp4');
   });
 
   it('asks the page for its render clock', () => {
@@ -155,6 +176,45 @@ describe('what a render writes — #1655', () => {
     );
     expect(renderUrl('http://demo.localhost', { preset: 'climb', route: 'fixture' })).toBe(
       'http://demo.localhost/?preset=climb&route=fixture&render',
+    );
+  });
+
+  it('opens a preset’s one page, or each of a tour’s scenes, the route only where a scene rides it — #3074', () => {
+    expect(
+      renderScenes('http://demo.localhost', {
+        preset: 'sprint',
+        route: undefined,
+        seconds: 2,
+        fps: 10,
+      }),
+    ).toEqual([
+      { url: 'http://demo.localhost/?preset=sprint&render', frames: 20, route: undefined },
+    ]);
+    const scenes = renderScenes('http://demo.localhost', {
+      preset: 'youtube',
+      route: 'fixture',
+      seconds: 81,
+      fps: 2,
+    });
+    expect(scenes).toEqual([
+      {
+        url: 'http://demo.localhost/?captions=youtube&scene=opening&route=fixture&render',
+        frames: 40,
+        route: 'fixture',
+      },
+      {
+        url: 'http://demo.localhost/?captions=youtube&scene=hill&render',
+        frames: 40,
+        route: undefined,
+      },
+      {
+        url: 'http://demo.localhost/?captions=youtube&scene=group&render',
+        frames: 82,
+        route: undefined,
+      },
+    ]);
+    expect(scenes.reduce((sum, scene) => sum + scene.frames, 0)).toBe(
+      rideFrames({ seconds: 81, fps: 2 }),
     );
   });
 

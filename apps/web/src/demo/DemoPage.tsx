@@ -52,7 +52,21 @@
  * `main.tsx`) and tells it it is stepped (`stage.ts` §"Stepped"). A render of
  * a baked route ends on {@link ClosingCard}, which the render asks for through
  * {@link DemoPageProps.registerClosingCard}: ADR 0056 D-8.3, the §4.3 notice
- * and the plain-text addresses a video cannot link.
+ * and the plain-text addresses a video cannot link. #3074: the card also
+ * carries the project's address, and ends every captioned tour; the render
+ * says whether the video drew map data, since a tour's last scene may not
+ * have.
+ *
+ * ## Captions — #3074
+ *
+ * `?captions=<script>&scene=<id>` rides a captioned tour's scene and draws
+ * its captions over the stage (`caption-script.ts` §`captionAt`), from the
+ * HUD's ride clock: a centred title or a lower third, in the design system's
+ * display face on the HUD's opaque backing, sized to the frame's height so a
+ * 1080p video reads at 720p. The lower third sits between the HUD's two
+ * bottom panels and the title in the middle of the stage, so neither covers
+ * the map credit, which `demo:video:check` measures. A `map-data` caption is
+ * drawn only when the run was given map data.
  *
  * ## Hidden means paused
  *
@@ -69,6 +83,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 import { HudCore } from '../game/hud/HudCore';
 import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
+import { SOURCE_CODE_URL } from '../privacy/policy';
 import { PlanTrace } from '../game/hud/PlanTrace';
 import type { GameRenderer, GameView } from '../game/port';
 import type { QualitySettings } from '../game/quality';
@@ -82,6 +97,7 @@ import {
   type BakedRouteLoad,
   type ReadDemoFile,
 } from './baked-route';
+import { captionAt, type CaptionScene, type ShownCaption } from './caption-script';
 import { createDemoPlayer, type DemoStatus } from './player';
 import { SHOWCASE_TIMELINE, showcaseRides } from './showcase';
 import { featuresInBuild } from './showcase-features';
@@ -113,9 +129,11 @@ export interface DemoPageProps {
   readonly drawnDecorations?: ((view: GameView) => number) | undefined;
   /**
    * #1655: handed the way to show {@link ClosingCard}, once the page is up —
-   * the video render's (`main.tsx`). Absent everywhere else.
+   * the video render's (`main.tsx`). Absent everywhere else. #3074: `credit`
+   * is whether the video drew a baked route's map data in any scene.
    */
-  readonly registerClosingCard?: ((show: () => void) => void) | undefined;
+  readonly registerClosingCard?:
+    ((show: (options: { readonly credit: boolean }) => void) => void) | undefined;
 }
 
 /** What the HUD's two controls say on the demo. */
@@ -171,8 +189,10 @@ function MapDataNotice(props: { readonly bundlePath: string }) {
  * The card a video of a baked route ends on — #1655, ADR 0056 D-8.3: the
  * credit, ODbL §4.3's notice, and the addresses §4.3 a asks for written out,
  * since a video cannot carry a link. Over the whole stage, in the HUD's tokens.
+ * #3074: and the project's address, the only line on a video that drew no map
+ * data.
  */
-function ClosingCard() {
+function ClosingCard(props: { readonly credit: boolean }) {
   return (
     <div
       className="oyl-demo__closing-card"
@@ -193,11 +213,69 @@ function ClosingCard() {
         zIndex: 1,
       }}
     >
-      <p style={{ fontSize: 'var(--oyl-font-size-xl)', margin: 0 }}>{OSM_ATTRIBUTION}</p>
-      <p style={{ margin: 0 }}>{ODBL_NOTICE}</p>
-      <p style={{ margin: 0 }}>OpenStreetMap: {OSM_COPYRIGHT_URL}</p>
-      <p style={{ margin: 0 }}>Open Database License: {ODBL_LICENCE_URL}</p>
+      {props.credit ? (
+        <>
+          <p style={{ fontSize: 'var(--oyl-font-size-xl)', margin: 0 }}>{OSM_ATTRIBUTION}</p>
+          <p style={{ margin: 0 }}>{ODBL_NOTICE}</p>
+          <p style={{ margin: 0 }}>OpenStreetMap: {OSM_COPYRIGHT_URL}</p>
+          <p style={{ margin: 0 }}>Open Database License: {ODBL_LICENCE_URL}</p>
+        </>
+      ) : null}
+      <p
+        style={{
+          fontFamily: 'var(--oyl-font-family-display)',
+          fontSize: '4.2vh',
+          fontWeight: 700,
+          margin: 0,
+        }}
+      >
+        On Your Left: {SOURCE_CODE_URL}
+      </p>
     </div>
+  );
+}
+
+/**
+ * #3074: a caption over the stage. Sized to the frame's height, not to the
+ * root's, so a video's caption is the same share of the frame at any size;
+ * the lower third is held between the HUD's bottom panels (each under 21 rem
+ * wide in the corners layout), and the title sits above the middle, clear of
+ * the map credit at the top of the bottom-left panel. `demo:video:check`
+ * measures both clear of every HUD panel and of the credit at 1280 × 720.
+ */
+function CaptionCard(props: { readonly shown: ShownCaption }) {
+  const { shown } = props;
+  const title = shown.placement === 'title';
+  return (
+    <p
+      className={`oyl-demo__caption-card oyl-demo__caption-card--${shown.placement}`}
+      style={{
+        background: 'var(--oyl-color-hud-surface)',
+        borderRadius: 'var(--oyl-radius)',
+        boxSizing: 'border-box',
+        color: 'var(--oyl-color-hud-ink)',
+        fontFamily: 'var(--oyl-font-family-display)',
+        fontSize: title ? '6.5vh' : '4.2vh',
+        fontWeight: title ? 800 : 700,
+        left: '50%',
+        lineHeight: 1.2,
+        margin: 0,
+        // Between the bottom panels (each under 21 rem with its margin); 40 % at
+        // least, for a frame too small to have room between them.
+        maxWidth: title ? '80%' : 'max(40%, min(64%, calc(100% - 44rem)))',
+        opacity: shown.opacity,
+        padding: '0.35em 0.7em',
+        position: 'absolute',
+        textAlign: 'center',
+        width: 'max-content',
+        zIndex: 1,
+        ...(title
+          ? { top: '40%', transform: 'translate(-50%, -50%)' }
+          : { bottom: '6vh', transform: 'translateX(-50%)' }),
+      }}
+    >
+      {shown.text}
+    </p>
   );
 }
 
@@ -219,7 +297,7 @@ export function DemoPage(props: DemoPageProps) {
   const [hud, setHud] = useState<HudView | undefined>(undefined);
   const { renderer, drawnWorld, frames, reducedMotion, observeInView, publish, readFile } = props;
   const { drawnSeason, drawnDecorations, registerClosingCard } = props;
-  const [closing, setClosing] = useState(false);
+  const [closing, setClosing] = useState<{ readonly credit: boolean } | undefined>(undefined);
   const asked = query.ok ? query.route : undefined;
   const [load, setLoad] = useState<RouteLoad>(
     asked === undefined ? { kind: 'none' } : { kind: 'loading' },
@@ -242,7 +320,7 @@ export function DemoPage(props: DemoPageProps) {
   }, [asked, readFile]);
 
   useEffect(() => {
-    registerClosingCard?.(() => setClosing(true));
+    registerClosingCard?.((options) => setClosing(options));
   }, [registerClosingCard]);
 
   useEffect(() => {
@@ -320,6 +398,15 @@ export function DemoPage(props: DemoPageProps) {
   // heading, its status line, the map-data disclosure and the source offer are
   // a visitor's, and a video has its own credit (the HUD's, and the card).
   const rendering = query.ok && query.render === true;
+  const scene: CaptionScene | undefined = query.ok ? query.captions?.scene : undefined;
+  const shownCaption =
+    scene === undefined || hud === undefined
+      ? undefined
+      : captionAt(scene, hud.rideSeconds, {
+          reducedMotion,
+          // Map data is the one claim only the run knows; the rest are the script's.
+          shows: (feature) => feature !== 'map-data' || hud.mapData,
+        });
   return (
     // #1654: the page is its iframe's whole box, and the stage takes what the
     // lines above and below it leave, so the page never scrolls. #1945: in a
@@ -406,7 +493,10 @@ export function DemoPage(props: DemoPageProps) {
                   attribution={hud.mapData ? OSM_ATTRIBUTION : undefined}
                 />
               )}
-              {closing && hud?.mapData === true ? <ClosingCard /> : null}
+              {shownCaption === undefined ? null : <CaptionCard shown={shownCaption} />}
+              {closing === undefined ? null : (
+                <ClosingCard credit={closing.credit || hud?.mapData === true} />
+              )}
             </section>
           </div>
           {!rendering && load.kind === 'ready' && hud?.mapData === true ? (

@@ -45,7 +45,7 @@ import { BOT_MASS_KILOGRAMS, watts } from '@onyourleft/domain';
 export type DemoKit = 'house' | 'green' | 'lime' | 'purple' | 'magenta';
 
 /** Which preset this is. */
-export type DemoPresetId = 'climb' | 'sprint' | 'group';
+export type DemoPresetId = 'climb' | 'sprint' | 'group' | 'hill';
 
 /** One segment of a script: scalars only, authored by hand. */
 export interface ScriptSegment {
