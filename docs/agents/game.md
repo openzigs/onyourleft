@@ -2642,12 +2642,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         simulated rider; `capture-wiring.test.tsx` holds the
                         stepped clock. Read only in a `--mode capture` build;
                         `tools/capture/capture-stays-out.ts` fails a product
-                        build that carries a scene. `docs/demo-video.md`
-                        §"Capture mode"
+                        build that carries a scene (found by the id mark
+                        `oyl-capture-scene:`, #3153). #3153's scenes: Delivery
+                        on a built-in level, a lap race on a built-in circuit,
+                        a workout and the pacer — a seed only a scene sets,
+                        scripted presses (`CaptureCues`), an event log the
+                        tool writes beside the video (`CaptureLog`), and an
+                        in-memory store (`captureStorage`) so no rider data is
+                        read or written. `capture-modes-wiring.test.tsx`.
+                        `docs/demo-video.md` §"Capture mode"
     src/game/capture-recording.ts
                         a capture ride's Moving, Elapsed, ride-so-far and
                         Calories, folded in memory by `recording/totals.ts`
-                        §`rideTotals` from the readings it rode, never stored
+                        §`rideTotals` from the readings it rode, never stored;
+                        and its laps over a course's line (#3153)
+    src/game/capture-workout.ts
+                        a capture's workout (#3153): the Ride screen's built-in
+                        address, tailored and expanded as a rider's is, held at
+                        its ERG target on the ride's clock and drawn by
+                        `WorkoutStrip`. Writes to nothing
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

@@ -9,11 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CAPTURE_MODE,
+  CAPTURE_SCENE_MARK,
   CAPTURE_SCENES,
+  CaptureCues,
+  CaptureLog,
+  captureGhostTrack,
   captureReadingAt,
   captureRider,
   captureSceneFromHash,
   CaptureSensors,
+  captureStorage,
   publishCaptureFrame,
   type CaptureScene,
   type CaptureTarget,
@@ -40,13 +45,18 @@ describe('the capture switch — #3152', () => {
 
   it('reads the scene the fragment names', () => {
     expect(captureSceneFromHash('#/game?capture=route-hud')).toBe(CAPTURE_SCENES['route-hud']);
-    expect(captureSceneFromHash('#/game?simulate=200&capture=route-hud')?.id).toBe('route-hud');
+    expect(captureSceneFromHash('#/game?simulate=200&capture=route-hud')?.id).toBe(
+      'oyl-capture-scene:route-hud',
+    );
+    expect(captureSceneFromHash('#/game?route=level%3Amorning-round&capture=delivery')).toBe(
+      CAPTURE_SCENES['delivery'],
+    );
   });
 
   it('is off with no scene, an unknown one, or a name off the object’s prototype', () => {
     expect(captureSceneFromHash('#/game')).toBeUndefined();
     expect(captureSceneFromHash('#/game?capture=')).toBeUndefined();
-    expect(captureSceneFromHash('#/game?capture=delivery')).toBeUndefined();
+    expect(captureSceneFromHash('#/game?capture=no-such-scene')).toBeUndefined();
     expect(captureSceneFromHash('#/game?capture=toString')).toBeUndefined();
     expect(captureSceneFromHash('#/game?capture=__proto__')).toBeUndefined();
   });
@@ -80,12 +90,25 @@ describe('a scene’s script — #3152', () => {
     expect(captureReadingAt(SCENE, -3)).toEqual({ watts: 100, cadence: 80, heartRate: 100 });
   });
 
-  it('gives every shipped scene keys that rise from nought', () => {
-    for (const scene of Object.values(CAPTURE_SCENES)) {
+  it('gives every shipped scene keys that rise from nought, an id of the mark and its name, and cues in order', () => {
+    for (const [name, scene] of Object.entries(CAPTURE_SCENES)) {
       expect(scene.keys[0]?.second).toBe(0);
       const seconds = scene.keys.map((key) => key.second);
       expect(seconds).toEqual([...seconds].sort((a, b) => a - b));
+      expect(scene.id).toBe(`${CAPTURE_SCENE_MARK}${name}`);
+      const cues = (scene.cues ?? []).map((cue) => cue.second);
+      expect(cues).toEqual([...cues].sort((a, b) => a - b));
     }
+  });
+
+  it('has a scene for each of Delivery, the lap race, a workout and the pacer (#3153)', () => {
+    expect(CAPTURE_SCENES['delivery']?.route?.id).toMatch(/^level:/u);
+    expect(CAPTURE_SCENES['delivery']?.seed).toBeTypeOf('number');
+    expect(CAPTURE_SCENES['lap-race']?.route?.id).toMatch(/^circuit:/u);
+    expect(CAPTURE_SCENES['lap-race']?.lapRace?.aiBots).toBeUndefined();
+    expect(CAPTURE_SCENES['workout']?.workout?.query).toMatch(/^workout=built-in:/u);
+    expect(CAPTURE_SCENES['pacer']?.pacer).toBeDefined();
+    expect(CAPTURE_SCENES['pacer']?.ghost).toBe(true);
   });
 });
 
@@ -100,6 +123,86 @@ describe('the capture rider’s sensors — #3152', () => {
       cadence: { value: 85, live: true, paired: true },
       heartRate: { value: 125, live: true, paired: true },
     });
+  });
+});
+
+describe('a capture’s workout trainer — #3153', () => {
+  it('reads the power its trainer holds in place of the script’s, and the script’s where it holds none', () => {
+    const sensors = new CaptureSensors(SCENE, (second) => (second < 5 ? 231.6 : undefined));
+    sensors.start(0);
+    expect(sensors.read(1_000).rider.power).toBe(232);
+    expect(sensors.read(10_000).rider.power).toBe(200);
+    expect(sensors.read(10_000).cadence.value).toBe(90);
+  });
+});
+
+describe('a capture’s scripted presses — #3153', () => {
+  const scene: CaptureScene = {
+    ...SCENE,
+    cues: [
+      { kind: 'throw', second: 2 },
+      { kind: 'item', second: 2 },
+      { kind: 'throw', second: 5 },
+    ],
+  };
+
+  it('hands back each press once the ride is at its second, in order, a second apart, and the next only once it is taken', () => {
+    const cues = new CaptureCues(scene);
+    expect(cues.due(1.99)).toBeUndefined();
+    expect(cues.due(2)).toEqual({ kind: 'throw', second: 2 });
+    // Not taken: asked again.
+    expect(cues.due(2.5)).toEqual({ kind: 'throw', second: 2 });
+    cues.taken(2.5);
+    // Due at 2 s, but never within a second of the last press.
+    expect(cues.due(3.49)).toBeUndefined();
+    expect(cues.due(3.5)).toEqual({ kind: 'item', second: 2 });
+    cues.taken(3.5);
+    expect(cues.due(4.9)).toBeUndefined();
+    expect(cues.due(5)).toEqual({ kind: 'throw', second: 5 });
+    cues.taken(5);
+    expect(cues.due(99)).toBeUndefined();
+  });
+
+  it('makes none on a scene with none', () => {
+    expect(new CaptureCues(SCENE).due(99)).toBeUndefined();
+  });
+});
+
+describe('a capture’s log — #3153', () => {
+  it('stamps each event with the frames drawn when it happened, and hands back copies', () => {
+    const log = new CaptureLog();
+    log.note({ kind: 'race', seed: 7, field: ['a'] });
+    log.drew();
+    log.drew();
+    log.note({ kind: 'lap', lap: 1 });
+    const first = log.events();
+    log.drew();
+    log.note({ kind: 'score', score: 2 });
+    expect(log.drawn).toBe(3);
+    expect(first).toEqual([
+      { kind: 'race', seed: 7, field: ['a'], frame: 0 },
+      { kind: 'lap', lap: 1, frame: 2 },
+    ]);
+    expect(log.events()).toHaveLength(3);
+  });
+});
+
+describe('what a capture keeps, and races — #3153', () => {
+  it('keeps in a store of its own, empty at the start and apart from every other', () => {
+    const one = captureStorage();
+    const two = captureStorage();
+    expect(one.getItem('oyl.delivery.progress')).toBeNull();
+    one.setItem('oyl.delivery.progress', '{"day":2}');
+    expect(one.getItem('oyl.delivery.progress')).toBe('{"day":2}');
+    expect(two.getItem('oyl.delivery.progress')).toBeNull();
+  });
+
+  it('races a synthetic best: steady, an hour long, the same every time', () => {
+    const ghost = captureGhostTrack();
+    expect(ghost.totalTime).toBe(3_600);
+    expect(ghost.totalDistance).toBeCloseTo(30_960, 6);
+    expect(ghost.distance[10]).toBeCloseTo(86, 6);
+    expect(captureGhostTrack()).toEqual(ghost);
   });
 });
 

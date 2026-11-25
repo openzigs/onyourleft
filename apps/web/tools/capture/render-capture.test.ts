@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { servedFile } from './render-capture';
+import { captureEventsFile, captureEventsName, servedFile } from './render-capture';
 
 const DIST = mkdtempSync(join(tmpdir(), 'oyl-capture-dist-'));
 mkdirSync(join(DIST, 'assets'));
@@ -37,5 +37,28 @@ describe('the capture’s file server — #3152', () => {
     expect(servedFile(DIST, '/..%2F..%2Fetc%2Fpasswd')).toBeUndefined();
     expect(servedFile(DIST, '/assets')).toBeUndefined();
     expect(servedFile(DIST, '/missing.js')).toBeUndefined();
+  });
+});
+
+describe('the capture’s event log — #3153', () => {
+  const request = {
+    scene: 'delivery',
+    seconds: 2,
+    fps: 60,
+    width: 1920,
+    height: 1080,
+    out: undefined,
+  };
+
+  it('is written beside the video, under its name', () => {
+    expect(captureEventsName(request)).toBe('delivery-1920x1080-60fps.events.json');
+  });
+
+  it('holds the scene, its frames and every event of the last frame', () => {
+    const events = [{ frame: 0, kind: 'round', seed: 3, houses: [120, 300] }] as const;
+    expect(
+      captureEventsFile(request, { drawn: 121, distance: 18, elapsed: 2, events: [...events] }),
+    ).toEqual({ scene: 'delivery', fps: 60, frames: 120, events: [...events] });
+    expect(captureEventsFile(request, { drawn: 1, distance: 0, elapsed: 0 }).events).toEqual([]);
   });
 });

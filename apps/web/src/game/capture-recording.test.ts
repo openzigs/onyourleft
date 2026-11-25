@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   altitudeMetres,
   beatsPerMinute,
+  metres,
   metresPerSecond,
   revolutionsPerMinute,
   seconds,
@@ -18,6 +19,7 @@ import {
   watts,
 } from '@onyourleft/domain';
 
+import { courseLap } from '../recording/laps';
 import { rideTotals } from '../recording/totals';
 
 import { CaptureRecording, type CaptureSample } from './capture-recording';
@@ -83,5 +85,60 @@ describe('a capture ride’s recorder figures — #3152', () => {
     expect(recording.totals()).toBe(first);
     recording.sample(2, SAMPLES[1] ?? ({} as CaptureSample));
     expect(recording.totals()).not.toBe(first);
+  });
+});
+
+describe('a capture ride’s laps — #3153, the review of PR #3160', () => {
+  const series = (count: number) => ({
+    startedAt: unixSeconds(0),
+    sampleInterval: seconds(1),
+    sampleCount: count,
+    channels: {
+      power: SAMPLES.slice(0, count).map((each) => watts(each.watts)),
+      heartRate: [beatsPerMinute(130), beatsPerMinute(140), undefined].slice(0, count),
+      cadence: [revolutionsPerMinute(85), revolutionsPerMinute(90), undefined].slice(0, count),
+    },
+  });
+
+  it('counts the lap’s seconds from the last line crossed, and ends a lap there as the recorder does', () => {
+    const recording = new CaptureRecording();
+    recording.sample(1, SAMPLES[0] as CaptureSample);
+    recording.sample(2, SAMPLES[1] as CaptureSample);
+    expect(recording.lapSeconds).toBe(2);
+    const stretch = { distance: metres(17), ascent: metres(2), partial: false };
+    const laps = recording.courseLine({ kind: 'lap', again: true, ...stretch });
+    const mark = (second: number) => ({ at: unixSeconds(second), movingTime: seconds(second) });
+    expect(laps).toEqual([courseLap(series(2), mark(0), mark(2), stretch)]);
+    expect(laps?.[0]?.distance).toBe(17);
+    expect(recording.lapSeconds).toBe(0);
+    recording.sample(3, SAMPLES[2] as CaptureSample);
+    expect(recording.lapSeconds).toBe(1);
+    expect(recording.seconds).toBe(3);
+    // The totals fold the laps' climb, as the recorder's do.
+    const kept = series(3);
+    expect(recording.totals()).toEqual(
+      rideTotals(
+        {
+          ...kept,
+          channels: {
+            ...kept.channels,
+            speed: SAMPLES.map((each) => metresPerSecond(each.speed)),
+            altitude: SAMPLES.map((each) => altitudeMetres(each.altitude)),
+          },
+          pauses: [],
+        },
+        [{ ascent: metres(2) }],
+      ),
+    );
+  });
+
+  it('ends no lap on a line event that is not one', () => {
+    const recording = new CaptureRecording();
+    recording.sample(1, SAMPLES[0] as CaptureSample);
+    expect(recording.courseLine({ kind: 'started' })).toBeUndefined();
+    expect(
+      recording.courseLine({ kind: 'progress', distance: metres(5), ascent: undefined }),
+    ).toBeUndefined();
+    expect(recording.lapSeconds).toBe(1);
   });
 });

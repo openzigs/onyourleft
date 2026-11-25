@@ -165,11 +165,17 @@ import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { CaptureRecording } from './capture-recording';
 import {
+  CaptureCues,
+  CaptureLog,
   CaptureSensors,
+  captureGhostTrack,
   captureRider,
   captureSceneFromHash,
+  captureStorage,
   publishCaptureFrame,
+  type CaptureCue,
 } from './capture-scene';
+import { CaptureWorkout } from './capture-workout';
 import {
   simulatedClock,
   simulatedRideSentences,
@@ -272,6 +278,7 @@ import {
   deviceStorage,
   readAnnouncementPreference,
   type AnnouncementPreference,
+  type PreferenceStorage,
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
@@ -323,12 +330,18 @@ import { dampedSway } from './lane-change-lean';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
-import type { ThrowSide } from './delivery/throw';
+import {
+  CARRIAGEWAY_HALF_WIDTH_METRES,
+  PARCEL_THROW_SPEED_METRES_PER_SECOND,
+  TARGET_CATCH_RADIUS_METRES,
+  type ThrowSide,
+} from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
 import type { ItemInputPort } from './lap-race/item-input-port';
 import {
   answerLapRaceRide,
   askLapRaceRide,
+  LAP_RACE_RIDER_ID,
   askRaceItem,
   askRaceLane,
   countLapRaceDown,
@@ -360,7 +373,7 @@ import {
   type RoomLapRaceRide,
 } from './lap-race/room-race';
 import { lapRaceInView } from './lap-race/in-view';
-import { lapRaceStandings, type LapRaceHud } from './hud/lap-race-hud';
+import { lapRaceStandings, riderEntry, type LapRaceHud } from './hud/lap-race-hud';
 import {
   deliveryEvents,
   deliverySpoken,
@@ -1401,6 +1414,8 @@ function useSimulatedRide(
     madeTheRoom: undefined,
     rooms: undefined,
     delivery: false,
+    // #3153: a capture scene's race, on the built-in circuit it opens on.
+    ...(simulated.capture?.lapRace === undefined ? {} : { lapRace: simulated.capture.lapRace }),
   };
 }
 
@@ -1425,10 +1440,32 @@ function GameScreen({
 }): JSX.Element {
   // #1992: held for this screen's life — the key above makes a new screen of a new choice.
   const [simulated] = useState(asked);
-  // #3152: a capture's scripted sensors, held for the screen as the rider is.
-  const [captureSensors] = useState(() =>
-    simulated?.capture === undefined ? undefined : new CaptureSensors(simulated.capture),
+  const captureScene = simulated?.capture;
+  // #3153: a capture scene's workout, its trainer held at the ERG target.
+  const [captureWorkout] = useState(() =>
+    captureScene?.workout === undefined ? undefined : new CaptureWorkout(captureScene.workout),
   );
+  // #3152: a capture's scripted sensors, held for the screen as the rider is.
+  // #3153: on a workout, the power is what its trainer holds.
+  const [captureSensors] = useState(() =>
+    captureScene === undefined
+      ? undefined
+      : new CaptureSensors(
+          captureScene,
+          captureWorkout === undefined ? undefined : (second) => captureWorkout.heldWatts(second),
+        ),
+  );
+  /**
+   * #3153: where the game keeps the rider's own game state — Delivery's week,
+   * the levels finished and both assist settings: the device's, or on a
+   * capture an empty store in memory (`capture-scene.ts` §`captureStorage`),
+   * so a capture reads none of a rider's and writes none.
+   */
+  const [keptStorage] = useState<() => PreferenceStorage | undefined>(() => {
+    if (captureScene === undefined) return deviceStorage;
+    const store = captureStorage();
+    return () => store;
+  });
   const props = useSimulatedRide(given, simulated, captureSensors);
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
@@ -1505,7 +1542,8 @@ function GameScreen({
     setRiderGhostProblem(undefined);
     if (value) setWithGhost(false);
   }, []);
-  const [withPacer, setWithPacer] = useState(false);
+  // #3153: a capture scene's pacer is on from the first render.
+  const [withPacer, setWithPacer] = useState(captureScene?.pacer !== undefined);
   /**
    * The AI pacer — #2712: whether the rider switched it on (per ride, like
    * the pacer), and what the instance last said of it for this rider. Read
@@ -1586,7 +1624,9 @@ function GameScreen({
     setWithLapRace(value);
     if (value) setWithDelivery(false);
   }, []);
-  const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
+  const [intensity, setIntensity] = useState(
+    String(captureScene?.pacer?.wattsPerKilogram ?? DEFAULT_PACER_INTENSITY),
+  );
   /**
    * Where the rider said their hands are — #365.
    *
@@ -1662,7 +1702,16 @@ function GameScreen({
    * during render (PR #3160's review). `undefined` on every other ride.
    */
   const [captureFigures, setCaptureFigures] = useState<
-    { readonly seconds: number; readonly totals: RideTotals } | undefined
+    | { readonly seconds: number; readonly lapSeconds: number; readonly totals: RideTotals }
+    | undefined
+  >(undefined);
+  /** #3153: a capture ride's frames and events, for the capture tool. @see CaptureLog */
+  const captureLogRef = useRef<CaptureLog | undefined>(undefined);
+  /** #3153: a capture ride's scripted presses still to make. @see CaptureCues */
+  const captureCuesRef = useRef<CaptureCues | undefined>(undefined);
+  /** #3153: what `WorkoutStrip` draws of a capture's workout, copied out each second. */
+  const [captureWorkoutGraph, setCaptureWorkoutGraph] = useState<
+    ReturnType<CaptureWorkout['graphAt']> | undefined
   >(undefined);
   /**
    * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
@@ -2504,7 +2553,7 @@ function GameScreen({
             // A level the listing does not name has no place in the order, so
             // nothing says it is open: it is not read (fails closed).
             return !order.includes(levelId) ||
-              levelStanding(order, readLevelProgress(deviceStorage()), levelId).state === 'locked'
+              levelStanding(order, readLevelProgress(keptStorage()), levelId).state === 'locked'
               ? undefined
               : (port.loadDeliveryLevel?.(levelId) ?? Promise.resolve(undefined));
           })
@@ -2657,7 +2706,7 @@ function GameScreen({
       // then, in the tick.
       const delivery = deliveryRef.current;
       if (delivery !== undefined && delivery.outcome === undefined) {
-        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery), delivery);
+        keepDeliveryWeek(keptStorage(), endDeliveryRide(delivery), delivery);
       }
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
@@ -2893,7 +2942,11 @@ function GameScreen({
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
       ghostRiderRef.current = undefined;
-      if (riderGhost) {
+      if (captureScene !== undefined) {
+        // #3153: a capture races a bundled synthetic best, or nobody — never
+        // the rider's own attempts, nor another rider's.
+        ghostRef.current = captureScene.ghost === true ? captureGhostTrack() : undefined;
+      } else if (riderGhost) {
         // #331: ONE other rider's ghost, in place of the rider's own. Asked
         // for at the press, and never kept: it lives in this ref for this ride.
         const asked: RiderGhostLoad = (await port?.loadRiderGhost?.(route.id)) ?? {
@@ -3162,7 +3215,16 @@ function GameScreen({
         captureSensors.start((props.now ?? performanceNow)());
         const recording = new CaptureRecording();
         captureRecordingRef.current = recording;
-        setCaptureFigures({ seconds: recording.seconds, totals: recording.totals() });
+        setCaptureFigures({
+          seconds: recording.seconds,
+          lapSeconds: recording.lapSeconds,
+          totals: recording.totals(),
+        });
+        // #3153: and its log, its scripted presses and its workout's first picture.
+        captureLogRef.current = new CaptureLog();
+        captureCuesRef.current =
+          captureScene === undefined ? undefined : new CaptureCues(captureScene);
+        setCaptureWorkoutGraph(captureWorkout?.graphAt(0));
       }
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
@@ -3404,7 +3466,9 @@ function GameScreen({
                 // #1853: the steering starts from the racing line, never from
                 // where a level bot or ghost has eased the drawn rider.
                 lineOffset: lineOffsetAt(racingLine(profile), from),
-                storage: deviceStorage(),
+                storage: keptStorage(),
+                // #3153: a capture scene's seed; every other round draws its own.
+                seed: captureScene?.seed,
                 // #2362: a level's round is its own houses and its parked cars and bins.
                 level:
                   levelRidden === undefined
@@ -3415,6 +3479,15 @@ function GameScreen({
                         id: levelRidden.file.id,
                       },
               });
+        // #3153: the round a capture's seed picked, for its log.
+        const picked = deliveryRef.current;
+        if (picked !== undefined && captureScene?.seed !== undefined) {
+          captureLogRef.current?.note({
+            kind: 'round',
+            seed: captureScene.seed,
+            houses: picked.targets.map((target) => Math.round(target.distance)),
+          });
+        }
         const noRoundText: string | undefined =
           deliveryRef.current !== undefined
             ? undefined
@@ -3453,7 +3526,9 @@ function GameScreen({
               conditions: lapRaceBotConditions(profile, raced),
               riderDistance: simulation.state.ride.distance,
               lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
-              storage: deviceStorage(),
+              storage: keptStorage(),
+              // #3153: a capture scene's seed; every other race draws its own.
+              seed: captureScene?.seed,
               // #2461, ADR 0067 D-3.4: ADR 0066 D-6's switch reaches the race.
               // On, every racer drafts, the rider included; off, none does.
               draft: readSoloDraftChoice(deviceStorage()),
@@ -3463,6 +3538,15 @@ function GameScreen({
               // last said this rider's consent names its model (D-5.2).
               model: raceChoice.aiBots === true && aiBotsConsented(tacticsStatusRef.current),
             });
+      // #3153: the field a capture's seed dealt, for its log.
+      const dealt = lapRaceRef.current;
+      if (dealt !== undefined && captureScene !== undefined) {
+        captureLogRef.current?.note({
+          kind: 'race',
+          seed: dealt.seed,
+          field: dealt.bots.map((bot) => dealt.names[bot.id] ?? bot.id),
+        });
+      }
       // #2710: a race with AI bots takes the instance's model slot and warms
       // it (D-6.5). Refused, AI bots are not available for this race, and it
       // rides seeded (D-6.3). The race does not wait for the answer.
@@ -3648,8 +3732,6 @@ function GameScreen({
     // lane change turns and leans the bicycle rather than sliding it.
     let steeredSway = 0;
     let steeredSwayAt: number | undefined;
-    // #3152: the frames of this ride that drew the world, for the capture tool.
-    let captureDrawn = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -4024,7 +4106,25 @@ function GameScreen({
             speed: simulation.state.ride.speed,
             altitude: elevationAt(road.profile, onRoad.ride.distance),
           });
-          setCaptureFigures({ seconds: capture.seconds, totals: capture.totals() });
+          setCaptureFigures({
+            seconds: capture.seconds,
+            lapSeconds: capture.lapSeconds,
+            totals: capture.totals(),
+          });
+        }
+        // #3153: and a capture's workout, its trace and where it has got to.
+        if (captureWorkout !== undefined) {
+          const before = captureWorkout.blockAt(traceSecond - 1);
+          const block = captureWorkout.blockAt(traceSecond);
+          if (block !== undefined && block !== before) {
+            captureLogRef.current?.note({ kind: 'block', block });
+          }
+          captureWorkout.sample(
+            traceSecond,
+            sensors.rider.live ? sensors.rider.power : undefined,
+            sensors.heartRate.live ? sensors.heartRate.value : undefined,
+          );
+          setCaptureWorkoutGraph(captureWorkout.graphAt(simulation.state.elapsed));
         }
       }
       if (paced.draw) {
@@ -4253,7 +4353,20 @@ function GameScreen({
           : courseLineEvent(course, lapsDoneRef.current, simulation.state.ride.distance);
       if (course !== undefined && crossed !== undefined) {
         lapsDoneRef.current = courseLapsDone(course, simulation.state.ride.distance);
-        const laps = trainerPortRef.current?.courseLine?.(crossed);
+        // #3153, the review of PR #3160: a capture keeps its laps in memory, as its figures.
+        const capture = captureRecordingRef.current;
+        const laps =
+          capture === undefined
+            ? trainerPortRef.current?.courseLine?.(crossed)
+            : capture.courseLine(crossed);
+        if (capture !== undefined && crossed.kind === 'lap') {
+          captureLogRef.current?.note({ kind: 'lap', lap: lapsDoneRef.current });
+          setCaptureFigures({
+            seconds: capture.seconds,
+            lapSeconds: capture.lapSeconds,
+            totals: capture.totals(),
+          });
+        }
         if (laps !== undefined) {
           setRideLaps(laps);
         }
@@ -4423,6 +4536,31 @@ function GameScreen({
       // trainer is sent (DL5): the gradient above samples the simulation alone, and
       // is sampled BEFORE this, so a fault in the round cannot stop the loop
       // short of this frame's grade write.
+      // #3153: a capture's scripted presses, through the HUD's own ports, so
+      // each is taken as a rider's press is.
+      const cues = captureCuesRef.current;
+      const cue = cues?.due(simulation.state.elapsed);
+      if (cues !== undefined && cue !== undefined) {
+        const taken = captureCueTaken(
+          cue,
+          deliveryRef.current,
+          lapRaceRef.current,
+          simulation.state.ride.speed,
+          {
+            throwParcel: () => {
+              throwPortRef.current.throwParcel('next-house');
+              return throwAskedRef.current !== undefined;
+            },
+            useItem: () => {
+              itemPortRef.current.useItem();
+            },
+          },
+        );
+        if (taken !== undefined) {
+          cues.taken(simulation.state.elapsed);
+          captureLogRef.current?.note({ kind: 'cue', cue: cue.kind, second: cue.second, taken });
+        }
+      }
       const crashClock = (crashClockRef.current += Math.max(0, at - lastFrameAt));
       const delivery = deliveryRef.current;
       if (delivery !== undefined && stepsRun > 0) {
@@ -4436,6 +4574,9 @@ function GameScreen({
         });
         throwAskedRef.current = undefined;
         deliveryRef.current = stepped.ride;
+        if (stepped.ride.score !== delivery.score) {
+          captureLogRef.current?.note({ kind: 'score', score: stepped.ride.score });
+        }
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
         // #2454: and drawn — the rider goes down where they are and gets back
@@ -4459,9 +4600,9 @@ function GameScreen({
           owed = oweRoundOver(owed, ended, stepped.ride.score);
           // Kept the moment the round ends, so a ride that goes on afterwards
           // and is then lost keeps it too (#1806).
-          keepDeliveryWeek(deviceStorage(), ended, stepped.ride);
+          keepDeliveryWeek(keptStorage(), ended, stepped.ride);
           // #2363, ADR 0065 D-9: a level's round, reached its end, opens the next level.
-          keepLevelFinished(deviceStorage(), stepped.ride);
+          keepLevelFinished(keptStorage(), stepped.ride);
         }
         deliveryOwedRef.current = owed;
       }
@@ -4868,12 +5009,15 @@ function GameScreen({
           view.render(frame);
           // #3152: told to the capture tool, which steps the next frame only
           // once this one has drawn the world.
-          if (captureRecordingRef.current !== undefined) {
-            captureDrawn += 1;
+          // #3153: counted in the ride's log, which stamps its events by it.
+          const captureLog = captureLogRef.current;
+          if (captureRecordingRef.current !== undefined && captureLog !== undefined) {
+            captureLog.drew();
             publishCaptureFrame({
-              drawn: captureDrawn,
+              drawn: captureLog.drawn,
               distance: simulation.state.ride.distance,
               elapsed: simulation.state.elapsed,
+              events: captureLog.events(),
             });
           }
           // #783: the other riders' names over the frame just drawn — DOM,
@@ -5301,7 +5445,7 @@ function GameScreen({
             week: ((week) =>
               level !== undefined && picked === level.route.id
                 ? { ...week, houses: level.file.round.houses }
-                : week)(readDeliveryProgress(deviceStorage())),
+                : week)(readDeliveryProgress(keptStorage())),
             // #2294: what each saved route holds for the round, as counted. A
             // level's own count is its offer's (#2362, `level` above), in
             // either world.
@@ -5314,7 +5458,7 @@ function GameScreen({
             onChoose: chooseLapRace,
             choice: lapRaceChoice,
             onChoice: setLapRaceChoice,
-            assisted: lapRaceAssisted(deviceStorage()),
+            assisted: lapRaceAssisted(keptStorage()),
             // #2710: AI bots, only while the rider's instance offers them.
             ...(tacticsStatus?.kind === 'offered'
               ? {
@@ -5603,7 +5747,8 @@ function GameScreen({
         // #2072: and the elapsed time, the recorder's again — pauses included.
         elapsedSeconds={captureFigures?.seconds ?? elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
-        lapSeconds={captureFigures?.seconds ?? lapSeconds}
+        // #3153, the review of PR #3160: a capture's from its last line.
+        lapSeconds={captureFigures?.lapSeconds ?? lapSeconds}
         // #2080: and every lap it has stated, for the lap splits panel.
         laps={rideLaps}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
@@ -5811,7 +5956,8 @@ function GameScreen({
         // #1307: the running workout as a picture, where the route plan is
         // on an ordinary ride. The Ride screen's own snapshot, read through
         // the port like the hold above; it draws and decides nothing.
-        workout={props.trainer?.runningWorkout?.()}
+        // #3153: or a capture's, held by its own trainer.
+        workout={captureWorkoutGraph ?? props.trainer?.runningWorkout?.()}
         // #551: the side camera's one line and its Stop. A lost link on an
         // OPEN pairing is not here but in `notices` below — it is the
         // exception, and a steady "filming" in the notice slot would take a
@@ -6175,6 +6321,44 @@ function GameScreen({
 const PACER_SAY_LABEL = 'Your pacer';
 /** The class that sets the AI pacer's line larger than a notice — #2760's review. */
 const PACER_SAY_CLASS = 'oyl-hud__pacer-say';
+
+/**
+ * #3153: make a capture's scripted press ({@link CaptureCue}): whether the
+ * ride took it, or `undefined` while a throw waits for its aim. A throw is
+ * aimed as a rider aims (`delivery/throw.ts`, "The flight"): the parcel is
+ * thrown from where the rider is drawn and carries their `speed` forward while
+ * it covers the step's depth sideways, so it goes once it would land within
+ * the catch radius of the next house's step — and a script written in seconds
+ * throws where the seed put the houses. An item is used once one is held; one
+ * asked of no race is not taken.
+ */
+function captureCueTaken(
+  cue: CaptureCue,
+  delivery: DeliveryRide | undefined,
+  race: LapRaceRide | undefined,
+  speed: number,
+  press: { readonly throwParcel: () => boolean; readonly useItem: () => void },
+): boolean | undefined {
+  if (cue.kind === 'item') {
+    if (race === undefined) return false;
+    // As a rider does: an item is used once one is held, from a pick-up.
+    if (riderEntry(race.race, LAP_RACE_RIDER_ID).held === null) return undefined;
+    press.useItem();
+    return true;
+  }
+  if (delivery === undefined) return undefined;
+  let house: DeliveryRide['throwTargets'][number] | undefined;
+  for (const target of delivery.throwTargets) {
+    if (delivery.round.houses[target.position] !== 'expecting') continue;
+    if (target.along + delivery.throwWindow.afterMetres < delivery.along) continue;
+    if (house === undefined || target.along < house.along) house = target;
+  }
+  if (house === undefined) return undefined;
+  const across = CARRIAGEWAY_HALF_WIDTH_METRES + house.clear;
+  const lands = delivery.along + speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+  if (lands < house.along - TARGET_CATCH_RADIUS_METRES) return undefined;
+  return press.throwParcel() ? true : undefined;
+}
 
 /** The simulation's start for a simulated ride, or nothing: the start line. */
 function startOf(
