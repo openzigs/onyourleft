@@ -271,9 +271,16 @@ is fine ("based on On Your Left") and what is not.
 
 ## Privacy
 
-Nothing is collected. There is no analytics, no account you need, and no code in the client that
-transmits a ride, a heart rate or a position anywhere except to an instance you choose to sign in
-to — which is checkable rather than a promise, because the whole thing is here.
+There is no analytics and no account you need, and the app sends no ride, heart rate or position
+anywhere except to an instance you choose to sign in to — which is checkable rather than a promise,
+because the whole thing is here.
+
+It does fetch map data from the project's own tile host, `tiles.openzigs.com`: the map around where
+you ride, the route's tiles in the realistic world, the heights along a route you draw, and, in an
+open-world ride, the map block by block, which lets the host see requests that follow where you go.
+Cloudflare, which serves it, keeps each request's IP address, time and device or browser type for up
+to 7 days, visible to the project's Cloudflare account, which does not use or share it. You can turn
+map tiles off in Settings, and then no request is made.
 
 The published policy is [`docs/privacy-policy.md`](docs/privacy-policy.md). It is the one the Android
 app links to from its About page and the one the Play listing points at; `apps/web/src/privacy/policy.ts`
