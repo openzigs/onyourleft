@@ -45,7 +45,10 @@
  *   threshold at 170. It approaches the target exponentially, over
  *   {@link HEART_RISE_SECONDS} s rising and {@link HEART_FALL_SECONDS} s
  *   falling, so it lags an effort by tens of seconds and recovers more slowly
- *   than it rose; a seeded wobble of at most ±1.2 bpm keeps it alive.
+ *   than it rose; a seeded wobble of at most ±1.2 bpm keeps it alive. A step
+ *   up settles in about 2–3 minutes, as a real rider's does (#3215, the
+ *   owner's ruling of 2026-11-25): about 69 % of the rise in the first minute,
+ *   and within 3 bpm of the plateau after three, even from rest to threshold.
  *
  * No random jumps: the only noise is a sum of slow sines whose phases come
  * from the seed, so a test pins every curve and a frame rate cannot move one.
@@ -62,8 +65,14 @@ const DEFAULT_THRESHOLD_WATTS = 250;
 const DEFAULT_THRESHOLD_BPM = 170;
 /** How far above threshold heart rate the rate may climb on any effort: a maximum. */
 const HEADROOM_BPM = 15;
-/** The time constant of a rising heart rate, seconds. */
-const HEART_RISE_SECONDS = 30;
+/**
+ * The time constant of a rising heart rate, seconds (#3215). One exponential
+ * meets both of the ruling's numbers: 60–70 % of a rise in the first minute
+ * asks for 50–66 s, and within 3 bpm of the plateau after three, on a step
+ * from rest to threshold (100 bpm), asks for no more than 51.4. Rest to the
+ * cap, 115 bpm, is then 3.4 bpm short after three minutes: about 3.
+ */
+const HEART_RISE_SECONDS = 51;
 /** The time constant of a falling heart rate, seconds: recovery is slower. */
 const HEART_FALL_SECONDS = 120;
 

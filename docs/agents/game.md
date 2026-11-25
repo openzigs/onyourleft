@@ -2643,7 +2643,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         rpm on the flat, 70–80 on a steep climb, a spin-up on
                         a surge, nought within 2 s of no power; heart rate
                         from 70 bpm at rest, lagging power by tens of seconds
-                        towards the rider's own thresholds (else 250 W / 170
+                        and settling a step up in 2–3 min (#3215) towards the
+                        rider's own thresholds (else 250 W / 170
                         bpm). Seeded wobble, no jumps; `simulated-body.test.ts`
                         pins the curves.
     src/game/capture-scene.ts

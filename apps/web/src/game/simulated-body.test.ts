@@ -69,6 +69,40 @@ function largestStep(values: readonly number[]): number {
   return largest;
 }
 
+/** The heart rate `after` seconds into a step from `before` watts to `watts`, and the two it lies between. */
+interface Step {
+  /** The rate of a body that never stepped: where the step began. */
+  readonly start: number;
+  readonly now: number;
+  /** The rate of a body that rode `watts` all along: where the step ends. */
+  readonly plateau: number;
+}
+
+/**
+ * A step from `before` watts to `watts` after ten settled minutes, read
+ * `after` seconds in (#3215). The three bodies share a seed and are read at
+ * the same second, so the wobble is the same in each and cancels.
+ */
+function step(before: number, watts: number, after: number): Step {
+  const settled = 600;
+  const second = settled + after;
+  const read = (legs: readonly Leg[]): number =>
+    ride(legs, 1).find(([at]) => at === second)?.[2] ?? Number.NaN;
+  return {
+    start: read([{ seconds: second, watts: before }]),
+    now: read([
+      { seconds: settled, watts: before },
+      { seconds: after, watts },
+    ]),
+    plateau: read([{ seconds: second, watts }]),
+  };
+}
+
+/** How far of its way a step has gone, from nought to one, up or down. */
+function shareOfStep({ start, now, plateau }: Step): number {
+  return (now - start) / (plateau - start);
+}
+
 describe('InventedBody at the start of a ride — #3210', () => {
   it('has no cadence and a resting heart rate before it has ridden', () => {
     const body = new InventedBody(3210);
@@ -118,24 +152,24 @@ describe('InventedBody on a step up in power — #3210', () => {
     expect(from(ridden, 290).map(([, cadence, heart]) => [cadence, heart])).toEqual([
       [86, 130],
       [85, 129],
+      [92, 138],
       [92, 142],
-      [92, 149],
-      [91, 156],
-      [91, 159],
-      [90, 162],
+      [91, 148],
+      [91, 152],
+      [90, 155],
+      [90, 158],
+      [88, 159],
+      [87, 162],
+      [88, 163],
+      [89, 165],
       [90, 165],
-      [88, 165],
+      [89, 166],
+      [90, 167],
+      [90, 167],
+      [89, 168],
       [87, 168],
-      [88, 167],
+      [88, 169],
       [89, 169],
-      [90, 169],
-      [89, 169],
-      [90, 170],
-      [90, 169],
-      [89, 170],
-      [87, 170],
-      [88, 170],
-      [89, 170],
     ]);
   });
 
@@ -165,6 +199,41 @@ describe('InventedBody on a step up in power — #3210', () => {
   });
 });
 
+/**
+ * #3215, the owner's ruling of 2026-11-25: a step up settles in about 2–3
+ * minutes, as a real rider's heart rate does, with about 60–70 % of the rise
+ * in the first minute and the rate within about 3 bpm of its plateau after
+ * three.
+ */
+describe('InventedBody settles a step up in 2–3 minutes — #3215', () => {
+  const steps = [
+    { name: 'from rest to threshold, 70 to 170 bpm', before: 0, watts: 250 },
+    { name: 'from rest to 200 W, the tablet’s step, 70 to 150 bpm', before: 0, watts: 200 },
+    { name: 'from endurance to threshold, 130 to 170 bpm', before: 150, watts: 250 },
+  ] as const;
+
+  for (const { name, before, watts } of steps) {
+    it(`goes 60–70 % of the way in the first minute, ${name}`, () => {
+      const share = shareOfStep(step(before, watts, 60));
+      expect(share).toBeGreaterThanOrEqual(0.6);
+      expect(share).toBeLessThanOrEqual(0.7);
+    });
+
+    it(`is within 3 bpm of its plateau after three minutes, ${name}`, () => {
+      const { now, plateau } = step(before, watts, 180);
+      expect(plateau - now).toBeGreaterThanOrEqual(0);
+      expect(plateau - now).toBeLessThanOrEqual(3);
+    });
+  }
+
+  it('has not settled after two minutes of a big step: more than 3 bpm short', () => {
+    for (const watts of [200, 250]) {
+      const { now, plateau } = step(0, watts, 120);
+      expect(plateau - now).toBeGreaterThan(3);
+    }
+  });
+});
+
 describe('InventedBody on a step down in power — #3210', () => {
   const ridden = ride(
     [
@@ -181,13 +250,13 @@ describe('InventedBody on a step down in power — #3210', () => {
       [83, 168],
       [86, 163],
       [86, 162],
-      [87, 159],
+      [87, 158],
       [87, 156],
       [88, 155],
-      [86, 152],
+      [86, 151],
       [85, 151],
       [86, 148],
-      [87, 148],
+      [87, 147],
       [88, 146],
       [87, 144],
       [88, 144],
@@ -199,17 +268,13 @@ describe('InventedBody on a step down in power — #3210', () => {
     ]);
   });
 
-  it('recovers more slowly than it rose', () => {
-    const up = ride(
-      [
-        { seconds: 300, watts: 150 },
-        { seconds: 60, watts: 250 },
-      ],
-      60,
-    ).at(-1);
-    const down = ridden.find(([at]) => at === 360);
-    // A minute after each step: the rise has gone further than the fall.
-    expect((up?.[2] ?? 0) - 130).toBeGreaterThan(170 - (down?.[2] ?? 0));
+  it('recovers more slowly than it rose: under half the fall in the first minute — #3215', () => {
+    // A minute after each step between the same two powers: the rise has gone
+    // further of its way than the fall has of its own.
+    const rise = shareOfStep(step(150, 250, 60));
+    const fall = shareOfStep(step(250, 150, 60));
+    expect(fall).toBeLessThan(0.5);
+    expect(fall).toBeLessThan(rise - 0.2);
   });
 });
 
@@ -260,20 +325,20 @@ describe('InventedBody on a climb — #3210', () => {
 
   it('is pinned', () => {
     expect(from(ridden, 110).map(([, cadence, heart]) => [cadence, heart])).toEqual([
-      [87, 147],
-      [87, 150],
-      [75, 148],
-      [77, 150],
-      [78, 149],
-      [80, 150],
-      [78, 150],
-      [77, 149],
-      [70, 151],
+      [87, 140],
+      [87, 143],
+      [75, 143],
+      [77, 146],
+      [78, 145],
+      [80, 147],
+      [78, 148],
+      [77, 147],
       [70, 149],
-      [68, 151],
-      [68, 150],
+      [70, 147],
+      [68, 149],
+      [68, 149],
       [71, 149],
-      [71, 151],
+      [71, 150],
     ]);
   });
 
