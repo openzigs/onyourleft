@@ -180,6 +180,13 @@ export interface RideToSaveInput {
    * pacer, and for one recovered after a crash.
    */
   readonly pacerModel?: PacerModelFact | undefined;
+  /**
+   * Whether some of this ride was ridden in the trainer game's open world —
+   * #3088, as the recorder kept it (`recorder.ts` §`openWorld`), so a ride
+   * recovered after a crash says so too. Saved as `RideFacts.openWorld`,
+   * which keeps the ride off every segment.
+   */
+  readonly openWorld?: boolean | undefined;
 }
 
 /**
@@ -271,6 +278,8 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         : { draftSpans: input.draft.draftSpans }),
       // #2712: known only to the ride that rode it, like the draft above.
       ...(input.pacerModel === undefined ? {} : { pacerModel: input.pacerModel }),
+      // #3088: and of the open world, which keeps the ride off every segment.
+      ...(input.openWorld === true ? { openWorld: true } : {}),
     },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

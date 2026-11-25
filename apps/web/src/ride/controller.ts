@@ -1385,6 +1385,14 @@ export interface RideController {
    */
   noteLapRace(race: LapRaceModelRecord): void;
   /**
+   * The game is riding the open world — #3088, the owner's ruling of
+   * 2026-11-25: told on every frame of an open-world ride. Marks the
+   * recording in progress (`Recorder.noteOpenWorld`), so the saved ride
+   * carries `RideFacts.openWorld` and is matched against no segment. Ignored
+   * unless a ride is recording or paused. Decides no write to the trainer.
+   */
+  noteOpenWorld(): void;
+  /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
    * marked here on the recorder's own clock, kept by the recorder (and so in
@@ -3509,6 +3517,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       ...(draft === undefined ? {} : { draft }),
       // #2712: and of its AI pacer. A recovered ride passes none.
       ...(pacerModel === undefined ? {} : { pacerModel }),
+      // #3088: the recorder's own, so a recovered ride keeps it by this path.
+      ...(current.openWorld ? { openWorld: true } : {}),
     });
   };
 
@@ -4612,6 +4622,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     noteLapRace(race: LapRaceModelRecord): void {
       // No phase check, for `noteRoomRace`'s reason.
       recorder?.noteLapRace(race);
+    },
+
+    noteOpenWorld(): void {
+      // #3088. A phase check, unlike `noteRoomRace`: a stopped recorder's ride
+      // is saved or being saved, and a mark landing after its save read the
+      // recorder would rewrite the stopped checkpoint for nothing. Idle, there
+      // is no recorder.
+      if (phase !== 'recording' && phase !== 'paused') return;
+      recorder?.noteOpenWorld();
     },
 
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {

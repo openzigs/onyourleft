@@ -71,6 +71,8 @@ export interface RecordedCalls {
   recordForRoom: number;
   readonly noteRoomRace: unknown[];
   readonly noteLapRace: unknown[];
+  /** #3088: one entry per `noteOpenWorld` call. */
+  readonly noteOpenWorld: unknown[];
   /** #1318 — the ride screen's *Lap*. */
   markLap: number;
   /** #1042 — the result card's *Done*, and its one announcement. */
@@ -228,6 +230,7 @@ export function stubRideController(
     recordForRoom: 0,
     noteRoomRace: [],
     noteLapRace: [],
+    noteOpenWorld: [],
     markLap: 0,
     dismissResult: 0,
     noteResultAnnounced: 0,
@@ -321,6 +324,9 @@ export function stubRideController(
     recordForRoom: () => {
       calls.recordForRoom += 1;
       return Promise.resolve(false);
+    },
+    noteOpenWorld: () => {
+      calls.noteOpenWorld.push(true);
     },
     noteLapRace: (race) => {
       calls.noteLapRace.push(race);

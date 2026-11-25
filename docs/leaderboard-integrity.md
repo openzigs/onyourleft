@@ -54,6 +54,19 @@ The incumbent leaderboard service reports removing about a third of impossible c
 automatically, after a decade of work on it (`stories.strava.com`, read 2026-09-02). This rule
 claims no more than its fixtures show. The rest is left to the community flag.
 
+## Open-world rides
+
+A ride in the trainer game's open world follows real streets, but its speed comes from the game's
+physics. No bicycle was on that road. So **an open-world ride is never matched against a segment**
+([#3088](https://github.com/openzigs/onyourleft/issues/3088), the owner's ruling of 2026-11-25). Its
+efforts never become personal bests, and they never reach a shared board. The ride is marked as
+open-world when it is saved, and the device's matcher skips any ride with that mark. A ride without
+the mark is matched as before.
+
+The instance cannot check this itself. It never holds a ride's positions, and nothing it is sent
+says whether a ride was open-world. An instance takes efforts only from a rider's own device, so the
+rule holds on any device that runs this app.
+
 ## The community flag
 
 A rider can flag **another rider's effort** on a segment, or flag **the segment itself as
