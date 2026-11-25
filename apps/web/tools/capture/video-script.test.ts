@@ -246,7 +246,7 @@ describe('the demo video’s scene script — #3156', () => {
       expect.objectContaining({ text: 'Bots that attack, chase and sit in', callout: 'standings' }),
     );
     // Each one named is a tactic the on-device bots ride (ADR 0067).
-    const named: readonly BotTactic[] = ['attack', 'chase', 'sit-in'];
+    const named: BotTactic[] = ['attack', 'chase', 'sit-in'];
     expect(BOT_TACTICS).toEqual(expect.arrayContaining(named));
   });
 
