@@ -224,7 +224,8 @@ describe('the demo video’s scene script — #3156', () => {
     expect(RIDING_PANELS).toEqual(['readings', 'totals', 'elevation', 'map', 'controls']);
     expect(of('route-hud')).toEqual([...RIDING_PANELS]);
     expect(of('free-ride')).toEqual([...RIDING_PANELS]);
-    expect(of('workout')).toEqual([...RIDING_PANELS, 'workout']);
+    // A workout's strip is drawn in the map's place (#1307).
+    expect(of('workout')).toEqual(['readings', 'totals', 'elevation', 'controls', 'workout']);
     expect(of('pacer')).toEqual([...RIDING_PANELS, 'pacer', 'best']);
     expect(of('lap-race')).toEqual([...RIDING_PANELS, 'standings', 'item']);
     expect(of('delivery')).toEqual([...RIDING_PANELS, 'houses', 'throw']);

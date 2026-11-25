@@ -118,11 +118,17 @@ export const RIDING_PANELS = [
  * {@link RIDING_PANELS}, and the panels of each mode the scene rides (the
  * workout's strip, the pacer's and the best ride's readings, the race's
  * standings and item, the round's houses and throws). The render stops on a
- * captioned frame where one is missing (`render-script.ts`). The junction's
- * prompt is not among them: it is drawn only as a junction comes up.
+ * captioned frame where one is missing (`render-script.ts`).
+ *
+ * Two are left out by design, not by the capture: a workout's strip is drawn
+ * in the map's place in the route panel (#1307, `HudCore.tsx`
+ * §`routeFigure`), so a workout has the strip and no map; and the junction's
+ * prompt is drawn only as a junction comes up.
  */
 export function scenePanels(scene: CaptureScene): CalloutPanelName[] {
-  const panels: CalloutPanelName[] = [...RIDING_PANELS];
+  const panels: CalloutPanelName[] = RIDING_PANELS.filter(
+    (panel) => scene.workout === undefined || panel !== 'map',
+  );
   if (scene.workout !== undefined) panels.push('workout');
   if (scene.pacer !== undefined) panels.push('pacer');
   if (scene.ghost === true) panels.push('best');

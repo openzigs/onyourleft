@@ -260,6 +260,7 @@ five seconds with no input, and a Delivery round draws its game strip, power and
   scene's mode draws (`video-script.ts` §`scenePanels`): the readings, the totals, the elevation
   profile, the map and the ride controls, and the mode's own (the workout strip, the pacer's and
   the best ride's readings, the race's standings and item, the round's houses and throw buttons).
+  A workout's strip is drawn in the map's place (#1307), so a workout scene has no map to ask for.
   The render stops on a frame where one is missing or faded. The closing card covers the frame and
   is not asked.
 
@@ -388,9 +389,9 @@ owner holds, and are left out of the script; comments in the file mark where the
 #### The opening: the logo, and the platforms line (#3175)
 
 The opening title is drawn under the project's logo, centred: `src/brand/logo-dark.webp`, the
-app's own file, drawn no larger than its own 512 × 408 pixels (34 % of the frame's height, so
-367 pixels tall at 1080p) and never scaled up, so it is sharp at 1080p and no cleaned copy is
-needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
+app's own file, drawn no larger than its own 512 × 408 pixels (24 % of the frame's height, so
+259 pixels tall at 1080p, small enough that the title fits between the HUD's top and bottom
+panels) and never scaled up, so it is sharp at 1080p and no cleaned copy is needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
 halo. Beneath it is the owner's platforms line, **"On Android. Coming to iOS soon."**, which the
 closing card carries too; `video-script.test.ts` pins the wording.
 

@@ -197,8 +197,10 @@ function measureOverlay(arg: {
   if (arg.logo && logo !== null) {
     Object.assign(logo.style, {
       display: 'block',
-      // Never larger than its own pixels, so never scaled up and blurred.
-      height: `min(34vh, ${String(logo.naturalHeight)}px)`,
+      // Never larger than its own pixels, so never scaled up and blurred;
+      // and small enough that the title fits between the HUD's top and
+      // bottom panels at 1080p, so it covers none of them.
+      height: `min(24vh, ${String(logo.naturalHeight)}px)`,
       width: 'auto',
       margin: '0 auto 0.25em',
     });
