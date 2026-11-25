@@ -6,12 +6,12 @@
  * every request, and a block it holds is never asked of the archive again
  * while it is there (D-6.7).
  *
- * ⚠️ **Nothing in the product builds one yet.** The open-world session
- * (`game/open-world/session.ts`, #2896) builds the reader and passes it no
- * cache; handing it one, for the riding athlete, is the step that turns the
- * cache on. The reader converts what it keeps into and out of each block's
- * own frame (`area.ts` §`blockFrame`), so a block kept on one ride lands in
- * the same place on a ride that started elsewhere.
+ * The open-world session (`game/open-world/session.ts`, #2896) builds one
+ * per ride for the riding athlete, from the store and athlete `main.tsx`
+ * hands `session-lazy.ts`; `open-world/ridden-blocks-wiring.test.ts` holds
+ * it. The reader converts what it keeps into and out of each block's own
+ * frame (`area.ts` §`blockFrame`), so a block kept on one ride lands in the
+ * same place on a ride that started elsewhere.
  *
  * - **Scoped to the athlete** (D-6.2): it is built for one `owner`, and every
  *   store call it makes names that owner, so one athlete's ride never reads

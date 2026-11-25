@@ -887,6 +887,10 @@ function buildGamePort(
       mapTilesOn: () => readMapTilesChoice(deviceStorage()),
       // #2899: the open-world road's real heights, from #2013's archive.
       terrain: browserTerrainConfig,
+      // #2891: the local athlete's ridden blocks, in the store the ride uses.
+      // ⚠️ An optional member: `open-world/ridden-blocks-wiring.test.ts` is
+      // what goes red when it is dropped.
+      riddenBlocks: { store, owner: LOCAL_ATHLETE },
     }),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.

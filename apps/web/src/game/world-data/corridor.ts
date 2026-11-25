@@ -925,10 +925,6 @@ interface PackedTileStreets {
  * ⚠️ **Never a name** (ADR 0096 D-1.4): a street's name is held in memory
  * with the block and is never stored, so a block read from the cache shows
  * none until it is read from the archive again.
- *
- * @unwired its one caller is `world-data/ridden-blocks.ts` §`riddenBlockCache`,
- * which no ride builds yet: the open-world session passes the reader no cache
- * (#2891, the maintainer decision of 2026-11-25 left `session.ts` unchanged).
  */
 export async function packTileStreets(streets: readonly TileStreets[]): Promise<Blob> {
   const packed: PackedTileStreets = {
@@ -955,9 +951,6 @@ export async function packTileStreets(streets: readonly TileStreets[]): Promise<
  * Reads back what {@link packTileStreets} packed, each road field held to the
  * decoder's own values again, so a blob edited on the device cannot put
  * another string into the street graph. Throws for a blob it did not write.
- *
- * @unwired for {@link packTileStreets}' reason: the ridden-block cache is its
- * one caller, and no ride builds one yet.
  */
 export async function unpackTileStreets(blob: Blob): Promise<TileStreets[]> {
   const json = await gunzipBytes(new Uint8Array(await blob.arrayBuffer()));
