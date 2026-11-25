@@ -56,7 +56,15 @@ const MAPPED = [...GRID_ROW_NAMES, ...GRID_COLUMN_NAMES].filter(
 const START = ((position) => `${String(position.latitude)},${String(position.longitude)}`)(
   fixturePosition(START_COLUMN, START_ROW),
 );
-const STEP_MS = 250;
+/**
+ * A step of the capture's clock: a capture at 1 frame a second, the slowest
+ * the tool allows (`--fps` is 1 to 60). The ride is the same road, the same
+ * script and the same two junctions at any step, and a frame costs the same in
+ * jsdom whatever it steps, so a 4 frames a second capture (this was 250 ms)
+ * took four times the frames to reach them (#3187). The prompt is still up for
+ * several frames at this step: the left is read being chosen on its own frame.
+ */
+const STEP_MS = 1000;
 
 /** Every name the renderer was handed to paint on the road, over the ride. */
 const painted = new Set<string>();
@@ -154,14 +162,37 @@ function published(): CaptureTarget['__oylCapture'] {
 
 let mounted: Mounted | undefined;
 
+/**
+ * The case that is running: aborted once it ends, so a case that timed out
+ * stops stepping its ride instead of riding on, in the background, into the
+ * next case's mount and globals. Checked after every await in a ride.
+ */
+let running = new AbortController();
+/**
+ * The ride the running case started, until it has stopped. A case that timed
+ * out leaves one inside `act()`; React would queue the next case's renders into
+ * that scope and never draw them (the control then found no *Ride Open world*
+ * button), so `afterEach` waits for it to stop.
+ */
+let inFlight: Promise<unknown>[] = [];
+
+/** Stop here if the case this ride belongs to has ended. */
+function stillRunning(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('the case this ride belongs to has ended');
+}
+
 beforeEach(() => {
+  running = new AbortController();
   painted.clear();
   reads = 0;
   vi.stubEnv('MODE', CAPTURE_MODE);
   vi.stubGlobal('Blob', NodeBlob);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  running.abort();
+  await Promise.all(inFlight);
+  inFlight = [];
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
@@ -186,13 +217,26 @@ function ways(): string[] {
 
 /**
  * Open `hash` as the capture tool does, press *Ride Open world* on held
- * clocks, then step `steps` frames, telling `onFrame` after each.
+ * clocks, then step up to `steps` frames, telling `onFrame` after each: it
+ * returning `true` ends the ride at that frame.
  */
-async function ride(
+function ride(
   hash: string,
   steps: number,
-  onFrame: (frame: number) => void = () => undefined,
+  onFrame?: (frame: number) => boolean | void,
   handed?: OpenWorldStart,
+): Promise<readonly CaptureEvent[]> {
+  const run = rideFor(running.signal, hash, steps, onFrame, handed);
+  inFlight.push(run.catch(() => undefined));
+  return run;
+}
+
+async function rideFor(
+  signal: AbortSignal,
+  hash: string,
+  steps: number,
+  onFrame: ((frame: number) => boolean | void) | undefined,
+  handed: OpenWorldStart | undefined,
 ): Promise<readonly CaptureEvent[]> {
   const on = stage();
   globalThis.location.hash = hash;
@@ -206,7 +250,10 @@ async function ride(
     />,
   );
   const name = `Ride ${captureRideName('free-ride')}`;
-  for (let tries = 0; tries < 400 && rideButton(name) === undefined; tries += 1) await settle();
+  for (let tries = 0; tries < 400 && rideButton(name) === undefined; tries += 1) {
+    await settle();
+    stillRunning(signal);
+  }
   expect(rideButton(name), name).toBeDefined();
   on.clock.hold();
   await act(async () => {
@@ -214,6 +261,7 @@ async function ride(
     await Promise.resolve();
   });
   await settle();
+  stillRunning(signal);
   for (
     let tries = 0;
     tries < (handed === undefined ? 40 : 4) && (published()?.drawn ?? 0) === 0;
@@ -224,6 +272,7 @@ async function ride(
       await Promise.resolve();
     });
     await settle();
+    stillRunning(signal);
   }
   for (let frame = 1; frame <= steps; frame += 1) {
     await act(async () => {
@@ -231,7 +280,8 @@ async function ride(
       await Promise.resolve();
     });
     await settle();
-    onFrame(frame);
+    stillRunning(signal);
+    if (onFrame?.(frame) === true) break;
   }
   return published()?.events ?? [];
 }
@@ -240,12 +290,14 @@ describe('a free-ride capture — #3154', () => {
   it('rides the open world from the command’s start, read from the archive it is handed, and takes the scripted turn at the junction', async () => {
     const shown: string[][] = [];
     const chosen: string[] = [];
-    const events = await ride(captureHash('free-ride', START), 200, () => {
+    // Ridden to the frame the second turn is pressed on, not on to a fixed count.
+    const events = await ride(captureHash('free-ride', START), 100, () => {
       if (ways().length > 0) shown.push(ways());
       chosen.push(
         mounted?.container.querySelector('.oyl-hud__junction-way--chosen .oyl-hud__junction-word')
           ?.textContent ?? '-',
       );
+      return (published()?.events ?? []).filter((event) => event.kind === 'cue').length >= 2;
     });
     expect(reads).toBeGreaterThan(0);
     // The junction prompt came up, and the scripted left was pressed in it.
@@ -256,14 +308,15 @@ describe('a free-ride capture — #3154', () => {
     // The left at the first junction, pressed on its frame…
     expect([chosen[left - 2], chosen[left - 1]]).toEqual(['Straight on', 'Left']);
     // …and the right at the next one, never the same junction pressed twice.
-    expect(right).toBeGreaterThan(left + 40);
+    expect(right).toBeGreaterThan(left + 10);
     expect(chosen[right - 1]).toBe('Right');
-    expect(published()?.drawn).toBe(201);
+    // The ride stopped on that frame: the first, drawn at the press, and one a step.
+    expect(published()?.drawn).toBe(right + 1);
   });
 
   it('shows no street by the map’s name: the junction prompt, the page and the road read placeholders only', async () => {
     const shown = new Set<string>();
-    await ride(captureHash('free-ride', START), 60, () => {
+    await ride(captureHash('free-ride', START), 15, () => {
       for (const way of ways()) shown.add(way);
     });
     const page = document.body.textContent;
@@ -285,7 +338,7 @@ describe('a free-ride capture — #3154', () => {
     // An ordinary screen: its start handed over by the picker, as a rider's is.
     await ride(
       '#/game',
-      60,
+      15,
       () => {
         for (const way of ways()) shown.add(way);
       },
