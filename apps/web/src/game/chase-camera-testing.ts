@@ -25,15 +25,16 @@
  */
 
 import { dampedHeading, turnedPose, type GroundHeading } from './camera';
-import type { CameraPose } from './port';
+import type { CameraPose, RiderMarker } from './port';
 import {
   cameraPose,
   drawnPathOf,
   drawnRiderDistance,
   placedRiders,
+  sceneFrame,
   type SceneInput,
 } from './scene';
-import { roadCorridor } from './terrain';
+import { roadCorridor, type RoadCorridor } from './terrain';
 
 /**
  * Frames the damping is stepped at for each metre ridden: **8**, so at the
@@ -53,12 +54,65 @@ const WARM_UP_METRES = 30;
 /** How far the rebuilt camera may stand from `sceneFrame`'s before the stepper says so. */
 const SAME_CAMERA = 1e-9;
 
-/** The camera `sceneFrame` builds for `input`, undamped, rebuilt from its own three calls. */
-export function undampedCamera(input: SceneInput): CameraPose {
+/** What `sceneFrame` draws the riders and the camera on: its road, its markers and its camera. */
+export interface RiddenFrame {
+  readonly corridor: RoadCorridor;
+  readonly markers: readonly RiderMarker[];
+  readonly camera: CameraPose;
+}
+
+/**
+ * The road, the riders and the undamped camera `sceneFrame` builds for
+ * `input`, rebuilt from its own three calls — #3161. A frame-by-frame ride
+ * that reads only these (`turnaround.test.ts`, `turnaround-pass-change.test.ts`)
+ * builds them without the scenery and the ground, which are most of a frame
+ * and which made those rides run past a test's 5 s under coverage. Hold it to
+ * `sceneFrame` with {@link expectSceneFrameAgrees}.
+ */
+export function riddenFrame(input: SceneInput): RiddenFrame {
   const riderDistance = drawnRiderDistance(input);
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
-  const lateral = placedRiders(input, corridor)[0]?.lateral ?? 0;
-  return cameraPose(corridor, riderDistance, lateral, lateral, drawnPathOf(input));
+  const riders = placedRiders(input, corridor);
+  const lateral = riders[0]?.lateral ?? 0;
+  return {
+    corridor,
+    markers: riders.map((rider) => rider.marker),
+    camera: cameraPose(corridor, riderDistance, lateral, lateral, drawnPathOf(input)),
+  };
+}
+
+/** The camera `sceneFrame` builds for `input`, undamped, rebuilt from its own three calls. */
+export function undampedCamera(input: SceneInput): CameraPose {
+  return riddenFrame(input).camera;
+}
+
+/**
+ * Throws unless `rebuilt` is what `sceneFrame` itself draws for `input`: the
+ * same markers and camera, and the same road to the bit — #3161. A ride built
+ * on {@link riddenFrame} calls it on a sample of its frames, so a change to
+ * how `sceneFrame` puts a frame together cannot leave the ride measuring a
+ * frame nothing draws.
+ */
+export function expectSceneFrameAgrees(input: SceneInput, rebuilt: RiddenFrame): void {
+  const built = sceneFrame(input);
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean =>
+    a.length === b.length && Array.prototype.every.call(a, (value, at) => value === b[at]);
+  const apart: string[] = [];
+  if (JSON.stringify(built.markers) !== JSON.stringify(rebuilt.markers)) apart.push('markers');
+  if (JSON.stringify(built.camera) !== JSON.stringify(rebuilt.camera)) apart.push('camera');
+  if (
+    !same(built.corridor.vertices, rebuilt.corridor.vertices) ||
+    !same(built.corridor.indices, rebuilt.corridor.indices) ||
+    !same(built.corridor.retraced, rebuilt.corridor.retraced) ||
+    JSON.stringify(built.corridor.centre) !== JSON.stringify(rebuilt.corridor.centre)
+  ) {
+    apart.push('road');
+  }
+  if (apart.length > 0) {
+    throw new Error(
+      `the ${apart.join(', ')} rebuilt for the ride differ from sceneFrame's, ${String(input.state.ride.distance)} along it`,
+    );
+  }
 }
 
 /**

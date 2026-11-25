@@ -14,15 +14,22 @@
  * the drawn rider was up to 4.6 m and 5.2 m from the drawn road's centreline,
  * past its 3.5 m edge. `terrain.ts` §`towardTheRidersPass` and §`tipBetween`
  * are the change.
+ *
+ * ⚠️ **The rides read each frame's road and riders from `sceneFrame`'s own
+ * calls** (`chase-camera-testing.ts` §`riddenFrame`) — #3161: with the
+ * scenery and the ground built on each of 400 frames as well, the bot's cases
+ * ran past a test's 5 s under coverage on CI. A sample of the frames is held
+ * to `sceneFrame` itself (§`expectSceneFrameAgrees`).
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { metres, type RouteProfile } from '@onyourleft/domain';
 
+import { expectSceneFrameAgrees, riddenFrame, type RiddenFrame } from './chase-camera-testing';
 import { TERRAIN_COLUMN_OFFSETS } from './landform';
 import { REVERSAL_AT_METRES, reversalRoute } from './route-fixtures-testing';
-import { sceneFrame } from './scene';
+import { sceneFrame, type SceneInput } from './scene';
 import { atStartLine } from './simulation';
 import { ROAD_COLUMNS, ROAD_WIDTH_METRES, corridorOrigin, type CorridorPoint } from './terrain';
 
@@ -40,7 +47,7 @@ interface Piece {
  * the carriageway (`terrain.ts` §`roadIndices`' middle lane) that is not
  * folded to nothing.
  */
-function drawnCentreline(frame: ReturnType<typeof sceneFrame>): Piece[] {
+function drawnCentreline(frame: RiddenFrame): Piece[] {
   const { corridor } = frame;
   const segments = corridor.centre.length - 1;
   const { vertices, indices } = corridor;
@@ -93,9 +100,16 @@ interface Ridden {
 }
 
 /** The drawn rider's place, from the frame. */
-function riderOf(frame: ReturnType<typeof sceneFrame>): { readonly x: number; readonly z: number } {
+function riderOf(frame: RiddenFrame): { readonly x: number; readonly z: number } {
   return frame.markers[0] as { readonly x: number; readonly z: number };
 }
+
+/**
+ * Where the rebuilt road and riders are held to `sceneFrame`'s, metres from
+ * the turning point: the first frame at or past each. A `sceneFrame` on every
+ * 15th frame cost these cases more than the ride did.
+ */
+const CHECKED_AT_METRES: readonly number[] = [-30, -24, -15, -6, -3, -1, 1, 3, 6];
 
 /**
  * Rides the last `window` metres up to the turn and 10 m on round it at
@@ -109,12 +123,18 @@ function rideRoundTheTurn(profile: RouteProfile, window: number): Ridden {
   let furthestOff = 0;
   let mostMoved = 0;
   let changed = 0;
+  let checked = 0;
   for (let along = REVERSAL_AT_METRES - window; along < REVERSAL_AT_METRES + 10; along += step) {
-    const frame = sceneFrame({
+    const input: SceneInput = {
       profile,
       origin,
       state: { ...start, ride: { ...start.ride, distance: metres(along) } },
-    });
+    };
+    const frame = riddenFrame(input);
+    if (along - REVERSAL_AT_METRES >= (CHECKED_AT_METRES[checked] ?? Number.POSITIVE_INFINITY)) {
+      expectSceneFrameAgrees(input, frame);
+      checked += 1;
+    }
     const rider = riderOf(frame);
     const road = drawnCentreline(frame);
     const off = distanceTo(road, rider.x, rider.z);
@@ -128,6 +148,8 @@ function rideRoundTheTurn(profile: RouteProfile, window: number): Ridden {
     const back = centre.findIndex((point: CorridorPoint) => point.along > REVERSAL_AT_METRES + 20);
     if (back >= 0 && retraced[back] === 0) changed += 1;
   }
+  // Non-vacuity: every check inside the window was made.
+  expect(checked).toBe(CHECKED_AT_METRES.filter((at) => at >= -window).length);
   return { furthestOff, mostMoved, changed };
 }
 
@@ -170,7 +192,7 @@ describe('the pass change before a one-point turnaround — #3061', () => {
       let frames = 0;
       for (let before = 1; before <= 24; before += 1) {
         for (let past = 3; past <= 20; past += 1) {
-          const frame = sceneFrame({
+          const input: SceneInput = {
             profile,
             origin,
             state: {
@@ -178,7 +200,10 @@ describe('the pass change before a one-point turnaround — #3061', () => {
               ride: { ...start.ride, distance: metres(REVERSAL_AT_METRES - before) },
             },
             botDistance: REVERSAL_AT_METRES + past,
-          });
+          };
+          const frame = riddenFrame(input);
+          // Held to `sceneFrame` on a 4 × 3 sample of the 24 × 18 frames.
+          if (before % 6 === 1 && past % 6 === 3) expectSceneFrameAgrees(input, frame);
           const bot = frame.markers.find((marker) => marker.kind === 'bot');
           if (bot === undefined) continue;
           frames += 1;

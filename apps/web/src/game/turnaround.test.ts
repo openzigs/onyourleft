@@ -18,6 +18,13 @@
  * coming out, the camera's gaze pitched up by 5° in one frame as its
  * look-ahead jumped from 9 m to 23 m. `drawn-line.ts` §`uTurnSamples` and
  * `camera.ts` §`dampedLookAhead` are the two changes.
+ *
+ * ⚠️ **Each frame's rider and camera are `sceneFrame`'s own three calls**
+ * (`chase-camera-testing.ts` §`riddenFrame`) — #3161: the whole frame, its
+ * scenery and ground built 500 times a ride, ran these cases past a test's
+ * 5 s under coverage on CI. The frames at {@link CHECKED_AT_METRES} are held
+ * to `sceneFrame` itself (§`expectSceneFrameAgrees`), so the ride measures
+ * the frame `GameView` is handed.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -32,6 +39,7 @@ import {
   turnedPose,
   type GroundHeading,
 } from './camera';
+import { expectSceneFrameAgrees, riddenFrame } from './chase-camera-testing';
 import { drawnLine, drawnLineAt, uTurnSamples } from './drawn-line';
 import {
   REVERSAL_AT_METRES,
@@ -40,7 +48,7 @@ import {
   plannerCornerRoute,
   reversalRoute,
 } from './route-fixtures-testing';
-import { sceneFrame } from './scene';
+import type { SceneInput } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadPosition } from './terrain';
 
@@ -80,6 +88,14 @@ function pitchOf(rig: ReturnType<typeof cameraRig>): number {
   );
 }
 
+/**
+ * Where the rebuilt rider, camera and road are held to `sceneFrame`'s, metres
+ * from the turning point: the first frame at or past each, so every ride is
+ * checked on the way in, round the loop and on the way out. A `sceneFrame`
+ * on every 15th frame cost these cases more than the ride did.
+ */
+const CHECKED_AT_METRES: readonly number[] = [-30, -15, -6, -3, -1, 1, 3, 6, 15, 30];
+
 /** Rides `profile` through its turnaround at `kmh`, drawing `fps` frames a second, as `GameView` does. */
 function rideThrough(profile: RouteProfile, kmh: number, fps: number): Ridden {
   const origin = corridorOrigin(profile);
@@ -111,16 +127,22 @@ function rideThrough(profile: RouteProfile, kmh: number, fps: number): Ridden {
     riderJerk: 0,
     pastTheTurn: Number.NEGATIVE_INFINITY,
   };
+  let checked = 0;
   for (
     let along = REVERSAL_AT_METRES - 30;
     along <= REVERSAL_AT_METRES + 40;
     along += speed * seconds
   ) {
-    const frame = sceneFrame({
+    const input: SceneInput = {
       profile,
       origin,
       state: { ...start, ride: { ...start.ride, distance: metres(along), speed: speed as never } },
-    });
+    };
+    const frame = riddenFrame(input);
+    if (along - REVERSAL_AT_METRES >= (CHECKED_AT_METRES[checked] ?? Number.POSITIVE_INFINITY)) {
+      expectSceneFrameAgrees(input, frame);
+      checked += 1;
+    }
     heading = dampedHeading(heading, frame.camera, seconds, false);
     lookAhead = dampedLookAhead(lookAhead, frame.camera.targetAheadMetres, seconds);
     const rider = frame.markers[0] as {
@@ -161,6 +183,8 @@ function rideThrough(profile: RouteProfile, kmh: number, fps: number): Ridden {
     }
     last = now;
   }
+  // Non-vacuity: every check was made.
+  expect(checked).toBe(CHECKED_AT_METRES.length);
   return ridden;
 }
 
