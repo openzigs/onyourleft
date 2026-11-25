@@ -128,6 +128,7 @@ let mounted: Mounted | undefined;
 /** What a rider's device already holds: a week part-way through, and level 1 finished. */
 const WEEK = JSON.stringify({ day: 4, houses: 9, score: 11 });
 const LEVELS = JSON.stringify({ finished: ['morning-round'] });
+const NO_LEVELS = JSON.stringify({ finished: [] });
 
 beforeEach(() => {
   asked = [];
@@ -249,12 +250,25 @@ describe('a Delivery scene — #3153', () => {
   });
 
   it('reads none of the rider’s week or levels, and writes none (no rider data in a capture)', async () => {
-    // The rider's device has finished level 1, and is on day 4 of a week.
-    await capture('delivery', 80);
+    // The rider's device is on day 4 of a week and has finished no level; the
+    // round is ridden to its end, where a round writes both.
+    localStorage.setItem(LEVEL_PROGRESS_STORAGE_KEY, NO_LEVELS);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const events = await capture('delivery', 1500);
+    expect(events.filter((event) => event.kind === 'score').length).toBeGreaterThan(0);
+    // Not the rider's week, nor their levels: written to none of them. (The
+    // frame-time report is not rider data, and is not this test's.)
+    expect(
+      setItem.mock.calls
+        .map(([key]) => key)
+        .filter(
+          (key) => key === DELIVERY_PROGRESS_STORAGE_KEY || key === LEVEL_PROGRESS_STORAGE_KEY,
+        ),
+    ).toEqual([]);
     // The round's HUD is the capture's own empty week's, not the device's day 4.
     expect(field('Score')).not.toContain('Day 4');
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(WEEK);
-    expect(localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY)).toBe(LEVELS);
+    expect(localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY)).toBe(NO_LEVELS);
     expect(asked).toEqual([]);
   });
 });
