@@ -221,6 +221,7 @@ import type { KitColour, RiderBody } from '@onyourleft/store';
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import type { SensorReading } from './hud/fields';
 import { BICYCLE_MASS_KILOGRAMS, DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
+import { RIDER_SKIN_TONES } from './rider-body';
 
 /** A turn, in radians. Written out once so that no call site spells `2 * PI`. */
 const TAU = Math.PI * 2;
@@ -1225,16 +1226,21 @@ export const RIDER_UPPER_BODY_PARTS_BY_BODY: Readonly<Record<RiderBody, readonly
  * "no skin tone appears here" still holds there, and none of them is in
  * {@link BICYCLE_COLOURS}: that list bounds what the stylised world's lamps
  * light. `skin` and `hair` were matched by eye to the realistic body's own
- * maps in the lap race's frames, and are the same for every stand-in.
+ * maps in the lap race's frames.
  *
- * Each is drawn under its rider's tint, as the realistic body's skin and
- * helmet are (`three-renderer.ts` §`RIDER_TINTS`), so a bot's stand-in has the
- * orange helmet and limbs the bot beside it has.
+ * ⚠️ **Since #3214 only the helmet and the shorts are drawn under the
+ * rider's tint** (`three-renderer.ts` §`RIDER_TINTS`), as the kit and the
+ * bicycle are: the owner ruled on 2026-11-25 that the team tint never
+ * reaches the skin, and a reviewer who remembers "a bot's stand-in has the
+ * orange limbs the bot beside it has" is reading #3211's file. `skin` is the
+ * first of `rider-body.ts` §`RIDER_SKIN_TONES` and marks where a rider's own
+ * tone is drawn — the neck, the forearms and the shins — untinted; `hair` is
+ * drawn as it is, untinted, on every stand-in.
  */
 export const STAND_IN_PALETTE = {
   helmet: 0xe4e7ea,
   shorts: 0x17191c,
-  skin: 0xd3bcae,
+  skin: RIDER_SKIN_TONES[0] as number,
   hair: 0x4a3426,
 } as const;
 
