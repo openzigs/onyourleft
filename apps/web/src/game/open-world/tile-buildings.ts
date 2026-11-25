@@ -16,6 +16,12 @@
  *   planned are the rider's, the ones ahead and the ones on **every way on
  *   from the next junction** (`tiles-ahead.ts`), so a footprint on a street
  *   the rider has not chosen is planned as soon as its tile is.
+ * - **Each once** (#3132): a footprint two tiles each carry, whole in one and
+ *   clipped at the other's buffer, can be owned by both, its centroid in
+ *   each; so the footprints within reach are held once
+ *   (`world-data/tile-copies.ts`), and a building mapped in parts is drawn by
+ *   its parts and not by its outline too (`world-data/part-outlines.ts`).
+ *   Drawn twice, the two copies' walls were one plane, and flickered.
  * - **Against what**: the view the rider is on, drawn in the ride's fixed
  *   frame (`terrain.ts` §`drawProfileIn`). A footprint's plan reads the road
  *   for its ground, its clearance and its front (`footprint-buildings.ts`
@@ -45,6 +51,8 @@ import { frameSeed } from '../scatter';
 import { anchorScenery, sceneryAnchor } from '../scenery-anchor';
 import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
+import { withoutPartOutlines } from '../world-data/part-outlines';
+import { withoutTileCopies } from '../world-data/tile-copies';
 import { openWorldStreetCorridor } from './street-corridor';
 import type { TileBlockFeatures, TilePlanDetail } from './tile-plan';
 
@@ -123,11 +131,21 @@ export function planBuildingsNear(
       used.add(tile.block);
     }
   }
-  if (detail === 'reduced') {
-    near.sort((a, b) => a.apart - b.apart);
-    near.length = Math.min(near.length, REDUCED_BUILDINGS_MOST);
-  }
   if (near.length === 0) return [];
+  // #3132: each building drawn once. A footprint near a tile's edge is in both
+  // tiles' features, whole in one and clipped in the other, and each tile owns
+  // the copy whose centroid is its own, so both were planned: the same walls,
+  // twice, on one plane. And a building mapped in parts is drawn by its parts,
+  // not by its outline as well (`world-data/part-outlines.ts`).
+  const apart = new Map(near.map((each) => [each.building, each.apart]));
+  const once = withoutTileCopies(withoutPartOutlines(near.map((each) => each.building))).map(
+    // A kept copy may carry the other's point of interest: a new object, at the same place.
+    (building) => ({ building, apart: apart.get(building) ?? centroidApart(building, request) }),
+  );
+  if (detail === 'reduced') {
+    once.sort((a, b) => a.apart - b.apart);
+    once.length = Math.min(once.length, REDUCED_BUILDINGS_MOST);
+  }
   const landUse: LandUseFeature[] = [];
   for (const key of used) landUse.push(...(blocks.get(key) as TileBlockFeatures).landUse);
   // #2903: every held block's streets and tiles, as the scene's corridor holds
@@ -136,7 +154,7 @@ export function planBuildingsNear(
   const corridor: WorldCorridor = {
     ...openWorldStreetCorridor(frame, blocks.values()),
     landUse,
-    buildings: near.map((each) => each.building),
+    buildings: once.map((each) => each.building),
   };
   // #3094: a copy of the view the road keyed is keyed here as the road keyed
   // it, its ground levelled beside the same held streets, so the plans stand
@@ -161,6 +179,23 @@ export function planBuildingsNear(
     undefined,
     { seed: frameSeed(frame) },
   ).plans;
+}
+
+/** How far `building`'s outer ring's vertices' mean stands from the rider. */
+function centroidApart(
+  building: BuildingFeature,
+  at: { readonly x: number; readonly z: number },
+): number {
+  const ring = building.rings[0];
+  if (ring === undefined || ring.length < 2) return Number.POSITIVE_INFINITY;
+  let x = 0;
+  let z = 0;
+  const n = Math.floor(ring.length / 2);
+  for (let i = 0; i < n; i += 1) {
+    x += ring[i * 2] as number;
+    z += ring[i * 2 + 1] as number;
+  }
+  return Math.hypot(x / n - at.x, z / n - at.z);
 }
 
 /** Every buffer `plans`' triangles are in, each once: what a worker transfers. */

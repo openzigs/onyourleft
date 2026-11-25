@@ -455,7 +455,12 @@ import {
   type LandClass,
   type LandClassMask,
 } from './land-class';
-import { ROAD_CLEARANCE_METRES, TERRAIN_COLUMN_OFFSETS, terrainHeightAt } from './landform';
+import {
+  ROAD_CLEARANCE_METRES,
+  TERRAIN_COLUMN_OFFSETS,
+  ridesARoadTwice,
+  terrainHeightAt,
+} from './landform';
 import { inWater, onOpenWater, waterways } from './waterways';
 import {
   CHURCH,
@@ -509,7 +514,13 @@ import {
 } from './settlements';
 import { CITY_PAVEMENT_WIDTH_METRES, cityPavementOn, KERB_LATERAL_METRES } from './streets';
 import { slotHash, uniformFrom } from './seeded';
-import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import {
+  drawnRoadFrame,
+  RETRACE_OVERLAP_METRES,
+  RETRACE_RATIO,
+  ROAD_WIDTH_METRES,
+  type CorridorOrigin,
+} from './terrain';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -5223,6 +5234,62 @@ const GROUND_REACHES = [32, 64, 128, 256, 512, 1_024, 2_560] as const;
 /** Scratch: the road segments near the footprint being planned. */
 const nearSegments: number[] = [];
 
+/** Scratch: {@link groundOfAnotherPass}'s segments, and where it found one. */
+const otherSegments: number[] = [];
+const otherPass: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+const otherFound: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+
+/**
+ * Where `(x, z)` is beside another pass of the road than `own`'s, into
+ * `into` — #3140: the nearest point of `segments` more than
+ * `terrain.ts` §`RETRACE_RATIO` times its reach along the route from `own`,
+ * and no more than `terrain.ts` §`RETRACE_OVERLAP_METRES` further off than
+ * `own`. `false`, and `into` untouched, where there is none.
+ *
+ * ⚠️ **Why a footprint reads it.** A recorded way out and way back along one
+ * road carry their own elevations, and each frame draws the ground beside the
+ * road at the height of the pass the rider is on. Planned on its nearest pass
+ * alone, a house beside the way back on `turnaround-coast.test.ts`' coast
+ * turnaround (+2.7 % out, −0.5 % back) stood 5.3 m over the ground drawn
+ * under it on the way out — the owner's floating house of 2026-11-24.
+ * Planned on both — its foot under the lower, its floor over the higher — it
+ * stands on either; and where the two differ by more than
+ * {@link FOOTPRINT_MAX_GROUND_RANGE_METRES} it is `too-steep`, as on any
+ * ground that varies that much under it, rather than drawn on a plinth.
+ *
+ * ⚠️ **Not by drawing the later pass at the earlier's heights.** #3140's
+ * first commit did, and #3127's review found the rider then saw a road
+ * drawn level, or falling, where they climbed (12 m off the recorded heights
+ * on an out-and-back 6 m over, 48 m on a stacked switchback). Held to within
+ * 1 % of the felt grade, the two passes were still metres apart, and the
+ * coast fixture's sea, levelled from the drawn way back, lay 7 m under the
+ * road at the turn, a bank steeper than 2 in 1 (#3103's step test, 0.21 to
+ * 0.29 m over). So each pass keeps its own heights.
+ */
+function groundOfAnotherPass(
+  road: DrawnRoadPoints,
+  segments: readonly number[],
+  x: number,
+  z: number,
+  own: BesideTheRoad,
+  into: BesideTheRoad,
+): boolean {
+  const reach = own.distance + RETRACE_OVERLAP_METRES;
+  otherSegments.length = 0;
+  for (const segment of segments) {
+    const along = Math.min(road.total, (segment + 0.5) * road.step);
+    if (Math.abs(along - own.along) > RETRACE_RATIO * reach + road.step) {
+      otherSegments.push(segment);
+    }
+  }
+  if (!nearestOnRoadSegments(road, otherSegments, x, z, otherFound)) return false;
+  if (otherFound.distance > reach) return false;
+  into.along = otherFound.along;
+  into.lateral = otherFound.lateral;
+  into.distance = otherFound.distance;
+  return true;
+}
+
 /** Scratch: the road segments near a front porch being placed — #1589. */
 const porchSegments: number[] = [];
 
@@ -5263,9 +5330,25 @@ interface PartyWall {
   readonly from: number;
   readonly to: number;
   readonly neighbourEaves: number;
+  /**
+   * #3132: whether the two are a terrace (#1635: both in {@link TERRACE_CLASSES},
+   * or mapped as a `terrace`), whose roofs are flat behind a parapet. A flush
+   * wall shared outside a terrace ({@link PARTY_WALL_FLUSH_METRES}) is drawn
+   * once as a party wall is, and changes nothing else about either building.
+   */
+  readonly terrace: boolean;
 }
 
 const NO_PARTY_WALLS: readonly PartyWall[] = [];
+
+/**
+ * Two edges of buildings that are not a terrace are one wall within this
+ * perpendicular offset: **1 cm** — #3132. Such a wall was drawn by both: their
+ * parapets on one plane, one of them facing the way the other's wall does,
+ * flickered (z-fighting) on the owner's tablet ride of 2026-11-24. Flush, so a
+ * gap between two detached buildings, however narrow, keeps both its walls.
+ */
+export const PARTY_WALL_FLUSH_METRES = 0.01;
 
 /** The side of a cell of {@link partyWallsOf}' edge grid: **16 m**. */
 const PARTY_CELL_METRES = 16;
@@ -5282,7 +5365,11 @@ const PARTY_CELL_METRES = 16;
  */
 function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, PartyWall[]> {
   const walls = new Map<number, PartyWall[]>();
-  // Every edge of every terraced candidate, as `owner, edge` pairs, in the cells its box reaches.
+  // #1791: a footprint mapped as a terrace is a candidate whatever its class.
+  const terraced = (each: Measured): boolean =>
+    TERRACE_CLASSES.has(each.urbanClass) || each.family === 'terrace';
+  // Every edge of every building, as `owner, edge` pairs, in the cells its box reaches.
+  // #3132: in any class: outside a terrace a wall is shared only where it is flush.
   const owners: number[] = [];
   const edges: number[] = [];
   const cells = new Map<number, number[]>();
@@ -5304,8 +5391,6 @@ function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, 
   };
   for (const [owner, each] of measured.entries()) {
     if (each === undefined || each.part) continue;
-    // #1791: a footprint mapped as a terrace is a candidate whatever its class.
-    if (!TERRACE_CLASSES.has(each.urbanClass) && each.family !== 'terrace') continue;
     const n = each.drawn.length / 2;
     for (let edge = 0; edge < n; edge += 1) {
       const index = owners.length;
@@ -5347,14 +5432,26 @@ function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, 
         seen.add(other);
         const b = measured[otherOwner] as Measured;
         const otherEdge = edges[other] as number;
-        const shared = sharedStretch(px, pz, dx, dz, length, b.drawn, otherEdge, sinLimit);
+        const terrace = terraced(a) && terraced(b);
+        const shared = sharedStretch(
+          px,
+          pz,
+          dx,
+          dz,
+          length,
+          b.drawn,
+          otherEdge,
+          sinLimit,
+          terrace ? PARTY_WALL_OFFSET_METRES : PARTY_WALL_FLUSH_METRES,
+        );
         if (shared === undefined) continue;
-        add(owner, { edge, from: shared[0], to: shared[1], neighbourEaves: b.eaves });
+        add(owner, { edge, from: shared[0], to: shared[1], neighbourEaves: b.eaves, terrace });
         add(otherOwner, {
           edge: otherEdge,
           from: shared[2],
           to: shared[3],
           neighbourEaves: a.eaves,
+          terrace,
         });
       }
     });
@@ -5377,6 +5474,8 @@ function sharedStretch(
   ring: Ring,
   edge: number,
   sinLimit: number,
+  /** #3132: how far off this edge's line the other may stand. */
+  offset: number = PARTY_WALL_OFFSET_METRES,
 ): readonly [number, number, number, number] | undefined {
   const n = ring.length / 2;
   const j = (edge + 1) % n;
@@ -5401,7 +5500,7 @@ function sharedStretch(
     const z = qz + (rz - qz) * t - pz;
     return Math.abs(x * dz - z * dx);
   };
-  if (offsetAt(from) > PARTY_WALL_OFFSET_METRES || offsetAt(to) > PARTY_WALL_OFFSET_METRES) {
+  if (offsetAt(from) > offset || offsetAt(to) > offset) {
     return undefined;
   }
   // The same stretch along the other edge.
@@ -6694,16 +6793,25 @@ function measureFootprint(
   if (!found) return 'too-steep';
   // #1633: the stretch of route the centroid is beside, before `beside` is reused.
   const urbanClass = urban?.classAt(beside.along) ?? 'unknown';
-  const groundAt = (x: number, z: number): number => {
+  // #3140: and, on a route that rides a road twice, the ground of the other
+  // pass beside the same point, which is the ground drawn there while the
+  // rider is on that pass (@see groundOfAnotherPass).
+  const twice = ridesARoadTwice(profile);
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  const groundAt = (x: number, z: number): void => {
     nearestOnRoadSegments(road, nearSegments, x, z, beside);
-    return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+    const own = terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+    lowest = Math.min(lowest, own);
+    highest = Math.max(highest, own);
+    if (!twice || !groundOfAnotherPass(road, nearSegments, x, z, beside, otherPass)) return;
+    const theirs = terrainHeightAt(profile, origin, seed, otherPass.along, otherPass.lateral, land);
+    lowest = Math.min(lowest, theirs);
+    highest = Math.max(highest, theirs);
   };
-  let lowest = groundAt(centroid.x, centroid.z);
-  let highest = lowest;
+  groundAt(centroid.x, centroid.z);
   for (let i = 0; i + 1 < drawn.length; i += 2) {
-    const height = groundAt(drawn[i] as number, drawn[i + 1] as number);
-    lowest = Math.min(lowest, height);
-    highest = Math.max(highest, height);
+    groundAt(drawn[i] as number, drawn[i + 1] as number);
   }
   if (highest - lowest > FOOTPRINT_MAX_GROUND_RANGE_METRES) return 'too-steep';
   // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are
@@ -7511,7 +7619,8 @@ function planFootprint(
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
   // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
-  const terraced = party.length > 0;
+  // #3132: a terrace's party wall; a flush wall shared outside one changes no roof.
+  const terraced = party.some((wall) => wall.terrace);
   // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
   const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
   const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
@@ -7622,9 +7731,10 @@ function planFootprint(
           // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
           (buildingArchetype === 'garden-apartment' &&
             wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
+  // #3132: and a flush wall shared outside a terrace, drawn once as a party wall is.
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
-  } = terraced ? { party: { walls: party, eaves } } : {};
+  } = party.length > 0 ? { party: { walls: party, eaves } } : {};
   const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house

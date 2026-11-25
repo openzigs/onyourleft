@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The three demo presets — #1646: a climb, a sprint, a group ride.
+ * The demo presets — #1646: a climb, a sprint, a group ride; and #3074's hill,
+ * a short scene for the captioned video that is on its climb from the start.
  *
  * ⚠️ **Every number below was written by hand** (ADR 0007 D4). None is taken
  * from, fitted to or checked against a recorded ride, the owner's or anybody
@@ -203,5 +204,42 @@ export const GROUP_PRESET: DemoPreset = {
   ],
 };
 
+/**
+ * #3074: an 8 % climb from the first second, for a video scene that shows a
+ * climb — the climb preset's rider meets its climb only after two minutes of
+ * flat. The rider starts from a standstill 100 m up the climb, past the
+ * 100 m window `route/profile.ts` fits a gradient over, so the HUD reads the
+ * climb's gradient from the start; the flat behind is the road the camera
+ * looks back down.
+ */
+export const HILL_PRESET: DemoPreset = {
+  id: 'hill',
+  route: [
+    { lengthMetres: 200, gradePercent: 0 },
+    { lengthMetres: 2500, gradePercent: 8 },
+  ],
+  riders: [
+    {
+      label: 'Rider A',
+      kit: 'lime',
+      startMetres: 300,
+      segments: [
+        {
+          untilSeconds: 900,
+          wattsPerKilogram: 3.7,
+          cadenceRpm: 78,
+          heartRateBpm: 158,
+          easeSeconds: 4,
+        },
+      ],
+    },
+  ],
+};
+
 /** Every preset, in the order a picker would list them. */
-export const DEMO_PRESETS: readonly DemoPreset[] = [CLIMB_PRESET, SPRINT_PRESET, GROUP_PRESET];
+export const DEMO_PRESETS: readonly DemoPreset[] = [
+  CLIMB_PRESET,
+  SPRINT_PRESET,
+  GROUP_PRESET,
+  HILL_PRESET,
+];

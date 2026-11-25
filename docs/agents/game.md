@@ -2476,6 +2476,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         covers it only where the frame draws the road (from
                         60 m behind the rider, in 40 m steps): the road back
                         is the route still, which nothing else draws
+    src/game/junction-surface.ts
+                        junction surfaces (#3133) — a junction an open-world
+                        ride turns through (the way taken turns 30° or more,
+                        chosen or the default: `open-world/road.ts`
+                        §`junctionsTurned`, `SceneInput.junctionsTurned`)
+                        drawn as the streets meeting there and not as one
+                        road bending: every arm to its own width (the route's
+                        7 m, a way not taken at its street's class) from the
+                        graph's node to its mouth, the square where they
+                        overlap, and each corner rounded to 6 m (less at a
+                        narrow angle; straight along the top of a T). One
+                        side road a junction, a fan of about 36 triangles, at
+                        the road's level lifted as a nearby street is, kept
+                        from 400 m behind the rider to the view's reach.
+                        ⚠️ **The road's lines stop at the mouth**: between the
+                        mouths of the way in and the way taken `terrain.ts`
+                        §`roadCorridor` (`unpainted`) paints no edge line and
+                        no centre-line mark. A junction ridden straight
+                        through is unchanged
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

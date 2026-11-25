@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { CLIMB_PRESET, GROUP_PRESET, SPRINT_PRESET } from './presets';
+import { YOUTUBE_CAPTIONS } from '../../demo/captions/youtube';
+import { CLIMB_PRESET, GROUP_PRESET, HILL_PRESET, SPRINT_PRESET } from './presets';
 import { parseDemoQuery } from './query';
 
 describe("the demo page's query — #1647", () => {
@@ -63,9 +64,9 @@ describe("the demo page's query — #1647", () => {
   it.each([
     ['?speed=2', 'This demo has no setting called “speed”.'],
     ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
-    ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
-    ['?preset=', 'This demo’s preset is one of climb, sprint, group, not “”.'],
-    ['?preset=Climb', 'This demo’s preset is one of climb, sprint, group, not “Climb”.'],
+    ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, hill, not “sprnt”.'],
+    ['?preset=', 'This demo’s preset is one of climb, sprint, group, hill, not “”.'],
+    ['?preset=Climb', 'This demo’s preset is one of climb, sprint, group, hill, not “Climb”.'],
     ['?preset=climb&preset=sprint', 'This demo’s “preset” setting is given more than once.'],
     ['?route=../secret', 'This demo has no route called “../secret”.'],
     ['?route=', 'This demo has no route called “”.'],
@@ -80,7 +81,35 @@ describe("the demo page's query — #1647", () => {
     ['?units=miles', 'This demo’s units are one of metric, imperial, not “miles”.'],
     ['?units=Imperial', 'This demo’s units are one of metric, imperial, not “Imperial”.'],
     ['?render=1', 'This demo’s “render” setting takes no value, not “1”.'],
+    ['?captions=youtube', 'This demo’s “captions” and “scene” settings come together.'],
+    ['?scene=hill', 'This demo’s “captions” and “scene” settings come together.'],
+    ['?captions=tiktok&scene=hill', 'This demo’s captions are one of youtube, not “tiktok”.'],
+    ['?captions=youtube&scene=descent', 'This demo’s youtube captions have no scene “descent”.'],
+    [
+      '?captions=youtube&scene=hill&preset=climb',
+      'This demo’s scene “hill” takes no “preset” setting.',
+    ],
+    [
+      '?captions=youtube&scene=group&showcase',
+      'This demo’s scene “group” takes no “showcase” setting.',
+    ],
+    ['?captions=youtube&scene=hill&route=fixture', 'This demo’s scene “hill” rides its own road.'],
   ])('refuses %j, saying why, rather than riding the default', (search, message) => {
     expect(parseDemoQuery(search)).toEqual({ ok: false, message });
+  });
+
+  it.each([
+    ['?captions=youtube&scene=hill&render', HILL_PRESET, 'hill', undefined],
+    ['?captions=youtube&scene=group', GROUP_PRESET, 'group', undefined],
+    ['?captions=youtube&scene=opening&route=fixture', CLIMB_PRESET, 'opening', 'fixture'],
+  ])('%j rides the captioned scene’s own preset — #3074', (search, preset, id, route) => {
+    const scene = YOUTUBE_CAPTIONS.scenes.find((each) => each.id === id);
+    expect(parseDemoQuery(search)).toEqual({
+      ok: true,
+      preset,
+      ...(route === undefined ? {} : { route }),
+      ...(search.includes('render') ? { render: true } : {}),
+      captions: { script: 'youtube', scene },
+    });
   });
 });

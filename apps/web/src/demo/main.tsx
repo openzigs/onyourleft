@@ -99,7 +99,7 @@ async function start(): Promise<void> {
   await Promise.all([loadSceneryModels(), loadGameWordmark()]);
   const query = parseDemoQuery(location.search);
   const clock = query.ok && query.render === true ? new RenderClock() : undefined;
-  let showClosingCard: (() => void) | undefined;
+  let showClosingCard: ((options: { readonly credit: boolean }) => void) | undefined;
   if (clock !== undefined) {
     window.__oylDemoRender = {
       step: async (stepMs) => {
@@ -107,8 +107,8 @@ async function start(): Promise<void> {
         await settled();
         return drawn;
       },
-      closingCard: async () => {
-        showClosingCard?.();
+      closingCard: async (options) => {
+        showClosingCard?.(options);
         await settled();
       },
     };

@@ -1304,6 +1304,13 @@ export interface MappedTown extends MappedFootprintIndex {
    */
   readonly urban?: UrbanClassMap | undefined;
   /**
+   * #3131: an open-world ride's urban class along any one of its profiles
+   * (`open-world/urban-stretch.ts`), since a class is read by distance along
+   * a profile and an open-world ride has many. Read in place of {@link urban}
+   * wherever it is given: {@link urbanOfTown}.
+   */
+  readonly urbanOn?: ((profile: RouteProfile) => UrbanClassMap) | undefined;
+  /**
    * The chain-link fence beside the corridor's industrial, school and sports
    * grounds — #1274, `chain-link.ts` §`chainLinkPieces` — for a route, built
    * on its first ask and kept. Absent is none: a ride with no corridor, and
@@ -1315,6 +1322,15 @@ export interface MappedTown extends MappedFootprintIndex {
     seed: number,
     land: LandClassMask,
   ) => readonly ChainLinkPiece[];
+}
+
+/** `town`'s urban class along `profile` — #3131: its own for the profile, or the ride's. */
+export function urbanOfTown(
+  town: MappedTown | null | undefined,
+  profile: RouteProfile,
+): UrbanClassMap | undefined {
+  if (town === null || town === undefined) return undefined;
+  return town.urbanOn?.(profile) ?? town.urban;
 }
 
 /** No footprints and no commercial land: what a ride with no corridor is handed. */

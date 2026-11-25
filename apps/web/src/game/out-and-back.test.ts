@@ -370,8 +370,13 @@ describe('one ground beside a road ridden twice — #1996', () => {
       // A recorded return on the other side of the road. Where it only lies
       // alongside, both grounds are kept, so the nearer pass's U-turn is not
       // left open, and the other's lies under it: no point in view has the
-      // two passes' grounds within half a metre of each other, where they
-      // would fight for the same depth, or cross.
+      // two passes' grounds within 0.3 m of each other, where they would
+      // fight for the same depth, or cross. ⚠️ Half a metre until #3122,
+      // which lets the other pass rise to meet the nearer one's ground at its
+      // folded edge (`landform.ts` §`coveredShare`) rather than stand 1.5 m
+      // under it as a pit: within `RETRACE_COVER_METRES` of that edge the two
+      // come closer. Measured on these frames, 0.354 m at the least, 62 m to
+      // the side 80 m ahead, the nearer pass's ground on top.
       const offsetRoute = outAndBackRoute({ offset: lane });
       const middle = offsetRoute.totalDistance / 2;
       let judged = 0;
@@ -394,7 +399,7 @@ describe('one ground beside a road ridden twice — #1996', () => {
           expect(
             top.height - Math.max(...other.map((hit) => hit.height)),
             `${String(offset)} m from the turn, ${String(point.ahead)} m ahead`,
-          ).toBeGreaterThan(0.5);
+          ).toBeGreaterThan(0.3);
         }
       }
       expect(judged).toBeGreaterThan(300);

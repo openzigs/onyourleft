@@ -1,6 +1,7 @@
 # The demo's videos — #1655, epic #1643.
 #
-# By hand (`workflow_dispatch`): renders the three presets with
+# By hand (`workflow_dispatch`): renders the three presets, and the captioned
+# YouTube tour (#3074), with
 # `demo:video` (apps/web/tools/demo/demo-video.ts) and uploads each as an
 # artefact, after `demo:video:check` has held the render to its claims. The
 # videos ride the synthetic road: CI never bakes OpenStreetMap data (ADR 0056
@@ -135,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [climb, sprint, group]
+        preset: [climb, sprint, group, youtube]
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -178,16 +179,20 @@ jobs:
         run: pnpm --filter @onyourleft/web run build:demo
 
       # The inputs reach the command as environment variables, never pasted
-      # into the script, and `demo:video` refuses any value it cannot use.
+      # into the script, and `demo:video` refuses any value it cannot use. The
+      # tour is as long as its scenes, so it is given no --seconds (#3074).
       - name: Render the video
         env:
           PRESET: ${{ matrix.preset }}
           SECONDS_OF_RIDE: ${{ inputs.seconds }}
           SIZE: ${{ inputs.size }}
           FPS: ${{ inputs.fps }}
-        run: >-
-          pnpm --filter @onyourleft/web run demo:video --
-          --preset "$PRESET" --seconds "$SECONDS_OF_RIDE" --size "$SIZE" --fps "$FPS"
+        run: |
+          if [ "$PRESET" = youtube ]; then
+            pnpm --filter @onyourleft/web run demo:video -- --preset "$PRESET" --size "$SIZE" --fps "$FPS"
+          else
+            pnpm --filter @onyourleft/web run demo:video -- --preset "$PRESET" --seconds "$SECONDS_OF_RIDE" --size "$SIZE" --fps "$FPS"
+          fi
 
       #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
       - name: Upload the video

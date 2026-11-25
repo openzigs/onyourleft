@@ -829,6 +829,13 @@ describe('the procedural structures and the mapped buildings, ranked together â€
     });
   }
 
+  /**
+   * #3132: a refill at a rung of this many structures. The frame's lots stood
+   * on the mapped buildings' plots and filled the realistic rung's 36 with
+   * them; off those plots, the frame's structures fill a rung of this.
+   */
+  const RUNG = 12;
+
   it('draws the townâ€™s nearest buildings at its edge, the fields beyond filling every structure slot', () => {
     const frame = mixedFrame(1_750);
     const view = frame.mappedBuildings;
@@ -838,7 +845,7 @@ describe('the procedural structures and the mapped buildings, ranked together â€
     );
     const billboards = frame.billboards.length;
     // The issue's frame: the procedural structures alone fill the capâ€¦
-    expect(procedural.length + billboards).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    expect(procedural.length + billboards).toBeGreaterThanOrEqual(RUNG);
     // â€¦and the town's nearest building is nearer than most of them: the fields beyond its end.
     const plans = mixedBuildings.plans;
     const away = (x: number, z: number): number => Math.hypot(x - view.x, z - view.z);
@@ -858,13 +865,7 @@ describe('the procedural structures and the mapped buildings, ranked together â€
     expect(beyond.length).toBeGreaterThan(procedural.length / 2);
 
     const belt = aBelt(mixedBuildings);
-    const cap = refillMappedBuildings(
-      belt,
-      view,
-      frame.scatter,
-      billboards,
-      REALISTIC_STRUCTURE_ITEMS,
-    );
+    const cap = refillMappedBuildings(belt, view, frame.scatter, billboards, RUNG);
     // The town is drawn, its nearest building first, read back out of the belt:
     // nearest, since #2429, to the road ahead the refill ranks by.
     const ranked = (index: number): number => {
@@ -889,7 +890,7 @@ describe('the procedural structures and the mapped buildings, ranked together â€
     before.refill(
       view.x,
       view.z,
-      Math.max(0, REALISTIC_STRUCTURE_ITEMS - procedural.length - billboards) * structure,
+      Math.max(0, RUNG - procedural.length - billboards) * structure,
       view.chunk,
     );
     expect(before.stats.buildings).toBe(0);
