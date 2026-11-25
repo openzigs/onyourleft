@@ -380,18 +380,18 @@ owner holds, and are left out of the script; comments in the file mark where the
   filmed until #3155, so the card may state them as optional and nothing else may name them;
 - the load-metric trademarks, a competitor's name, and "validated", "accurate to" or "professional
   fit". The word list is `src/demo/caption-words.ts`, shared with the demo's tour;
-- a caption up for under 3 or over 6 seconds, one that runs past its scene, or one less than a
+- a caption up for under 3 or over 6 seconds (a `card` may be up for 10, since it carries the
+  project's address and the map credit), one that runs past its scene, or one less than a
   second from the next; a scene under 6 seconds; a chapter list that YouTube would not read (the
   first chapter at 0:00, three or more chapters, each 10 seconds or longer);
-- lines under a caption's words on anything but a `title` or a `card`, and the logo on anything
-  but a `title`.
+- lines under a caption's words, or the logo, on anything but a `title` or a `card`.
 
 #### The opening: the logo, and the platforms line (#3175)
 
 The opening title is drawn under the project's logo, centred: `src/brand/logo-dark.webp`, the
-app's own file, drawn no larger than its own 512 × 408 pixels (24 % of the frame's height, so
-259 pixels tall at 1080p, small enough that the title fits between the HUD's top and bottom
-panels) and never scaled up, so it is sharp at 1080p and no cleaned copy is needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
+app's own file, drawn no larger than its own 512 × 408 pixels (20 % of the frame's height, so
+216 pixels tall at 1080p, small enough that the title sits between the HUD's top panels and the
+rider) and never scaled up, so it is sharp at 1080p and no cleaned copy is needed. Its edge was checked on the dark frame: the sticker outline is clean, with no green-screen
 halo. Beneath it is the owner's platforms line, **"On Android, and in Chrome or Edge on your computer. iOS coming soon."**, which the
 closing card carries too; `video-script.test.ts` pins the wording.
 
@@ -409,13 +409,36 @@ HUD's tokens (`render-script.ts`):
    the frame has no other;
 3. the page draws the caption there, with a leader line and a ring round the panel. Each caption
    fades in and out over half a second, but for a card that ends its scene: the closing card holds
-   to the video's last frame.
+   to the video's last frame. How it looks is in the next section.
 
 The drawn box is then measured again. The render **stops** on any frame where a caption covers the
 panel it explains or the map credit, or leaves the title-safe area. It also stops when a callout's
 panel is not drawn, for example the standings below 1080p, where the HUD leaves them out, or the ride
 controls once they have faded after five seconds without input. Such a video is never written.
 `caption-layout.test.ts` sweeps the layout over five frame sizes and the HUD's measured 1080p boxes.
+
+#### How a caption looks, and how scenes join (#3175's review)
+
+`tools/capture/caption-style.ts` is the one table of how captions are drawn. The page is handed it
+as data, and `caption-style.test.ts` holds it to what a viewer needs:
+
+- **Sizes, as a share of the frame's height.** A title's heading is 4.6 %, a lower third 4.2 %,
+  a callout 3.6 %, and a statement under a heading 3 % or more. No line read in passing is under
+  3 %, which is about 2 mm on a phone held sideways. The closing card's credit lines are 2.2 %.
+- **One hierarchy.** The title is the logo, one heading on one line, then the platforms line. The
+  closing card is the logo, its heading, its statements, then **the project's address in a box**,
+  as the call to action, and the map credit under it in the HUD's muted ink. The script and the
+  `.srt` still list the address last; only the drawing order differs.
+- **Even lines.** A callout or a lower third that wraps is drawn at the least width that keeps its
+  line count (`caption-layout.ts` §`balancedWidth`), with `text-wrap: balance` and no hyphenation.
+  No caption ends on one word or breaks a word.
+- **Lifted off the sky.** A caption has a shadow under it. The leader line, its dot and the ring
+  have a dark edge, because a cloud is the same colour as the HUD's ink.
+- **Scenes fade through black**, 0.4 seconds each way (`video-script.ts` §`sceneFade`). Every
+  scene frames the rider alike, so a hard cut reads as a glitch in one ride. The video opens from
+  black, and does not fade out: its last frame is the closing card. No caption is on screen during
+  a fade, and `video-script.test.ts` holds the shipped script to that.
+- **No scene starts from a stop.** Each is written from 2 seconds or more into its ride.
 
 #### Known in the frames
 

@@ -16,7 +16,10 @@ import {
   captionAt,
   cardLines,
   chapterTime,
+  FADE_SECONDS,
   RIDING_PANELS,
+  SCENE_FADE_SECONDS,
+  sceneFade,
   scenePanels,
   scriptChapters,
   scriptProblems,
@@ -201,18 +204,21 @@ describe('the demo video’s scene script — #3156', () => {
     ]);
   });
 
-  it('draws the logo over a title alone, and lets a title carry lines — #3175', () => {
+  it('draws the logo over a title or a card alone, and lets a title carry lines — #3175', () => {
     expect(
       problemsOf({}, [
         { at: 0, seconds: 4, text: 'Free', placement: 'title', logo: true, lines: ['More'] },
       ]),
     ).toEqual([]);
+    expect(
+      problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', placement: 'card', logo: true }]),
+    ).toEqual([]);
     expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', logo: true }])).toEqual([
-      'test scene one, “Free”: only a title is drawn under the logo',
+      'test scene one, “Free”: only a title or a card is drawn under the logo',
     ]);
     expect(
       problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', callout: 'map', logo: true }]),
-    ).toEqual(['test scene one, “Free”: only a title is drawn under the logo']);
+    ).toEqual(['test scene one, “Free”: only a title or a card is drawn under the logo']);
   });
 
   it('asks every riding scene for the whole HUD, and each mode for its own panels — #3175', () => {
@@ -293,6 +299,70 @@ describe('the demo video’s scene script — #3156', () => {
       'test scene one, “Long and late”: runs outside its scene’s 10 seconds',
       'test scene one, “Long and late”: is up for 6.5 seconds, not 3 to 6',
     ]);
+  });
+
+  it('gives a card up to ten seconds, for the address and the credit under its words', () => {
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 10, text: 'Free', placement: 'card' }]),
+    ).toEqual([]);
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 10.5, text: 'Free', placement: 'card' }]),
+    ).toEqual(['test scene one, “Free”: is up for 10.5 seconds, not 3 to 10']);
+    // Only a card: a title of the same length is refused as any caption.
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 8, text: 'Free', placement: 'title' }]),
+    ).toEqual(['test scene one, “Free”: is up for 8 seconds, not 3 to 6']);
+  });
+
+  it('closes on the logo, with the card up long enough to find the address — #3175', () => {
+    const closing = YOUTUBE_SCRIPT.scenes.at(-1);
+    const card = closing?.captions.find((caption) => caption.placement === 'card');
+    expect(card).toMatchObject({ logo: true, seconds: 8 });
+    expect((card?.at ?? 0) + (card?.seconds ?? 0)).toBe(closing?.seconds);
+  });
+
+  it('gives every caption read over the ride time to be read: three words a second at most', () => {
+    for (const scene of YOUTUBE_SCRIPT.scenes) {
+      for (const caption of scene.captions) {
+        // The title and the card are read as a card, not in passing over the ride.
+        if (caption.placement === 'card' || caption.placement === 'title') continue;
+        const words = caption.text.split(/\s+/u).length;
+        // The half-second fades are not reading time.
+        expect(words / (caption.seconds - 2 * FADE_SECONDS), caption.text).toBeLessThanOrEqual(3);
+      }
+    }
+  });
+
+  it('starts no scene of the shipped script from a stop', () => {
+    // A capture scene pulls off from rest; the first seconds are not shown.
+    for (const scene of YOUTUBE_SCRIPT.scenes) {
+      expect(scene.from ?? 0, scene.id).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('fades each scene from black and to black, but for the closing card at the end', () => {
+    const middle = { first: false, last: false };
+    expect(sceneFade(0, 10, middle)).toBe(1);
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, middle)).toBeCloseTo(0.5);
+    expect(sceneFade(SCENE_FADE_SECONDS, 10, middle)).toBe(0);
+    expect(sceneFade(5, 10, middle)).toBe(0);
+    expect(sceneFade(10 - SCENE_FADE_SECONDS / 2, 10, middle)).toBeCloseTo(0.5);
+    expect(sceneFade(10, 10, middle)).toBe(1);
+    // The video opens from black, as every scene does.
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, { first: true, last: false })).toBeCloseTo(0.5);
+    // Its last frame is the closing card, not black.
+    const last = { first: false, last: true };
+    expect(sceneFade(10, 10, last)).toBe(0);
+    expect(sceneFade(10 - SCENE_FADE_SECONDS / 2, 10, last)).toBe(0);
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, last)).toBeCloseTo(0.5);
+    // No caption of the shipped script is on screen while its scene is fading.
+    YOUTUBE_SCRIPT.scenes.forEach((scene, index) => {
+      const edges = { first: index === 0, last: index === YOUTUBE_SCRIPT.scenes.length - 1 };
+      for (const caption of scene.captions) {
+        expect(sceneFade(caption.at, scene.seconds, edges), caption.text).toBe(0);
+        expect(sceneFade(caption.at + caption.seconds, scene.seconds, edges), caption.text).toBe(0);
+      }
+    });
   });
 
   it('refuses the words no caption may say', () => {

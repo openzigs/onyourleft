@@ -43,6 +43,7 @@ import { CAPTURE_SCENES } from '../../src/game/capture-scene';
 import { encoders, startEncoder } from '../demo/render-video';
 import { hasEncoder } from '../demo/video';
 import {
+  balancedWidth,
   placeCaption,
   inside,
   intersects,
@@ -50,6 +51,7 @@ import {
   type Box,
   type Point,
 } from './caption-layout';
+import { overlayStyle, type CaptionKind, type OverlayStyle } from './caption-style';
 import { captureMp4Args, VIDEO_SCRIPTS, type ScriptRequest } from './capture-args';
 import { renderCapture } from './render-capture';
 import {
@@ -59,10 +61,12 @@ import {
   scriptChapters,
   scriptProblems,
   scriptSeconds,
+  sceneFade,
   scenePanels,
   scriptSrt,
   shownLines,
   type CalloutPanel,
+  type VideoCaption,
   type VideoScene,
 } from './video-script';
 
@@ -123,8 +127,7 @@ export interface ScriptResult {
   readonly frames: number;
 }
 
-/** How a caption is drawn: a callout beside its panel, or its own placement. */
-type Kind = 'title' | 'lower-third' | 'callout' | 'card';
+type Kind = CaptionKind;
 
 /** What {@link measureOverlay} reads off the page. */
 export interface Measured {
@@ -143,13 +146,16 @@ export interface Measured {
  */
 function measureOverlay(arg: {
   readonly lines: readonly string[];
-  readonly kind: Kind;
   readonly selector: string | undefined;
   readonly label: string | undefined;
   readonly credit: string;
   readonly panels: string;
   /** #3175: draw the logo above the words. */
   readonly logo: boolean;
+  /** How it is drawn (`caption-style.ts`). */
+  readonly style: OverlayStyle;
+  /** The width to lay it out at, in pixels; its own where there is none. */
+  readonly width?: number | undefined;
   /** #3175: the panels the frame must show, by name, selector and label. */
   readonly want: readonly {
     readonly name: string;
@@ -184,8 +190,6 @@ function measureOverlay(arg: {
   const svg = root.querySelector('svg');
   if (card === null || svg === null) throw new Error('the capture overlay lost its parts');
   svg.style.visibility = 'hidden';
-  const title = arg.kind === 'title';
-  const whole = arg.kind === 'card';
   // #3175: the logo is kept out of the caption between frames, so a caption
   // that has none does not take it away with its own lines.
   const logo = document.getElementById('oyl-capture-logo') as HTMLImageElement | null;
@@ -198,11 +202,12 @@ function measureOverlay(arg: {
     Object.assign(logo.style, {
       display: 'block',
       // Never larger than its own pixels, so never scaled up and blurred;
-      // and small enough that the title fits between the HUD's top and
-      // bottom panels at 1080p, so it covers none of them.
-      height: `min(24vh, ${String(logo.naturalHeight)}px)`,
+      // and small enough that the title sits between the HUD's top panels
+      // and the rider at 1080p (`caption-style.ts` §`LOGO_VH`).
+      height: `min(${String(arg.style.logoVh)}vh, ${String(logo.naturalHeight)}px)`,
       width: 'auto',
-      margin: '0 auto 0.25em',
+      margin: '0 auto 0.2em',
+      order: '-1',
     });
   }
   card.replaceChildren(
@@ -210,47 +215,18 @@ function measureOverlay(arg: {
     ...arg.lines.map((line, index) => {
       const p = document.createElement('p');
       p.textContent = line;
-      Object.assign(p.style, {
-        margin: '0',
-        ...(whole && index > 0
-          ? { fontFamily: 'inherit', fontSize: '2.2vh', fontWeight: '400', maxWidth: '70%' }
-          : {}),
-        ...(title && index > 0 ? { fontSize: '3.6vh', fontWeight: '600' } : {}),
-      });
+      Object.assign(p.style, arg.style.lines[index]);
       return p;
     }),
   );
   card.removeAttribute('style');
-  Object.assign(card.style, {
-    position: 'absolute',
-    left: '0',
-    top: '0',
-    visibility: 'hidden',
-    boxSizing: 'border-box',
-    background: 'var(--oyl-color-hud-surface)',
-    color: 'var(--oyl-color-hud-ink)',
-    fontFamily: 'var(--oyl-font-family-display)',
-    fontWeight: title ? '800' : '700',
-    fontSize: title ? '6.5vh' : whole ? '5.5vh' : arg.kind === 'callout' ? '3.4vh' : '4.2vh',
-    lineHeight: '1.2',
-    textAlign: arg.kind === 'callout' ? 'left' : 'center',
-    borderRadius: whole ? '0' : 'var(--oyl-radius)',
-    padding: whole ? '0' : '0.35em 0.7em',
-    ...(whole
-      ? {
-          width: '100vw',
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '1.6vh',
-        }
-      : {
-          width: 'max-content',
-          maxWidth: title ? '80vw' : arg.kind === 'callout' ? '34vw' : '64vw',
-        }),
-  });
+  Object.assign(card.style, arg.style.card);
+  // A wrapped caption is drawn at the width that balances its lines
+  // (`caption-layout.ts` §`balancedWidth`), not at its widest.
+  if (arg.width !== undefined) {
+    Object.assign(card.style, { width: `${String(arg.width)}px`, maxWidth: 'none' });
+  }
+  Object.assign(svg.style, arg.style.marks);
   const boxOf = (element: Element): Box => {
     const rect = element.getBoundingClientRect();
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
@@ -363,6 +339,29 @@ function drawOverlay(arg: {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
+/**
+ * In the page: black over the whole frame at `opacity`, under any caption: a
+ * scene's fade from and to black (`video-script.ts` §`sceneFade`).
+ */
+function drawFade(opacity: number): void {
+  const ID = 'oyl-capture-fade';
+  let fade = document.getElementById(ID);
+  if (fade === null) {
+    fade = document.createElement('div');
+    fade.id = ID;
+    fade.setAttribute('aria-hidden', 'true');
+    Object.assign(fade.style, {
+      position: 'fixed',
+      inset: '0',
+      pointerEvents: 'none',
+      background: '#000',
+      zIndex: '2147483646',
+    });
+    document.body.append(fade);
+  }
+  fade.style.opacity = String(opacity);
+}
+
 /** In the page: no caption on this frame. */
 function hideOverlay(): void {
   const root = document.getElementById('oyl-capture-overlay');
@@ -417,6 +416,7 @@ async function drawCaption(
   second: number,
   frame: { readonly width: number; readonly height: number },
   logo: string,
+  widths: WeakMap<VideoCaption, number>,
 ): Promise<void> {
   const shown = captionAt(scene, second);
   if (shown === undefined) {
@@ -430,19 +430,33 @@ async function drawCaption(
   const kind: Kind = panel === undefined ? (caption.placement ?? 'lower-third') : 'callout';
   if (caption.logo === true) await page.evaluate(installLogo, logo);
   const capture = CAPTURE_SCENES[scene.capture];
-  const measured = await page.evaluate(measureOverlay, {
-    lines: shownLines(caption),
-    kind,
+  const lines = shownLines(caption);
+  const asked = {
+    lines,
     selector: panel?.selector,
     label: panel?.label,
     credit: CREDIT_SELECTOR,
     panels: PANEL_SELECTOR,
     logo: caption.logo === true,
+    style: overlayStyle(kind, lines.length, caption.lines?.length ?? 0),
     want: (capture === undefined ? [] : scenePanels(capture)).map((name) => {
       const wanted: CalloutPanel = CALLOUT_PANELS[name];
       return { name, selector: wanted.selector, label: wanted.label };
     }),
-  });
+  };
+  // A callout or a lower third that wraps is drawn at the least width that
+  // keeps its lines, so they are even and the box holds no empty side. Found
+  // once a caption: the words and the frame do not change under it.
+  let width = widths.get(caption);
+  if (width === undefined && (kind === 'callout' || kind === 'lower-third')) {
+    const natural = (await page.evaluate(measureOverlay, asked)).size;
+    width = await balancedWidth(
+      natural,
+      async (at) => (await page.evaluate(measureOverlay, { ...asked, width: at })).size.height,
+    );
+    widths.set(caption, width);
+  }
+  const measured = await page.evaluate(measureOverlay, { ...asked, width });
   if (panel !== undefined && measured.target === undefined) {
     throw new Error(`${where}: the ${String(caption.callout)} panel is not in the frame`);
   }
@@ -514,10 +528,15 @@ export async function renderScript(
   const frame = { width: request.width, height: request.height };
   const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, partial));
   const logo = logoDataUrl();
+  const widths = new WeakMap<VideoCaption, number>();
   let frames = 0;
   try {
     for (const scene of script.scenes) {
       const from = scene.from ?? 0;
+      const edges = {
+        first: scene === script.scenes[0],
+        last: scene === script.scenes.at(-1),
+      };
       const openWorld = CAPTURE_SCENES[scene.capture]?.openWorld === true;
       const result = await renderCapture(
         {
@@ -536,7 +555,10 @@ export async function renderScript(
           ffmpeg,
           encoder: { into: encoder, mp4: partial },
           skipFrames: from * request.fps,
-          beforeShot: (page, second) => drawCaption(page, scene, second - from, frame, logo),
+          beforeShot: async (page, second) => {
+            await page.evaluate(drawFade, sceneFade(second - from, scene.seconds, edges));
+            await drawCaption(page, scene, second - from, frame, logo, widths);
+          },
           onFrame: (at, of) => options.onFrame?.(scene.id, at, of),
         },
       );

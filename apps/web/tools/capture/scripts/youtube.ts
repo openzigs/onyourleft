@@ -24,7 +24,7 @@
  * - a word for a feature only an instance runs ("AI", "instance") anywhere
  *   but a line of the closing card that begins "Optional on your own
  *   instance:";
- * - a caption up for under 3 or over 6 seconds, run past its scene, or less
+ * - a caption up for under 3 or over 6 seconds (a card, over 10), run past its scene, or less
  *   than a second from the next; a scene under 6 seconds; a chapter under 10.
  *
  * A scene is a capture scene (`src/game/capture-scene.ts`) ridden from its
@@ -149,6 +149,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'free-ride',
       chapter: 'Free ride',
       capture: 'free-ride',
+      // Past the pull-off from a stop and the post beside the start.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -165,6 +167,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'delivery',
       chapter: 'Delivery',
       capture: 'delivery',
+      // Under way, not pulling off from a stop.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -223,17 +227,20 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'closing',
       chapter: 'Free and open',
       capture: 'route-hud',
-      seconds: 12,
+      // Under way, not pulling off from a stop.
+      from: 3,
+      seconds: 15,
       captions: [
         {
           at: 0.5,
-          seconds: 4.5,
+          seconds: 5.5,
           text: 'No subscription. Your rides are kept on your device; self-hosting is optional',
         },
         {
-          at: 6,
-          seconds: 6,
+          at: 7,
+          seconds: 8,
           placement: 'card',
+          logo: true,
           text: 'Free and open source',
           // Owner ruling 2026-11-25: they exist but are not filmed, as each
           // needs an instance; only the closing card may say so, and only so.

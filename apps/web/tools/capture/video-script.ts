@@ -26,8 +26,8 @@
  *   bots and the rest exist only on a rider's own instance, which no scene
  *   rides yet (#3155), so only a line of the closing card may name them, and
  *   only as optional and on your own instance ({@link INSTANCE_ONLY_STATEMENT}).
- * - **The epic's timing**: a caption is up for 3 to 6 seconds, inside its
- *   scene and a second from the next; no scene is under 6 seconds; YouTube's
+ * - **The epic's timing**: a caption is up for 3 to 6 seconds (a card, up to
+ *   10), inside its scene and a second from the next; no scene is under 6 seconds; YouTube's
  *   chapter rules (the first at 0:00, three or more, each 10 s or longer).
  *
  * Where a caption is drawn — clear of the panel it explains and of the map
@@ -160,9 +160,9 @@ export interface VideoCaption {
   /** The HUD panel the caption explains, with a leader line to it. */
   readonly callout?: CalloutPanelName | undefined;
   /**
-   * #3175: draw the project's logo above a `title`'s words, centred, no
-   * larger than its own pixels so it is sharp (`render-script.ts`). Only a
-   * title has it.
+   * #3175: draw the project's logo above a `title`'s or a `card`'s words,
+   * centred, no larger than its own pixels so it is sharp
+   * (`render-script.ts`). Only a title or a card has it.
    */
   readonly logo?: boolean | undefined;
   /** The feature the caption claims, which its scene must show. */
@@ -205,6 +205,17 @@ export const CAPTION_MAX_SECONDS = 6;
 export const CAPTION_GAP_SECONDS = 1;
 /** Each caption's fade in and out: the epic's half second. */
 export const FADE_SECONDS = 0.5;
+/**
+ * The longest a `card` is up: it carries the platforms, the project's address
+ * and the map credit, which six seconds do not give a viewer time to find.
+ */
+export const CARD_MAX_SECONDS = 10;
+/**
+ * Each scene's fade from black and to black — #3175's review. Every scene
+ * frames the rider alike, so a hard cut between two reads as a glitch in one
+ * ride, not as a new scene; a short dip through black says it is one.
+ */
+export const SCENE_FADE_SECONDS = 0.4;
 /** The shortest scene: the epic's "no scene is under 6 s". */
 export const SCENE_MIN_SECONDS = 6;
 /** YouTube's shortest chapter, and fewest chapters, for a chapter list to be read as one. */
@@ -321,9 +332,10 @@ export function scriptProblems(
       if (!(caption.at >= 0 && end <= scene.seconds)) {
         problems.push(`${said}: runs outside its scene’s ${String(scene.seconds)} seconds`);
       }
-      if (!(caption.seconds >= CAPTION_MIN_SECONDS && caption.seconds <= CAPTION_MAX_SECONDS)) {
+      const longest = caption.placement === 'card' ? CARD_MAX_SECONDS : CAPTION_MAX_SECONDS;
+      if (!(caption.seconds >= CAPTION_MIN_SECONDS && caption.seconds <= longest)) {
         problems.push(
-          `${said}: is up for ${String(caption.seconds)} seconds, not ${String(CAPTION_MIN_SECONDS)} to ${String(CAPTION_MAX_SECONDS)}`,
+          `${said}: is up for ${String(caption.seconds)} seconds, not ${String(CAPTION_MIN_SECONDS)} to ${String(longest)}`,
         );
       }
       const next = captions[index + 1];
@@ -344,8 +356,8 @@ export function scriptProblems(
       ) {
         problems.push(`${said}: only a card or a title has lines under its words`);
       }
-      if (caption.logo === true && caption.placement !== 'title') {
-        problems.push(`${said}: only a title is drawn under the logo`);
+      if (caption.logo === true && caption.placement !== 'title' && caption.placement !== 'card') {
+        problems.push(`${said}: only a title or a card is drawn under the logo`);
       }
       const onClosingCard = scene === closing && caption.placement === 'card';
       for (const text of [caption.text, ...(caption.lines ?? [])]) {
@@ -463,6 +475,22 @@ export function captionAt(scene: VideoScene, second: number): ShownCaption | und
     return { caption, opacity };
   }
   return undefined;
+}
+
+/**
+ * How black the frame at `second` of a scene `seconds` long is, from 0 to 1:
+ * each scene fades from black and to black over {@link SCENE_FADE_SECONDS}.
+ * The video's `last` scene does not fade out — its closing card is the last
+ * frame — and its `first` fades in like any other.
+ */
+export function sceneFade(
+  second: number,
+  seconds: number,
+  edges: { readonly first: boolean; readonly last: boolean },
+): number {
+  const fromBlack = 1 - second / SCENE_FADE_SECONDS;
+  const toBlack = edges.last ? 0 : 1 - (seconds - second) / SCENE_FADE_SECONDS;
+  return Math.min(1, Math.max(0, fromBlack, toBlack));
 }
 
 /** `seconds` as an SRT time, `HH:MM:SS,mmm`. */
