@@ -52,14 +52,52 @@ describe('capture’s arguments — #3152', () => {
     });
   });
 
+  it('takes a free ride’s start and archive (#3154)', () => {
+    const parsed = parseCaptureArgs([
+      '--scene',
+      'free-ride',
+      '--start',
+      '40.1,-75.25',
+      '--archive',
+      '/maps/basemap.pmtiles',
+    ]);
+    expect(parsed.ok && parsed.request).toMatchObject({
+      scene: 'free-ride',
+      start: '40.1,-75.25',
+      archive: '/maps/basemap.pmtiles',
+    });
+  });
+
+  it('never repeats a refused start back: it is a place (ADR 0004 D)', () => {
+    const parsed = parseCaptureArgs([
+      '--scene',
+      'free-ride',
+      '--start',
+      '95.123,-75.456',
+      '--archive',
+      'a',
+    ]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.message).not.toContain('95.123');
+      expect(parsed.message).not.toContain('75.456');
+    }
+  });
+
   it.each([
     [['--preset', 'climb'], /no option --preset/u],
     [['--scene'], /needs a value/u],
     [['--scene', 'x', '--scene', 'y'], /given twice/u],
     [
-      ['--scene', 'free-ride'],
-      /--scene is one of route-hud, delivery, lap-race, workout, pacer, not free-ride/u,
+      ['--scene', 'gravel'],
+      /--scene is one of route-hud, delivery, lap-race, workout, pacer, free-ride, not gravel/u,
     ],
+    // #3154: a free ride's start and archive, both, and only a free ride's.
+    [['--scene', 'free-ride'], /rides the open world, so it needs --start and --archive/u],
+    [['--scene', 'free-ride', '--start', '40.1,-75.2'], /needs --start and --archive/u],
+    [['--start', '40.1,-75.2', '--archive', 'a.pmtiles'], /for a scene that rides the open world/u],
+    [['--scene', 'free-ride', '--start', '91.0,-75.2', '--archive', 'a'], /latitude to 90/u],
+    [['--scene', 'free-ride', '--start', '40.1;-75.2', '--archive', 'a'], /<lat>,<lon>/u],
     [['--seconds', '0'], /positive/u],
     [['--fps', '61'], /1 to 60/u],
     [['--fps', '2.5'], /1 to 60/u],
@@ -127,6 +165,11 @@ describe('what the capture rides — #3152', () => {
     expect(captureHash('delivery')).toBe('#/game?route=level%3Amorning-round&capture=delivery');
     expect(gameRouteFromHash(captureHash('lap-race'))).toBe('circuit:bellwether');
     expect(captureRideName('lap-race')).toBe('Bellwether Loop');
+    // #3154: the open world's card is chosen by the game, and its start is the command's.
+    expect(captureHash('free-ride', '40.1,-75.25')).toBe(
+      '#/game?capture=free-ride&start=40.1%2C-75.25',
+    );
+    expect(captureRideName('free-ride')).toBe('Open world');
   });
 
   it('rides an invented route under a placeholder name, from 0° 0°', () => {

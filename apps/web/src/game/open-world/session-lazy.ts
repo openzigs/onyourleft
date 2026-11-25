@@ -19,7 +19,12 @@
 import type { BasemapConfig } from '../../map/basemap';
 import type { TerrainConfig } from '../../terrain/config';
 import type { OpenWorldEntry } from './entry';
-import type { OpenWorldReady, OpenWorldSession, OpenWorldSessions } from './ride';
+import type {
+  OpenWorldReady,
+  OpenWorldSession,
+  OpenWorldSessionExtras,
+  OpenWorldSessions,
+} from './ride';
 import type { OpenWorldStart } from './start';
 
 interface LazyOpenWorldOptions {
@@ -37,7 +42,7 @@ interface LazyOpenWorldOptions {
 }
 
 /** What opens one session, once the modules are loaded. */
-type OpenSession = (start: OpenWorldStart) => OpenWorldSession;
+type OpenSession = (start: OpenWorldStart, extras?: OpenWorldSessionExtras) => OpenWorldSession;
 
 const UNAVAILABLE: OpenWorldReady = { kind: 'refused', refusal: 'unavailable' };
 
@@ -55,11 +60,12 @@ export function lazyOpenWorldSessions(
     const source = await import('../../world-data/corridor-source');
     // #2899: the road's heights, through #2013's one module (ADR 0087 D-2.3).
     const heights = await import('../../terrain/terrain-source');
-    return (start) => {
+    return (start, extras) => {
       const config = options.basemap();
       const terrain = options.terrain?.();
       return session.createOpenWorldSession({
         start,
+        streetName: extras?.streetName,
         archive: config === undefined ? undefined : source.corridorArchive(config),
         mapTilesOn: options.mapTilesOn,
         terrain: terrain === undefined ? undefined : heights.terrainArchive(terrain),
@@ -70,7 +76,7 @@ export function lazyOpenWorldSessions(
   let loaded: Promise<OpenSession> | undefined;
   return {
     take: () => options.entry.take(),
-    open: (start) => {
+    open: (start, extras) => {
       let stopped = false;
       let inner: OpenWorldSession | undefined;
       loaded ??= load().catch((error: unknown) => {
@@ -81,7 +87,7 @@ export function lazyOpenWorldSessions(
         (open): Promise<OpenWorldReady> | OpenWorldReady => {
           // Stopped while the modules loaded: nothing is asked for at all.
           if (stopped) return { kind: 'stopped' };
-          inner = open(start);
+          inner = open(start, extras);
           return inner.ready;
         },
         (): OpenWorldReady => UNAVAILABLE,

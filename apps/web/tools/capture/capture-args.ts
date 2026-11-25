@@ -17,12 +17,34 @@ export interface CaptureRequest {
   readonly height: number;
   /** A directory; absent is `apps/web/capture/dist`. */
   readonly out: string | undefined;
+  /**
+   * #3154: where a free ride starts, `<lat>,<lon>` in degrees, for a scene
+   * that rides the open world; `undefined` for every other scene.
+   */
+  readonly start?: string | undefined;
+  /**
+   * #3154: a local copy of the basemap archive (`.pmtiles`) the open world's
+   * blocks are answered from, for a scene that rides it; `undefined` for
+   * every other scene. Its bytes never leave this machine, nor does a request.
+   */
+  readonly archive?: string | undefined;
 }
 
 /** The longest capture, in frames: ten minutes at 60 fps. A typo is refused, not rendered for a day. */
 export const MAX_CAPTURE_FRAMES = 36_000;
 
-const OPTIONS = ['--scene', '--seconds', '--fps', '--size', '--out'] as const;
+const OPTIONS = [
+  '--scene',
+  '--seconds',
+  '--fps',
+  '--size',
+  '--out',
+  '--start',
+  '--archive',
+] as const;
+
+/** `<lat>,<lon>`, each a decimal number of degrees. */
+const START = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/u;
 
 /**
  * `capture`'s arguments. The defaults are the issue's: the `route-hud`
@@ -89,7 +111,49 @@ export function parseCaptureArgs(
       message: `capture: --size is WIDTHxHEIGHT, each even and at least 64, not ${sizeText}`,
     };
   }
-  return { ok: true, request: { scene, seconds, fps, width, height, out: values.get('--out') } };
+  // #3154: a free ride's start and blocks, and only a free ride's. ⚠️ A
+  // message about the start names the option and the rule, never the value
+  // (ADR 0004 D): it is a place.
+  const start = values.get('--start');
+  const archive = values.get('--archive');
+  const openWorld = CAPTURE_SCENES[scene]?.openWorld === true;
+  if (openWorld && (start === undefined || archive === undefined)) {
+    return {
+      ok: false,
+      message: `capture: --scene ${scene} rides the open world, so it needs --start and --archive`,
+    };
+  }
+  if (!openWorld && (start !== undefined || archive !== undefined)) {
+    return {
+      ok: false,
+      message: 'capture: --start and --archive are for a scene that rides the open world',
+    };
+  }
+  if (start !== undefined) {
+    const parts = START.exec(start);
+    const latitude = Number(parts?.[1]);
+    const longitude = Number(parts?.[2]);
+    if (parts === null || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+      return {
+        ok: false,
+        message:
+          'capture: --start is <lat>,<lon> in decimal degrees, latitude to 90 and longitude to 180',
+      };
+    }
+  }
+  return {
+    ok: true,
+    request: {
+      scene,
+      seconds,
+      fps,
+      width,
+      height,
+      out: values.get('--out'),
+      ...(start === undefined ? {} : { start }),
+      ...(archive === undefined ? {} : { archive }),
+    },
+  };
 }
 
 /** How many frames a capture writes: its seconds times its frames a second, exactly. */
@@ -165,10 +229,12 @@ export const CAPTURE_RIDER_KILOGRAMS = 72;
  * built-in route when it names one (#3153), as `shell/routes.ts`
  * §`hrefForGameRoute` writes it, so the game opens with that card chosen.
  */
-export function captureHash(scene: string): string {
-  const route = CAPTURE_SCENES[scene]?.route;
-  const chosen = route === undefined ? '' : `route=${encodeURIComponent(route.id)}&`;
-  return `#/game?${chosen}capture=${encodeURIComponent(scene)}`;
+export function captureHash(scene: string, start?: string): string {
+  const id = CAPTURE_SCENES[scene]?.route?.id;
+  const chosen = id === undefined ? '' : `route=${encodeURIComponent(id)}&`;
+  // #3154: a free ride's start, which only an open-world scene reads.
+  const from = start === undefined ? '' : `&start=${encodeURIComponent(start)}`;
+  return `#/game?${chosen}capture=${encodeURIComponent(scene)}${from}`;
 }
 
 /**

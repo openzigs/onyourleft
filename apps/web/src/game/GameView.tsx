@@ -175,6 +175,7 @@ import {
   publishCaptureFrame,
   type CaptureCue,
 } from './capture-scene';
+import { captureOpenWorldStart, captureStreetName } from './capture-free-ride';
 import { CaptureWorkout } from './capture-workout';
 import {
   simulatedClock,
@@ -255,8 +256,10 @@ import {
 import type { OpenWorldStart } from './open-world/start';
 import {
   createJunctionChoice,
+  pressesOfWays,
   type JunctionChoice,
   type TurnPress,
+  type WayPress,
 } from './open-world/junction-choice';
 import {
   junctionEvent,
@@ -1316,7 +1319,10 @@ export function GameView(props: GameViewProps): JSX.Element {
   // #2896: the open-world start, taken ONCE for this screen — here rather than
   // in `GameScreen`, which a preview remounts, and in an initialiser, which
   // React's StrictMode runs twice and keeps the first answer of.
-  const [openWorldStart] = useState(() => props.port?.openWorld?.take());
+  // #3154: or, on a free-ride capture, the start its command named.
+  const [openWorldStart] = useState(
+    () => props.port?.openWorld?.take() ?? captureOpenWorldStart(globalThis.location.hash),
+  );
   return (
     <GameScreen
       // ⚠️ A preview is a NEW screen, mounted with no trainer port, room or
@@ -1709,6 +1715,8 @@ function GameScreen({
   const captureLogRef = useRef<CaptureLog | undefined>(undefined);
   /** #3153: a capture ride's scripted presses still to make. @see CaptureCues */
   const captureCuesRef = useRef<CaptureCues | undefined>(undefined);
+  /** #3154: the ride distance of the junction a capture's last turn was pressed at. */
+  const captureTurnedAtRef = useRef<number | undefined>(undefined);
   /** #3153: what `WorkoutStrip` draws of a capture's workout, copied out each second. */
   const [captureWorkoutGraph, setCaptureWorkoutGraph] = useState<
     ReturnType<CaptureWorkout['graphAt']> | undefined
@@ -2586,7 +2594,11 @@ function GameScreen({
   const openWorldSessions = port?.openWorld;
   useEffect(() => {
     if (openWorldStart === undefined || openWorldSessions === undefined) return;
-    const session = openWorldSessions.open(openWorldStart);
+    // #3154: on a capture, every street by a placeholder name, on the road and in the prompt.
+    const session = openWorldSessions.open(
+      openWorldStart,
+      captureScene?.openWorld === true ? { streetName: captureStreetName } : undefined,
+    );
     openWorldSessionRef.current = session;
     let live = true;
     setOpenWorld({ kind: 'reading' });
@@ -2606,7 +2618,7 @@ function GameScreen({
       openWorldRoadRef.current = undefined;
       if (openWorldSessionRef.current === session) openWorldSessionRef.current = undefined;
     };
-  }, [openWorldStart, openWorldSessions]);
+  }, [openWorldStart, openWorldSessions, captureScene]);
   const openWorldRoutes = openWorld?.kind === 'ready' ? [openWorld.route] : [];
 
   /**
@@ -3224,6 +3236,7 @@ function GameScreen({
         captureLogRef.current = new CaptureLog();
         captureCuesRef.current =
           captureScene === undefined ? undefined : new CaptureCues(captureScene);
+        captureTurnedAtRef.current = undefined;
         setCaptureWorkoutGraph(captureWorkout?.graphAt(0));
       }
       // #1312: the rider is on the line of this course, so a lap begins here
@@ -4553,6 +4566,26 @@ function GameScreen({
             },
             useItem: () => {
               itemPortRef.current.useItem();
+            },
+            // #3154: a free ride's turn, at the rider's distance, as the HUD presses it.
+            // One turn a junction: the next waits for the junction after it.
+            turn: (press) => {
+              const choice = junctionRef.current;
+              const prompt = choice?.prompt(simulation.state.ride.distance);
+              if (
+                choice === undefined ||
+                prompt === undefined ||
+                prompt.locked ||
+                prompt.distance === captureTurnedAtRef.current
+              ) {
+                return undefined;
+              }
+              captureTurnedAtRef.current = prompt.distance;
+              const offered = [...pressesOfWays(prompt).values()].some((presses) =>
+                presses.includes(press),
+              );
+              if (offered) choice.press(press, simulation.state.ride.distance);
+              return offered;
             },
           },
         );
@@ -6337,8 +6370,14 @@ function captureCueTaken(
   delivery: DeliveryRide | undefined,
   race: LapRaceRide | undefined,
   speed: number,
-  press: { readonly throwParcel: () => boolean; readonly useItem: () => void },
+  press: {
+    readonly throwParcel: () => boolean;
+    readonly useItem: () => void;
+    readonly turn: (press: WayPress) => boolean | undefined;
+  },
 ): boolean | undefined {
+  // #3154: a turn waits for the next junction's prompt, and is not taken where its way is not offered.
+  if (cue.kind === 'turn') return press.turn(cue.press);
   if (cue.kind === 'item') {
     if (race === undefined) return false;
     // As a rider does: an item is used once one is held, from a pick-up.

@@ -45,6 +45,7 @@ const result = await renderCapture(request, {
 });
 console.log(`capture: ${result.mp4}`);
 console.log(`capture: ${result.events}`);
+console.log(`capture: ${result.requests}`);
 console.log(
   `capture: ${String(result.frames)} frames; the ride was ${result.last.distance.toFixed(1)} m ` +
     `in at ${result.last.elapsed.toFixed(2)} s on the last`,

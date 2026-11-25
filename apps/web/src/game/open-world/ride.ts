@@ -78,7 +78,18 @@ export interface OpenWorldSessions {
   /** The start the picker handed over (`entry.ts`), once; `undefined` when none waits. */
   take(): OpenWorldStart | undefined;
   /** A session on `start`. Its first blocks are asked for at once. */
-  open(start: OpenWorldStart): OpenWorldSession;
+  open(start: OpenWorldStart, extras?: OpenWorldSessionExtras): OpenWorldSession;
+}
+
+/** What a screen may ask of a session beyond its start. */
+export interface OpenWorldSessionExtras {
+  /**
+   * #3154: the name a street is shown by, in place of the map's — on the road
+   * and in the junction prompt alike — or `undefined` to show none. Capture
+   * mode's alone (`capture-free-ride.ts` §`captureStreetName`): no real street
+   * or place name is on a capture's screen. Absent, the map's own.
+   */
+  readonly streetName?: ((name: string) => string | undefined) | undefined;
 }
 
 /**

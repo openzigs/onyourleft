@@ -171,11 +171,13 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 
 | Option | Values | Default |
 |---|---|---|
-| `--scene` | `route-hud`, `delivery`, `lap-race`, `workout`, `pacer` | `route-hud` |
+| `--scene` | `route-hud`, `delivery`, `lap-race`, `workout`, `pacer`, `free-ride` | `route-hud` |
 | `--seconds` | seconds of ride, positive; `seconds × fps` must be whole | `20` |
 | `--fps` | whole frames a second, 1 to 60 | `60` |
 | `--size` | `WIDTHxHEIGHT`, each even, at least 64 | `1920x1080` |
 | `--out` | a directory | `apps/web/capture/dist` |
+| `--start` | `free-ride` only: where the ride starts, `<lat>,<lon>` in decimal degrees | none: required |
+| `--archive` | `free-ride` only: a local copy of the basemap archive (`.pmtiles`) | none: required |
 
 ### How it works
 
@@ -227,8 +229,41 @@ table by the mark every scene's id begins with (`oyl-capture-scene:`), never by 
 `apps/web/capture/dist/app`, never to `apps/web/dist`, which is Capacitor's `webDir`, so an app
 built by hand after a capture never reads `?capture=` (#3153).
 `src/game/capture-wiring.test.tsx` proves the stepped clock, and `simulated-rider-wiring.test.tsx`
-proves that a capture reaches no trainer and starts no recording. Free ride and the instance scenes
-are #3154 and #3155.
+proves that a capture reaches no trainer and starts no recording. The instance scenes are #3155.
+
+### Free ride (#3154)
+
+```sh
+pnpm --filter @onyourleft/web run capture -- --scene free-ride --seconds 40 \
+  --start <lat>,<lon> --archive /path/to/basemap.pmtiles
+```
+
+- **Blocks from local disk.** The open world reads its blocks as range requests on the basemap
+  archive's one URL (`world-data/corridor-source.ts`). The capture tool answers that URL from the
+  `--archive` file (`render-capture.ts` §`archiveRange`), so nothing waits on the network. The URL
+  is the one the capture build was made with (`map/basemap.ts` §`readBasemapConfig`), read as
+  the build reads it: the environment and `apps/web`'s `.env`, `.env.local`, `.env.capture` and
+  `.env.capture.local` files (`render-capture.ts` §`captureArchiveUrl`).
+  The terrain archive is refused, so a capture's open-world road is flat.
+- **The request log.** Beside the video, `<scene>-<size>-<fps>fps.requests.json` counts the app's
+  files and the archive's ranges answered from this machine, and lists every other request by
+  origin and path. Every request is answered or refused inside the browser
+  (`context.route`), so none leaves the machine; the log says which were asked.
+- **The start** is the command's, never one kept in this repository. The tool writes it into the
+  game's address as `start=` beside `capture=`, and only the capture build reads it
+  (`src/game/capture-free-ride.ts` §`captureOpenWorldStart`), as a pin on the picker's map would.
+- **Junctions.** The scene presses *left* at the first junction after 2 s and *right* at the next,
+  through the HUD's own turn buttons, one junction a press (`capture-scene.ts` §`CaptureCue`).
+- **No real street or place names on screen** (the owner's rule of 2026-11-24). On a capture every
+  street is shown by a placeholder from a fixed list (`capture-free-ride.ts`
+  §`CAPTURE_STREET_NAMES`), on the road and in the junction prompt alike, through the session's one
+  source of names (`open-world/session.ts` §`renamedStreets`). The minimap draws lines and no
+  names, and the open world's card is *Open world*. The other scenes ride a synthetic route, a
+  built-in level or a built-in circuit, whose names are this project's own.
+
+To try it with no map at all, the open world's invented test block
+(`src/game/open-world/fixture-testing.ts` §`openWorldFixtureArchive`, no OpenStreetMap data) can be
+written to a file and handed to `--archive`, with `--start` at its start pin.
 
 ### The modes' scenes (#3153)
 
