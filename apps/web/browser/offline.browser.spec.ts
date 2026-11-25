@@ -144,12 +144,18 @@ const EXPECTED_PRECACHE = distFiles()
   // that they would multiply a first visit by about seven for every rider.
   // The directory again, for the same reason as the line above.
   .filter((file) => !file.startsWith('pose/'))
+  // ⚠️ #2734: the in-browser routing engine's worker and WebAssembly are in
+  // `dist` and deliberately NOT precached: ten megabytes a rider who never
+  // draws a route has no use for, fetched on the first routed leg instead.
+  .filter((file) => !file.startsWith('routing/'))
   .sort();
 
 /** The realistic world's files in `dist`: there, and not to be cached. ADR 0026 D-7. */
 const REALISTIC_IN_DIST = distFiles().filter((file) => file.startsWith('realistic/'));
 
 const POSE_IN_DIST = distFiles().filter((file) => file.startsWith('pose/'));
+
+const ROUTING_IN_DIST = distFiles().filter((file) => file.startsWith('routing/'));
 
 /**
  * What the worker actually cached, read out of the browser.
@@ -316,6 +322,14 @@ test.describe('what the worker actually cached', () => {
     expect(POSE_IN_DIST.some((file) => file.endsWith('.wasm'))).toBe(true);
     expect(POSE_IN_DIST.some((file) => file.startsWith('pose/pose-worker-'))).toBe(true);
     expect(precached.filter((entry) => entry.startsWith('pose/'))).toEqual([]);
+  });
+
+  test('holds none of the in-browser routing engine, which IS in the build — #2734', () => {
+    // Both halves, as above: the engine's worker and WebAssembly are really in
+    // `dist`, and neither reached the cache a real browser filled.
+    expect(ROUTING_IN_DIST.some((file) => file.endsWith('.wasm'))).toBe(true);
+    expect(ROUTING_IN_DIST.some((file) => file.endsWith('.js'))).toBe(true);
+    expect(precached.filter((entry) => entry.startsWith('routing/'))).toEqual([]);
   });
 
   test('leaves the control outside the cache, and outside dist entirely', () => {
