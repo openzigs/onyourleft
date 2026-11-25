@@ -290,7 +290,9 @@ describe('capture mode shows the HUD a rider sees — #3152', () => {
     await startCapture('#/game?simulate=200');
     for (let frame = 1; frame <= 3 * FPS; frame += 1) await step();
     expect(mounted?.container.querySelector('.oyl-hud__simulated')).not.toBeNull();
-    expect(field('Cadence')).not.toMatch(/\d/u);
+    // #3210: its cadence is invented since the owner's ruling of 2026-11-25
+    // (`simulated-body.ts`), so it is a number; its recorder figures are not.
+    expect(field('Cadence')).toMatch(/^\d+ rpm$/u);
     expect(field('Moving')).not.toMatch(/\d/u);
   });
 });

@@ -213,8 +213,8 @@ it happened on. Two captures of one scene are the same ride when their logs are 
 rooms and no Delivery round**. It never writes to a trainer, records nothing and posts nothing. It
 differs in three ways:
 
-- its power, cadence and heart rate follow the scene's script on the ride's clock, so the HUD shows
-  numbers where a simulated ride shows dashes;
+- its power, cadence and heart rate follow the scene's script on the ride's clock, where a
+  simulated ride's cadence and heart rate are invented by `simulated-body.ts` (#3210);
 - the HUD carries no *Simulated ride* mark, because the video is the HUD a rider sees;
 - the recorder's figures (*Moving*, *Elapsed*, the ride so far and *Calories*) are folded in memory
   from the same readings by `capture-recording.ts`, with the recorder's own `rideTotals`, and are

@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -83,13 +84,16 @@ vi.mock('./scene', async (importOriginal) => {
   };
 });
 
-/** Three kilometres north from 0° 0°, climbing 1 % — straight, so no bend eases the rider. */
-function straightRoute(): RidableRoute {
+/**
+ * Three kilometres north from 0° 0°, climbing 1 % — straight, so no bend
+ * eases the rider. #3210: or climbing `percent`.
+ */
+function straightRoute(percent = 1): RidableRoute {
   const points: RoutePoint[] = [];
   for (let index = 0; index <= 300; index += 1) {
     points.push({
       position: geographicPosition(degreesLatitude((index * 10) / 111_320), degreesLongitude(0)),
-      elevation: altitudeMetres(index * 0.1),
+      elevation: altitudeMetres((index * 10 * percent) / 100),
     });
   }
   return { id: 'route-own', name: 'My imported route', profile: routeProfile(points), attempts: 0 };
@@ -99,9 +103,9 @@ const ROUTE = straightRoute();
 const POWER = 250;
 
 /** The rider's saved routes, and the given sensors — none at all, by default. */
-function gamePort(sensors: GameSensors = NO_SENSORS): GamePort {
+function gamePort(sensors: GameSensors = NO_SENSORS, route: RidableRoute = ROUTE): GamePort {
   return {
-    listRoutes: () => Promise.resolve([ROUTE]),
+    listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => sensors,
   };
@@ -234,6 +238,8 @@ async function ride(
     readonly port?: GamePort;
     readonly trainer?: GameTrainerPort;
     readonly frames?: number;
+    /** #3210: where the frames the renderer was handed are kept. */
+    readonly drawn?: SceneFrame[];
   } = {},
 ): Promise<void> {
   globalThis.location.hash = hash;
@@ -241,7 +247,7 @@ async function ride(
     <GameView
       port={options.port ?? gamePort()}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
-      renderer={() => Promise.resolve(capturingRenderer([]))}
+      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
     />,
   );
@@ -273,14 +279,19 @@ async function preview(power: string, speedup: PreviewSpeedup): Promise<void> {
 async function ridePreview(
   power: string,
   speedup: PreviewSpeedup,
-  options: { readonly trainer?: GameTrainerPort; readonly frames?: number } = {},
+  options: {
+    readonly trainer?: GameTrainerPort;
+    readonly frames?: number;
+    readonly drawn?: SceneFrame[];
+    readonly port?: GamePort;
+  } = {},
 ): Promise<void> {
   globalThis.location.hash = '#/game';
   mounted = await mount(
     <GameView
-      port={gamePort()}
+      port={options.port ?? gamePort()}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
-      renderer={() => Promise.resolve(capturingRenderer([]))}
+      renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
     />,
   );
@@ -310,6 +321,26 @@ function shadowDistance(frames: number, speedup: number): number {
 /** What is mounted now — a read rather than a narrowed variable, as the cases remount. */
 function screen(): HTMLElement | undefined {
   return mounted?.container;
+}
+
+/** What the HUD's field labelled `label` reads, or `''` with no such field. */
+function hudField(label: string): string {
+  const rows = queryAll(screen() ?? document, '.oyl-hud__field');
+  const row = rows.find((each) => each.querySelector('dt')?.textContent === label);
+  return row?.querySelector('dd')?.textContent ?? '';
+}
+
+/** The number a HUD field reads, or `undefined` for a dash. */
+function hudNumber(label: string): number | undefined {
+  const found = /^(\d+)/u.exec(hudField(label));
+  return found === null ? undefined : Number(found[1]);
+}
+
+/** How far the rider's cranks had turned on each frame the renderer was given. */
+function crankAngles(frames: readonly SceneFrame[]): number[] {
+  return frames.map(
+    (frame) => frame.markers.find((each) => each.kind === 'rider')?.crankAngle ?? Number.NaN,
+  );
 }
 
 /** The odometer of the last frame the scene built. */
@@ -418,6 +449,78 @@ describe('the picker’s Preview without a trainer — PR #2113’s ruling', () 
     expect(screen()?.querySelector('.oyl-hud__simulated')?.textContent).toBe(
       simulatedRideText({ watts: POWER, speedup: 4, startMetres: undefined }),
     );
+  });
+
+  /**
+   * #3210, the owner's ruling of 2026-11-25: the preview's rider invents a
+   * cadence and a heart rate, so the HUD shows both and the legs turn. The
+   * curves are `simulated-body.test.ts`'s; this is that they reach the HUD
+   * and the cranks of the real screen, and are realistic there.
+   */
+  it('shows an invented cadence and heart rate, and the rider pedals — #3210', async () => {
+    const drawn: SceneFrame[] = [];
+    await ridePreview(String(POWER), 1, { frames: 40, drawn });
+
+    const cadence = hudNumber('Cadence');
+    expect(hudField('Cadence')).toMatch(/^\d+ rpm$/u);
+    expect(cadence).toBeGreaterThanOrEqual(85);
+    expect(cadence).toBeLessThanOrEqual(95);
+    expect(hudField('Heart rate')).toMatch(/^\d+ bpm$/u);
+    // Twenty seconds in, from a resting 70: rising, and well short of threshold.
+    expect(hudNumber('Heart rate')).toBeGreaterThan(80);
+    expect(hudNumber('Heart rate')).toBeLessThan(140);
+    const angles = crankAngles(drawn).slice(-6);
+    expect(angles.length).toBe(6);
+    for (let index = 1; index < angles.length; index += 1) {
+      expect(angles[index]).not.toBe(angles[index - 1]);
+    }
+  });
+
+  it('slows the legs to 70–80 rpm up the road’s own 8 % climb — #3210', async () => {
+    await ridePreview(String(POWER), 1, {
+      frames: 40,
+      port: gamePort(NO_SENSORS, straightRoute(8)),
+    });
+
+    expect(hudNumber('Cadence')).toBeGreaterThanOrEqual(70);
+    expect(hudNumber('Cadence')).toBeLessThanOrEqual(80);
+  });
+
+  it('scales the heart rate to the rider’s own thresholds — #3210', async () => {
+    const own: GamePort = {
+      ...gamePort(),
+      ownThresholdPower: () => Promise.resolve(watts(300)),
+      ownThresholdHeartRate: () => Promise.resolve(beatsPerMinute(150)),
+    };
+    // 160 s of ride at 8×: 250 W settles near 137 bpm on these, and near 168 on the defaults.
+    await ridePreview(String(POWER), 8, { frames: 40, port: own });
+    expect(hudNumber('Heart rate')).toBeGreaterThanOrEqual(130);
+    expect(hudNumber('Heart rate')).toBeLessThanOrEqual(140);
+
+    mounted?.unmount();
+    mounted = undefined;
+    pending = [];
+    await ridePreview(String(POWER), 8, { frames: 40 });
+    expect(hudNumber('Heart rate')).toBeGreaterThanOrEqual(160);
+  });
+
+  it('shows a dash for each, and the cranks stand still, on an ordinary ride with no sensors — the control', async () => {
+    const drawn: SceneFrame[] = [];
+    await ride('#/game', { frames: 40, drawn });
+
+    expect(hudField('Cadence')).not.toMatch(/\d/u);
+    expect(hudField('Heart rate')).not.toMatch(/\d/u);
+    expect(new Set(crankAngles(drawn).slice(-6)).size).toBe(1);
+  });
+
+  it('stops the legs at a cadence of nought, asked for by the address — #3210', async () => {
+    const drawn: SceneFrame[] = [];
+    await ride(`#/game?simulate=${String(POWER)}&cadence=0&hr=141`, { frames: 40, drawn });
+
+    expect(lastOdometer() ?? 0).toBeGreaterThan(30);
+    expect(hudField('Cadence')).toBe('0 rpm');
+    expect(hudField('Heart rate')).toBe('141 bpm');
+    expect(new Set(crankAngles(drawn).slice(-6)).size).toBe(1);
   });
 
   it('refuses a power it cannot ride, and says why — nothing starts', async () => {
@@ -818,6 +921,10 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await rideFor(rig, 30);
     expect(lastOdometer() ?? 0).toBeGreaterThan(100);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
+    // #3210: the preview's invented readings are on the screen — not the
+    // paired sensors' 88 rpm and 142 bpm — and below, none of it is recorded.
+    expect(hudNumber('Cadence')).toBeGreaterThanOrEqual(85);
+    expect(hudNumber('Heart rate')).toBeGreaterThan(142);
     await clickThrough(buttonStarting('End ride'));
     await clickThrough(endRideAnswer(document, 'End ride'));
     for (let index = 0; index < 10; index += 1) await settle();
