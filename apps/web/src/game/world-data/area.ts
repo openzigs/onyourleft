@@ -452,6 +452,9 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     try {
       const kept = await options.cache.get(block);
       if (kept === undefined) return undefined;
+      // The unpack was one task; the conversion is another, as a fresh read
+      // yields between its tiles (#2891 review).
+      await idle();
       const move = reframer(blockFrame(block), options.frame);
       return {
         block,
@@ -483,6 +486,11 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     if (options.cache === undefined || !fullyRead(done.tiles)) return;
     try {
       await idle();
+      // ⚠️ Stopped while it waited: kept nothing. A ride that ends and an
+      // "Erase this device" straight after must not have this write land after
+      // the erase, re-created athlete and all (#2891 review). A block not kept
+      // is read again on the next ride.
+      if (stopped) return;
       const move = reframer(options.frame, blockFrame(done.block));
       const features = reframeCorridorFeatures(done.features, move);
       const streets = reframeStreets(done.streets, move);

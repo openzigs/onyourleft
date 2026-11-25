@@ -879,3 +879,97 @@ describe('keeping a block never holds up the ride (#2891 review)', () => {
     area.stop();
   });
 });
+
+describe('the second review’s findings (#2891, review 6058881364)', () => {
+  it('keeps nothing that was waiting when the ride stopped, so an erase straight after stays erased', async () => {
+    const waiting: (() => void)[] = [];
+    let gated = false;
+    const store = fresh();
+    const area = createAreaReader({
+      archive: corridorArchiveFrom(countingSource(archive)),
+      frame: { latitude: START.latitude, longitude: START.longitude },
+      cache: riddenBlockCache({
+        store,
+        owner: ATHLETE_A,
+        archiveUrl: ARCHIVE_URL,
+        now: () => new Date('2026-11-25T09:00:00Z'),
+      }),
+      mapTilesOn: () => true,
+      random: () => 0,
+      yieldToIdle: () =>
+        gated ? new Promise<void>((resolve) => waiting.push(resolve)) : Promise.resolve(),
+      onChange: () => (gated = true),
+    });
+    void area.start(START);
+    for (let turn = 0; turn < 50 && waiting.length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(area.held().length).toBeGreaterThan(0);
+    // The ride ends, and the rider erases this device at once: the athlete
+    // is deleted and made again, as `transfer/erase-device.ts` does.
+    area.stop();
+    const athlete = await store.getAthlete(ATHLETE_A);
+    if (athlete === undefined) throw new Error('the athlete is seeded');
+    await store.deleteAthlete(ATHLETE_A);
+    await store.ensureAthlete(athlete);
+    // Idle comes only now, for the write that was waiting on it.
+    gated = false;
+    for (const resolve of waiting.splice(0)) resolve();
+    await area.settled();
+    for (const block of blocksAround(BLOCK)) {
+      await expect(fresh().getRiddenBlock(ATHLETE_A, blockKey(block))).resolves.toBeUndefined();
+    }
+  });
+
+  it('yields to idle between a kept block’s unpack and its conversion into the ride’s frame', async () => {
+    const waiting: (() => void)[] = [];
+    let gets = 0;
+    const area = createAreaReader({
+      archive: undefined,
+      frame: { latitude: START.latitude, longitude: START.longitude },
+      cache: {
+        get: () => {
+          gets += 1;
+          return Promise.resolve({
+            tiles: [],
+            features: { landUse: [], buildings: [], paths: [], streets: [], places: [] },
+            streets: [],
+          });
+        },
+        put: () => Promise.resolve(),
+      },
+      mapTilesOn: () => true,
+      random: () => 0,
+      yieldToIdle: () => new Promise<void>((resolve) => waiting.push(resolve)),
+    });
+    const started = area.start(START);
+    for (let turn = 0; turn < 50 && waiting.length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    // The block is unpacked, and nothing is held until idle comes.
+    expect(gets).toBe(1);
+    expect(area.held()).toStrictEqual([]);
+    for (let turn = 0; turn < 50 && waiting.length > 0; turn += 1) {
+      for (const resolve of waiting.splice(0)) resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(await started).toStrictEqual({ kind: 'ready' });
+    expect(area.held().length).toBeGreaterThan(0);
+    area.stop();
+  });
+
+  it('keeps a hit a hit when marking the block ridden fails', async () => {
+    await ride(ATHLETE_A);
+    const real = fresh();
+    const failingMark: RiddenBlockStore = {
+      getRiddenBlock: (owner, block) => real.getRiddenBlock(owner, block),
+      putRiddenBlock: (record) => real.putRiddenBlock(record),
+      markRiddenBlock: () => Promise.reject(new DOMException('full', 'QuotaExceededError')),
+    };
+    const second = await ride(ATHLETE_A, { store: failingMark });
+    expect(second.started).toStrictEqual({ kind: 'ready' });
+    // Every block from the cache: not one range asked of the archive.
+    expect(second.calls).toStrictEqual([]);
+    expect(second.area.held()).toHaveLength(9);
+  });
+});

@@ -74,7 +74,9 @@ export function riddenBlockCache(options: RiddenBlockCacheOptions): AreaCache {
       }
       const features = await unpackCorridorFeatures(record.features);
       const streets = await unpackTileStreets(record.streets);
-      await store.markRiddenBlock(owner, key, options.now().toISOString());
+      // A mark that fails costs the eviction order a little, never the hit:
+      // the block is held, and asking the archive for it would break D-6.7.
+      await store.markRiddenBlock(owner, key, options.now().toISOString()).catch(() => false);
       return { tiles: record.tiles, features, streets };
     },
     put: async (block, kept, identity) => {

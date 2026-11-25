@@ -128,6 +128,7 @@ your own action:
 | Routes, segments, efforts and workouts | drawn in the app, or imported from a file you choose |
 | A threshold power and a unit preference | typed by you in Settings |
 | Your list of words to mask before anything is sent to a hosted model — a street, a town, a name | typed by you in Settings; kept with your rides on this device, not put in the account export, and *Erase everything* removes it |
+| The map blocks your open-world rides read whole, with the names of their streets and when you last rode through each, up to 256 for each rider | read from the map host as you ride an open-world ride (see *An open-world ride* under **What leaves the device**); kept on this device, not put in the account export, not synced, not sent to an instance, and *Erase everything* removes them |
 | Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | The address of an instance you connected to, the account id it gave you, and this device's sign-in to it (a session token) | kept in this device's browser storage when you press *Connect*; never put in an export; *Disconnect* and *Erase everything* remove it |

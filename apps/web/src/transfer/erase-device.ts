@@ -185,6 +185,10 @@ export const ERASE_REMOVES: readonly string[] = [
   // `deleteAthlete` cannot see it; {@link eraseDevice}'s `rememberedSensors`
   // is what makes the line true.
   'the sensors, trainer and steering controller this app remembers you paired, so it can reconnect to them: their names, what each was paired as, and which device each one is',
+  // #2891, ADR 0098. The ridden-block cache: `deleteAthlete` cascades
+  // `riddenBlocks`. Named because it is a timestamped record of where the
+  // rider rides, with the streets' names, in the policy's own terms.
+  'the map blocks your open-world rides kept on this device, with the names of their streets and when you last rode through each',
 ];
 
 /**
