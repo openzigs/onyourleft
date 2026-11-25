@@ -225,6 +225,52 @@ describe('a drafted effort — #2451, ADR 0066 D-5.2, D-5.6', () => {
   });
 });
 
+describe('an open-world ride is matched against nothing — #3088, the owner’s ruling of 2026-11-25', () => {
+  it('finds no effort in an open-world ride with a position, while an ordinary ride over the same track still matches', async () => {
+    const open = await openSeeded();
+    const segment = theSegment();
+    await open.write(async (store) => store.putSegment(segment));
+    const openWorld = await seedTraversingRide(open, ATHLETE_A, {
+      startedAt: unixSeconds(1_770_000_000),
+      rideFacts: { openWorld: true },
+    });
+    const outdoors = await seedTraversingRide(open, ATHLETE_A, {
+      startedAt: unixSeconds(1_770_010_000),
+    });
+
+    const result = await sweep(open);
+
+    expect(result).toMatchObject({ kind: 'swept', swept: 2, efforts: 1, done: true });
+    // The screen's own read, on a connection the sweep never touched: the
+    // ordinary ride's effort, and none from the open world.
+    const history = await historyOf(open, segment);
+    expect(history?.rows.map((row) => row.activity?.id)).toStrictEqual([outdoors.id]);
+    const byRide = await open.read(async (store) => ({
+      openWorld: await store.listActivityEfforts(ATHLETE_A, openWorld.id),
+      outdoors: await store.listActivityEfforts(ATHLETE_A, outdoors.id),
+    }));
+    expect(byRide.openWorld).toHaveLength(0);
+    expect(byRide.outdoors).toHaveLength(1);
+  });
+
+  it('takes away, on the next sweep, an effort a ride held before it was marked', async () => {
+    const open = await openSeeded();
+    const segment = theSegment();
+    await open.write(async (store) => store.putSegment(segment));
+    const ride = await seedTraversingRide(open);
+    await sweep(open);
+    expect((await historyOf(open, segment))?.rows).toHaveLength(1);
+
+    await open.write(async (store) =>
+      store.setActivityRideFacts(ATHLETE_A, ride.id, { openWorld: true }),
+    );
+    const again = await sweep(open);
+
+    expect(again).toMatchObject({ kind: 'swept', swept: 1, efforts: 0, done: true });
+    expect((await historyOf(open, segment))?.rows).toHaveLength(0);
+  });
+});
+
 describe('criterion 1 — a ride over a segment produces an effort a rider can see', () => {
   it('shows it through the same read path SegmentDetailView uses', async () => {
     const open = await openSeeded();

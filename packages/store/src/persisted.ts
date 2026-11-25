@@ -197,6 +197,8 @@ export interface PersistedRideFacts {
   drafted?: boolean;
   /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
   draftSpans?: unknown[];
+  /** @see RideFacts.openWorld — #3088. */
+  openWorld?: boolean;
   /**
    * @see RideFacts.lapRaces — #2710, since schema version 22. Plain JSON in
    * the record's own shape, each re-read on the way in and out: @see lapRacesOf
@@ -704,6 +706,8 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   if (facts.drafted !== undefined) row.drafted = facts.drafted;
   const spans = draftSpansOf(facts.draftSpans);
   if (spans !== undefined) row.draftSpans = spans.map(({ from, to }) => ({ from, to }));
+  // #3088: the open world, which keeps the ride off every segment.
+  if (facts.openWorld !== undefined) row.openWorld = facts.openWorld;
   // #2710: a race with AI bots, each record through its reader on the way in
   // too — one that does not read is dropped, never the ride.
   const lapRaces = lapRacesOf(facts.lapRaces);
@@ -1071,6 +1075,9 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(draftSpans === undefined ? {} : { draftSpans }),
     ...(lapRaces === undefined ? {} : { lapRaces }),
     ...(pacerModel === undefined ? {} : { pacerModel }),
+    ...(facts.openWorld === undefined
+      ? {}
+      : { openWorld: decodedBoolean('activity.rideFacts.openWorld', facts.openWorld) }),
   };
 }
 

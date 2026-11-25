@@ -7,6 +7,8 @@
  */
 
 import { CAPTURE_SCENES } from '../../src/game/capture-scene';
+import { YOUTUBE_SCRIPT } from './scripts/youtube';
+import type { VideoScript } from './video-script';
 
 /** What a capture was asked for. */
 export interface CaptureRequest {
@@ -41,20 +43,16 @@ const OPTIONS = [
   '--out',
   '--start',
   '--archive',
+  '--script',
 ] as const;
 
 /** `<lat>,<lon>`, each a decimal number of degrees. */
 const START = /^(-?\d{1,2}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/u;
 
-/**
- * `capture`'s arguments. The defaults are the issue's: the `route-hud`
- * scene, 1920×1080 at 60 frames a second, for 20 seconds.
- */
-export function parseCaptureArgs(
-  argv: readonly string[],
-):
-  | { readonly ok: true; readonly request: CaptureRequest }
-  | { readonly ok: false; readonly message: string } {
+type Refused = { readonly ok: false; readonly message: string };
+
+/** Each option and its value, or why `argv` is not a capture's. */
+function readOptions(argv: readonly string[]): Map<string, string> | Refused {
   const values = new Map<string, string>();
   for (let at = 0; at < argv.length; at += 1) {
     const arg = argv[at] ?? '';
@@ -71,34 +69,17 @@ export function parseCaptureArgs(
     values.set(arg, value);
     at += 1;
   }
-  const scene = values.get('--scene') ?? 'route-hud';
-  if (!Object.hasOwn(CAPTURE_SCENES, scene)) {
-    return {
-      ok: false,
-      message: `capture: --scene is one of ${Object.keys(CAPTURE_SCENES).join(', ')}, not ${scene}`,
-    };
-  }
-  const seconds = Number(values.get('--seconds') ?? '20');
-  if (!(Number.isFinite(seconds) && seconds > 0)) {
-    return { ok: false, message: 'capture: --seconds is a positive number' };
-  }
+  return values;
+}
+
+/** The frame rate and size `values` ask for: 1920×1080 at 60 by default. */
+function readFrame(
+  values: ReadonlyMap<string, string>,
+): { readonly fps: number; readonly width: number; readonly height: number } | Refused {
   const fpsText = values.get('--fps') ?? '60';
   const fps = Number(fpsText);
   if (!(Number.isInteger(fps) && fps >= 1 && fps <= 60)) {
     return { ok: false, message: `capture: --fps is a whole number from 1 to 60, not ${fpsText}` };
-  }
-  const frames = seconds * fps;
-  if (!Number.isInteger(frames)) {
-    return {
-      ok: false,
-      message: `capture: ${String(seconds)} seconds at ${String(fps)} frames a second is not a whole number of frames`,
-    };
-  }
-  if (frames > MAX_CAPTURE_FRAMES) {
-    return {
-      ok: false,
-      message: `capture: ${String(frames)} frames is more than ${String(MAX_CAPTURE_FRAMES)}`,
-    };
   }
   const sizeText = values.get('--size') ?? '1920x1080';
   const size = /^(\d{2,4})x(\d{2,4})$/.exec(sizeText);
@@ -111,16 +92,25 @@ export function parseCaptureArgs(
       message: `capture: --size is WIDTHxHEIGHT, each even and at least 64, not ${sizeText}`,
     };
   }
-  // #3154: a free ride's start and blocks, and only a free ride's. ⚠️ A
-  // message about the start names the option and the rule, never the value
-  // (ADR 0004 D): it is a place.
+  return { fps, width, height };
+}
+
+/**
+ * #3154: a free ride's start and blocks, given exactly when `openWorld`, in
+ * `what` (a scene's name, or a script's). ⚠️ A message about the start names
+ * the option and the rule, never the value (ADR 0004 D): it is a place.
+ */
+function readOpenWorld(
+  values: ReadonlyMap<string, string>,
+  openWorld: boolean,
+  what: string,
+): { readonly start?: string; readonly archive?: string } | Refused {
   const start = values.get('--start');
   const archive = values.get('--archive');
-  const openWorld = CAPTURE_SCENES[scene]?.openWorld === true;
   if (openWorld && (start === undefined || archive === undefined)) {
     return {
       ok: false,
-      message: `capture: --scene ${scene} rides the open world, so it needs --start and --archive`,
+      message: `capture: ${what} rides the open world, so it needs --start and --archive`,
     };
   }
   if (!openWorld && (start !== undefined || archive !== undefined)) {
@@ -142,18 +132,120 @@ export function parseCaptureArgs(
     }
   }
   return {
-    ok: true,
-    request: {
-      scene,
-      seconds,
-      fps,
-      width,
-      height,
-      out: values.get('--out'),
-      ...(start === undefined ? {} : { start }),
-      ...(archive === undefined ? {} : { archive }),
-    },
+    ...(start === undefined ? {} : { start }),
+    ...(archive === undefined ? {} : { archive }),
   };
+}
+
+function refused(value: object): value is Refused {
+  return 'ok' in value && value.ok === false;
+}
+
+/**
+ * `capture`'s arguments. The defaults are the issue's: the `route-hud`
+ * scene, 1920×1080 at 60 frames a second, for 20 seconds.
+ */
+export function parseCaptureArgs(
+  argv: readonly string[],
+):
+  | { readonly ok: true; readonly request: CaptureRequest }
+  | { readonly ok: false; readonly message: string } {
+  const values = readOptions(argv);
+  if (refused(values)) return values;
+  if (values.has('--script')) {
+    return { ok: false, message: 'capture: --script is a whole video: parseScriptArgs reads it' };
+  }
+  const scene = values.get('--scene') ?? 'route-hud';
+  if (!Object.hasOwn(CAPTURE_SCENES, scene)) {
+    return {
+      ok: false,
+      message: `capture: --scene is one of ${Object.keys(CAPTURE_SCENES).join(', ')}, not ${scene}`,
+    };
+  }
+  const seconds = Number(values.get('--seconds') ?? '20');
+  if (!(Number.isFinite(seconds) && seconds > 0)) {
+    return { ok: false, message: 'capture: --seconds is a positive number' };
+  }
+  const frame = readFrame(values);
+  if (refused(frame)) return frame;
+  const { fps, width, height } = frame;
+  const frames = seconds * fps;
+  if (!Number.isInteger(frames)) {
+    return {
+      ok: false,
+      message: `capture: ${String(seconds)} seconds at ${String(fps)} frames a second is not a whole number of frames`,
+    };
+  }
+  if (frames > MAX_CAPTURE_FRAMES) {
+    return {
+      ok: false,
+      message: `capture: ${String(frames)} frames is more than ${String(MAX_CAPTURE_FRAMES)}`,
+    };
+  }
+  const openWorld = readOpenWorld(
+    values,
+    CAPTURE_SCENES[scene]?.openWorld === true,
+    `--scene ${scene}`,
+  );
+  if (refused(openWorld)) return openWorld;
+  return {
+    ok: true,
+    request: { scene, seconds, fps, width, height, out: values.get('--out'), ...openWorld },
+  };
+}
+
+/** #3156: what a script's render was asked for. */
+export interface ScriptRequest {
+  /** A name in {@link VIDEO_SCRIPTS}. */
+  readonly script: string;
+  readonly fps: number;
+  readonly width: number;
+  readonly height: number;
+  /** A directory; absent is `apps/web/capture/dist`. */
+  readonly out: string | undefined;
+  /** The start and archive of the script's free-ride scenes, when it has one. */
+  readonly start?: string | undefined;
+  readonly archive?: string | undefined;
+}
+
+/** #3156: the scene scripts `--script` renders, by name. */
+export const VIDEO_SCRIPTS: Readonly<Record<string, VideoScript>> = { youtube: YOUTUBE_SCRIPT };
+
+/**
+ * #3156: `capture -- --script <name>`'s arguments: the whole video of a
+ * script, whose scenes say what is ridden and for how long, so `--scene` and
+ * `--seconds` are not taken. A script with an open-world scene needs
+ * `--start` and `--archive`, as that scene does.
+ */
+export function parseScriptArgs(
+  argv: readonly string[],
+):
+  | { readonly ok: true; readonly request: ScriptRequest }
+  | { readonly ok: false; readonly message: string } {
+  const values = readOptions(argv);
+  if (refused(values)) return values;
+  const name = values.get('--script') ?? '';
+  const script = Object.hasOwn(VIDEO_SCRIPTS, name) ? VIDEO_SCRIPTS[name] : undefined;
+  if (script === undefined) {
+    return {
+      ok: false,
+      message: `capture: --script is one of ${Object.keys(VIDEO_SCRIPTS).join(', ')}, not ${name}`,
+    };
+  }
+  for (const option of ['--scene', '--seconds']) {
+    if (values.has(option)) {
+      return { ok: false, message: `capture: ${option} is the script’s to say, not --script’s` };
+    }
+  }
+  const frame = readFrame(values);
+  if (refused(frame)) return frame;
+  const openWorld = readOpenWorld(
+    values,
+    script.scenes.some((scene) => CAPTURE_SCENES[scene.capture]?.openWorld === true),
+    `--script ${name}`,
+  );
+  if (refused(openWorld)) return openWorld;
+  return { ok: true, request: { script: name, ...frame, out: values.get('--out'), ...openWorld } };
 }
 
 /** How many frames a capture writes: its seconds times its frames a second, exactly. */

@@ -645,6 +645,20 @@ export interface RideFacts {
    * different pacer.
    */
   readonly pacerModel?: PacerModelFact;
+  /**
+   * `true` when some of this ride was ridden in the trainer game's open world
+   * — #3088, the owner's ruling of 2026-11-25. Known only while riding, like
+   * {@link drafted}, and kept by the recording's checkpoint too, so a ride
+   * recovered after a crash still says so. Absent for every other ride, and
+   * for one brought in from a file.
+   *
+   * ⚠️ **A ride carrying it is matched against no segment**
+   * (`apps/web/src/segments/backfill.ts`): its positions are the streets the
+   * game drew under a simulated rider, not where a bicycle was, so its
+   * efforts never become personal bests or reach a shared board. A ride
+   * without it is matched exactly as before.
+   */
+  readonly openWorld?: boolean;
 }
 
 /**

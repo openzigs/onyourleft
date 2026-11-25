@@ -3910,6 +3910,8 @@ export class ActivityStore {
       // #1328: so a recovered ride is saved with its re-plan record.
       ...(header.replans === undefined ? {} : { replans: header.replans }),
       ...(header.replansDropped === undefined ? {} : { replansDropped: header.replansDropped }),
+      // #3088: so a recovered open-world ride is still matched against no segment.
+      ...(header.openWorld === true ? { openWorld: true } : {}),
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,
     };

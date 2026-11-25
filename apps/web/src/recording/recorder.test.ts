@@ -685,6 +685,80 @@ describe('#1328 — a re-plan record the checkpoint could not keep stays counted
   });
 });
 
+describe('#3088 — the open-world mark goes out on the header', () => {
+  /**
+   * {@link harnessStore}, holding on to every header write, so a test can wait
+   * for one the recorder does not await rather than guess how long it takes.
+   */
+  function trackedStore(): { store: RecordingCheckpointStore; settled: () => Promise<unknown> } {
+    const inner = harnessStore();
+    const writes: Promise<unknown>[] = [];
+    return {
+      store: {
+        ...inner,
+        putRecordingSession: async (record) => {
+          const write = inner.putRecordingSession(record);
+          writes.push(write);
+          return write;
+        },
+      },
+      settled: async () => Promise.all(writes),
+    };
+  }
+
+  it('is on disk at once, with no flush after it, and a recorder rebuilt from it keeps it through a second crash', async () => {
+    const tracked = trackedStore();
+    const recorder = newRecorder({ store: tracked.store });
+    await recorder.start(at(0));
+    for (let t = 0; t < 3; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      recorder.observeReading(speedReading(t, 9));
+      await recorder.tick(at(t));
+    }
+    recorder.noteOpenWorld();
+    expect(recorder.openWorld).toBe(true);
+    // No tick, flush or stop after the mark: only its own header write.
+    await tracked.settled();
+    const sessionId = recorder.sessionId;
+    await harness.discard();
+
+    const once = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    expect(once?.recovered.openWorld).toBe(true);
+    const continued = once?.recorder;
+    if (continued === undefined) throw new Error('the recovered recorder is the subject');
+    expect(continued.openWorld).toBe(true);
+
+    // Continued, written again by the rebuilt recorder, and the tab dies again.
+    await continued.resume(at(60));
+    for (let t = 60; t < 70; t += 1) {
+      continued.observeReading(powerReading(t, 200));
+      continued.observeReading(speedReading(t, 9));
+      await continued.tick(at(t));
+    }
+    await continued.flush();
+    await harness.discard();
+
+    const twice = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    expect(twice?.recovered.sampleCount).toBeGreaterThan(60);
+    expect(twice?.recovered.openWorld).toBe(true);
+  });
+
+  it('is absent from a recording never marked', async () => {
+    const recorder = newRecorder();
+    await ride(recorder, 10);
+    await recorder.flush();
+    expect(recorder.openWorld).toBe(false);
+    await harness.discard();
+    const rebuilt = await recoverRecorder({
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      sessionId: recorder.sessionId,
+    });
+    expect(rebuilt?.recovered).not.toHaveProperty('openWorld');
+    expect(rebuilt?.recorder.openWorld).toBe(false);
+  });
+});
+
 describe('two tabs recording at once', () => {
   it('does not let a second tab destroy the first tab’s ride', async () => {
     const first = newRecorder();

@@ -50,7 +50,7 @@ import { loadEnv } from 'vite';
 import { LAUNCH_ARGS } from '../../playwright.config';
 import { readBasemapConfig } from '../../src/map/basemap';
 import type { CaptureEvent, CaptureSnapshot } from '../../src/game/capture-scene';
-import { encoders, startEncoder } from '../demo/render-video';
+import { encoders, startEncoder, type Encoder } from '../demo/render-video';
 import { hasEncoder } from '../demo/video';
 import {
   CAPTURE_DATE_MS,
@@ -185,6 +185,25 @@ export interface CaptureOptions {
   readonly ffmpeg?: string | undefined;
   /** Told after each frame is written, for a progress line. */
   readonly onFrame?: ((frame: number, of: number) => void) | undefined;
+  /**
+   * #3156: the encoder the frames are written into, shared by every scene of
+   * a script so the whole video is one file. The capture neither starts nor
+   * ends it, and {@link CaptureResult.mp4} is {@link mp4}. Absent, the capture
+   * encodes its own video, {@link captureName}.
+   */
+  readonly encoder?: { readonly into: Encoder; readonly mp4: string } | undefined;
+  /**
+   * #3156: how many of the ride's first frames are stepped and drawn but not
+   * written, so a scene can open part-way into its ride. Every frame is still
+   * checked to draw the world once.
+   */
+  readonly skipFrames?: number | undefined;
+  /**
+   * #3156: called before each written frame is taken, with the page and the
+   * ride's second on it: where a script draws its captions and callouts over
+   * the app, in the page, so they are in the frame's own pixels.
+   */
+  readonly beforeShot?: ((page: Page, second: number) => Promise<void>) | undefined;
 }
 
 /** What a capture wrote and saw. */
@@ -293,7 +312,8 @@ export async function renderCapture(
     throw new Error('capture: this ffmpeg has no libx264, which the H.264 output needs');
   }
   mkdirSync(options.out, { recursive: true });
-  const mp4 = join(options.out, captureName(request));
+  const mp4 = options.encoder?.mp4 ?? join(options.out, captureName(request));
+  const skip = options.skipFrames ?? 0;
 
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
   try {
@@ -369,7 +389,7 @@ export async function renderCapture(
       await page.waitForTimeout(50);
     }
 
-    const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, mp4));
+    const encoder = options.encoder?.into ?? startEncoder(ffmpeg, captureMp4Args(request.fps, mp4));
     const stepMs = 1000 / request.fps;
     const frames = captureFrames(request);
     let last: CaptureSnapshot | undefined;
@@ -391,13 +411,15 @@ export async function renderCapture(
         }
         drawnBefore = drawn;
         last = stepped.snapshot;
+        if (frame <= skip) continue;
+        await options.beforeShot?.(page, frame / request.fps);
         await encoder.write(
           await page.screenshot({ type: 'png', animations: 'disabled', caret: 'hide' }),
         );
-        options.onFrame?.(frame, frames);
+        options.onFrame?.(frame - skip, frames - skip);
       }
     } finally {
-      await encoder.end();
+      if (options.encoder === undefined) await encoder.end();
     }
     if (last === undefined) throw new Error('capture: no frame was captured');
     const events = join(options.out, captureEventsName(request));
@@ -405,7 +427,7 @@ export async function renderCapture(
     const requests = join(options.out, captureRequestsName(request));
     const logged: CaptureRequests = log;
     writeFileSync(requests, `${JSON.stringify(logged, null, 2)}\n`);
-    return { mp4, events, requests, frames, last, refused: [...refused] };
+    return { mp4, events, requests, frames: frames - skip, last, refused: [...refused] };
   } finally {
     await browser.close();
   }
