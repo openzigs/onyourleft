@@ -21,9 +21,12 @@
  * - {@link RoutingProvider.heights} is not answered here: the tier choice
  *   (`tiers.ts`) asks the terrain archive instead;
  * - of a rider's preferences only the bicycle reaches the engine
- *   (`bicycle_type`). The SDK takes no `use_hills` and no `avoid_bad_surfaces`,
- *   so the hills and surface choices are not applied, and every leg's surface
- *   is `'unknown'`: never assumed paved (#70, #72).
+ *   (`bicycle_type`). The SDK's request check refuses every bicycle option but
+ *   `bicycle_type`, `cycling_speed` and `use_roads` ("Unsupported option"), so
+ *   `use_hills` and `avoid_bad_surfaces` cannot be sent: the hills and surface
+ *   choices are not applied, the planner says so under its surface choice
+ *   (`tiers.ts` §`ridingChoicesNote`), and every leg's surface is
+ *   `'unknown'`: never assumed paved (#70, #72).
  *
  * ## The settings spike 0035 measured
  *
@@ -31,6 +34,17 @@
  * 128 MiB decoded-tile budget (the 32 MiB default livelocked on long routes),
  * the SDK's longest per-fetch deadline, and an `AbortSignal` that gives up on
  * a leg after {@link LEG_TIMEOUT_MS}.
+ *
+ * ## One leg at a time, and the engine let go when the planner closes
+ *
+ * Aborting one `route()`'s signal terminates the SDK's worker and rejects
+ * every route queued behind it. The planner starts a `resolveDraft` per edit,
+ * and they overlap when a rider clicks quickly, so the legs are queued here
+ * instead: only one is ever in the SDK, its deadline is started when it runs
+ * rather than when it was queued, and one leg's deadline cannot cancel
+ * another. {@link BrowserRoutingProvider.release} calls the SDK's `cancel()`,
+ * which ends the worker and frees its tile cache and WebAssembly heap; the
+ * router stays usable, and the next leg starts a new worker.
  *
  * ## A refusal is a straight line, not a broken leg
  *
@@ -135,6 +149,14 @@ export interface BrowserRouter {
     request: BrowserRouteRequest,
     options: { readonly signal: AbortSignal },
   ): Promise<BrowserRouteResult>;
+  /** Rejects what is outstanding, ends the worker and frees its memory. The router stays usable. */
+  cancel(): void;
+}
+
+/** The in-browser engine, which holds a worker and its memory until it is let go. */
+export interface BrowserRoutingProvider extends RoutingProvider {
+  /** Ends the worker and frees its memory, if one was started. The next leg starts another. */
+  release(): void;
 }
 
 /** Makes the router. The default loads the SDK; a test passes its own. */
@@ -167,10 +189,17 @@ export const loadBrowserRouter: CreateBrowserRouter = async (graph) => {
  * The in-browser engine as a {@link RoutingProvider}. Nothing is loaded and
  * nothing is fetched until the first leg is routed.
  */
-export function valhallaBrowserProvider(options: BrowserProviderOptions): RoutingProvider {
+export function valhallaBrowserProvider(options: BrowserProviderOptions): BrowserRoutingProvider {
   const create = options.createRouter ?? loadBrowserRouter;
   const legTimeoutMs = options.legTimeoutMs ?? LEG_TIMEOUT_MS;
   let router: Promise<BrowserRouter> | undefined;
+  // Every leg of every request, one at a time (see the header).
+  let queue: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.then(task, task);
+    queue = run.catch(() => undefined);
+    return run;
+  };
 
   const routeLeg = async (request: RouteRequest, leg: number): Promise<RoutedLeg> => {
     const from = request.waypoints[leg]?.position;
@@ -212,11 +241,19 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Routin
         throw new RoutingError('invalid-request', 'a route needs at least two waypoints');
       }
       const legs: RoutedLeg[] = [];
-      // One worker routes one leg at a time, so in series.
+      // One worker routes one leg at a time, so in series, and in turn with any other request's.
       for (let leg = 0; leg + 1 < request.waypoints.length; leg += 1) {
-        legs.push(await routeLeg(request, leg));
+        legs.push(await inTurn(() => routeLeg(request, leg)));
       }
       return legs;
+    },
+    release: () => {
+      void router?.then(
+        (engine) => {
+          engine.cancel();
+        },
+        () => undefined,
+      );
     },
     heights: (): Promise<HeightProfile> =>
       Promise.reject(

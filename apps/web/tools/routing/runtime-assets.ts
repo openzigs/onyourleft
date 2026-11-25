@@ -30,7 +30,26 @@ export function isRoutingRuntimeAsset(originalFileNames: readonly string[]): boo
   );
 }
 
-/** Rolldown's `assetFileNames`: the SDK's files under `routing/`, every other asset where Vite puts it. */
+/**
+ * Whether a chunk is the engine's licence texts (`public/routing/third-party.txt`,
+ * imported by `src/credits/notices-document.ts`), read off the modules in it.
+ */
+export function isRoutingRuntimeChunk(moduleIds: readonly string[]): boolean {
+  return moduleIds.some((id) => /(?:^|[\\/])public[\\/]routing[\\/]/.test(id));
+}
+
+/**
+ * Rolldown's `chunkFileNames`: the engine's licence texts under `routing/`
+ * with the engine, out of the precache (#2734); every other chunk where Vite
+ * puts it.
+ */
+export function chunkFileName(chunk: { readonly moduleIds: readonly string[] }): string {
+  return isRoutingRuntimeChunk(chunk.moduleIds)
+    ? `${ROUTING_RUNTIME_DIRECTORY}[name]-[hash].js`
+    : 'assets/[name]-[hash].js';
+}
+
+/** Rolldown's `assetFileNames`:the SDK's files under `routing/`, every other asset where Vite puts it. */
 export function assetFileName(asset: { readonly originalFileNames: readonly string[] }): string {
   return isRoutingRuntimeAsset(asset.originalFileNames)
     ? `${ROUTING_RUNTIME_DIRECTORY}[name]-[hash][extname]`

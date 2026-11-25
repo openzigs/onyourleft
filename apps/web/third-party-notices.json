@@ -115,6 +115,7 @@
       "vendored": {
         "name": "Valhalla and the libraries compiled with it into valhalla-browser's WebAssembly",
         "version": "valhalla-browser 0.2.1, Valhalla 3.8.3",
+        "document": "routing/third-party.txt",
         "licence": "MIT AND BSL-1.0 AND BSD-3-Clause AND BSD-2-Clause AND Zlib AND (MIT OR NCSA) AND Apache-2.0 WITH LLVM-exception, with the IANA time-zone data in the public domain",
         "what": "valhalla-browser.wasm, in routing/: the Valhalla 3.8.3 routing engine compiled to WebAssembly by Emscripten, with the libraries it links, as valhalla-browser 0.2.1 ships it. The app's route planner runs it on the device to follow roads when no instance routes a leg (#2734, ADR 0097). The package's licence field says MIT and cannot say what the WebAssembly carries, so the package's own dist/licenses/ is reproduced below, file by file and verbatim: the SDK, Valhalla, Boost (BSL-1.0), Protobuf (BSD-3-Clause), protozero and vtzero (BSD-2-Clause), zlib, RapidJSON, Howard Hinnant's date, unordered_dense, cpp-statsd-client, cxxopts, musl, Emscripten (MIT or the University of Illinois/NCSA licence, with LLVM's Apache-2.0 WITH LLVM-exception parts), the IANA time-zone data, and the package's NOTICE.md for them. None is copyleft (spike 0035).",
         "upstream": [

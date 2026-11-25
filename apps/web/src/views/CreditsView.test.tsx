@@ -700,6 +700,54 @@ describe('the full notices, read inside the app — #664', () => {
   });
 });
 
+describe('the road-map engine’s licence texts, read inside the app — #2734', () => {
+  const summary = (): HTMLElement => {
+    const found = queryAll<HTMLElement>(
+      mounted?.container ?? document,
+      '[data-terms="software"] details > summary',
+    ).find((candidate) => candidate.textContent === 'Read the road-map engine’s licence texts');
+    if (found === undefined) throw new Error('Credits has no engine licence-texts disclosure');
+    return found;
+  };
+  const shown = (): string | undefined =>
+    mounted?.container.querySelector('[data-routing-notices-document]')?.textContent ?? undefined;
+
+  it('reads nothing until a rider asks, then shows the texts the notices name', async () => {
+    const load = vi.fn(() => Promise.resolve('Boost Software License fixture'));
+    mounted = await mount(<CreditsView notices={NOTICES} routingNoticesDocument={load} />);
+    expect(load).not.toHaveBeenCalled();
+    await activateWithKeyboard(summary());
+    await settle();
+    expect(shown()).toBe('Boost Software License fixture');
+    // The full notices are a disclosure of their own, still unread.
+    expect(shownDocument()).toBeUndefined();
+  });
+
+  it('says so when they cannot be read, offline before they were ever downloaded', async () => {
+    mounted = await mount(
+      <CreditsView
+        notices={NOTICES}
+        routingNoticesDocument={() => Promise.reject(new Error('chunk failed'))}
+      />,
+    );
+    await activateWithKeyboard(summary());
+    await settle();
+    expect(software()).toContain('need a network the first time');
+    expect(shown()).toBeUndefined();
+  });
+
+  it('shows the real committed texts by default, every one the notices list', async () => {
+    const committed = await noticesDocument.loadRoutingNoticesDocument();
+    const reads = vi.spyOn(noticesDocument, 'loadRoutingNoticesDocument');
+    mounted = await mount(<CreditsView />);
+    await activateWithKeyboard(summary());
+    expect(reads).toHaveBeenCalledTimes(1);
+    await readsSettled(reads);
+    expect(shown()).toBe(committed);
+    expect(shown()).toContain('Boost Software License - Version 1.0');
+  });
+});
+
 describe('the map data — #1552, ADR 0054 D-3.6', () => {
   const mapData = (): Element | null =>
     mounted?.container.querySelector('[data-terms="map-data"]') ?? null;

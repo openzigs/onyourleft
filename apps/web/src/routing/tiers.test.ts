@@ -15,7 +15,15 @@ import type { RouteHeights } from '../terrain/heights';
 
 import { RIDING_DEFAULTS } from './preferences';
 import { scriptedProvider } from './testing';
-import { heightIntervalOf, NO_HEIGHTS_TEXT, routingTiers } from './tiers';
+import {
+  CHOICES_NOT_APPLIED_TEXT,
+  CHOICES_NOT_ON_FALLBACK_TEXT,
+  heightIntervalOf,
+  NO_HEIGHTS_TEXT,
+  releaseRouting,
+  ridingChoicesNote,
+  routingTiers,
+} from './tiers';
 import { valhallaBrowserProvider } from './valhalla-browser-provider';
 
 // Synthetic points off Null Island: no road, no place.
@@ -146,5 +154,50 @@ describe('which engine routes a leg (#2734)', () => {
 
   it('reads no interval from a provider that is not the tiers', () => {
     expect(heightIntervalOf(scriptedProvider())).toBeUndefined();
+  });
+});
+
+describe('how far the surface and hills choices reach (#2734)', () => {
+  it('says the choices are not applied when the in-browser engine routes every leg', () => {
+    const tiers = routingTiers({ browser: () => scriptedProvider() });
+    expect(tiers?.ridingChoices).toBe('not-applied');
+    expect(ridingChoicesNote(tiers)).toBe(CHOICES_NOT_APPLIED_TEXT);
+  });
+
+  it('says they are not applied on a leg the instance cannot route, when the browser engine can', () => {
+    const tiers = routingTiers({ instance: scriptedProvider(), browser: () => scriptedProvider() });
+    expect(ridingChoicesNote(tiers)).toBe(CHOICES_NOT_ON_FALLBACK_TEXT);
+  });
+
+  it('says nothing when only the instance routes, or with no tiers, or for any other provider', () => {
+    expect(ridingChoicesNote(routingTiers({ instance: scriptedProvider() }))).toBeUndefined();
+    expect(ridingChoicesNote(undefined)).toBeUndefined();
+    expect(ridingChoicesNote(scriptedProvider())).toBeUndefined();
+  });
+});
+
+describe('letting the in-browser engine go (#2734)', () => {
+  it('releases the browser engine once it was made, and makes nothing to release it', async () => {
+    let released = 0;
+    const engine = Object.assign(scriptedProvider(), {
+      release: () => {
+        released += 1;
+      },
+    });
+    const { made, browser } = countingBrowser(engine);
+    const tiers = routingTiers({ browser });
+    releaseRouting(tiers);
+    expect(made.count).toBe(0);
+    expect(released).toBe(0);
+    await tiers?.route(REQUEST);
+    releaseRouting(tiers);
+    expect(released).toBe(1);
+  });
+
+  it('is a no-op for a provider with nothing to let go', () => {
+    expect(() => {
+      releaseRouting(scriptedProvider());
+      releaseRouting(undefined);
+    }).not.toThrow();
   });
 });

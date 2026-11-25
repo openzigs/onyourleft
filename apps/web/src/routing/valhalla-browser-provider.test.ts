@@ -7,7 +7,7 @@ import {
   RoutingError,
   type GeographicPosition,
 } from '@onyourleft/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   addWaypoint,
@@ -81,6 +81,7 @@ interface FakeEngine {
   created: number;
   answer: (request: BrowserRouteRequest, signal: AbortSignal) => Promise<BrowserRouteResult>;
   failCreate: Error | undefined;
+  cancelled: number;
 }
 
 function fakeEngine(): FakeEngine & { createRouter: () => Promise<BrowserRouter> } {
@@ -90,6 +91,7 @@ function fakeEngine(): FakeEngine & { createRouter: () => Promise<BrowserRouter>
     created: 0,
     answer: (request) => Promise.resolve(roadBetween(request)),
     failCreate: undefined,
+    cancelled: 0,
     createRouter: () => {
       engine.created += 1;
       if (engine.failCreate !== undefined) return Promise.reject(engine.failCreate);
@@ -98,6 +100,9 @@ function fakeEngine(): FakeEngine & { createRouter: () => Promise<BrowserRouter>
           engine.requests.push(request);
           engine.signals.push(signal);
           return engine.answer(request, signal);
+        },
+        cancel: () => {
+          engine.cancelled += 1;
         },
       });
     },
@@ -227,6 +232,74 @@ describe('the in-browser Valhalla adapter (#2734)', () => {
     });
     await expect(routing).rejects.toThrow(TOO_SLOW_TEXT);
     expect(engine.signals[0]?.aborted).toBe(true);
+  });
+
+  it('routes one leg at a time, so one leg past its deadline cannot cancel another, and each clock starts when its leg runs', async () => {
+    const engine = fakeEngine();
+    let inFlight = 0;
+    let most = 0;
+    // As the SDK does: an abort ends the worker and rejects every route queued in it.
+    const queued: ((error: Error) => void)[] = [];
+    engine.answer = (request, signal) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      return new Promise<BrowserRouteResult>((resolve, reject) => {
+        queued.push(reject);
+        signal.addEventListener('abort', () => {
+          for (const rejectQueued of queued.splice(0)) rejectQueued(sdkError('CANCELLED'));
+        });
+        // The first leg never answers; any other answers after 30 ms, longer
+        // than a deadline started when it was queued would allow.
+        if (request.locations[0].lat !== 0.05) {
+          setTimeout(() => {
+            resolve(roadBetween(request));
+          }, 30);
+        }
+      }).finally(() => {
+        inFlight -= 1;
+      });
+    };
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: engine.createRouter,
+      legTimeoutMs: 40,
+    });
+    const stuck = provider.route({
+      waypoints: [{ position: at(0.05, 0.05) }, { position: at(0.06, 0.06) }],
+      preferences: RIDING_DEFAULTS,
+    });
+    const other = provider.route({
+      waypoints: [{ position: at(0.07, 0.07) }, { position: at(0.08, 0.08) }],
+      preferences: RIDING_DEFAULTS,
+    });
+    await expect(stuck).rejects.toThrow(TOO_SLOW_TEXT);
+    await expect(other).resolves.toHaveLength(1);
+    expect(most).toBe(1);
+  });
+
+  it('lets the engine go when released, and starts it again on the next leg with the same router', async () => {
+    const engine = fakeEngine();
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: engine.createRouter,
+    });
+    // Released before any leg: nothing was made, so nothing is made now.
+    provider.release();
+    await Promise.resolve();
+    expect(engine.created).toBe(0);
+    const request = {
+      waypoints: [{ position: at(0.05, 0.05) }, { position: at(0.06, 0.06) }],
+      preferences: RIDING_DEFAULTS,
+    };
+    await provider.route(request);
+    provider.release();
+    await vi.waitFor(() => {
+      expect(engine.cancelled).toBe(1);
+    });
+    await expect(provider.route(request)).resolves.toHaveLength(1);
+    expect(engine.created).toBe(1);
   });
 
   it('refuses fewer than two waypoints without loading anything', async () => {

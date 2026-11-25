@@ -126,6 +126,9 @@ function counting(create: CreateBrowserRouter): {
           calls += 1;
           return router.route(request, options);
         },
+        cancel: () => {
+          router.cancel();
+        },
       };
     },
   };

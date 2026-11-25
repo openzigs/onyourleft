@@ -100,7 +100,10 @@ export interface DraftLeg {
  * graph could not be loaded at all (offline, map tiles off). {@link resolveDraft}
  * then draws the leg **freehand**, a straight line whose length is a lower
  * bound, and keeps this message on it as its {@link DraftLeg.failure}: the leg
- * is marked stale, and "Follow roads" on it asks again.
+ * is marked stale, and "Follow roads" on it asks again. So does the next edit
+ * that touches it (moving, inserting or deleting a waypoint at either end):
+ * {@link touchedMode} rebuilds a fallback leg snapped, so the engine is asked
+ * again rather than the straight line being kept with its reason lost.
  *
  * ⚠️ A no-route answer is NOT this. A graph that holds both ends and finds no
  * path between them has said something about the waypoints, and the rider
@@ -240,7 +243,7 @@ export function insertWaypoint(
     inserted,
     ...draft.waypoints.slice(legIndex + 1),
   ];
-  const mode = draft.legs[legIndex]!.mode;
+  const mode = touchedMode(draft.legs[legIndex]!);
   const legs = [
     ...draft.legs.slice(0, legIndex),
     legFor(mode, waypoints[legIndex]!, inserted),
@@ -276,7 +279,7 @@ export function moveWaypoint(
   );
   const touched = [index - 1, index].filter((leg) => leg >= 0 && leg < draft.legs.length);
   const legs = draft.legs.map((leg, at) =>
-    touched.includes(at) ? legFor(leg.mode, waypoints[at]!, waypoints[at + 1]!) : leg,
+    touched.includes(at) ? legFor(touchedMode(leg), waypoints[at]!, waypoints[at + 1]!) : leg,
   );
   return { draft: { ...draft, waypoints, legs }, stale: staleAmong(legs, touched) };
 }
@@ -306,7 +309,7 @@ export function deleteWaypoint(draft: RouteDraft, id: string): DraftEdit {
   // Either choice loses something when the two differed; this one keeps the
   // rider's most recent decision about the stretch they are standing on, and it
   // is recorded here so the next person does not read it as arbitrary.
-  const mode = draft.legs[index - 1]!.mode;
+  const mode = touchedMode(draft.legs[index - 1]!);
   const legs = [
     ...draft.legs.slice(0, index - 1),
     legFor(mode, waypoints[index - 1]!, waypoints[index]!),
@@ -509,6 +512,16 @@ export function legFor(mode: LegMode, from: DraftWaypoint, to: DraftWaypoint): D
     };
   }
   return { mode, state: 'pending', ...NO_GEOMETRY };
+}
+
+/**
+ * The mode an edit rebuilds a touched leg in: its own, except that a leg the
+ * engine drew straight ({@link FreehandFallback}: freehand, with a failure on
+ * it) is rebuilt snapped, so the edit asks the engine again (#2734). A leg the
+ * rider drew freehand carries no failure and stays freehand.
+ */
+function touchedMode(leg: DraftLeg): LegMode {
+  return leg.mode === 'freehand' && leg.failure !== undefined ? 'snapped' : leg.mode;
 }
 
 function staleAmong(legs: readonly DraftLeg[], indices: readonly number[]): readonly number[] {

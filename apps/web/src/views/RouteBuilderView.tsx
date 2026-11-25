@@ -57,7 +57,12 @@ import {
   type LegMode,
   type RouteDraft,
 } from '../routing/draft';
-import { heightIntervalOf } from '../routing/tiers';
+import {
+  heightIntervalOf,
+  releaseRouting,
+  ridingChoicesNote,
+  ridingChoicesOf,
+} from '../routing/tiers';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
 import type { RouteHeights } from '../terrain/heights';
@@ -378,6 +383,15 @@ export function RouteBuilderView({
     else keep.current.write(draft);
   }, [draft]);
 
+  // #2734: the in-browser engine's worker and memory are let go as the planner
+  // closes; the next route drawn starts them again.
+  useEffect(
+    () => () => {
+      releaseRouting(provider);
+    },
+    [provider],
+  );
+
   // Legs restored from storage arrive unrouted, so ask for them on mount.
   const restored = useRef(false);
   useEffect(() => {
@@ -535,7 +549,14 @@ export function RouteBuilderView({
 
   const surfaces = surfaceSummary(draft);
   const unresolved = unresolvedSentence(draft.legs);
-  const risk = strandingRisk(preferences.surface);
+  // #2734: the in-browser engine is told the bicycle only, so with it routing
+  // every leg the surface choice cannot refuse a route, and the screen says
+  // the choice is not applied rather than show it as if it were.
+  const choicesNote = ridingChoicesNote(provider);
+  const risk =
+    provider !== undefined && ridingChoicesOf(provider) === 'not-applied'
+      ? undefined
+      : strandingRisk(preferences.surface);
   const loop = loopReadout(draft, loopTarget, units);
 
   return (
@@ -864,6 +885,7 @@ export function RouteBuilderView({
               </option>
             ))}
           </select>
+          {choicesNote === undefined ? null : <p data-riding-choices="">{choicesNote}</p>}
           {risk === undefined ? null : (
             <StatusMessage tone="warning" label="This setting can refuse a route">
               {risk}

@@ -7,6 +7,7 @@ import {
   geographicPosition,
   RoutingError,
   type GeographicPosition,
+  type RoutingProvider,
 } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +16,11 @@ import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
 import { IS_A_LOOP_TEXT, NOT_YET_A_LOOP_TEXT } from '../routing/loop';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
+import {
+  CHOICES_NOT_APPLIED_TEXT,
+  CHOICES_NOT_ON_FALLBACK_TEXT,
+  routingTiers,
+} from '../routing/tiers';
 import {
   activateWithKeyboard,
   chooseOption,
@@ -56,7 +62,7 @@ function isolatedStorage(): DraftStorage {
 
 async function open(
   options: {
-    provider?: ScriptedProvider | undefined;
+    provider?: RoutingProvider | undefined;
     storage?: DraftStorage | undefined;
   } = {},
 ): Promise<Mounted> {
@@ -516,6 +522,49 @@ describe('legs, surfaces and the settings that decide them', () => {
     await chooseOption(select as HTMLSelectElement, 'paved-only');
     await settle();
     expect(view.container.textContent).toContain('including your own driveway');
+  });
+
+  it('says the surface choice is not applied when the in-browser engine routes, and gives no warning it cannot keep (#2734)', async () => {
+    const view = await open({ provider: routingTiers({ browser: () => scriptedProvider() }) });
+    expect(view.container.textContent).toContain(CHOICES_NOT_APPLIED_TEXT);
+    const select = view.container.querySelector('select');
+    await chooseOption(select as HTMLSelectElement, 'paved-only');
+    await settle();
+    expect(view.container.textContent).not.toContain('including your own driveway');
+  });
+
+  it('says a leg the instance cannot route does not apply the surface choice, and still warns (#2734)', async () => {
+    const view = await open({
+      provider: routingTiers({ instance: scriptedProvider(), browser: () => scriptedProvider() }),
+    });
+    expect(view.container.textContent).toContain(CHOICES_NOT_ON_FALLBACK_TEXT);
+    expect(view.container.textContent).not.toContain(CHOICES_NOT_APPLIED_TEXT);
+    await chooseOption(view.container.querySelector('select') as HTMLSelectElement, 'paved-only');
+    await settle();
+    expect(view.container.textContent).toContain('including your own driveway');
+  });
+
+  it('says nothing about the choice with the instance alone', async () => {
+    const view = await open({ provider: scriptedProvider() });
+    expect(view.container.querySelector('[data-riding-choices]')).toBeNull();
+  });
+});
+
+describe('the in-browser engine, as the planner closes (#2734)', () => {
+  it('is let go on unmount, once it was made', async () => {
+    let released = 0;
+    const engine = Object.assign(scriptedProvider(), {
+      release: () => {
+        released += 1;
+      },
+    });
+    await open({ provider: routingTiers({ browser: () => engine }) });
+    await place(2);
+    expect(engine.routeCalls.length).toBeGreaterThan(0);
+    expect(released).toBe(0);
+    mounted?.unmount();
+    mounted = undefined;
+    expect(released).toBe(1);
   });
 });
 

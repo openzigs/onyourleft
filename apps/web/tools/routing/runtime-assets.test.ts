@@ -4,7 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 import { PRECACHE_EXCLUSIONS } from '../precache/precache';
 
-import { assetFileName, isRoutingRuntimeAsset, ROUTING_RUNTIME_DIRECTORY } from './runtime-assets';
+import {
+  assetFileName,
+  chunkFileName,
+  isRoutingRuntimeAsset,
+  ROUTING_RUNTIME_DIRECTORY,
+} from './runtime-assets';
 
 const SDK = '/repo/node_modules/.pnpm/valhalla-browser@0.2.1/node_modules/valhalla-browser/dist/';
 
@@ -28,6 +33,18 @@ describe('where the build puts the in-browser routing engine — #2734', () => {
     );
     expect(isRoutingRuntimeAsset(['/repo/apps/web/src/valhalla-browser/x.wasm'])).toBe(false);
     expect(isRoutingRuntimeAsset(['/repo/node_modules/not-valhalla-browser/x.wasm'])).toBe(false);
+  });
+
+  it('puts the chunk of the engine’s licence texts under routing/, and every other chunk where Vite does', () => {
+    expect(
+      chunkFileName({ moduleIds: ['/repo/apps/web/public/routing/third-party.txt?raw'] }),
+    ).toBe('routing/[name]-[hash].js');
+    expect(
+      chunkFileName({ moduleIds: ['/repo/apps/web/public/licences/third-party.txt?raw'] }),
+    ).toBe('assets/[name]-[hash].js');
+    expect(chunkFileName({ moduleIds: ['/repo/apps/web/src/routing/draft.ts'] })).toBe(
+      'assets/[name]-[hash].js',
+    );
   });
 
   it('is a directory the precache leaves out', () => {
