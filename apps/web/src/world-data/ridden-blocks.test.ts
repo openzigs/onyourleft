@@ -136,6 +136,7 @@ async function ride(
     /** No cache at all: a fresh read, every block from the archive. */
     noCache?: boolean;
     source?: CountingSource;
+    onChange?: () => void;
   } = {},
 ) {
   const source = options.source ?? countingSource(archive);
@@ -163,6 +164,7 @@ async function ride(
     },
     yieldToIdle: () => Promise.resolve(),
     log: (line) => log.push(line),
+    onChange: options.onChange,
   });
   const started = await area.start(start);
   await area.settled();
@@ -432,6 +434,16 @@ describe('a kept block lands where a fresh read puts it, on a ride that started 
 });
 
 describe('a kept block’s streets reach the street graph', () => {
+  it('tells the session each time a kept block is handed out, as it does for a read one', async () => {
+    let fromArchive = 0;
+    await ride(ATHLETE_A, { onChange: () => (fromArchive += 1) });
+    let fromCache = 0;
+    const second = await ride(ATHLETE_A, { onChange: () => (fromCache += 1) });
+    expect(second.calls).toStrictEqual([]);
+    expect(fromArchive).toBe(9);
+    expect(fromCache).toBe(9);
+  });
+
   it('builds the same graph from a kept block’s streets as from a fresh read’s', async () => {
     const first = await ride(ATHLETE_A);
     for (const store of open.splice(0)) store.close();
