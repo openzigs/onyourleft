@@ -396,6 +396,7 @@ import {
   RIDER_STAND_IN_PARTS_BY_BODY,
   RIDER_UPPER_BODY_PARTS_BY_BODY,
   STAND_IN_LEGS,
+  STAND_IN_PALETTE,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -688,7 +689,7 @@ import {
   type RiderFade,
   type RiderFadeLine,
 } from './rider-fade';
-import { riderBodyFor } from './rider-body';
+import { riderBodyFor, riderSkinFor } from './rider-body';
 import {
   directionalFogColour,
   drawnHorizonColour,
@@ -3448,6 +3449,8 @@ export class RiderBelt {
   readonly #rider = new Matrix4();
   readonly #local = new Matrix4();
   readonly #tint = new Color();
+  /** No tint at all: what a stand-in's bare shin is drawn under — #3214. */
+  readonly #untinted = new Color(0xffffff);
   readonly #up = new Vector3(0, 1, 0);
   readonly #acrossTheBicycle = new Vector3(1, 0, 0);
   readonly #alongTheBicycle = new Vector3(0, 0, 1);
@@ -3824,13 +3827,20 @@ export class RiderBelt {
     }
     // #3211: a stand-in's thighs are in the shorts and its shins bare.
     const standIn = this.#world === 'realistic';
+    // #3214: and its skin is this rider's own tone, which no tint reaches —
+    // in the upper body's limb channel, which a stand-in's has no other use
+    // for (@see KIT_SKIN), and a bare shin's.
+    const skin = riderSkinFor(marker.skin);
+    if (standIn) {
+      for (const mesh of [this.#torsos, this.#femaleTorsos]) {
+        writeKitChannel(mesh, KIT_LIMB_ATTRIBUTE, slot, skin, this.#tint);
+      }
+    }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
-      writeKit(
-        this.#limbs,
-        slot * LEG_BONE_COUNT + bone,
-        standIn ? (STAND_IN_LEG_KITS[bone] ?? kit) : kit,
-        this.#tint,
-      );
+      const at = slot * LEG_BONE_COUNT + bone;
+      writeKit(this.#limbs, at, standIn ? (STAND_IN_LEG_KITS[bone] ?? kit) : kit, this.#tint);
+      if (this.#bareLeg(bone))
+        writeKitChannel(this.#limbs, KIT_LIMB_ATTRIBUTE, at, skin, this.#tint);
     }
     this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
 
@@ -3870,7 +3880,11 @@ export class RiderBelt {
     this.#cranksets.setColorAt(slot, this.#tint);
 
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
-      this.#limbs.setColorAt(slot * LEG_BONE_COUNT + bone, this.#tint);
+      // #3214: a bare shin is drawn untinted, in its tone alone.
+      this.#limbs.setColorAt(
+        slot * LEG_BONE_COUNT + bone,
+        this.#bareLeg(bone) ? this.#untinted : this.#tint,
+      );
     }
     // ⚠️ **All six, not the angle alone.** `#poseLegs` writes world matrices,
     // so the rider's own place and heading are part of what a pose was solved
@@ -3900,6 +3914,11 @@ export class RiderBelt {
     posed[at + 4] = marker.lean;
     posed[at + 5] = angle;
     return true;
+  }
+
+  /** Whether leg segment `bone` is bare skin in this world — #3214: a stand-in's shin. @see STAND_IN_LEGS */
+  #bareLeg(bone: number): boolean {
+    return this.#world === 'realistic' && STAND_IN_LEGS[bone]?.colour === STAND_IN_PALETTE.skin;
   }
 
   /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
@@ -4999,6 +5018,15 @@ const KIT_NONE = 0;
 const KIT_JERSEY = 1;
 /** A vertex of the legs or the helmet, in the kit's darker colour. @see markKit */
 const KIT_LIMB = 2;
+/**
+ * A vertex of a stand-in's SKIN — #3214: drawn in its instance's limb channel
+ * and never tinted. Only the stand-in has skin, and its upper body has no
+ * {@link KIT_LIMB} vertex, so its limb channel is free to carry the tone
+ * (`RiderBelt.#placeOne` writes it there). @see RIDER_KIT_GLSL
+ */
+const KIT_SKIN = 3;
+/** A vertex drawn as it is baked and never tinted — #3214: a stand-in's hair. @see RIDER_KIT_GLSL */
+const KIT_BARE = 4;
 
 /**
  * Which part of the kit a part painted `colour` is — #623. The stylised
@@ -5009,6 +5037,9 @@ const KIT_LIMB = 2;
 function kitRoleOf(colour: number): number {
   if (colour === RIDER_PALETTE.jersey) return KIT_JERSEY;
   if (colour === RIDER_PALETTE.limb) return KIT_LIMB;
+  // #3214: a stand-in's skin and hair, which no tint reaches.
+  if (colour === STAND_IN_PALETTE.skin) return KIT_SKIN;
+  if (colour === STAND_IN_PALETTE.hair) return KIT_BARE;
   return KIT_NONE;
 }
 
@@ -5048,16 +5079,47 @@ function kitChannels(mesh: InstancedMesh): void {
  * vertex colour is. `into` is scratch, so this allocates nothing.
  */
 function writeKit(mesh: InstancedMesh, slot: number, kit: RiderKit, into: Color): void {
-  for (const [name, colour] of [
-    [KIT_JERSEY_ATTRIBUTE, kit.jersey],
-    [KIT_LIMB_ATTRIBUTE, kit.limb],
-  ] as const) {
-    const channels = mesh.geometry.getAttribute(name) as InstancedBufferAttribute;
-    into.setHex(colour);
-    channels.setXYZ(slot, into.r, into.g, into.b);
-    channels.needsUpdate = true;
-  }
+  writeKitChannel(mesh, KIT_JERSEY_ATTRIBUTE, slot, kit.jersey, into);
+  writeKitChannel(mesh, KIT_LIMB_ATTRIBUTE, slot, kit.limb, into);
 }
+
+/** One of {@link kitChannels}' two colours for one instance, linear. @see writeKit */
+function writeKitChannel(
+  mesh: InstancedMesh,
+  name: string,
+  slot: number,
+  colour: number,
+  into: Color,
+): void {
+  const channels = mesh.geometry.getAttribute(name) as InstancedBufferAttribute;
+  into.setHex(colour);
+  channels.setXYZ(slot, into.r, into.g, into.b);
+  channels.needsUpdate = true;
+}
+
+/**
+ * The colour of one rider vertex — #623's kit per instance, and #3214's skin.
+ * `baked` is the vertex's own colour, `jersey` and `limb` its instance's kit
+ * channels and `tint` its instance's {@link RIDER_TINTS} entry; `role` is
+ * {@link markKit}'s. The kit, the helmet and the bicycle are drawn under the
+ * tint; a {@link KIT_SKIN} vertex is its instance's tone and a
+ * {@link KIT_BARE} one its own colour, and neither is tinted — the owner's
+ * ruling of 2026-11-25. Exported so `three-renderer.test.ts` runs it as text.
+ */
+export const RIDER_KIT_GLSL = /* glsl */ `
+vec3 oylRiderColour(float role, vec3 baked, vec3 jersey, vec3 limb, vec3 tint) {
+  if (role > ${String(KIT_BARE - 0.5)}) {
+    return baked;
+  } else if (role > ${String(KIT_SKIN - 0.5)}) {
+    return limb;
+  } else if (role > ${String(KIT_LIMB - 0.5)}) {
+    return limb * tint;
+  } else if (role > ${String(KIT_JERSEY - 0.5)}) {
+    return jersey * tint;
+  }
+  return baked * tint;
+}
+`;
 
 /**
  * The stylised rider's two materials, taught to put each INSTANCE's own kit
@@ -5077,22 +5139,81 @@ function withKitPerInstance(material: Material): void {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};\nattribute vec3 ${KIT_JERSEY_ATTRIBUTE};\nattribute vec3 ${KIT_LIMB_ATTRIBUTE};`,
+        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};\nattribute vec3 ${KIT_JERSEY_ATTRIBUTE};\nattribute vec3 ${KIT_LIMB_ATTRIBUTE};${RIDER_KIT_GLSL}`,
         'vertex',
         spliced,
       ),
       '#include <color_vertex>',
       /* glsl */ `#include <color_vertex>
-#ifdef USE_INSTANCING_COLOR
-if (${KIT_ROLE_ATTRIBUTE} > 0.5) {
-  vColor.rgb = (${KIT_ROLE_ATTRIBUTE} > 1.5 ? ${KIT_LIMB_ATTRIBUTE} : ${KIT_JERSEY_ATTRIBUTE}) * instanceColor.rgb;
-}
+#if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, ${KIT_JERSEY_ATTRIBUTE}, ${KIT_LIMB_ATTRIBUTE}, instanceColor.rgb);
 #endif`,
       'vertex',
       spliced,
     );
   };
   material.customProgramCacheKey = () => 'oyl-rider-kit-per-instance';
+}
+
+/**
+ * How chromatic a realistic helmet vertex's colour must be to be the FACE or
+ * the hair — #3214, as `max − min` of its linear channels. The file's helmet
+ * mesh carries the shell, the straps, the vents and the glasses' frame, all
+ * greys, and beside them the lenses, the eyes and the female rider's hair
+ * (`process_rider.py` §`SHELL` to §`VENT`, `rider_kit.py` §`EYE_BANDS`,
+ * §`HAIR`), each with a hue: the smoked lens, the least of them, leads with
+ * its blue by 0.04, and the vent, the most hued grey, by 0.005.
+ */
+const HELMET_BARE_CHROMA = 0.015;
+
+/**
+ * Marks which of a realistic helmet mesh's vertices are the face and the hair
+ * — #3214 — as {@link KIT_BARE}, and every other {@link KIT_NONE}, from the
+ * colours the file paints them: drawn as they are and never tinted, where the
+ * shell and the straps keep the tint. Once, on a helmet's own clone.
+ */
+function markBareHelmet(geometry: BufferGeometry): BufferGeometry {
+  const colour = geometry.getAttribute('color');
+  const roles = new Float32Array(colour.count);
+  for (let at = 0; at < colour.count; at += 1) {
+    const [r, g, b] = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+    roles[at] = Math.max(r, g, b) - Math.min(r, g, b) > HELMET_BARE_CHROMA ? KIT_BARE : KIT_NONE;
+  }
+  geometry.setAttribute(KIT_ROLE_ATTRIBUTE, new BufferAttribute(roles, 1));
+  return geometry;
+}
+
+/**
+ * Teaches an instanced, vertex-coloured material {@link markKit}'s
+ * {@link KIT_BARE} — #3214: a vertex so marked is drawn in its own colour and
+ * not under its instance's tint, through {@link RIDER_KIT_GLSL} with no kit
+ * (the realistic helmet wears none). Chained after any earlier hook.
+ */
+function withBareVertices<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#3214's untinted face";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};${RIDER_KIT_GLSL}`,
+        'vertex',
+        spliced,
+      ),
+      '#include <color_vertex>',
+      /* glsl */ `#include <color_vertex>
+#if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);
+#endif`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}+oyl-bare`;
+  return material;
 }
 
 /**
@@ -17877,9 +17998,17 @@ interface RealisticRiderPool {
  * maps: it is each body's own kit uniform, set every frame from
  * {@link RIDER_KITS} — the rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey, the
  * colour the stylised rider wears too, and the pacer's and the ghost's is
- * `PACER_KIT`'s blue. The tint still multiplies the whole body after it, and
- * it multiplies the kit THAT kind wears, so #368's three stay three: orange
+ * `PACER_KIT`'s blue. The tint still multiplies the kit after it, and it
+ * multiplies the kit THAT kind wears, so #368's three stay three: orange
  * times teal was a jersey whose green led its red (#742's review).
+ *
+ * ⚠️ **Since #3214 the tint never reaches the skin** (the owner's ruling of
+ * 2026-11-25): it multiplied the whole body until then, so every bot's arms,
+ * legs and face were orange. The skin is drawn in the marker's own tone
+ * (`rider-body.ts` §`RIDER_SKIN_TONES`, a lap race's bot's seeded from its
+ * id) and the kit, the helmet and the bicycle under the tint
+ * ({@link RIDER_BODY_GLSL}); the helmet mesh's lenses, eyes and hair are
+ * drawn as the file paints them ({@link markBareHelmet}).
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and
@@ -18022,9 +18151,14 @@ export class RealisticRiderBelt {
     this.#otherBodiesOf = world;
     // #623: the helmet and glasses are the file's own, coloured per vertex.
     // #2596: faded with the rider who wears it.
+    // #3214: and its face and hair drawn as they are, untinted.
     const helmetMaterial = withRiderInstance(
       withAtmosphere(
-        constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+        withBareVertices(
+          constructed(
+            new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 }),
+          ),
+        ),
       ),
       false,
     );
@@ -18074,7 +18208,7 @@ export class RealisticRiderBelt {
     this.#handAlong = [new Vector3(), new Vector3()];
     this.#footBall = [new Vector3(), new Vector3()];
     this.#helmets = riderInstanceChannels(
-      tintable(helmetSource.geometry.clone(), helmetMaterial, instances),
+      tintable(markBareHelmet(helmetSource.geometry.clone()), helmetMaterial, instances),
       instances,
     );
     this.#helmets.count = 0;
@@ -18093,7 +18227,9 @@ export class RealisticRiderBelt {
       const source = skinned.material as Material;
       const kit = { value: new Color(RIDER_KITS.rider.jersey) };
       const fade = { value: 0 };
-      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade);
+      // #3214: the maps' own skin until a frame says otherwise.
+      const skin = { value: new Color(1, 1, 1) };
+      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade, skin);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -18149,6 +18285,7 @@ export class RealisticRiderBelt {
         material,
         kit,
         fade,
+        skin,
         bones,
         ordered,
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
@@ -18386,6 +18523,11 @@ export class RealisticRiderBelt {
     return this.kitColoursOf(REALISTIC_DEFAULT_BODY);
   }
 
+  /** Each slot's skin as a share of the maps', in the default body's pool — #3214. For the tests. */
+  get skinShares(): readonly Color[] {
+    return (this.#pools[REALISTIC_DEFAULT_BODY]?.riders ?? []).map((rider) => rider.skin.value);
+  }
+
   /** Each slot's kit colour in one body's pool — #2839. For the tests. */
   kitColoursOf(body: RiderBody): readonly Color[] {
     return (this.#pools[body]?.riders ?? []).map((rider) => rider.kit.value);
@@ -18608,6 +18750,8 @@ export class RealisticRiderBelt {
     );
     // #623: the kit this kind wears, under its tint. @see RIDER_KITS
     rider.kit.value.setHex(this.#kits[marker.kind].jersey);
+    // #3214: this rider's own skin, which the tint below never reaches.
+    riderSkinShare(riderSkinFor(marker.skin), rider.skin.value);
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
@@ -19041,6 +19185,8 @@ interface RealisticRiderSlot {
   readonly kit: { value: Color };
   /** How much of this body is faded out — #2596. Set per frame from `rider-fade.ts`. */
   readonly fade: { value: number };
+  /** This body's skin tone as a share of the maps' — #3214. Set per frame. @see riderSkinShare */
+  readonly skin: { value: Color };
   readonly bones: ReadonlyMap<string, Bone>;
   readonly restQuaternions: readonly Quaternion[];
   readonly restPositions: readonly Vector3[];
@@ -19210,6 +19356,55 @@ function helmetOf(scene: Object3D): Mesh {
 }
 
 /**
+ * How chromatic a texel of the realistic rider's colour map must be to be
+ * SKIN — #3214, as `[none, all]` of `max − min` of its linear channels. The
+ * map holds no skin mask, and needs none: everything in it that is not skin
+ * is a grey — the white kit at 0.80, the bib, the zip, the shoes and the
+ * soles (`rider_kit.py` §`WHITE` to §`SOLE`) — and the main colour is black
+ * there (`REALISTIC_RIDER_MAPS`). Read off the committed map on 2026-11-25:
+ * its grey texels reach 0.07 (ETC1S warms a white), its skin starts near
+ * 0.17, its darkest detail (`rider_kit.py` §`SKIN_DETAIL_RANGE`) at 0.16, and a
+ * texel between the two is a hem's blend of both.
+ */
+const RIDER_SKIN_CHROMA: readonly [number, number] = [0.08, 0.15];
+
+/**
+ * The realistic body's albedo — #623's kit, and #3214's skin. `map` is the
+ * colour map's texel (linear), `kit` the main colour's share (`orm`'s blue),
+ * `jersey` the body's kit uniform, `tint` its #368 tint and `skin` its tone
+ * as a share of the map's ({@link riderSkinShare}). The kit and every grey of
+ * the map are drawn under the tint; the skin, found by
+ * {@link RIDER_SKIN_CHROMA}, in its own tone and never tinted — the owner's
+ * ruling of 2026-11-25. Exported so `three-renderer.test.ts` runs it as text.
+ */
+export const RIDER_BODY_GLSL = /* glsl */ `
+float oylSkinOfMap(vec3 map) {
+  float chroma = max(map.x, max(map.y, map.z)) - min(map.x, min(map.y, map.z));
+  return smoothstep(${glslFloat(RIDER_SKIN_CHROMA[0])}, ${glslFloat(RIDER_SKIN_CHROMA[1])}, chroma);
+}
+vec3 oylBodyAlbedo(vec3 map, float kit, vec3 jersey, vec3 tint, vec3 skin) {
+  return map * mix(tint, skin, oylSkinOfMap(map)) + kit * jersey * tint;
+}
+`;
+
+/** The first skin tone (`rider-body.ts` §`RIDER_SKIN_TONES`), linear: the one the realistic body's maps are drawn in. */
+const MAPPED_SKIN = new Color(STAND_IN_PALETTE.skin);
+
+/**
+ * A rider's skin tone as a share of the realistic body's maps', linear, per
+ * channel — #3214: `rider-body.ts` §`RIDER_SKIN_TONES`' entry over its first,
+ * which is the tone the maps were matched to. Written into `into`, so a frame
+ * allocates nothing; never above 1 in a channel (`rider-body.test.ts`).
+ */
+function riderSkinShare(tone: number, into: Color): Color {
+  into.setHex(tone);
+  into.r /= MAPPED_SKIN.r;
+  into.g /= MAPPED_SKIN.g;
+  into.b /= MAPPED_SKIN.b;
+  return into;
+}
+
+/**
  * The material a realistic rider's body wears — #623, ADR 0026 D-11:
  * constructed here, physically based, and one a rider.
  *
@@ -19221,7 +19416,9 @@ function helmetOf(scene: Object3D): Mesh {
  *   main colour a texel is — a SHADE, premultiplied: the colour map is black
  *   there. The one line spliced after `map_fragment` ADDS `blue × kit × color`,
  *   where `kit` is the body's own kit uniform ({@link RIDER_KITS}) and `color` the #368
- *   tint, so the albedo is `(map + blue × kit) × tint`. ⚠️ Added rather than
+ *   tint, so the albedo is `(map + blue × kit) × tint` — but for the skin,
+ *   which since #3214 is `map × skin` and never tinted ({@link RIDER_BODY_GLSL}).
+ *   ⚠️ Added rather than
  *   multiplied, because both maps are filtered: a white shade in the colour
  *   map times a 0/1 mask drew a pale halo half-way across every hem and cuff,
  *   which the browser gate's first picture of the kit showed.
@@ -19230,12 +19427,15 @@ function helmetOf(scene: Object3D): Mesh {
  *   gate's control for the pattern (#623).
  * - `fade` is how much of the body is faded out, the share of its pixels
  *   discarded by the same dither its bicycle's instances read (#2596).
+ * - `skin` is this rider's skin tone as a share of the maps' own, linear, per
+ *   channel (#3214, {@link riderSkinShare}): 1 draws the maps' skin.
  */
 function riderBodyMaterial(
   maps: RealisticRiderMaps,
   kit: { value: Color },
   plain: { value: number },
   fade: { value: number },
+  skin: { value: Color },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -19253,12 +19453,13 @@ function riderBodyMaterial(
     shader.uniforms['oylKitColour'] = kit;
     shader.uniforms['oylKitPlain'] = plain;
     shader.uniforms['oylRiderFade'] = fade;
+    shader.uniforms['oylSkin'] = skin;
     shader.fragmentShader = replacedOrThrown(
       replacedOrThrown(
         replacedOrThrown(
           shader.fragmentShader,
           '#include <common>',
-          '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;',
+          `#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;\nuniform vec3 oylSkin;${RIDER_BODY_GLSL}`,
           'fragment',
           spliced,
         ),
@@ -19269,8 +19470,12 @@ function riderBodyMaterial(
       ),
       '#include <map_fragment>',
       /* glsl */ `#include <map_fragment>
+#ifdef USE_MAP
+float oylKitShare = 0.0;
 #ifdef USE_ROUGHNESSMAP
-diffuseColor.rgb += diffuse * oylKitColour * texture2D(roughnessMap, vRoughnessMapUv).b;
+oylKitShare = texture2D(roughnessMap, vRoughnessMapUv).b;
+#endif
+diffuseColor.rgb = oylBodyAlbedo(sampledDiffuseColor.rgb, oylKitShare, oylKitColour, diffuse, oylSkin);
 #endif
 diffuseColor.rgb = mix(
   diffuseColor.rgb,

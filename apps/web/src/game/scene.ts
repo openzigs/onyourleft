@@ -738,6 +738,8 @@ export interface RaceBotInput {
   readonly hit?: RaceHitLook | undefined;
   /** Which body it is drawn as, seeded for the race (#2839). @see RiderMarker.body */
   readonly body?: RiderBody | undefined;
+  /** Which skin tone it is drawn with, seeded from its id (#3214). @see RiderMarker.skin */
+  readonly skin?: number | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -2800,6 +2802,8 @@ interface Rider {
   readonly followed?: boolean | undefined;
   /** @see RiderMarker.body */
   readonly body?: RiderBody | undefined;
+  /** @see RiderMarker.skin */
+  readonly skin?: number | undefined;
   /** A lap-race bot's lane, across the road, in place of the line. @see RaceBotInput.lateralMetres */
   readonly laned?: number | undefined;
   /** @see RaceBotInput.laidOut */
@@ -2965,6 +2969,7 @@ function ridersOnTheRoad(
       laidOut: bot.laidOut,
       hit: bot.hit,
       body: bot.body,
+      skin: bot.skin,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -3037,7 +3042,9 @@ function ridersOnTheRoad(
     // realistic world's split. Only a race's bots are laned.
     const raced = rider.laned === undefined ? hit : { ...hit, racer: true as const };
     // #2839: which body, where one was given; absent draws the default.
-    const cranked = rider.body === undefined ? raced : { ...raced, body: rider.body };
+    const bodied = rider.body === undefined ? raced : { ...raced, body: rider.body };
+    // #3214: which skin tone, where one was given; absent draws the first.
+    const cranked = rider.skin === undefined ? bodied : { ...bodied, skin: rider.skin };
     return {
       // #783: the name the room gave them, carried to the frame as words only.
       marker:

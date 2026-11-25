@@ -130,6 +130,8 @@ import {
   realisticStructureGeometry,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
+  RIDER_BODY_GLSL,
+  RIDER_KIT_GLSL,
   stylisedRiderTriangles,
   breathesTheAir,
   fadesRiders,
@@ -149,6 +151,8 @@ import {
   ROOF_SNOW,
   sceneryColours,
 } from './three-renderer';
+import { GlslProgram } from './glsl-program-testing';
+import { RIDER_SKIN_TONES } from './rider-body';
 import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES, facadePartAt } from './facade';
 import { glslFunction } from './glsl-testing';
 import { mappedBuildingsOf } from './mapped-buildings';
@@ -3104,7 +3108,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       belt.dispose();
     });
 
-    it('marks only the jersey as kit, and bakes the helmet, the shorts and the skin', () => {
+    it('marks the jersey as kit, the skin and the hair as untinted, and bakes the helmet and the shorts', () => {
       const belt = new RiderBelt();
       for (const body of ['male', 'female'] as const) {
         const geometry = belt.shapes.realistic[body];
@@ -3112,7 +3116,24 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
         const colour = geometry.getAttribute('color');
         const roles = new Set(Array.from({ length: role.count }, (_, at) => role.getX(at)));
         // The jersey (1) and no limb (2): a stand-in's helmet is not its kit's.
-        expect(roles, body).toEqual(new Set([0, 1]));
+        // #3214: the skin (3), and the female's hair (4).
+        expect(roles, body).toEqual(new Set(body === 'female' ? [0, 1, 3, 4] : [0, 1, 3]));
+        const colourOf = (at: number): string =>
+          [colour.getX(at), colour.getY(at), colour.getZ(at)]
+            .map((channel) => channel.toFixed(4))
+            .join(',');
+        const key = (hex: number): string =>
+          linear(hex)
+            .map((channel) => channel.toFixed(4))
+            .join(',');
+        const painted = (wanted: number): Set<string> =>
+          new Set(
+            Array.from({ length: role.count }, (_, at) => at)
+              .filter((at) => role.getX(at) === wanted)
+              .map(colourOf),
+          );
+        expect(painted(3), body).toEqual(new Set([key(STAND_IN_PALETTE.skin)]));
+        if (body === 'female') expect(painted(4)).toEqual(new Set([key(STAND_IN_PALETTE.hair)]));
         const baked = new Set(
           Array.from({ length: role.count }, (_, at) => at)
             .filter((at) => role.getX(at) === 0)
@@ -3122,12 +3143,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
                 .join(','),
             ),
         );
-        const expected = [
-          STAND_IN_PALETTE.helmet,
-          STAND_IN_PALETTE.shorts,
-          STAND_IN_PALETTE.skin,
-          ...(body === 'female' ? [STAND_IN_PALETTE.hair] : []),
-        ].map((hex) =>
+        const expected = [STAND_IN_PALETTE.helmet, STAND_IN_PALETTE.shorts].map((hex) =>
           linear(hex)
             .map((channel) => channel.toFixed(4))
             .join(','),
@@ -3241,6 +3257,253 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       }
       belt.dispose();
       expect(released.size).toBe(6);
+    });
+  });
+
+  describe('the tint colours the kit, the helmet and the bicycle, and never the skin — #3214', () => {
+    const linear = (hex: number): readonly number[] =>
+      [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff].map((byte) => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+    const times = (a: readonly number[], b: readonly number[]): number[] =>
+      a.map((value, at) => value * (b[at] ?? Number.NaN));
+    const expectColour = (actual: unknown, expected: readonly number[], what: string): void => {
+      const got = actual as readonly number[];
+      expected.forEach((channel, at) => expect(got[at], what).toBeCloseTo(channel, 5));
+    };
+    type Channels = {
+      getX(index: number): number;
+      getY(index: number): number;
+      getZ(index: number): number;
+    };
+    const at3 = (channels: Channels, index: number): number[] => [
+      channels.getX(index),
+      channels.getY(index),
+      channels.getZ(index),
+    ];
+    const tintOf = (mesh: { readonly instanceColor: unknown }, index: number): number[] =>
+      at3(mesh.instanceColor as Channels, index);
+    const kit = new GlslProgram(RIDER_KIT_GLSL);
+    /** A lap race's bot, past the realistic world's nearest two, in skin tone `skin`. */
+    const standIn = (skin: number | undefined, z = 9): RiderMarker => ({
+      ...riderAt({ z }, {}, 0, 'bot'),
+      racer: true,
+      ...(skin === undefined ? {} : { skin }),
+    });
+    type Mesh = RiderBelt['meshes']['torsos'];
+    /**
+     * Every vertex of `mesh`'s instance `slot`, coloured as the shader colours
+     * it: {@link RIDER_KIT_GLSL} run as text over the geometry's own role and
+     * colour and the instance's own kit channels and tint.
+     */
+    const drawnColours = (
+      mesh: Mesh,
+      slot: number,
+    ): { role: number; baked: number[]; drawn: number[] }[] => {
+      const geometry = mesh.geometry;
+      const role = geometry.getAttribute('oylKit');
+      const colour = geometry.getAttribute('color');
+      const jersey = at3(geometry.getAttribute('oylKitJersey'), slot);
+      const limb = at3(geometry.getAttribute('oylKitLimb'), slot);
+      const tint = tintOf(mesh, slot);
+      return Array.from({ length: role.count }, (_, at) => {
+        const baked = at3(colour, at);
+        return {
+          role: role.getX(at),
+          baked,
+          drawn: kit.call('oylRiderColour', role.getX(at), baked, jersey, limb, tint) as number[],
+        };
+      });
+    };
+    const same = (a: readonly number[], b: readonly number[]): boolean =>
+      a.every((value, at) => Math.abs(value - (b[at] ?? Number.NaN)) < 1e-4);
+    const neckOf = (mesh: Mesh, slot: number): number[] => {
+      const neck = drawnColours(mesh, slot).find((each) => each.role === 3);
+      if (neck === undefined) throw new Error('no skin vertex');
+      return neck.drawn;
+    };
+
+    it('runs the kit’s shader: the kit and the baked colours under the tint, the skin and the bare not', () => {
+      const baked = [0.3, 0.2, 0.1];
+      const jersey = [0.1, 0.2, 0.6];
+      const limb = [0.5, 0.35, 0.25];
+      const tint = [0.9, 0.25, 0.02];
+      const drawn = (role: number): unknown =>
+        kit.call('oylRiderColour', role, baked, jersey, limb, tint);
+      expectColour(drawn(0), times(baked, tint), 'baked');
+      expectColour(drawn(1), times(jersey, tint), 'jersey');
+      expectColour(drawn(2), times(limb, tint), 'limb');
+      expectColour(drawn(3), limb, 'skin');
+      expectColour(drawn(4), baked, 'bare');
+    });
+
+    it('draws a stand-in bot’s neck and forearms in its own tone, untinted, and its helmet, jersey and shorts tinted', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      const tone = 3;
+      const skin = linear(RIDER_SKIN_TONES[tone] as number);
+      for (const body of ['male', 'female'] as const) {
+        belt.place([{ ...standIn(tone), body }]);
+        const mesh = body === 'female' ? belt.meshes.femaleTorsos : belt.meshes.torsos;
+        const tint = tintOf(mesh, 0);
+        // Non-vacuity: the bot's tint is orange, so a tinted skin would differ.
+        expect((tint[0] ?? 0) - (tint[2] ?? 0)).toBeGreaterThan(0.3);
+        const vertices = drawnColours(mesh, 0);
+        const painted = (hex: number): typeof vertices =>
+          vertices.filter((each) => same(each.baked, linear(hex)));
+        const bare = painted(STAND_IN_PALETTE.skin);
+        expect(bare.length, body).toBeGreaterThan(20);
+        for (const each of bare) {
+          expectColour(each.drawn, skin, `${body} skin`);
+          expect(same(each.drawn, times(skin, tint)), body).toBe(false);
+        }
+        for (const hex of [STAND_IN_PALETTE.helmet, STAND_IN_PALETTE.shorts]) {
+          const parts = painted(hex);
+          expect(parts.length, `${body} ${hex.toString(16)}`).toBeGreaterThan(0);
+          for (const each of parts) expectColour(each.drawn, times(linear(hex), tint), body);
+        }
+        for (const each of vertices.filter((vertex) => vertex.role === 1)) {
+          expectColour(each.drawn, times(linear(PACER_KIT.jersey), tint), `${body} jersey`);
+        }
+        // The female's hair is drawn as it is, untinted, on every stand-in.
+        const hair = painted(STAND_IN_PALETTE.hair);
+        expect(hair.length > 0, body).toBe(body === 'female');
+        for (const each of hair) expectColour(each.drawn, linear(STAND_IN_PALETTE.hair), body);
+      }
+      belt.dispose();
+    });
+
+    it('draws a stand-in’s bare shins in its tone, untinted, and its thighs in the shorts under the tint', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      const tone = 4;
+      belt.place([standIn(tone)]);
+      const limbs = belt.meshes.limbs;
+      const role = limbs.geometry.getAttribute('oylKit').getX(0);
+      const baked = at3(limbs.geometry.getAttribute('color'), 0);
+      const tint = tintOf(belt.meshes.bodies, 0);
+      STAND_IN_LEGS.forEach((leg, bone) => {
+        const drawn = kit.call(
+          'oylRiderColour',
+          role,
+          baked,
+          at3(limbs.geometry.getAttribute('oylKitJersey'), bone),
+          at3(limbs.geometry.getAttribute('oylKitLimb'), bone),
+          tintOf(limbs, bone),
+        );
+        const shin = leg.colour === STAND_IN_PALETTE.skin;
+        expectColour(
+          drawn,
+          shin ? linear(RIDER_SKIN_TONES[tone] as number) : times(linear(leg.colour), tint),
+          String(bone),
+        );
+      });
+      // Both shins, and both thighs.
+      expect(STAND_IN_LEGS.filter((leg) => leg.colour === STAND_IN_PALETTE.skin)).toHaveLength(2);
+      belt.dispose();
+    });
+
+    it('draws a stand-in with no tone, or one off the list, in the first tone', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      for (const skin of [undefined, 99, -1]) {
+        belt.place([standIn(skin)]);
+        expectColour(
+          neckOf(belt.meshes.torsos, 0),
+          linear(RIDER_SKIN_TONES[0] as number),
+          String(skin),
+        );
+      }
+      belt.dispose();
+    });
+
+    it('gives each stand-in of a pack its own tone, slot by slot', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      belt.place([standIn(1, 9), standIn(3, 12)]);
+      for (const [slot, tone] of [
+        [0, 1],
+        [1, 3],
+      ] as const) {
+        expectColour(
+          neckOf(belt.meshes.torsos, slot),
+          linear(RIDER_SKIN_TONES[tone] as number),
+          String(slot),
+        );
+      }
+      belt.dispose();
+    });
+
+    it('leaves the stylised world’s rider as it was: no skin, and the helmet and legs in the kit under the tint', () => {
+      const belt = new RiderBelt();
+      belt.place([standIn(3)]);
+      for (const mesh of [belt.meshes.torsos, belt.meshes.femaleTorsos, belt.meshes.bodies]) {
+        const role = mesh.geometry.getAttribute('oylKit');
+        for (let at = 0; at < role.count; at += 1) expect(role.getX(at)).toBeLessThan(3);
+      }
+      const tint = tintOf(belt.meshes.bodies, 0);
+      const helmet = linear(PACER_KIT.limb);
+      const kitVertices = drawnColours(belt.meshes.torsos, 0).filter((each) => each.role === 2);
+      expect(kitVertices.length).toBeGreaterThan(0);
+      for (const each of kitVertices) expectColour(each.drawn, times(helmet, tint), 'helmet');
+      for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+        expectColour(tintOf(belt.meshes.limbs, bone), tint, String(bone));
+        expectColour(
+          at3(belt.meshes.limbs.geometry.getAttribute('oylKitLimb'), bone),
+          helmet,
+          String(bone),
+        );
+      }
+      belt.dispose();
+    });
+
+    describe('the realistic body’s map', () => {
+      const body = new GlslProgram(RIDER_BODY_GLSL);
+      // `rider_kit.py`'s colours, linear, and its skin's detail range.
+      const SKIN_TONE = [0.52, 0.32, 0.23];
+      const GREYS: Readonly<Record<string, readonly number[]>> = {
+        white: [0.8, 0.8, 0.8],
+        // A white as the committed map's ETC1S carries it, read off it on 2026-11-25.
+        warmedWhite: [0.799, 0.799, 0.738],
+        bib: [0.016, 0.019, 0.024],
+        zip: [0.2, 0.2, 0.21],
+        shoe: [0.02, 0.02, 0.022],
+        sole: [0.62, 0.62, 0.6],
+        main: [0, 0, 0],
+      };
+      const tint = linear(0xc2410c);
+      const share = [0.6, 0.4, 0.3];
+      const jersey = linear(PACER_KIT.jersey);
+
+      it('draws the skin in the rider’s tone, untinted, over the whole of its detail', () => {
+        for (const detail of [0.55, 1, 1.45]) {
+          const map = SKIN_TONE.map((channel) => Math.min(1, channel * detail));
+          expect(body.call('oylSkinOfMap', map), String(detail)).toBeCloseTo(1, 9);
+          expectColour(
+            body.call('oylBodyAlbedo', map, 0, jersey, tint, share),
+            times(map, share),
+            String(detail),
+          );
+        }
+      });
+
+      it('draws every grey of the kit, and its main colour, under the tint', () => {
+        for (const [name, map] of Object.entries(GREYS)) {
+          expect(body.call('oylSkinOfMap', map), name).toBeCloseTo(0, 9);
+          expectColour(
+            body.call('oylBodyAlbedo', map, 0, jersey, tint, share),
+            times(map, tint),
+            name,
+          );
+        }
+        // The main colour: black in the map, its share in `orm`'s blue.
+        expectColour(
+          body.call('oylBodyAlbedo', [0, 0, 0], 1, jersey, tint, share),
+          times(jersey, tint),
+          'main',
+        );
+      });
     });
   });
 
@@ -3362,7 +3625,12 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     material.onBeforeCompile(shader);
     expect(shader.vertexShader).toContain('attribute vec3 oylKitJersey;');
     expect(shader.vertexShader).toContain(
-      'vColor.rgb = (oylKit > 1.5 ? oylKitLimb : oylKitJersey) * instanceColor.rgb;',
+      'vColor.rgb = oylRiderColour(oylKit, color.rgb, oylKitJersey, oylKitLimb, instanceColor.rgb);',
+    );
+    // #3214: and the function it calls, declared once, before `main`.
+    expect(shader.vertexShader.split('vec3 oylRiderColour(')).toHaveLength(2);
+    expect(shader.vertexShader.indexOf('vec3 oylRiderColour(')).toBeLessThan(
+      shader.vertexShader.indexOf('void main()'),
     );
     belt.setShading('flat');
     const flat = bodies.material as unknown as typeof material;
