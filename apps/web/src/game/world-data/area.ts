@@ -475,9 +475,9 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
    *
    * ⚠️ **Never awaited by the read** ({@link keepLater}): the next block's
    * request, and the start, wait on no IndexedDB write. It yields to idle
-   * before it converts the block and again before it hands it to the store,
-   * so the conversion and the packing are not run inside a frame of a moving
-   * ride the moment the block is read.
+   * once before it converts the block and the cache packs it, so that work
+   * does not run in the same task as the read that held the block, inside a
+   * frame of a moving ride.
    */
   const keep = async (done: HeldBlock, identity: string): Promise<void> => {
     if (options.cache === undefined || !fullyRead(done.tiles)) return;
@@ -486,7 +486,6 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       const move = reframer(options.frame, blockFrame(done.block));
       const features = reframeCorridorFeatures(done.features, move);
       const streets = reframeStreets(done.streets, move);
-      await idle();
       await options.cache.put(done.block, { tiles: done.tiles, features, streets }, identity);
     } catch (error) {
       log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
