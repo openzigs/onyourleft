@@ -61,6 +61,7 @@ import {
 } from './realistic-budget';
 import type { StructureSurface } from './realistic-assets';
 import { footprintSamples, SIDE_ROAD_STRUCTURE_MARGIN_METRES } from './cross-streets';
+import { isBuiltKind } from './buildings';
 import type { ScatterItem } from './scatter';
 import {
   SETTLEMENT_CLEARED_KINDS,
@@ -751,6 +752,11 @@ export function onDriveway(
   at: { readonly x: number; readonly z: number; readonly rotation: number },
   footprint: Footprint,
   margin: number,
+  /**
+   * #3132: and on the building's own footprint, by any overlap: a procedural
+   * building standing on a mapped one's plot. Off, the driveway and apron alone.
+   */
+  onBuilding = false,
 ): boolean {
   const reach = Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + margin;
   const fromX = Math.floor((at.x - reach) / CELL_METRES);
@@ -764,12 +770,19 @@ export function onDriveway(
       if (list === undefined) continue;
       for (const index of list) {
         const plan = buildings.plans[index] as FootprintPlan;
-        if (plan.driveway.length === 0 && plan.apron.length === 0) continue;
+        if (!onBuilding && plan.driveway.length === 0 && plan.apron.length === 0) continue;
         const near = (buildings.radii[index] as number) + reach;
         const dx = at.x - plan.centroid.x;
         const dz = at.z - plan.centroid.z;
         if (dx * dx + dz * dz > near * near) continue;
         samples ??= footprintSamples(at, footprint);
+        if (onBuilding) {
+          for (let p = 0; p + 1 < samples.length; p += 2) {
+            if (insideRing(plan.footprint, samples[p] as number, samples[p + 1] as number)) {
+              return true;
+            }
+          }
+        }
         // #2848: an apron's outline as a driveway's. An empty ring holds no point and has no edge.
         for (const paving of [plan.driveway, plan.apron]) {
           for (let p = 0; p + 1 < samples.length; p += 2) {
@@ -792,8 +805,12 @@ export function onDriveway(
  * #2428, the side roads' rule for a structure, held for a driveway. A
  * roadside hedge row stands on the verge a driveway crosses, so the piece
  * across its end is left out and the row stops short of it each side.
- * Anything with no footprint is kept: {@link clearOfMappedBuildings} clears
- * the natural scenery. The same array where there are no plans.
+ * Since #3132 also every building (`buildings.ts` §`BUILT_KINDS`) whose
+ * footprint overlaps a mapped building's: an open-world ride has no land
+ * class, so a procedural village could be sited on a mapped town, its houses
+ * on the mapped buildings' plots and through their walls. Anything with no
+ * footprint is kept: {@link clearOfMappedBuildings} clears the natural
+ * scenery. The same array where there are no plans.
  */
 export function clearOfDriveways(
   items: readonly ScatterItem[],
@@ -804,7 +821,13 @@ export function clearOfDriveways(
     const footprint = (STRUCTURE_FOOTPRINTS as Readonly<Record<string, Footprint>>)[item.kind];
     return (
       footprint === undefined ||
-      !onDriveway(buildings, item, footprint, SIDE_ROAD_STRUCTURE_MARGIN_METRES)
+      !onDriveway(
+        buildings,
+        item,
+        footprint,
+        SIDE_ROAD_STRUCTURE_MARGIN_METRES,
+        isBuiltKind(item.kind),
+      )
     );
   });
 }

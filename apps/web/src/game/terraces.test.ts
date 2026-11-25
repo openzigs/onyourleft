@@ -199,9 +199,13 @@ describe('a terrace — the read path (#1635)', () => {
     const none = plansOf(pair(0), undefined);
     expect(village.map(bytesOf)).toStrictEqual(none.map(bytesOf));
     expect(village.some(terraced)).toBe(false);
-    // And its shared edge is two walls with windows, one each.
-    for (const plan of village) {
-      const walls = onSharedEdge(plan, 'wall', 1_008).flat();
+    // #3132: and its flush shared edge is drawn by neither, the two being one
+    // height, as a party wall is — not two walls on one plane, which flickered.
+    // The roofs keep the class gate: no terrace, as above.
+    for (const plan of village) expect(onSharedEdge(plan, 'wall', 1_008)).toHaveLength(0);
+    // Control: a gap apart, each draws its wall there, with its windows.
+    for (const plan of plansOf(pair(0.3), everywhere('village'))) {
+      const walls = onSharedEdge(plan, 'wall', 1_008, 0.5).flat();
       expect(walls.length).toBeGreaterThan(0);
       expect(walls.every((v) => v.top > 0)).toBe(true);
     }
