@@ -5146,7 +5146,7 @@ function withKitPerInstance(material: Material): void {
       '#include <color_vertex>',
       /* glsl */ `#include <color_vertex>
 #if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
-vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color, ${KIT_JERSEY_ATTRIBUTE}, ${KIT_LIMB_ATTRIBUTE}, instanceColor.rgb);
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, ${KIT_JERSEY_ATTRIBUTE}, ${KIT_LIMB_ATTRIBUTE}, instanceColor.rgb);
 #endif`,
       'vertex',
       spliced,
@@ -5206,7 +5206,7 @@ function withBareVertices<M extends Material>(material: M): M {
       '#include <color_vertex>',
       /* glsl */ `#include <color_vertex>
 #if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
-vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color, vec3(0.0), vec3(0.0), instanceColor.rgb);
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);
 #endif`,
       'vertex',
       spliced,

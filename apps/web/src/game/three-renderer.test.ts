@@ -3625,7 +3625,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     material.onBeforeCompile(shader);
     expect(shader.vertexShader).toContain('attribute vec3 oylKitJersey;');
     expect(shader.vertexShader).toContain(
-      'vColor.rgb = oylRiderColour(oylKit, color, oylKitJersey, oylKitLimb, instanceColor.rgb);',
+      'vColor.rgb = oylRiderColour(oylKit, color.rgb, oylKitJersey, oylKitLimb, instanceColor.rgb);',
     );
     // #3214: and the function it calls, declared once, before `main`.
     expect(shader.vertexShader.split('vec3 oylRiderColour(')).toHaveLength(2);
