@@ -392,7 +392,10 @@ import {
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
   RIDER_BICYCLE_PARTS,
+  RIDER_STAND_IN_BICYCLE_PARTS,
+  RIDER_STAND_IN_PARTS_BY_BODY,
   RIDER_UPPER_BODY_PARTS_BY_BODY,
+  STAND_IN_LEGS,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -921,6 +924,10 @@ export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
  *
  * #3176: the stylised belt draws its share in the realistic world's light
  * (`RiderBelt.setWorld`), not under a Lambert material that world leaves black.
+ *
+ * #3211: and as STAND-INS there — shaped and dressed as the realistic body
+ * beside them is (`bicycle.ts` §`RIDER_STAND_IN_PARTS_BY_BODY`), in the same
+ * meshes and at no more triangles, so the split's arithmetic is unchanged.
  */
 export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
   readonly realistic: readonly RiderMarker[];
@@ -3355,6 +3362,15 @@ export class RiderBelt {
   readonly #physical = physicalRiderMaterial();
   /** Which world the belt is drawn in. @see setWorld */
   #world: QualitySettings['world'] = 'stylised';
+  /**
+   * The bicycle and the upper bodies each world draws — #3211: the stylised
+   * world's own, and the realistic world's stand-ins (`bicycle.ts`
+   * §`RIDER_STAND_IN_PARTS_BY_BODY`, §`RIDER_STAND_IN_BICYCLE_PARTS`), shaped
+   * and dressed as the realistic body beside them is. The three meshes wear
+   * one set or the other, so a world costs no draw call the other does not;
+   * each set shares its mesh's per-instance channels.
+   */
+  readonly #shapes: Readonly<Record<QualitySettings['world'], RiderShapes>>;
   /** The rung's shading. @see setShading */
   #shading: QualitySettings['shading'] = 'lit';
   /**
@@ -3499,6 +3515,19 @@ export class RiderBelt {
       mesh.customDepthMaterial = this.#depth;
       this.#group.add(mesh);
     }
+    // #3211: after the loop, so each stand-in takes the channels it made.
+    this.#shapes = {
+      stylised: {
+        bicycle: this.#bodies.geometry,
+        male: this.#torsos.geometry,
+        female: this.#femaleTorsos.geometry,
+      },
+      realistic: {
+        bicycle: standInGeometry(RIDER_STAND_IN_BICYCLE_PARTS, this.#bodies.geometry),
+        male: standInGeometry(RIDER_STAND_IN_PARTS_BY_BODY.male, this.#torsos.geometry),
+        female: standInGeometry(RIDER_STAND_IN_PARTS_BY_BODY.female, this.#femaleTorsos.geometry),
+      },
+    };
     this.#group.visible = false;
   }
 
@@ -3686,8 +3715,27 @@ export class RiderBelt {
    * rung's flat material is the same in both.
    */
   setWorld(world: QualitySettings['world']): void {
+    if (world !== this.#world) {
+      // #3211: a stand-in's legs are another girth, so every leg is posed afresh.
+      this.#posed.fill(Number.NaN);
+    }
     this.#world = world;
+    // #3211: and shaped and dressed as the realistic body beside them is.
+    const shapes = this.#shapes[world];
+    this.#bodies.geometry = shapes.bicycle;
+    this.#torsos.geometry = shapes.male;
+    this.#femaleTorsos.geometry = shapes.female;
     this.#mount();
+  }
+
+  /**
+   * The bicycle and the upper bodies the belt draws in each world — #3211.
+   *
+   * @test-facing read by `three-renderer.test.ts` §"#3211" and by
+   * {@link stylisedRiderTriangles}, which prices the heavier world's.
+   */
+  get shapes(): Readonly<Record<QualitySettings['world'], RiderShapes>> {
+    return this.#shapes;
   }
 
   /** The material the meshes wear. @see setShading @see setWorld */
@@ -3724,6 +3772,10 @@ export class RiderBelt {
     for (const mesh of this.#all()) {
       mesh.geometry.dispose();
       mesh.dispose();
+    }
+    // #3211: and the shapes of the world the belt is not drawn in.
+    for (const { bicycle, male, female } of Object.values(this.#shapes)) {
+      for (const geometry of [bicycle, male, female]) geometry.dispose();
     }
     // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
     // of the two is mounted, and the other would leak.
@@ -3770,8 +3822,15 @@ export class RiderBelt {
     for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos]) {
       writeKit(mesh, slot, kit, this.#tint);
     }
+    // #3211: a stand-in's thighs are in the shorts and its shins bare.
+    const standIn = this.#world === 'realistic';
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
-      writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
+      writeKit(
+        this.#limbs,
+        slot * LEG_BONE_COUNT + bone,
+        standIn ? (STAND_IN_LEG_KITS[bone] ?? kit) : kit,
+        this.#tint,
+      );
     }
     this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
 
@@ -3865,7 +3924,9 @@ export class RiderBelt {
       this.#turn.setFromAxisAngle(this.#acrossTheBicycle, bone.pitch);
       // The limb geometry is one metre long, so the bone's own length is the
       // `y` scale and nothing has to be rebuilt when a leg changes shape.
-      this.#stretch.set(1, bone.length, 1);
+      // #3211: and a stand-in's thigh is thicker than its shin.
+      const girth = this.#world === 'realistic' ? (STAND_IN_LEGS[index]?.girth ?? 1) : 1;
+      this.#stretch.set(girth, bone.length, girth);
       this.#local.compose(this.#position, this.#turn, this.#stretch);
       this.#limbs.setMatrixAt(
         slot * LEG_BONE_COUNT + index,
@@ -4818,7 +4879,14 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
     case 'box':
       return new BoxGeometry(solid.width, solid.height, solid.depth);
     case 'tube':
-      return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
+      return new CylinderGeometry(
+        solid.radius,
+        solid.radius,
+        solid.length,
+        solid.sides ?? LIMB_SEGMENTS,
+        1,
+        solid.open === true,
+      );
     case 'ring':
       return ringGeometry(solid.radius, solid.thickness);
     case 'bend':
@@ -4827,11 +4895,25 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
       // is for. Folding it into the part's `roll` would apply it last, after
       // the yaw that stands the arc up, and spin the bar out of the bicycle's
       // plane entirely.
-      return new TorusGeometry(solid.radius, solid.thickness, 5, 12, solid.sweep).rotateZ(
-        solid.start,
-      );
+      // #3211: a stand-in's bar is three sides round and six pieces along.
+      return new TorusGeometry(
+        solid.radius,
+        solid.thickness,
+        solid.coarse === true ? 3 : 5,
+        solid.coarse === true ? 6 : 12,
+        solid.sweep,
+      ).rotateZ(solid.start);
     case 'ball':
       return new SphereGeometry(solid.radius, 8, 6);
+    case 'lathe':
+      // #3211: turned about `+Y`, then made as deep as a chest is. `scale`
+      // turns the normals with the shape, so the light reads it as round.
+      return new LatheGeometry(
+        solid.rings.map(([halfWidth, height]) => new Vector2(halfWidth, height)),
+        solid.sides,
+      ).scale(1, 1, solid.depthShare);
+    case 'ellipsoid':
+      return new SphereGeometry(0.5, 8, 5).scale(solid.width, solid.height, solid.depth);
   }
 }
 
@@ -4875,6 +4957,39 @@ function limbGeometry(): BufferGeometry {
   const geometry = new CylinderGeometry(LIMB_RADIUS_METRES, LIMB_RADIUS_METRES, 1, LIMB_SEGMENTS);
   paintEveryVertex(geometry, RIDER_PALETTE.limb);
   markKit(geometry, KIT_LIMB);
+  return geometry;
+}
+
+/**
+ * A stand-in's legs as kits — #3211: each bone's colour in both places, since
+ * a leg's vertices read the `limb`. Made once, so `RiderBelt.place` allocates
+ * nothing for them. @see STAND_IN_LEGS
+ */
+const STAND_IN_LEG_KITS: readonly RiderKit[] = STAND_IN_LEGS.map(({ colour }) => ({
+  jersey: colour,
+  limb: colour,
+}));
+
+/**
+ * What one world draws a rider's bicycle and upper body with — #3211. A
+ * rider wears the bicycle and ONE of the two bodies. @see RiderBelt.shapes
+ */
+export interface RiderShapes {
+  readonly bicycle: BufferGeometry;
+  readonly male: BufferGeometry;
+  readonly female: BufferGeometry;
+}
+
+/**
+ * A stand-in's `parts` as one geometry — #3211 — carrying the per-instance
+ * channels `stylised` already has (the kit, the steer and the fade), so the
+ * mesh that swaps between the two writes one set of buffers whichever it wears.
+ */
+function standInGeometry(parts: readonly RiderPart[], stylised: BufferGeometry): BufferGeometry {
+  const geometry = mergedParts(parts);
+  for (const name of [RIDER_INSTANCE_ATTRIBUTE, KIT_JERSEY_ATTRIBUTE, KIT_LIMB_ATTRIBUTE]) {
+    geometry.setAttribute(name, stylised.getAttribute(name));
+  }
   return geometry;
 }
 
@@ -20690,6 +20805,9 @@ function realisticBicycle(): {
       // unreachable — and it is spelled out rather than left to the `else`
       // below, which is what makes that `else` a `never`.
       throw new Error('the realistic bicycle has no ball to draw');
+    } else if (solid.shape === 'lathe' || solid.shape === 'ellipsoid') {
+      // #3211: a stand-in's trunk and helmet, which no bicycle is built from.
+      throw new Error(`the realistic bicycle has no ${solid.shape} to draw`);
     } else {
       // ⚠️ **A shape this chain does not know is a COMPILE error, since #369's
       // review.** It used to fall out of an `if`/`else if` chain in silence, so
@@ -20802,13 +20920,17 @@ export function realisticBicycleTriangles(): number {
  */
 export function stylisedRiderTriangles(): number {
   const belt = new RiderBelt();
-  const { bodies, torsos, femaleTorsos, cranksets, limbs } = belt.meshes;
+  const { cranksets, limbs } = belt.meshes;
   const count = (geometry: BufferGeometry): number =>
     (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
   const total =
-    count(bodies.geometry) +
-    // #2839: a rider wears one upper body; the budget prices the heavier.
-    Math.max(count(torsos.geometry), count(femaleTorsos.geometry)) +
+    // #2839: a rider wears one upper body; the budget prices the heavier,
+    // #3211: in whichever world's shapes are the heavier.
+    Math.max(
+      ...Object.values(belt.shapes).map(
+        (shapes) => count(shapes.bicycle) + Math.max(count(shapes.male), count(shapes.female)),
+      ),
+    ) +
     count(cranksets.geometry) +
     count(limbs.geometry) * LEG_BONE_COUNT;
   belt.dispose();

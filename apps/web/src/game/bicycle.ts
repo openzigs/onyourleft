@@ -397,8 +397,19 @@ export type RiderSolid =
       readonly height: number;
       readonly depth: number;
     }
-  /** A cylinder along its own `+Y`, before the part's rotation. */
-  | { readonly shape: 'tube'; readonly radius: number; readonly length: number }
+  /**
+   * A cylinder along its own `+Y`, before the part's rotation. #3211: `sides`
+   * is how many flat sides it is built with where that is not the renderer's
+   * own count, and `open` leaves its two ends off, for a tube whose ends are
+   * inside other parts.
+   */
+  | {
+      readonly shape: 'tube';
+      readonly radius: number;
+      readonly length: number;
+      readonly sides?: number | undefined;
+      readonly open?: true | undefined;
+    }
   /** A torus in its own XY plane — a wheel whose axle points along `+Z`. */
   | { readonly shape: 'ring'; readonly radius: number; readonly thickness: number }
   /**
@@ -423,8 +434,32 @@ export type RiderSolid =
       readonly start: number;
       /** How far it sweeps from there. */
       readonly sweep: number;
+      /**
+       * #3211: built from fewer pieces, for a bar nobody is near enough to
+       * count the sides of. @see RIDER_STAND_IN_BICYCLE_PARTS
+       */
+      readonly coarse?: true | undefined;
     }
-  | { readonly shape: 'ball'; readonly radius: number };
+  | { readonly shape: 'ball'; readonly radius: number }
+  /**
+   * A body turned about its own `+Y` from an outline — #3211, a trunk. Each
+   * ring is `[half width, height]`, from the lowest to the highest; its half
+   * depth is `depthShare` of the half width, because a chest is wider than it
+   * is deep. `sides` flat sides round it. Open at both ends.
+   */
+  | {
+      readonly shape: 'lathe';
+      readonly rings: readonly (readonly [number, number])[];
+      readonly depthShare: number;
+      readonly sides: number;
+    }
+  /** A ball with three diameters — #3211, a helmet longer than it is wide. */
+  | {
+      readonly shape: 'ellipsoid';
+      readonly width: number;
+      readonly height: number;
+      readonly depth: number;
+    };
 
 /**
  * One rigid piece of the rider.
@@ -1177,6 +1212,195 @@ export const RIDER_UPPER_BODY_PARTS_FEMALE: readonly RiderPart[] = [
 export const RIDER_UPPER_BODY_PARTS_BY_BODY: Readonly<Record<RiderBody, readonly RiderPart[]>> = {
   female: RIDER_UPPER_BODY_PARTS_FEMALE,
   male: RIDER_UPPER_BODY_PARTS,
+};
+
+/**
+ * What the stand-in rider wears besides its jersey — #3211. A stand-in is the
+ * stylised rider the REALISTIC world draws for a rider past its nearest two
+ * (`three-renderer.ts` §`realisticRemoteSplit`), so it is dressed as the
+ * realistic body beside it is: a pale helmet, black shorts, bare arms and
+ * lower legs, and the jersey its kind's kit gives it.
+ *
+ * ⚠️ **The stylised world draws none of these**, so {@link RIDER_PALETTE}'s
+ * "no skin tone appears here" still holds there, and none of them is in
+ * {@link BICYCLE_COLOURS}: that list bounds what the stylised world's lamps
+ * light. `skin` and `hair` were matched by eye to the realistic body's own
+ * maps in the lap race's frames, and are the same for every stand-in.
+ *
+ * Each is drawn under its rider's tint, as the realistic body's skin and
+ * helmet are (`three-renderer.ts` §`RIDER_TINTS`), so a bot's stand-in has the
+ * orange helmet and limbs the bot beside it has.
+ */
+export const STAND_IN_PALETTE = {
+  helmet: 0xe4e7ea,
+  shorts: 0x17191c,
+  skin: 0xd3bcae,
+  hair: 0x4a3426,
+} as const;
+
+/**
+ * A stand-in's legs, one entry a bone in {@link legBones}' order — #3211: the
+ * thigh in the shorts and thicker than the stylised leg, the shin bare and
+ * thinner. `girth` multiplies {@link LIMB_RADIUS_METRES}.
+ */
+export const STAND_IN_LEGS: readonly { readonly colour: number; readonly girth: number }[] = [
+  1, -1,
+].flatMap(() => [
+  { colour: STAND_IN_PALETTE.shorts, girth: 1.25 },
+  { colour: STAND_IN_PALETTE.skin, girth: 0.85 },
+]);
+
+/** How many flat sides a stand-in's trunk has. @see standInParts */
+const STAND_IN_TRUNK_SIDES = 12;
+/** A stand-in's chest is this deep for its width. */
+const STAND_IN_DEPTH_SHARE = 0.62;
+/** How thick a stand-in's upper arm is. */
+const STAND_IN_UPPER_ARM_RADIUS = 0.037;
+/** Where a stand-in's elbow is, below the line from its shoulder to its hand. */
+const STAND_IN_ELBOW_DROP = 0.05;
+
+/** `made`, a tube, with no ends — or with `sides` flat sides and its ends. @see RiderSolid */
+function tubeBuilt(made: RiderPart, how: { readonly sides: number } | 'open'): RiderPart {
+  if (made.solid.shape !== 'tube') return made;
+  return {
+    ...made,
+    solid: how === 'open' ? { ...made.solid, open: true } : { ...made.solid, sides: how.sides },
+  };
+}
+
+/**
+ * A stand-in's bicycle — #3211: {@link RIDER_BICYCLE_PARTS}, every part where
+ * it is, built from fewer triangles. A tube's two ends are left off, since
+ * each is inside a joint, and a bar's bend is turned from fewer pieces.
+ *
+ * ⚠️ **This is what pays for the stand-in's body.** A realistic frame's remote
+ * riders are priced at the stylised rider's triangles
+ * (`realistic-budget.ts` §`REALISTIC_REMOTE_STYLISED_RIDERS`) and that sum has
+ * no room left, so a rounder trunk has to be paid for out of the same rider.
+ * The two bends alone were 240 of a rider's triangles, on a curve of 6.5 cm
+ * radius that the realistic world shows from metres behind.
+ * `three-renderer.test.ts` §"#3211" holds the whole stand-in to the stylised
+ * rider's count, mesh by mesh, and this bicycle to the stylised one's extent.
+ */
+export const RIDER_STAND_IN_BICYCLE_PARTS: readonly RiderPart[] = RIDER_BICYCLE_PARTS.map((each) =>
+  each.solid.shape === 'tube'
+    ? tubeBuilt(each, 'open')
+    : each.solid.shape === 'bend'
+      ? { ...each, solid: { ...each.solid, coarse: true } }
+      : each,
+);
+
+/**
+ * A stand-in's upper body — #3211: a trunk turned from an outline (the hips
+ * in the shorts, the back and shoulders in the jersey, a bare neck), arms
+ * bent at the elbow with bare forearms, and a helmet longer than it is wide.
+ *
+ * The hips, the shoulders' height, the hands and the helmet's place are the
+ * stylised rider's, so the legs, the bars, the camera and a name tag need no
+ * second set of numbers; `bicycle.test.ts` §"#3211" holds it no taller and no
+ * wider. The arms are carried nearer the bicycle's plane than the stylised
+ * rider's, so the shoulders that cover their open ends stay inside
+ * {@link RIDER_HALF_WIDTH_METRES}.
+ *
+ * ⚠️ **Paid for by {@link RIDER_STAND_IN_BICYCLE_PARTS}**: the whole stand-in
+ * submits no more triangles than the stylised rider it replaces.
+ */
+function standInParts(shoulderAcross: number): RiderPart[] {
+  // The shoulders reach past the arms, so an arm's open end is inside them.
+  const shoulders = shoulderAcross + STAND_IN_UPPER_ARM_RADIUS + 0.003;
+  const half = TORSO_SPAN.length / 2;
+  const trunk = (
+    name: string,
+    colour: number,
+    rings: readonly (readonly [number, number])[],
+  ): RiderPart =>
+    part(
+      name,
+      { shape: 'lathe', rings, depthShare: STAND_IN_DEPTH_SHARE, sides: STAND_IN_TRUNK_SIDES },
+      colour,
+      { y: TORSO_SPAN.y, z: TORSO_SPAN.z },
+      { pitch: TORSO_SPAN.pitch },
+    );
+  const waist = [0.125, -half + 0.21] as const;
+  const collar = [0.06, half + 0.07] as const;
+  // The elbow: the middle of the arm, dropped square to it, down and back.
+  const along = spanBetween(SHOULDER_Y, SHOULDER_Z, GRIP_Y, GRIP_Z);
+  const elbow = {
+    y: along.y - STAND_IN_ELBOW_DROP * Math.sin(along.pitch),
+    z: along.z + STAND_IN_ELBOW_DROP * Math.cos(along.pitch),
+  };
+  return [
+    trunk('hips', STAND_IN_PALETTE.shorts, [
+      [0.07, -half - 0.06],
+      [0.13, -half - 0.01],
+      [0.15, -half + 0.07],
+      waist,
+    ]),
+    trunk('back', RIDER_PALETTE.jersey, [
+      waist,
+      [shoulders - 0.02, half - 0.11],
+      [shoulders, half - 0.01],
+      [shoulders - 0.05, half + 0.04],
+      collar,
+    ]),
+    trunk('neck', STAND_IN_PALETTE.skin, [collar, [0.05, half + 0.12]]),
+    ...[-1, 1].flatMap((side) => [
+      tubeBuilt(
+        tube(
+          `upper arm ${side}`,
+          RIDER_PALETTE.jersey,
+          STAND_IN_UPPER_ARM_RADIUS,
+          { x: side * shoulderAcross, y: SHOULDER_Y, z: SHOULDER_Z },
+          elbow,
+        ),
+        'open',
+      ),
+      // #2494: the hand on the bar turns with it, the elbow does not.
+      steering(
+        tubeBuilt(
+          tube(
+            `forearm ${side}`,
+            STAND_IN_PALETTE.skin,
+            0.032,
+            { x: side * shoulderAcross, ...elbow },
+            { y: GRIP_Y, z: GRIP_Z },
+          ),
+          'open',
+        ),
+        'toward-end',
+      ),
+    ]),
+    part(
+      'helmet',
+      { shape: 'ellipsoid', width: 0.2, height: 0.19, depth: 0.26 },
+      STAND_IN_PALETTE.helmet,
+      { y: HELMET_Y, z: HELMET_Z + 0.01 },
+      // Nose down, as a rider looking up the road wears it.
+      { pitch: 0.25 },
+    ),
+  ];
+}
+
+/**
+ * The stand-in upper body each {@link RiderBody} is drawn with in the
+ * realistic world — #3211. The female's is narrower across the shoulders and
+ * wears {@link RIDER_UPPER_BODY_PARTS_FEMALE}'s ponytail, in a hair colour.
+ */
+export const RIDER_STAND_IN_PARTS_BY_BODY: Readonly<Record<RiderBody, readonly RiderPart[]>> = {
+  female: [
+    ...standInParts(0.13),
+    tubeBuilt(
+      tube(
+        'ponytail',
+        STAND_IN_PALETTE.hair,
+        0.03,
+        { y: HELMET_Y - 0.01, z: HELMET_Z - HELMET_RADIUS + 0.02 },
+        { y: SHOULDER_Y + 0.03, z: SHOULDER_Z - 0.17 },
+      ),
+      { sides: 4 },
+    ),
+  ],
+  male: standInParts(0.155),
 };
 
 /**
