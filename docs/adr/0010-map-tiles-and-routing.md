@@ -759,3 +759,36 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that day on [#1991](https://github.com/openzigs/onyourleft/pull/1991): the project builds its own
   archive from OpenStreetMap. This entry is a pointer and changes nothing else here.
   ([#1788](https://github.com/openzigs/onyourleft/issues/1788))
+- **2026-11-23** — **D-5's two statements about Mapterhorn are out of date, and a drawn route's
+  heights no longer need the engine.** D-5 says Mapterhorn *"is not on the critical path today only
+  because its per-source data attribution list could not be fetched on 2026-09-03"*; the list has
+  loaded since at least 2026-11-20, at `https://download.mapterhorn.com/attribution.json`, with 151
+  sources (ADR 0032's entry of that date records the same). And D-5's *"Elevation is not a separate
+  service. It is `/height` on the same Valhalla process"* no longer describes the only path: on the
+  owner's ruling of 2026-11-02 on [#2013](https://github.com/openzigs/onyourleft/issues/2013)
+  (*"Yes: the lower 48 on R2"*), the project hosts its own extract of Mapterhorn's terrain tiles
+  beside the basemap, and the route planner and the route editor read a drawn line's heights from
+  it in the app, with no instance and no engine (`apps/web/src/terrain/`,
+  `apps/web/tools/terrain/README.md`). [ADR 0087](0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)
+  D-2, D-8 and D-9, accepted 2026-11-20, already name that archive, its reader's one `fetch`, its
+  credit and its cost row. What still holds: D-5's rule that a route stores the name and the grid
+  spacing of the dataset its heights came from (a drawn route now stores *"Mapterhorn terrain"*),
+  the Copernicus notice, which the credits screen gives because the archive's tiles are resampled
+  from GLO-30 where nothing finer exists, and the engine's `/height` as the source for an operator
+  who runs one: `RoutingProvider.heights` is unchanged, and with an engine its heights are the
+  route's. This entry is a pointer to the ruling and to ADR 0087, and decides nothing itself.
+- **2026-11-24** — D-4's engine is now running, as an optional add-on to the rider's own instance
+  ([#2008](https://github.com/openzigs/onyourleft/issues/2008)): **Valhalla `3.9.1`** (released
+  2026-10-06, MIT, read 2026-11-24), pinned by digest in `apps/instance/deploy/home/compose.yaml`,
+  not the `3.8.3` the *Sources* table records. Reached over HTTP as a separate process, as D-4
+  requires; the app reaches it only through its instance, sealed. Two facts for D-5, recorded and
+  **not** decided here: (1) the heights loaded into that process are **Tilezen's terrain tiles**,
+  the 1-arc-second grid `valhalla_build_elevation` downloads, and not Copernicus GLO-30 — in the
+  United States their source is USGS 3DEP, a bare-earth model and public domain, which answers
+  D-5's first caveat rather than adding to it; their notices are in
+  [`docs/operating-an-instance.md`](../operating-an-instance.md) §"Road routing". Keeping them, or
+  loading GLO-30 as D-5 names, is the owner's call on
+  [#3138](https://github.com/openzigs/onyourleft/issues/3138). (2) D-5's own third caveat, GLO-30's
+  maintenance to 2026, is still open. The in-browser bundle (`apps/web/tools/valhalla`) stays at
+  `3.8.3` until its own change moves it.
+  ([#2008](https://github.com/openzigs/onyourleft/issues/2008))

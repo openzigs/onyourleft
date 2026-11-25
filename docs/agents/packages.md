@@ -116,7 +116,11 @@ packages/             Apache-2.0, without exception
                       and the corridor's tile cover, simplification, clipping,
                       triangulation and rasterisation (#1544, ADR 0054);
                       and since #2894 the open-world street graph, built a
-                      tile at a time from decoded streets (ADR 0091).
+                      tile at a time from decoded streets (ADR 0091);
+                      and since #2013 a z12 height tile of the terrain
+                      archive: the bounds its bytes are held to before any
+                      decoder sees them, Terrarium heights and the sampling
+                      (`height-tile.ts`, ADR 0087 D-3). It decodes no image.
                       ⚠️ A tile is UNTRUSTED input: every limit is a refusal,
                       never a throw, and a refusal names no coordinate and no
                       tile x/y. It fetches nothing and holds no map data; it

@@ -169,6 +169,8 @@ import { browserBasemapConfig } from './map/basemap';
 import { readMapTilesChoice } from './map/tiles-preference';
 import { readRealisticWorldChoice } from './game/world-preference';
 import { lazyWorldCorridorPort, readingCorridorOnSave } from './world-data/corridor-lazy';
+import { browserTerrainConfig } from './terrain/config';
+import { lazyRouteHeights, type RouteHeights } from './terrain/heights';
 import type { WorldCorridorPort } from './world-data/corridor-port';
 import type { MapPort } from './map/port';
 import { forgettingOnDelete, type LibraryPort } from './library/store-port';
@@ -198,6 +200,7 @@ import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
+import { createRoutingPort, type RoutingPort } from './instance/routing-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -762,6 +765,26 @@ function buildWorkoutPort(): WorkoutPort {
 }
 
 /**
+ * A drawn route's heights (#2013): the terrain archive, read in the app with
+ * no instance and no routing engine.
+ *
+ * `undefined` for a build configured with no terrain archive, or with no
+ * basemap (`terrain/config.ts` §`readTerrainConfig`), and the planner then
+ * saves a drawn route flat, as it did before. The reader, `pmtiles` and the decoder
+ * are loaded on the first request (`terrain/heights.ts` §`lazyRouteHeights`),
+ * and with map tiles off nothing is loaded or asked (ADR 0054 D-6.4: one
+ * switch for everything the tile host is asked).
+ */
+function buildRouteHeights(): RouteHeights | undefined {
+  const config = browserTerrainConfig();
+  if (config === undefined) return undefined;
+  return lazyRouteHeights({
+    config,
+    mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+  });
+}
+
+/**
  * The effort-history screen's port (#67).
  *
  * The same store behind a narrower interface: `EffortStore` names five reads
@@ -862,6 +885,8 @@ function buildGamePort(
       entry: openWorldEntry,
       basemap: browserBasemapConfig,
       mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+      // #2899: the open-world road's real heights, from #2013's archive.
+      terrain: browserTerrainConfig,
     }),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
@@ -1319,6 +1344,29 @@ function buildPacerPort(): PacerPort | undefined {
     loadedFrom: loadedFrom(),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
+}
+
+/**
+ * The route planner's roads (#2008): the ONE production place a routing port
+ * is built, so `check:wiring` reports `createRoutingPort` if this goes. Over
+ * the sealed session the Connect screen keeps, through the one instance
+ * module (ADR 0036 D-3 (a)), and only when this device is connected to an
+ * instance it can seal to: with none, the planner is handed no provider and
+ * draws straight lines, sending nothing. Read when the shell is drawn, so a
+ * rider who connects an instance has roads the next time the app starts.
+ */
+function buildRoutingPort(): RoutingPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const port = createRoutingPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    // A waypoint inside one of this device's zones is never sent.
+    zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
+  });
+  return port.offered() ? port : undefined;
 }
 
 /**
@@ -2047,6 +2095,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           segments={buildSegmentPort()}
           match={buildMatchPort()}
           routes={buildRoutePort(worldCorridorPort)}
+          // #2008: roads from the rider's instance, or none and straight lines.
+          routing={buildRoutingPort()}
+          heights={buildRouteHeights()}
+          terrain={browserTerrainConfig()}
           openWorld={buildOpenWorldStartPort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}

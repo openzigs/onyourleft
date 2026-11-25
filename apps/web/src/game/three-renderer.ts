@@ -24329,7 +24329,9 @@ export interface MappedBuildingMaterials {
  * on the owner's tablet as a new area loaded (2026-11-23), and none on a
  * route ride of the same build. Made once and kept by whoever builds the
  * belts, a new set of buildings is new geometry in the same materials, and
- * introduces no program.
+ * introduces no program. (Since #3119 the realistic world's drawing builds
+ * one belt and hands it each new set, {@link MappedBuildingBelt.rebind}; a
+ * belt is built again only for a set it cannot hold.)
  */
 export function mappedBuildingMaterials(
   textures: RealisticWorld['structures'],
@@ -24411,7 +24413,8 @@ export function mappedBuildingWarmUp(materials: MappedBuildingMaterials): {
 
 export class MappedBuildingBelt {
   readonly mesh: Mesh;
-  readonly buildings: MappedBuildings;
+  /** The set the belt draws from: the one it was built for, or the last {@link rebind} handed it. */
+  #buildings: MappedBuildings;
   readonly #materials: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
   /** Whether the materials are this belt's own, to dispose of with it. @see mappedBuildingMaterials */
   readonly #ownsMaterials: boolean;
@@ -24496,7 +24499,7 @@ export class MappedBuildingBelt {
     houses?: RealisticHouses,
     materials?: MappedBuildingMaterials,
   ) {
-    this.buildings = buildings;
+    this.#buildings = buildings;
     this.#houses = houses;
     this.#ownsMaterials = materials === undefined;
     const drawnIn = materials ?? mappedBuildingMaterials(textures, houses);
@@ -24557,6 +24560,46 @@ export class MappedBuildingBelt {
   addTo(scene: Scene): void {
     scene.add(this.mesh);
     scene.add(this.modelMesh);
+  }
+
+  /** The set of buildings the belt draws from. @see rebind */
+  get buildings(): MappedBuildings {
+    return this.#buildings;
+  }
+
+  /**
+   * Whether {@link rebind} may hand this belt `buildings`: its selection holds
+   * as many buildings as one refill of them may draw (`mapped-buildings.ts`
+   * §`mappedBuildingCap`). Every set an open-world ride plans is indexed with
+   * the same cap, so the belt its first set built holds every later one.
+   */
+  canHold(buildings: MappedBuildings): boolean {
+    return mappedBuildingCap(buildings) <= this.#selection.plans.length;
+  }
+
+  /**
+   * Draws `buildings` from the next refill on, in the buffers this belt
+   * already has — #3119. An open-world ride plans its buildings round the
+   * rider again every `open-world/tile-buildings.ts`
+   * §`OPEN_WORLD_BUILDINGS_REPLAN_METRES`, and each plan is another set.
+   * Until #3119 the drawing built another belt for each: some 10 MB of
+   * attribute arrays allocated whole, and uploaded whole to new GL buffers on
+   * the frame the plan arrived, with the old ones left to the collector. A
+   * belt handed a new set allocates nothing: the next refill writes the new
+   * set's buildings over the old in the same arrays and uploads only the
+   * range it wrote, as every refill within one set does.
+   *
+   * The next frame refills whatever its chunk ({@link invalidate}): the
+   * selection holds places in the set before until then, so a caller hands
+   * the belt a new set on the frame it refills, as `RealisticDrawing`
+   * §`updateMapped` does. Refused for a set it cannot hold ({@link canHold}).
+   */
+  rebind(buildings: MappedBuildings): void {
+    if (!this.canHold(buildings)) {
+      throw new RangeError('a mapped-building belt cannot hold a set with a larger cap');
+    }
+    this.#buildings = buildings;
+    this.invalidate();
   }
 
   /** What the last refill drew. */
@@ -25563,6 +25606,27 @@ function isRival(kind: SceneryKind): boolean {
   return isStructureKind(kind) && !BOUNDARY_KINDS.has(kind);
 }
 
+/**
+ * The belt a frame that carries `buildings` draws them with — #3119,
+ * `RealisticDrawing`'s rule, apart from the view so a Node test runs the line
+ * the product runs: `belt` while it draws them; `belt` handed them
+ * ({@link MappedBuildingBelt.rebind}) when they are another set it can hold,
+ * which an open-world ride's every plan is; and only otherwise what `build`
+ * makes, the first set of a world or one indexed with a larger cap. The
+ * caller disposes of a belt this did not return.
+ */
+export function mappedBeltFor(
+  belt: MappedBuildingBelt | undefined,
+  buildings: MappedBuildings,
+  build: () => MappedBuildingBelt,
+): MappedBuildingBelt {
+  if (belt === undefined) return build();
+  if (belt.buildings === buildings) return belt;
+  if (!belt.canHold(buildings)) return build();
+  belt.rebind(buildings);
+  return belt;
+}
+
 /** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
 let rivalDistances = new Float64Array(REALISTIC_STRUCTURE_ITEMS);
 
@@ -25963,6 +26027,11 @@ class RealisticDrawing {
    * items over until the next refill. The held-to-the-budget guarantee is
    * strict for structures, one refill behind for billboards.
    *
+   * **One belt a world, whatever the sets** — #3119: the first frame that
+   * carries buildings builds it, and a frame carrying another set hands that
+   * set to it ({@link MappedBuildingBelt.rebind}) and refills it, allocating
+   * no buffer.
+   *
    * Every other frame reads one number and allocates nothing.
    */
   updateMapped(
@@ -25977,18 +26046,27 @@ class RealisticDrawing {
       this.#capStructures(Number.POSITIVE_INFINITY);
       return;
     }
-    if (this.#mapped?.buildings !== view.buildings) {
+    // #3119: a new set is drawn by the belt this world already has, in its
+    // buffers, refilled below; another belt would allocate and upload its
+    // buffers whole inside this frame.
+    const belt = mappedBeltFor(
+      this.#mapped,
+      view.buildings,
+      // #3107: every belt this world builds draws in the one set of
+      // materials, so a new set of buildings links no program.
+      () =>
+        new MappedBuildingBelt(
+          view.buildings,
+          this.#world.structures,
+          this.#world.houses,
+          this.readyMapped(),
+        ),
+    );
+    if (belt !== this.#mapped) {
       this.#mapped?.mesh.removeFromParent();
       this.#mapped?.modelMesh.removeFromParent();
       this.#mapped?.dispose();
-      // #3107: every belt this world builds draws in the one set of
-      // materials, so a new set of buildings links no program.
-      this.#mapped = new MappedBuildingBelt(
-        view.buildings,
-        this.#world.structures,
-        this.#world.houses,
-        this.readyMapped(),
-      );
+      this.#mapped = belt;
       this.#mapped.setShown(this.#shown);
       if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
     }

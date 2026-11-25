@@ -58,6 +58,7 @@ import {
   distanceBetween,
   geographicPosition,
   metres,
+  type GeographicPosition,
   seconds,
   thresholdShare,
   unixSeconds,
@@ -74,13 +75,26 @@ import { routeShare } from '../routes/share';
 import { sharedRoomRoute } from '../rooms/share';
 import { exportActivity } from '../transfer/export-activity';
 import { createInstancePort } from '../instance/instance-port';
+import { createRoutingPort } from '../instance/routing-port';
 import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
 import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
 import { replanInput, replanRequest } from '../workout/replan-job';
 import { planCorridor } from '../game/world-data/corridor';
+import { resampleShape } from '../routing/elevation';
+import { terrainHeights } from '../terrain/route-heights';
+import { terrainArchiveFrom } from '../terrain/terrain-source';
+import {
+  buildTerrainArchive,
+  fixtureDecode,
+  FIXTURE_HEIGHT_TILE,
+  placeInTile,
+} from '../terrain/terrain-testing';
+import { stripComments } from '../units/no-inline-units';
+import { countingSource, type CountingSource } from '../world-data/archive-testing';
 import { tileBounds } from '@onyourleft/map-features';
+import { flatHeightTile } from '@onyourleft/map-features/testing';
 
 import { coordinatesIn, insideZone } from './boundaries';
 
@@ -160,10 +174,11 @@ const BOUNDARIES: readonly Boundary[] = [
     module: 'instance/instance-transport.ts',
     what: 'a device’s public key, a signed statement and a display name, sent to an instance the rider chose (#777) — and since #784 a room’s route, which `rooms/share.ts` declares and checks',
     // ⚠️ Departing: an instance is somebody's server — the rider's own, the
-    // project's, or a third party's (ADR 0036 D-3 (d)). This build sends it no
-    // ride and no position; the walk below reads every body a connection
-    // sends and finds no coordinate at all, and when sync (#776) starts
-    // sending a ride through this module it is here that the trim is asserted.
+    // project's, or a third party's (ADR 0036 D-3 (d)). A CONNECTION sends it
+    // no position; the walk below reads every body a connection sends and
+    // finds no coordinate at all. The route planner's waypoints (#2008) do
+    // pass through this module, sealed, and `instance/routing-port.ts` is the
+    // entry that declares and checks them.
     direction: 'departing',
   },
   {
@@ -187,6 +202,17 @@ const BOUNDARIES: readonly Boundary[] = [
     // and nothing that reaches the builder holds one — the session that fills
     // it is handed power, heart rate and cadence and nothing else. The case
     // below reads the body that is sent.
+    direction: 'departing',
+  },
+  {
+    module: 'instance/routing-port.ts',
+    what: 'the waypoints of a route being drawn, and the line its climbing is asked along, sent sealed to the rider’s instance for roads and heights (#2008)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)), and this is the first boundary that sends it positions
+    // on purpose — the places a rider means to ride. A leg with a waypoint in
+    // a zone, or a line with any point in one, is REFUSED on the device before
+    // a session is read (a leg missing its end is a different leg). The case
+    // below reads what reached the routing engine behind the instance.
     direction: 'departing',
   },
   {
@@ -230,6 +256,30 @@ const BOUNDARIES: readonly Boundary[] = [
     // ride's alone; what an open-world read may ask for is a function of the
     // rider's block and nothing else (R-1), which
     // `game/world-data/area.test.ts` holds.
+    direction: 'departing',
+  },
+  {
+    module: 'terrain/terrain-source.ts',
+    what: 'byte ranges of the terrain archive under a route being drawn or redrawn, asked for so the route has its climbs with no instance (#2013, ADR 0087 D-2.3); and, in an open-world ride, the height tiles round the rider, which follow the rider for as long as the ride goes on (#2899, ADR 0087 D-2.2)',
+    // ⚠️ Departing, and like the corridor read its payload carries NO
+    // coordinate and is still a location: the host can tell which z12 height
+    // tiles were read, each about 7.5 to 9 km across. It travels as byte
+    // offsets in a `Range` header, so the walk below cannot fire on it.
+    // What protects the rider: a tile is far coarser than the map the planner
+    // is drawing on the same screen, from the same host; the read is a
+    // function of the tiles the line crosses and of nothing else, so it reads
+    // inside a privacy zone the same way as outside one and shows no hole
+    // (ADR 0090 R-1 and R-3, which ADR 0087 D-2.2 binds to every height
+    // read); and with map tiles off nothing is asked at all. The case below,
+    // "a drawn route's heights", holds the first two against a counting
+    // archive, and `terrain/heights.test.ts` holds the switch.
+    // ⚠️ #2899, ADR 0087 D-2.2: an OPEN-WORLD ride reads through this module
+    // too, and its read follows the rider: the one to four z12 tiles that
+    // hold the 3 × 3 blocks round them, at the start and then after each
+    // block crossing's random wait of up to 30 s (ADR 0090 R-8). What it asks
+    // for is a function of the rider's block alone (R-1), the same inside a
+    // privacy zone (R-3), and nothing with map tiles off (R-6):
+    // `game/open-world/heights.test.ts` holds each.
     direction: 'departing',
   },
   {
@@ -277,11 +327,15 @@ function boundaryModulesOnDisk(): readonly string[] {
       // request to the rider's instance, sent while a ride is in progress.
       // ⚠️ And `corridor-source.ts` since #1539: the one module that asks the
       // basemap archive for a route's corridor.
+      // ⚠️ And `terrain-source.ts` since #2013: the one module that asks the
+      // terrain archive for a height tile.
       if (
         entry === 'corridor-source.ts' ||
+        entry === 'terrain-source.ts' ||
         entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
         entry === 'replan-job.ts' ||
+        entry === 'routing-port.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
@@ -494,6 +548,113 @@ describe('a room’s route leaves only when none of it is in a zone — #784', (
     expect(insideZone(found, far, route.id)).toStrictEqual([]);
     // And the zone the route crosses WOULD have been found in it.
     expect(insideZone(found, zone, route.id).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the route planner sends its instance no point inside a zone — #2008', () => {
+  interface Asked {
+    readonly action: string;
+    readonly body: Record<string, unknown>;
+  }
+  interface RoutingWorld {
+    readonly instance: { handler(request: Request): Promise<Response> };
+    readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+    close(): Promise<void>;
+  }
+  const INSTANCE = (path: string): string =>
+    new URL(`../../../instance/src/${path}`, import.meta.url).href;
+
+  /** What the engine behind the instance was asked, as positions the walk recognises. */
+  function positionsAsked(asked: readonly Asked[]): unknown[] {
+    return asked.flatMap((each) =>
+      [
+        ...((each.body.locations as { lat: number; lon: number }[] | undefined) ?? []),
+        ...((each.body.shape as { lat: number; lon: number }[] | undefined) ?? []),
+      ].map(({ lat, lon }) => ({ latitude: lat, longitude: lon })),
+    );
+  }
+
+  it('refuses every leg and line that touches a zone, and what does reach the engine has no point in any', async () => {
+    const testing = (await import(/* @vite-ignore */ INSTANCE('auth/identity-testing.ts'))) as {
+      TEST_ORIGIN: string;
+      startIdentityInstance(options: object): Promise<RoutingWorld>;
+    };
+    const valhallaTesting = (await import(
+      /* @vite-ignore */ INSTANCE('routing/valhalla-testing.ts')
+    )) as { fakeValhalla(): { requests: Asked[]; engine(): unknown } };
+    const valhalla = valhallaTesting.fakeValhalla();
+    const world = await testing.startIdentityInstance({
+      bodyLimitBytes: 1024 * 1024,
+      routing: { engine: valhalla.engine() },
+    });
+    const harness = createStoreHarness();
+    try {
+      const route = routeFor(ATHLETE_A, { loop: false, spacingMetres: 10, sideMetres: 400 });
+      const positions = route.profile.positions;
+      const zone = zoneOver(positions);
+      const map = new Map<string, string>();
+      const sealing = {
+        loadedFrom: { native: false, href: 'http://localhost:5173/' },
+        storage: {
+          getItem: (key: string) => map.get(key) ?? null,
+          setItem: (key: string, value: string) => void map.set(key, value),
+          removeItem: (key: string) => void map.delete(key),
+        },
+        signingKey: () =>
+          harness.write(async (open) => {
+            await ensureLocalAthlete(open, unixSeconds(1_790_000_000));
+            return ensureDeviceSigningKey(open, LOCAL_ATHLETE, {
+              now: () => unixSeconds(1_790_000_000),
+            });
+          }),
+        send: (url: string, init: RequestInit) => world.instance.handler(new Request(url, init)),
+        now: () => 1_790_000_000_000,
+      };
+      const instance = createInstancePort({
+        ...sealing,
+        ensureLocalAthlete: () =>
+          harness.write(async (open) => ensureLocalAthlete(open, unixSeconds(1_790_000_000))),
+      });
+      const card = (await world.instanceKeys.show()).card;
+      expect(await instance.connect(testing.TEST_ORIGIN, 'Anna', card)).toMatchObject({
+        kind: 'connected',
+      });
+      const routing = createRoutingPort({ ...sealing, zones: () => Promise.resolve([zone]) });
+      // A leg every 40 samples along the track — and one waypoint at the
+      // zone's centre, so two legs end in it — and heights along the whole.
+      const middle = Math.floor(positions.length / 2);
+      const waypoints = positions.filter((_, index) => index % 40 === 0 || index === middle);
+      let refused = 0;
+      for (let index = 0; index + 1 < waypoints.length; index += 1) {
+        await routing
+          .route({
+            waypoints: [{ position: waypoints[index]! }, { position: waypoints[index + 1]! }],
+            preferences: { bicycle: 'road', hills: 'neutral', surface: 'any' },
+          })
+          .catch(() => {
+            refused += 1;
+          });
+      }
+      await routing.heights({ shape: positions, interval: metres(30) }).catch(() => {
+        refused += 1;
+      });
+      expect(refused).toBeGreaterThan(0);
+      const found = coordinatesIn(positionsAsked(valhalla.requests));
+      // Something really left, so "nothing inside" is not vacuous…
+      expect(found.length).toBeGreaterThan(0);
+      expect(insideZone(found, zone, route.id)).toStrictEqual([]);
+      // …and the walk would have seen a point in the zone had one been sent.
+      expect(
+        insideZone(
+          coordinatesIn(positions.map(({ latitude, longitude }) => ({ latitude, longitude }))),
+          zone,
+          route.id,
+        ).length,
+      ).toBeGreaterThan(0);
+    } finally {
+      await world.close();
+      await harness.destroy();
+    }
   });
 });
 
@@ -868,5 +1029,54 @@ describe('the walk cannot see inside image bytes, and says so', () => {
     const header = readFileSync(fileURLToPath(new URL('./boundaries.ts', import.meta.url)), 'utf8');
     expect(header).toContain('cannot inspect image bytes');
     expect(header).toContain('frame.ts');
+  });
+});
+
+/**
+ * **A drawn route's heights ask for whole height tiles, and for the same ones
+ * whatever is inside them — #2013.**
+ *
+ * The heights read's payload is byte ranges, so `coordinatesIn` has nothing to
+ * walk. What can be held is what the ranges are a function of: the z12 tiles
+ * the line crosses, and nothing finer. So a line through the athlete's privacy
+ * zone and a line through the far corner of the same tile ask for the same
+ * ranges in the same order — no request says where in the tile the line is,
+ * and none depends on a zone, which the reader is never handed.
+ */
+describe('a drawn route’s heights ask for whole tiles, zone or no zone — #2013', () => {
+  const zoneCentre = placeInTile(FIXTURE_HEIGHT_TILE, 256, 256);
+
+  async function asked(line: readonly GeographicPosition[]): Promise<CountingSource['calls']> {
+    const source = countingSource(
+      await buildTerrainArchive([{ tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() }]),
+    );
+    const heights = terrainHeights({ archive: terrainArchiveFrom(source), decode: fixtureDecode });
+    await heights.heights({
+      shape: resampleShape(line, heights.interval),
+      interval: heights.interval,
+    });
+    return source.calls;
+  }
+
+  it('asks the same of the host for a line through a zone as for one far from it in the same tile', async () => {
+    // Through the zone's centre, and along the tile's far edge, 3 km away.
+    const through = await asked([
+      placeInTile(FIXTURE_HEIGHT_TILE, 236, 250),
+      zoneCentre,
+      placeInTile(FIXTURE_HEIGHT_TILE, 276, 262),
+    ]);
+    const far = await asked([
+      placeInTile(FIXTURE_HEIGHT_TILE, 20, 500),
+      placeInTile(FIXTURE_HEIGHT_TILE, 60, 505),
+    ]);
+    expect(through.length).toBeGreaterThan(0);
+    expect(through).toStrictEqual(far);
+  });
+
+  it('takes no zone: the reader’s options name an archive and a decoder and nothing else', () => {
+    const source = stripComments(
+      readFileSync(fileURLToPath(new URL('terrain/route-heights.ts', sourceRoot)), 'utf8'),
+    );
+    expect(source).not.toMatch(/PrivacyZone|listPrivacyZones|zone/i);
   });
 });

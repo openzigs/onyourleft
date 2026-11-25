@@ -166,7 +166,8 @@ export interface MapCreateOptions extends MapViewOptions {
   /**
    * Whether the map is the route planner's (#2006): a tap is heard, the
    * waypoints are markers that drag, and the line can be dragged to bend it.
-   * Only meaningful on an {@link explorable} map.
+   * Only meaningful on an {@link explorable} map. Unlike a saved route's map,
+   * one finger on empty map pans it on touch (#3134).
    *
    * ⚠️ **The pointer's way only, and never the only way.** The markers take no
    * focus — the planner's list is the keyboard's way to place, move and insert

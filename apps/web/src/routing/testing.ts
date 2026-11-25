@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * A scripted {@link RoutingProvider}, and the reason there is no real one yet.
+ * A scripted {@link RoutingProvider}, for the screens' tests.
  *
  * ## What this stands in for
  *
  * [ADR 0010](../../../../docs/adr/0010-map-tiles-and-routing.md) D-4 chose
- * **Valhalla, MIT, self-hosted, over HTTP**, and D-5 chose **Copernicus DEM
- * GLO-30** behind the same process. Neither is running. Standing one up is
- * #53's infrastructure work, and #70's own criteria — *"the same test suite
- * passes against two different engines"* and *"repointed from a bootstrap
- * endpoint to a self-hosted instance"* — cannot be met without one.
- *
- * ⚠️ **So no HTTP adapter is shipped here, deliberately.** Writing one against
- * an API nobody in the loop can call would be the shape docs/agents/commands.md §4a warns
- * about — *"a documented command nobody has run is the most expensive kind of
- * wrong"* — and it would be worse than absent, because a reviewer would read
- * request-shaping code as evidence the engine had been talked to. What is real
- * is the **interface**, the **validation** every engine's numbers must pass
- * (`@onyourleft/domain`'s `routing/validate.ts`), and everything above them.
+ * **Valhalla, MIT, self-hosted, over HTTP**. Since #2008 it runs as an
+ * optional add-on to the rider's instance, and the production provider is
+ * `instance/routing-port.ts`, which asks the instance, sealed; the HTTP
+ * adapter is on the instance (`apps/instance/src/routing/valhalla.ts`), and
+ * `instance/routing-port.test.ts` runs the planner's own functions against the
+ * real instance and a fake Valhalla. ⚠️ A reviewer who remembers this comment
+ * saying no engine is running is reading the old file.
  *
  * ## What a scripted provider proves that a real one could not
  *

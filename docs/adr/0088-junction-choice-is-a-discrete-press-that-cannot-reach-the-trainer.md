@@ -383,3 +383,46 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   reaches the trainer (D-5). The ruling is posted on
   [#3053](https://github.com/openzigs/onyourleft/issues/3053), whose pull request implements it.
   (#3053)
+- **2026-11-24** — **The owner ruled that while the next junction's choice is final, the prompt is
+  for the first junction after it whose choice is not, within 250 m.** The owner's tablet ride of
+  2026-11-24 found streets that offered no turn, and
+  [#3128](https://github.com/openzigs/onyourleft/pull/3128) found the cause in a dense town: D-1.2
+  prompted only the next junction, so a junction less than 100 m after the last one was inside
+  D-1.5's lock from the moment it was prompted, and took its default. So D-1.2 now reads as follows.
+  The prompt is for the next junction while its choice is not final. Once it is, the prompt is for
+  the first junction after it whose choice is not final, within the 250 m prompt distance, and a
+  press is for that junction. When no such junction is within 250 m, the prompt stays on the
+  furthest junction whose choice is final, which is the one it showed last, so it never steps back
+  to a junction it has left (*the implementer's choice*; the ruling did not say). When the junction
+  prompted is not the next one, the prompt says which junction it is for: "At the 2nd junction"
+  (new wording, for the owner's approval). D-1.5's 100 m lock and ADR 0087 D-6.2's grade safety are
+  unchanged: the rolling route refuses a choice within 100 m of its junction, whichever junction is
+  shown, so no choice is ever made inside 100 m, and a choice at the junction after next changes no
+  grade before it. D-1.5's last sentence still holds for a junction whose choice is final before it
+  is ever prompted, and the owner ruled the words: the prompt shows "Too close to the last junction
+  to choose" in place of "Choice locked" for such a junction, and only for one. A roundabout's ring
+  is a run of ordinary junctions in the street graph (ADR 0091 D-5) until
+  [#2893](https://github.com/openzigs/onyourleft/issues/2893) flags it, so nothing here treats its
+  exits apart. Three things this changes for a junction with another less than 150 m after it,
+  which the prompt reaches as the first one locks. D-1.5's "the prompt shows that it is locked" no
+  longer holds for it: the pop-up moves on to the next junction as its choice becomes final, so
+  its lock is not shown. D-3's "announced … once when it locks" still holds, in another form: the
+  lock, with the way taken, is said at the front of the next junction's first sentence ("Junction
+  choice locked: left. At the 2nd junction: …", or "Choice at the 2nd junction locked: left. At
+  the 3rd junction: …" while the junction before it is still ahead; new wording for the owner's
+  approval). And the Consequences bullet "Late presses do nothing" no longer holds for it: a press
+  inside its lock chooses at the junction the prompt shows, and still does nothing at the locked
+  one. The ruling is posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129), whose
+  pull request implements it. (#3129)
+- **2026-11-24** — **The owner ruled that a U-turn within 100 m past the junction just turned at
+  takes, as its default there, the way back onto the street the rider came along.** The owner's
+  same ride: *"i turned off a street then did a u turn and was not offered to turn back onto the
+  street I originally turned off"*. Turned round within 100 m past a junction, the rider faces it
+  inside D-1.5's lock, so D-1.4's default, the way most nearly straight on, was taken and no press
+  could change it. Now the road back from such a U-turn takes, as its default at that junction, the
+  way back onto the street the rider came along, which undoes the turn. The U-turn itself sets it:
+  D-1.6's U-turn already changes the road under the rider at once and walks the grade there (ADR
+  0087 D-6.4), so no choice is made inside a lock. A U-turn more than 100 m past the junction keeps
+  D-1.4's default, and a press before the lock chooses there as at any junction. The ruling is
+  posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129), whose pull request
+  implements it. (#3129)

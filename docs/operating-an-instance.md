@@ -319,6 +319,72 @@ and no other — never yours — and sends the service the picture and one fixed
 | a rider reports *"The model answered that it does not take pictures"* | the model's server refused the picture (`model_without_pictures`): name a model that reads images |
 | a rider's pictures are refused `rate_limited` | one of theirs was still with the model, their session passed 120 sealed requests a minute, or they have held the local picture model for half of this clock hour (#2175; a hosted model on their own key is not counted). The app sends at most one a second, waits longer after each refusal, up to 30 s, and counts the refused pictures on its screen |
 
+## Road routing
+
+A rider's route planner draws straight lines between their waypoints unless their instance runs a
+routing engine (#2008; [ADR 0010](adr/0010-map-tiles-and-routing.md) D-4). With one, each leg
+follows roads by bicycle, and the planner shows its length, its surface and the climbing along it.
+**It is optional**: with it off, a rider loses the roads and nothing else, as a rider with no
+instance does (ADR 0036 D-3).
+
+The engine is Valhalla (MIT), in the home deployment's `compose.yaml` as two services behind
+their own profiles, so `deploy.sh` starts neither:
+
+1. **Build the graph, once** — and again whenever the map should be newer. Put an OpenStreetMap
+   extract (`.osm.pbf`) for your area on this machine (Geofabrik publishes one per US state), and
+   name it in `.env`, then build. Stop `routing` first if it is running: the build replaces the
+   graph it reads.
+
+   ```
+   OYL_ROUTING_PBF=/path/to/your-area-latest.osm.pbf
+   ```
+   ```
+   docker compose --profile routing-build run --rm routing-build
+   ```
+
+   It builds Valhalla's tiles, downloads the terrain tiles covering them, builds the tiles again
+   with their heights, and prints how long each step took, the most memory the build held and the
+   disk it used. `OYL_ROUTING_THREADS` (4 when empty) is how many threads it uses.
+2. **Run it**: add `routing` to `COMPOSE_PROFILES` in `.env`, set
+   `OYL_INSTANCE_ROUTING_URL=http://routing:8002`, and run `deploy.sh` again.
+
+**What one state cost on the development Mac** (Apple M4 Pro, Docker Desktop's VM at 12 CPUs and
+3.8 GiB, 8 threads, 2026-11-24): a 22.3 MB extract built in **11 s** (tiles 4 s, terrain 3 s,
+tiles with heights 4 s), held at most **755 MiB**, and left **133 MiB** on disk, 74 MiB of it
+heights. The running engine held 35 MiB, and answered a 13 km route in 1 to 3 ms. That is one
+small state on one machine, not a figure for a large one: the whole-US extract is 12.2 GB, 550
+times this one, and was not built (#53 holds the record).
+
+**What your instance does with a route.** A request arrives sealed to your instance's key and
+signed by the rider's device, is answered from the engine, and is not written anywhere: not to the
+database, a file or the log. The log line says how a call went and how long it took
+(`"event":"routing-call"`), never where. The rider's app sends no waypoint inside one of their
+privacy zones. ⚠️ **Do not publish the engine's port, or put it behind a remote path**: its API has
+no authentication and answers anything about any place; your instance is the only thing that
+should reach it. ⚠️ **Do not turn on Valhalla's own request logging**: a request is the places a
+rider means to ride.
+
+**It is sealed, or refused**, as the picture route is: `POST /v1/routing/route` and `POST
+/v1/routing/heights` are reached only inside `POST /v1/sealed`, on an instance with no
+`OYL_INSTANCE_SECRET_KEY` too, which therefore offers no routing. A rider may ask for 120 routes
+and 30 height profiles a minute.
+
+**The data, and the notices that travel with it.** The graph is derived from OpenStreetMap
+(ODbL; [`docs/odbl.md`](odbl.md)): the app already credits OpenStreetMap on its map. The heights are
+Tilezen's terrain tiles, downloaded by `valhalla_build_elevation` from their public bucket for the
+graph's area; in the United States their source is the USGS 3D Elevation Program
+(*"3DEP data courtesy of the U.S. Geological Survey"*), with SRTM and GMTED2010 (*"… data courtesy
+of the U.S. Geological Survey"*) elsewhere and other national datasets beyond, each named in
+Tilezen's own attribution list. A route records the dataset its heights came from.
+
+| You see | It means |
+|---|---|
+| `"event":"routing","state":"on"` at start | an engine is named. Its address is not logged |
+| `"event":"routing","state":"off","code":"not-set"` | none is named: a rider's leg is answered `routing_off` and stays a straight line |
+| `…"code":"not-a-url"`, `"not-origin"`, `"not-local"`, `"tls-by-name"` | `OYL_INSTANCE_ROUTING_URL` is set and refused; standard error says why (`instance: routing is off: …`) |
+| `"event":"routing-call","state":"unreachable"` | the engine did not answer: is the `routing` service running, and was the graph built? |
+| `"event":"routing-call","state":"no-route"` | no road joins a rider's two waypoints, or one is off the graph's area |
+
 ## Analysis jobs
 
 A rider's device asks the instance to write a ride up as a **job** (#1095,

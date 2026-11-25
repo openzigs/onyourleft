@@ -126,8 +126,12 @@ describe('the junction prompt on the HUD — #2898', () => {
   it('audits clean once the choice is final, and says so on the ways and in words', async () => {
     const { route, choice } = newRide();
     const junction = theJunction(route);
-    route.advance(junction.distance - 60);
-    mounted = await mount(<JunctionHud choice={choice} rider={junction.distance - 60} />);
+    // Offered before it locked, so the line is the lock's (#3129); and no
+    // nearer than 80 m, where the junction after it, 180 m on, would be shown.
+    route.advance(junction.distance - 200);
+    choice.prompt(junction.distance - 200);
+    route.advance(junction.distance - 80);
+    mounted = await mount(<JunctionHud choice={choice} rider={junction.distance - 80} />);
 
     expect(document.body.textContent).toContain(JUNCTION_LOCKED_LINE);
     // #3053: the way chosen, alone.
@@ -205,10 +209,11 @@ describe('said by the HUD’s one region (ADR 0088 D-3)', () => {
       document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
 
     // A ride at 10 m a second from 260 m before the junction (past the one
-    // before it, 270 m back) to 50 m before it, as the session will run each frame: the prompt, its event offered
+    // before it, 270 m back) to 80 m before it, as the session will run each frame: the prompt, its event offered
     // to the announcer with announcements OFF (the default), what the
-    // announcer said handed back, and the HUD rendered with it.
-    for (let second = 0; second <= 21; second += 1) {
+    // announcer said handed back, and the HUD rendered with it. Nearer than
+    // 80 m the prompt is for the junction after it, 180 m on (#3129).
+    for (let second = 0; second <= 18; second += 1) {
       const rider = junction.distance - 260 + second * 10;
       route.advance(rider);
       const step = junctionEvent(announced, choice.prompt(rider));

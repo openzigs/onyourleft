@@ -80,6 +80,7 @@ import {
   GROUNDING_METRES,
   isConstructedMaterial,
   laysRoofSnow,
+  mappedBeltFor,
   MappedBuildingBelt,
   readsInstanceTint,
   readsTextureLodBias,
@@ -1401,5 +1402,98 @@ describe('a building the near plane would cut is hidden from that frame, and dra
     expect(rangesOf(geometry).position).toEqual([{ start: drawn.modelAt * 3, count: 9 }]);
     belt.clearOf(undefined);
     expect(positionsOf(geometry)).toEqual(whole);
+  });
+});
+
+describe('a belt handed another set draws it in the buffers it has — #3119', () => {
+  it('refills from the new set on the next frame, whatever its chunk, over the same arrays', () => {
+    const belt = aBelt();
+    const view = viewAt(1_500);
+    refillMappedBuildings(belt, view, [], 0, REALISTIC_STRUCTURE_ITEMS);
+    const drawn = belt.drawnPlans().map((index) => planned[index]);
+    const position = belt.mesh.geometry.getAttribute('position');
+    const array = position.array;
+    // The same buildings in another order: each at another place in the set.
+    const reversed = mappedBuildingsOf([...planned].reverse());
+    belt.rebind(reversed);
+    expect(belt.buildings).toBe(reversed);
+    // The same chunk, and still a refill: the places held were the set before's.
+    expect(
+      refillMappedBuildings(
+        belt,
+        { ...view, buildings: reversed },
+        [],
+        0,
+        REALISTIC_STRUCTURE_ITEMS,
+      ),
+    ).toBeDefined();
+    const redrawn = belt.drawnPlans().map((index) => reversed.plans[index]);
+    expect(redrawn.length).toBeGreaterThan(0);
+    expect(new Set(redrawn)).toStrictEqual(new Set(drawn));
+    expect(belt.mesh.geometry.getAttribute('position')).toBe(position);
+    expect(position.array).toBe(array);
+  });
+
+  it('is the belt the drawing keeps: a frame carrying another set builds no belt and allocates no buffer', () => {
+    // `RealisticDrawing.updateMapped`'s own rule, over an open-world ride's
+    // plans: each another set of buildings. Until #3119 each built a belt,
+    // its buffers allocated whole and uploaded whole on that frame.
+    let built = 0;
+    const builder = (of: MappedBuildings) => (): MappedBuildingBelt => {
+      built += 1;
+      return aBelt(of);
+    };
+    const sets = [
+      buildings,
+      mappedBuildingsOf([...planned].reverse()),
+      mappedBuildingsOf(planned.slice(0, planned.length - 3)),
+    ];
+    const view = viewAt(1_500);
+    let belt: MappedBuildingBelt | undefined;
+    const arrays = new Set<unknown>();
+    let refilled = 0;
+    for (const set of [...sets, ...sets]) {
+      belt = mappedBeltFor(belt, set, builder(set));
+      if (
+        refillMappedBuildings(
+          belt,
+          { ...view, buildings: set },
+          [],
+          0,
+          REALISTIC_STRUCTURE_ITEMS,
+        ) !== undefined
+      ) {
+        refilled += 1;
+      }
+      expect(belt.buildings).toBe(set);
+      expect(belt.stats.buildings).toBeGreaterThan(0);
+      for (const mesh of [belt.mesh, belt.modelMesh]) {
+        for (const attribute of Object.values(mesh.geometry.attributes))
+          arrays.add(attribute.array);
+      }
+    }
+    // One belt built, at the first set; each set after it refilled in its buffers.
+    expect(built).toBe(1);
+    expect(refilled).toBe(6);
+    expect(arrays.size).toBe(13);
+    // The same set again is the same belt, and no refill in the same chunk.
+    expect(mappedBeltFor(belt, belt?.buildings ?? buildings, builder(buildings))).toBe(belt);
+    // And a set it cannot hold is another belt.
+    const larger = mappedBuildingsOf(planned, MAPPED_BUILDING_MAX + 4);
+    const other = mappedBeltFor(belt, larger, builder(larger));
+    expect(other).not.toBe(belt);
+    expect(other.buildings).toBe(larger);
+    expect(built).toBe(2);
+  });
+
+  it('refuses a set indexed with a larger cap than its selection holds', () => {
+    const belt = aBelt();
+    const larger = mappedBuildingsOf(planned, MAPPED_BUILDING_MAX + 4);
+    expect(belt.canHold(mappedBuildingsOf(planned))).toBe(true);
+    expect(belt.canHold(larger)).toBe(false);
+    expect(() => {
+      belt.rebind(larger);
+    }).toThrow(RangeError);
+    expect(belt.buildings).toBe(buildings);
   });
 });

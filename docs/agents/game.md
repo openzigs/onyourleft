@@ -1158,10 +1158,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         motorways (D-3); footways, cycleways, paths, tracks
                         (D-3, D-9 Q1); a street mapped to stop more than 3 m
                         short of the road (D-4, `T_SNAP_METRES`); and a
-                        junction under 100 m after the last one, after a
-                        U-turn, or round a roundabout, which takes its
-                        default because the choice is final 100 m before it
-                        (ADR 0088 D-1.2, D-1.5; ADR 0087 D-6.2). A one-way
+                        junction whose choice is final (100 m before it,
+                        ADR 0088 D-1.5, ADR 0087 D-6.2) before it was ever
+                        prompted, whose pop-up says "Too close to the last
+                        junction to choose". Since #3129 (ADR 0088's
+                        amendments of 2026-11-24) the pop-up offers the
+                        first junction not yet final within 250 m while the
+                        next is final, titled "At the 2nd junction"
+                        (`junction-choice.ts` §`promptedJunction`), and a
+                        U-turn within 100 m past a junction takes the street
+                        came along as its default (`RollingRoute.uTurn`), so
+                        a dense town and a quick U-turn are offered. A one-way
                         street is offered BOTH ways (ADR 0091 D-5): not a
                         limit. `junction-limits.test.tsx` rides each through
                         the real game screen and holds its words in the help.
@@ -2104,7 +2111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+                        the tint is a VERTEX attribute, and there is no ground blob (#620).
+                        ⚠️ **One belt a world since #3119**: an open-world
+                        ride's every plan is another set, handed to the belt
+                        it has (`MappedBuildingBelt.rebind`,
+                        `mappedBeltFor`) and refilled in its buffers; a new
+                        belt allocated and uploaded ~10 MB inside the frame
     src/game/house-models.ts
                         which mapped plans are drawn as a house MODEL (#1585):
                         GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
@@ -2428,7 +2440,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         or of the blocks held read every street inside one
                         frame. A route ride's are read whole, once, as before.
                         A reading's grid of segments (`onNearbyStreet`) is
-                        built when a planner of buildings first asks for it
+                        built when a planner of buildings first asks for it.
+                        ⚠️ **Since #3119 the scenery along the ways out is
+                        placed a few ways a frame** (`scatter.ts`
+                        §`WaysOutPlacing`, `StreetScans.ways`): at most
+                        `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
+                        first, all on the ride's first frame; a junction in a
+                        dense town hands on ~20 at once. The way roads below
+                        still read every way handed on.
                         ⚠️ Since #3105 an open-world ride draws a side
                         street's BRIDGE too, as a deck at the road's level
                         across the water a ground street stops at
@@ -2457,6 +2476,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         covers it only where the frame draws the road (from
                         60 m behind the rider, in 40 m steps): the road back
                         is the route still, which nothing else draws
+    src/game/junction-surface.ts
+                        junction surfaces (#3133) — a junction an open-world
+                        ride turns through (the way taken turns 30° or more,
+                        chosen or the default: `open-world/road.ts`
+                        §`junctionsTurned`, `SceneInput.junctionsTurned`)
+                        drawn as the streets meeting there and not as one
+                        road bending: every arm to its own width (the route's
+                        7 m, a way not taken at its street's class) from the
+                        graph's node to its mouth, the square where they
+                        overlap, and each corner rounded to 6 m (less at a
+                        narrow angle; straight along the top of a T). One
+                        side road a junction, a fan of about 36 triangles, at
+                        the road's level lifted as a nearby street is, kept
+                        from 400 m behind the rider to the view's reach.
+                        ⚠️ **The road's lines stop at the mouth**: between the
+                        mouths of the way in and the way taken `terrain.ts`
+                        §`roadCorridor` (`unpainted`) paints no edge line and
+                        no centre-line mark. A junction ridden straight
+                        through is unchanged
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

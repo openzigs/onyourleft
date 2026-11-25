@@ -18,6 +18,7 @@ import {
   RollingRoute,
   SIMULATION_GRADE_DEADBAND_PERCENT,
   gradeAt,
+  gradePercent,
   seconds,
   type RollingEdge,
   type RouteProfile,
@@ -73,12 +74,16 @@ interface Ride {
   readonly now: () => number;
 }
 
-function rideOn(route: RollingRoute): Ride {
+function rideOn(route: RollingRoute, walkFrom?: number): Ride {
   let at = 0;
   let distance = 0;
   const road = new OpenWorldRoad(route);
   const trainer = recordingTrainer(() => at);
-  const session = createGradientSession({ profile: road.view.profile, control: trainer.control });
+  const session = createGradientSession({
+    profile: road.view.profile,
+    control: trainer.control,
+    ...(walkFrom === undefined ? {} : { walkFrom: gradePercent(walkFrom) }),
+  });
   const roads: Ride['roads'] = [];
   return {
     road,
@@ -233,5 +238,83 @@ describe('the grade on a rolling route past its first view — #2982, ADR 0087 D
     await drain();
     expect(ride.written).toHaveLength(count);
     expect(SIMULATION_GRADE_DEADBAND_PERCENT).toBeGreaterThan(0);
+  });
+});
+
+describe('the start of a ride, walked — #2899, ADR 0087 D-6.4', () => {
+  /** The biggest change between one write and the next, in percent a second. */
+  const steepest = (written: readonly { at: number; grade: number }[]): number => {
+    let most = 0;
+    for (let index = 1; index < written.length; index += 1) {
+      const before = written[index - 1] as { at: number; grade: number };
+      const after = written[index] as { at: number; grade: number };
+      most = Math.max(most, Math.abs(after.grade - before.grade) / (after.at - before.at));
+    }
+    return most;
+  };
+
+  it('writes one step from the grade it walks from first, then a step a second up to the road', async () => {
+    const ride = rideOn(climb(12, 3_000), 0);
+    await ride.rideTo(400);
+    const grades = ride.written.map((write) => write.grade);
+    // The road's own grade at the start is some 6 % (half a window of 12 %).
+    expect(roadGrade(ride.road.view.profile, 0, 0)).toBeGreaterThan(5);
+    expect(grades[0]).toBeCloseTo(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND, 6);
+    expect(ride.written[0]?.at).toBeCloseTo(FRAME_SECONDS, 6);
+    expect(steepest(ride.written)).toBeLessThanOrEqual(
+      CORRECTION_GRADE_STEP_PERCENT_PER_SECOND + 1e-6,
+    );
+    expect(grades.at(-1)).toBeCloseTo(12, 1);
+  });
+
+  it('walks down as it walks up: a descent from the start is a step at a time too', async () => {
+    const ride = rideOn(climb(-9, 3_000), 0);
+    await ride.rideTo(300);
+    expect(ride.written[0]?.grade).toBeCloseTo(-CORRECTION_GRADE_STEP_PERCENT_PER_SECOND, 6);
+    expect(steepest(ride.written)).toBeLessThanOrEqual(
+      CORRECTION_GRADE_STEP_PERCENT_PER_SECOND + 1e-6,
+    );
+    expect(ride.written.at(-1)?.grade).toBeCloseTo(-9, 1);
+  });
+
+  it('still tells the trainer of a flat start: the first write is made though it moves nothing', async () => {
+    const ride = rideOn(climb(0, 3_000), 0);
+    await ride.rideTo(100);
+    expect(ride.written.length).toBeGreaterThan(0);
+    expect(new Set(ride.written.map((write) => write.grade))).toStrictEqual(new Set([0]));
+  });
+
+  it('is the driver’s write, the road’s grade at once, with no grade to walk from', async () => {
+    const ride = rideOn(climb(12, 3_000));
+    await ride.rideTo(50);
+    expect(ride.written[0]?.grade).toBeGreaterThan(5);
+  });
+
+  it('walks again from that grade when the first write was refused and none was confirmed', async () => {
+    let now = 0;
+    let refuse = true;
+    const written: { at: number; grade: number }[] = [];
+    const route = climb(12, 3_000);
+    const session = createGradientSession({
+      profile: route.view(),
+      walkFrom: gradePercent(0),
+      control: {
+        setSimulationParameters: (parameters: SimulationParameters) => {
+          if (refuse) return Promise.reject(new Error('refused'));
+          written.push({ at: now, grade: parameters.grade });
+          return Promise.resolve();
+        },
+        letGo: () => Promise.resolve({ kind: 'stopped' }),
+      },
+    });
+    session.sample(seconds(now), 0);
+    await drain();
+    refuse = false;
+    for (now = 1; now <= 4; now += 1) {
+      session.sample(seconds(now), now * SPEED);
+      await drain();
+    }
+    expect(written[0]?.grade).toBeCloseTo(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND, 6);
+    expect(steepest(written)).toBeLessThanOrEqual(CORRECTION_GRADE_STEP_PERCENT_PER_SECOND + 1e-6);
   });
 });

@@ -223,6 +223,14 @@ export const FLAT_DRAWN_ROUTE_TEXT =
   'No heights are known for a route drawn here yet, so it is saved flat: its climb reads 0 m.';
 
 /**
+ * What a rider is told about a route saved flat although heights could have
+ * been read (#2013): the terrain archive was unreachable, map tiles are off,
+ * or the read had not finished when Save was pressed.
+ */
+export const FLAT_WITHOUT_ELEVATION_TEXT =
+  'No elevation had been read for this route, so it is saved flat: its climb reads 0 m.';
+
+/**
  * Turn the route a rider drew into a saved route — #2006.
  *
  * The same `RouteRecord` an import writes, so a drawn route sits in the same

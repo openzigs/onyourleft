@@ -79,6 +79,26 @@ The decoder is our own over a bounded reader of our own (`protobuf.ts`), rather 
 `@mapbox/vector-tile` over `pbf`: `pbf`'s reader does not bounds-check, and `@mapbox/vector-tile`
 materialises a feature's whole geometry before anything could count it. #1544 admits either.
 
+## A height tile is untrusted input too (#2013)
+
+`height-tile.ts` is the terrain archive's half: a z12 tile of Terrarium-encoded heights
+(`R × 256 + G + B / 256 − 32768` m) as a 512 px lossless WebP (ADR 0087 D-3). **It decodes no
+image**: a WebP decoder is the platform's, and `apps/web/src/terrain/decode.ts` hands the pixels
+back. What is here needs no platform:
+
+| Bound | Value | Where |
+|---|---|---|
+| compressed bytes | `MAX_TILE_BYTES`, 4 MiB | `checkHeightTileBytes`, before anything is read |
+| container | a simple lossless WebP (`VP8L`) only: a lossy tile decodes to heights that are wrong and in range | `checkHeightTileBytes` |
+| pixels | exactly 512 × 512, read from the header, so a decode allocates 1 MiB and no more | `checkHeightTileBytes` |
+| decoded pixels | exactly 512 × 512 × 4 bytes | `heightTileFromRgba` |
+| heights | −200 m to 4,600 m, and opaque; anything else is no-data | `heightTileFromRgba` |
+| no-data | the nearest valid pixel within 2 pixels, else no height there | `sampleHeightTile` |
+
+A refusal names a reason and at most a limit this package chose, never a tile or a coordinate.
+ADR 0087 D-3's last row, the 4 m step between neighbouring road samples, is about a road and not
+a tile, and is #2899's.
+
 ## What it may not depend on
 
 - **Any platform API at all**, as `packages/domain`: `tsconfig.platform-free.json` (`lib:
@@ -101,3 +121,11 @@ roundabout, a loop, a dead end, a one-way pair, the ways the graph leaves out, a
 through one point). **No OpenStreetMap data of any kind**: rectangles, regular polygons
 and evenly spaced points, for the reason `apps/web/browser/pmtiles-fixture.ts` gives. They are code
 rather than committed binaries, and `fixtures.test.ts` pins the named ones by SHA-256.
+
+`src/fixtures/height.ts` holds the height tiles: a flat block, a steady slope, a plateau cut by a
+valley for a bridge, a malformed tile (a true header and a body cut short), an oversize tile (a
+header stating 4,096 × 4,096 over a few bytes), a lossy container and a tile of heights outside
+the range. **No terrain data from any source**: each ground is a formula.
+`src/testing/webp-encoder.ts` writes them as real lossless WebP in one fixed shape, and reads that
+shape back for a Vitest suite, since Node has no WebP decoder;
+`apps/web/browser/terrain.browser.spec.ts` reads the same bytes through Chromium's.

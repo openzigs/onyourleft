@@ -415,6 +415,56 @@ describe('drawing a stretch', () => {
     expect(stretch.points[1]!.elevation).toBe(200);
   });
 
+  it('with no routing service and the terrain to read, is the straight line with the ground’s heights (#2013)', async () => {
+    const asked: number[] = [];
+    const terrain = {
+      interval: metres(15),
+      heights: ({ shape, interval }: { shape: readonly unknown[]; interval: number }) => {
+        asked.push(interval);
+        return Promise.resolve({
+          source: { name: 'fixture terrain', resolution: metres(15) },
+          samples: shape.map((_, index) => ({
+            along: metres(index * interval),
+            elevation: altitudeMetres(200 + index),
+          })),
+        });
+      },
+    };
+    const stretch = await drawStretch(
+      at(0, 0),
+      at(500, 0),
+      { from: altitudeMetres(100), to: altitudeMetres(110) },
+      undefined,
+      RIDING_DEFAULTS,
+      terrain,
+    );
+    // Asked once, at the terrain's own spacing, not the engine's 30 m.
+    expect(asked).toStrictEqual([15]);
+    expect(stretch.measured).toBe(true);
+    // 500 m at 15 m: the ends, and the samples between them.
+    expect(stretch.points.length).toBeGreaterThan(30);
+    expect(stretch.points[0]!.elevation).toBe(100);
+    expect(stretch.points[1]!.elevation).toBe(201);
+    expect(stretch.points.at(-1)!.elevation).toBe(110);
+  });
+
+  it('falls back to the even slope when the terrain cannot be read', async () => {
+    const terrain = {
+      interval: metres(15),
+      heights: () => Promise.reject(new RoutingError('unavailable', 'Elevation is unavailable.')),
+    };
+    const stretch = await drawStretch(
+      at(0, 0),
+      at(500, 0),
+      { from: altitudeMetres(100), to: altitudeMetres(110) },
+      undefined,
+      RIDING_DEFAULTS,
+      terrain,
+    );
+    expect(stretch.measured).toBe(false);
+    expect(stretch.points).toHaveLength(2);
+  });
+
   it('passes the routing service’s refusal on, so nothing is changed', async () => {
     const provider = scriptedProvider();
     provider.failNextRoute(new RoutingError('no-route', 'No path between these two points.', 0));

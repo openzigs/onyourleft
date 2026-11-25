@@ -35,11 +35,14 @@ describe('main.tsx hands the game the open-world session — #2896', () => {
   it('builds the game port’s openWorld over the tab’s one entry', () => {
     expect(gamePort.length).toBeGreaterThan(0);
     expect(gamePort).toMatch(
-      /openWorld: lazyOpenWorldSessions\(\{\s*entry: openWorldEntry,\s*basemap: browserBasemapConfig,\s*mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\),\s*\}\)/,
+      /openWorld: lazyOpenWorldSessions\(\{\s*entry: openWorldEntry,\s*basemap: browserBasemapConfig,\s*mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\),\s*terrain: browserTerrainConfig,\s*\}\)/,
     );
     expect(main).toMatch(
       /import \{ lazyOpenWorldSessions \} from '\.\/game\/open-world\/session-lazy';/,
     );
+    // #2899: and the terrain archive the road's heights are read from, the
+    // one #2013's planner reads.
+    expect(main).toMatch(/import \{ browserTerrainConfig \} from '\.\/terrain\/config';/);
   });
 
   it('is the entry the start picker hands its start to', () => {
