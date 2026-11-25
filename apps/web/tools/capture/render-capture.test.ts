@@ -9,10 +9,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import {
   archiveRange,
+  captureArchiveUrl,
   captureEventsFile,
   captureEventsName,
   captureRequestsName,
@@ -109,5 +110,28 @@ describe('a free ride’s blocks, from the local archive — #3154', () => {
         out: undefined,
       }),
     ).toBe('free-ride-1920x1080-60fps.requests.json');
+  });
+});
+
+describe('the archive URL a capture answers — PR #3169', () => {
+  it('reads it from the .env files the capture build reads, not the environment alone', () => {
+    // The environment wins over a file, as in the build: clear it for this case.
+    vi.stubEnv('VITE_BASEMAP_PMTILES_URL', undefined);
+    const root = mkdtempSync(join(tmpdir(), 'oyl-capture-env-'));
+    try {
+      writeFileSync(
+        join(root, '.env'),
+        'VITE_BASEMAP_PMTILES_URL=https://tiles.example/a.pmtiles\n',
+      );
+      expect(captureArchiveUrl(root)).toBe('https://tiles.example/a.pmtiles');
+      writeFileSync(
+        join(root, '.env.capture'),
+        'VITE_BASEMAP_PMTILES_URL=https://tiles.example/b.pmtiles\n',
+      );
+      expect(captureArchiveUrl(root)).toBe('https://tiles.example/b.pmtiles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    }
   });
 });

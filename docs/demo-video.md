@@ -241,8 +241,9 @@ pnpm --filter @onyourleft/web run capture -- --scene free-ride --seconds 40 \
 - **Blocks from local disk.** The open world reads its blocks as range requests on the basemap
   archive's one URL (`world-data/corridor-source.ts`). The capture tool answers that URL from the
   `--archive` file (`render-capture.ts` §`archiveRange`), so nothing waits on the network. The URL
-  is the one the capture build was made with (`map/basemap.ts` §`readBasemapConfig`): set
-  `VITE_BASEMAP_PMTILES_URL` in the environment of both the build and the capture, or of neither.
+  is the one the capture build was made with (`map/basemap.ts` §`readBasemapConfig`), read as
+  the build reads it: the environment and `apps/web`'s `.env`, `.env.local`, `.env.capture` and
+  `.env.capture.local` files (`render-capture.ts` §`captureArchiveUrl`).
   The terrain archive is refused, so a capture's open-world road is flat.
 - **The request log.** Beside the video, `<scene>-<size>-<fps>fps.requests.json` counts the app's
   files and the archive's ranges answered from this machine, and lists every other request by

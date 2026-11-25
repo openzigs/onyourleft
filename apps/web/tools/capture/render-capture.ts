@@ -42,8 +42,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { chromium, type Page } from '@playwright/test';
+import { loadEnv } from 'vite';
 
 import { LAUNCH_ARGS } from '../../playwright.config';
 import { readBasemapConfig } from '../../src/map/basemap';
@@ -61,6 +63,7 @@ import {
   captureRouteGpx,
   type CaptureRequest,
 } from './capture-args';
+import { CAPTURE_BUILD_MODE } from './capture-stays-out';
 import { installCaptureClock, type CaptureClockControl } from './capture-clock';
 
 declare global {
@@ -261,6 +264,21 @@ export function captureEventsFile(
   };
 }
 
+/** `apps/web`, where `vite build --mode capture` reads its `.env` files from. */
+const WEB_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+/**
+ * The basemap archive URL the capture build was made with: read as the build
+ * reads it (`loadEnv`, over the `.env`, `.env.local`, `.env.capture` and
+ * `.env.capture.local` files of `webRoot` and then `process.env`), so a URL set
+ * in an `.env` file is the one answered, not only one in the environment.
+ */
+export function captureArchiveUrl(webRoot: string): string | undefined {
+  const env = loadEnv(CAPTURE_BUILD_MODE, webRoot, 'VITE_');
+  return readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: env['VITE_BASEMAP_PMTILES_URL'] })
+    ?.archiveUrl;
+}
+
 /** Capture `request` from the built app; resolves once the video is written and closed. */
 export async function renderCapture(
   request: CaptureRequest,
@@ -294,11 +312,7 @@ export async function renderCapture(
     const log = { app: 0, archive: 0, refused: {} as Record<string, number> };
     // #3154: the archive a free ride's blocks are read from, answered from the
     // local copy — the URL the capture build was made with (`map/basemap.ts`).
-    const archiveUrl =
-      request.archive === undefined
-        ? undefined
-        : readBasemapConfig({ VITE_BASEMAP_PMTILES_URL: process.env['VITE_BASEMAP_PMTILES_URL'] })
-            ?.archiveUrl;
+    const archiveUrl = request.archive === undefined ? undefined : captureArchiveUrl(WEB_ROOT);
     await context.route('**/*', (route) => {
       const url = new URL(route.request().url());
       if (request.archive !== undefined && url.toString() === archiveUrl) {
