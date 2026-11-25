@@ -31,15 +31,26 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { inlineGraphWorker, workerGraphBuilder } from '../game/open-world/graph-build';
 import {
+  fixtureStart,
+  GRID_COLUMN_NAMES,
+  GRID_ROW_NAMES,
+  OPEN_WORLD_GRID_STREETS,
+  openWorldFixtureArchive,
+  START_COLUMN,
+  START_ROW,
+} from '../game/open-world/fixture-testing';
+import {
   blockFrame,
   blockKey,
   blockOf,
   blocksAround,
   createAreaReader,
   tilesOfBlock,
+  type AreaCache,
   type AreaPosition,
   type BlockId,
   type HeldBlock,
+  type KeptBlock,
 } from '../game/world-data/area';
 import {
   CORRIDOR_READER_VERSION,
@@ -191,7 +202,7 @@ const heldBlock = (held: readonly HeldBlock[], block: BlockId): HeldBlock | unde
  * The largest distance in metres between two values' coordinates, walking
  * both alike: every `Float32Array` element and every number. A difference of
  * shape — a key, a length, a string — throws, so only positions are measured.
- * `name` is left out: a street's name is never kept (ADR 0096 D-1.4).
+ * A street's name is a string like any other: kept (ADR 0098), it must match.
  */
 function farthest(actual: unknown, expected: unknown, path = 'value'): number {
   if (actual instanceof Float32Array && expected instanceof Float32Array) {
@@ -218,10 +229,7 @@ function farthest(actual: unknown, expected: unknown, path = 'value'): number {
     typeof expected === 'object' &&
     expected !== null
   ) {
-    const keys = (o: object) =>
-      Object.keys(o)
-        .filter((k) => k !== 'name')
-        .sort();
+    const keys = (o: object) => Object.keys(o).sort();
     expect(keys(actual), path).toStrictEqual(keys(expected));
     return keys(actual).reduce(
       (most, key) =>
@@ -531,8 +539,8 @@ describe('only a block read whole is kept', () => {
   });
 });
 
-describe('a kept street carries its road fields and never its name (ADR 0096 D-1.4)', () => {
-  it('keeps the road fields, drops the name, and reads back with none', async () => {
+describe('a kept street carries its road fields and its name, and nothing else does (ADR 0098)', () => {
+  it('keeps the road fields and the name in the streets blob alone, and reads both back', async () => {
     const NAME = 'Third Avenue';
     const store = fresh();
     const cache = riddenBlockCache({
@@ -563,12 +571,11 @@ describe('a kept street carries its road fields and never its name (ADR 0096 D-1
     );
     const record = await fresh().getRiddenBlock(ATHLETE_A, blockKey(BLOCK));
     if (record === undefined) throw new Error('the block is kept');
-    for (const blob of [record.streets, record.features]) {
-      const text = new TextDecoder().decode(
-        await gunzipBytes(new Uint8Array(await blob.arrayBuffer())),
-      );
-      expect(text).not.toContain(NAME);
-    }
+    const textOf = async (blob: Blob) =>
+      new TextDecoder().decode(await gunzipBytes(new Uint8Array(await blob.arrayBuffer())));
+    // The name is in the streets blob, and only there: the features carry none.
+    expect(await textOf(record.streets)).toContain(NAME);
+    expect(await textOf(record.features)).not.toContain(NAME);
     const kept = await cache.get(BLOCK);
     expect(kept?.streets).toStrictEqual([
       {
@@ -581,6 +588,7 @@ describe('a kept street carries its road fields and never its name (ADR 0096 D-1
             oneway: street.oneway,
             access: street.access,
             isLink: street.isLink,
+            name: NAME,
             line: street.line,
           },
         ],
@@ -597,6 +605,37 @@ describe('a kept street carries its road fields and never its name (ADR 0096 D-1
           y: 2,
           streets: [
             { kind: 7, detail: null, g: 'sky', o: 'sideways', a: 'maybe', l: 'yes', line: [100] },
+            // A name is held to the decoder's own rules (ADR 0096 D-1.3).
+            {
+              kind: 'minor_road',
+              detail: '',
+              g: 'ground',
+              o: 'no',
+              a: 'open',
+              l: false,
+              n: 'Main\u0000 Street\u202e',
+              line: [],
+            },
+            {
+              kind: 'minor_road',
+              detail: '',
+              g: 'ground',
+              o: 'no',
+              a: 'open',
+              l: false,
+              n: 7,
+              line: [],
+            },
+            {
+              kind: 'minor_road',
+              detail: '',
+              g: 'ground',
+              o: 'no',
+              a: 'open',
+              l: false,
+              n: '   ',
+              line: [],
+            },
           ],
         },
       ],
@@ -615,10 +654,228 @@ describe('a kept street carries its road fields and never its name (ADR 0096 D-1
             isLink: false,
             line: Float32Array.of(1),
           },
+          {
+            kind: 'minor_road',
+            kindDetail: '',
+            grade: 'ground',
+            oneway: 'no',
+            access: 'open',
+            isLink: false,
+            name: 'Main Street',
+            line: new Float32Array(0),
+          },
+          ...[0, 1].map(() => ({
+            kind: 'minor_road',
+            kindDetail: '',
+            grade: 'ground',
+            oneway: 'no',
+            access: 'open',
+            isLink: false,
+            line: new Float32Array(0),
+          })),
         ],
       },
     ]);
     const other = new Blob([await gzipBytes(new TextEncoder().encode('{"v":2,"tiles":[]}'))]);
     await expect(unpackTileStreets(other)).rejects.toThrow('not a version this reads');
+  });
+});
+
+describe('a cache answer that comes too late is not held (#2891 review)', () => {
+  /** A cache whose every answer waits until the test gives it, and which keeps nothing. */
+  function slowCache() {
+    const answers: (() => void)[] = [];
+    const cache: AreaCache = {
+      get: () =>
+        new Promise<KeptBlock>((resolve) => {
+          answers.push(() =>
+            resolve({
+              tiles: [],
+              features: { landUse: [], buildings: [], paths: [], streets: [], places: [] },
+              streets: [],
+            }),
+          );
+        }),
+      put: () => Promise.resolve(),
+    };
+    return { cache, answers };
+  }
+
+  function slowReader(cache: AreaCache, changes: { count: number }) {
+    return createAreaReader({
+      archive: undefined,
+      frame: { latitude: START.latitude, longitude: START.longitude },
+      cache,
+      mapTilesOn: () => true,
+      random: () => 0,
+      schedule: (run) => {
+        run();
+        return () => undefined;
+      },
+      yieldToIdle: () => Promise.resolve(),
+      onChange: () => (changes.count += 1),
+    });
+  }
+
+  /** Lets every pending promise settle. */
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('holds nothing, and says nothing, when the hit comes after the ride stopped', async () => {
+    const { cache, answers } = slowCache();
+    const changes = { count: 0 };
+    const area = slowReader(cache, changes);
+    const started = area.start(START);
+    await flush();
+    expect(answers).toHaveLength(1);
+    area.stop();
+    answers.shift()?.();
+    expect((await started).kind).not.toBe('ready');
+    await flush();
+    expect(area.held()).toStrictEqual([]);
+    expect(changes.count).toBe(0);
+  });
+
+  it('holds nothing, and says nothing, when the hit is for a block the rider has left', async () => {
+    const { cache, answers } = slowCache();
+    const changes = { count: 0 };
+    const area = slowReader(cache, changes);
+    const started = area.start(START);
+    await flush();
+    expect(answers).toHaveLength(1);
+    // Five blocks east: the start's block is no longer in the 3 × 3.
+    area.moveTo(inside({ x: BLOCK.x + 5, y: BLOCK.y }, 0.5, 0.5));
+    answers.shift()?.();
+    await flush();
+    expect(area.held().some((h) => blockKey(h.block) === blockKey(BLOCK))).toBe(false);
+    expect(changes.count).toBe(0);
+    area.stop();
+    for (const answer of answers.splice(0)) answer();
+    await started;
+  });
+});
+
+describe('a kept street’s name is never logged (ADR 0098)', () => {
+  it('says a store’s failure, and a kept block’s read, without one name, over streets that all have one', async () => {
+    const named = await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS);
+    const start = fixtureStart(START_COLUMN, START_ROW).position;
+    const names = [...GRID_ROW_NAMES, ...GRID_COLUMN_NAMES].filter(
+      (name): name is string => name !== undefined,
+    );
+    expect(names.length).toBeGreaterThan(5);
+    const rideOver = async (store: RiddenBlockStore) => {
+      const log: string[] = [];
+      const area = createAreaReader({
+        archive: corridorArchiveFrom(countingSource(named)),
+        frame: { latitude: start.latitude, longitude: start.longitude },
+        cache: riddenBlockCache({
+          store,
+          owner: ATHLETE_A,
+          archiveUrl: ARCHIVE_URL,
+          now: () => new Date('2026-11-25T09:00:00Z'),
+        }),
+        mapTilesOn: () => true,
+        random: () => 0,
+        yieldToIdle: () => Promise.resolve(),
+        log: (line) => log.push(line),
+      });
+      expect(await area.start(start)).toStrictEqual({ kind: 'ready' });
+      await area.settled();
+      const held = area.held().flatMap((h) => h.streets.flatMap((each) => each.streets));
+      area.stop();
+      return { log, held };
+    };
+    // Kept, then read back from the cache: the names are held, and logged nowhere.
+    const first = await rideOver(fresh());
+    const second = await rideOver(fresh());
+    expect(second.held.some((street) => street.name === 'Main Street')).toBe(true);
+    // A store that refuses every write and every read: its failures are said.
+    const broken = await rideOver({
+      getRiddenBlock: () => Promise.reject(new DOMException('gone', 'InvalidStateError')),
+      putRiddenBlock: () => Promise.reject(new DOMException('full', 'QuotaExceededError')),
+      markRiddenBlock: () => Promise.resolve(false),
+    });
+    expect(broken.log.length).toBeGreaterThan(0);
+    for (const line of [...first.log, ...second.log, ...broken.log]) {
+      for (const name of names) expect(line).not.toContain(name);
+    }
+  });
+});
+
+describe('keeping a block never holds up the ride (#2891 review)', () => {
+  it('starts while every cache write is still waiting, and settles once they are written', async () => {
+    const release: (() => void)[] = [];
+    const puts: number[] = [];
+    const cache: AreaCache = {
+      get: () => Promise.resolve(undefined),
+      put: (block) =>
+        new Promise<void>((resolve) => {
+          release.push(() => {
+            puts.push(blockKey(block));
+            resolve();
+          });
+        }),
+    };
+    const area = createAreaReader({
+      archive: corridorArchiveFrom(countingSource(archive)),
+      frame: { latitude: START.latitude, longitude: START.longitude },
+      cache,
+      mapTilesOn: () => true,
+      random: () => 0,
+      yieldToIdle: () => Promise.resolve(),
+    });
+    // The start answers with no write done: the pump waits on no store.
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    expect(puts).toStrictEqual([]);
+    let settled = false;
+    const done = area.settled().then(() => (settled = true));
+    for (let turn = 0; turn < 50 && release.length < 9; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(release).toHaveLength(9);
+    expect(settled).toBe(false);
+    for (const write of release.splice(0)) write();
+    await done;
+    expect(puts).toHaveLength(9);
+    area.stop();
+  });
+
+  it('yields to idle after a block is read, before it converts and packs it to keep', async () => {
+    const waiting: (() => void)[] = [];
+    let gated = false;
+    const puts: number[] = [];
+    const area = createAreaReader({
+      archive: corridorArchiveFrom(countingSource(archive)),
+      frame: { latitude: START.latitude, longitude: START.longitude },
+      cache: {
+        get: () => Promise.resolve(undefined),
+        put: (block) => {
+          puts.push(blockKey(block));
+          return Promise.resolve();
+        },
+      },
+      mapTilesOn: () => true,
+      random: () => 0,
+      // Idle never comes once the first block is held, until the test says.
+      yieldToIdle: () =>
+        gated ? new Promise<void>((resolve) => waiting.push(resolve)) : Promise.resolve(),
+      onChange: () => (gated = true),
+    });
+    void area.start(START);
+    for (let turn = 0; turn < 50 && waiting.length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(waiting.length).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The first block is held and announced, and nothing of it is kept yet.
+    expect(area.held().length).toBeGreaterThan(0);
+    expect(puts).toStrictEqual([]);
+    // Idle comes: the reads go on and every block is kept.
+    gated = false;
+    for (let turn = 0; turn < 200 && puts.length < 9; turn += 1) {
+      for (const resolve of waiting.splice(0)) resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(puts).toHaveLength(9);
+    area.stop();
   });
 });

@@ -40,6 +40,7 @@ import {
   PITCH_KIND,
   PITCH_SPORTS,
   RAIL_KIND_DETAILS,
+  streetNameOf,
   tileBounds,
   tileBox,
   POI_CLASSES,
@@ -906,7 +907,10 @@ interface PackedTileStreets {
   readonly tiles: readonly {
     readonly x: number;
     readonly y: number;
-    /** `g` grade, `o` oneway, `a` access, `l` is-link; never a name. */
+    /**
+     * `g` grade, `o` oneway, `a` access, `l` is-link, and `n` the street's
+     * name, absent where it has none (ADR 0098).
+     */
     readonly streets: readonly {
       kind: string;
       detail: string;
@@ -914,6 +918,7 @@ interface PackedTileStreets {
       o: DecodedStreetFeature['oneway'];
       a: DecodedStreetFeature['access'];
       l: boolean;
+      n?: string;
       line: number[];
     }[];
   }[];
@@ -922,9 +927,11 @@ interface PackedTileStreets {
 /**
  * A block's per-tile streets as the ridden-block cache keeps them (#2891):
  * gzip over JSON, coordinates in centimetres, as {@link packCorridorFeatures}.
- * ⚠️ **Never a name** (ADR 0096 D-1.4): a street's name is held in memory
- * with the block and is never stored, so a block read from the cache shows
- * none until it is read from the archive again.
+ * **With each street's name** (ADR 0098, the owner's ruling of 2026-11-25, in
+ * part superseding ADR 0096 D-1.4), so a block read from the cache names its
+ * streets on the road and in the junction prompt as a fresh read does. ⚠️ The
+ * name is kept in this one store, on the device: it is never logged, never
+ * sent to an instance, never exported, and it is erased with the athlete.
  */
 export async function packTileStreets(streets: readonly TileStreets[]): Promise<Blob> {
   const packed: PackedTileStreets = {
@@ -939,6 +946,7 @@ export async function packTileStreets(streets: readonly TileStreets[]): Promise<
         o: f.oneway,
         a: f.access,
         l: f.isLink,
+        ...(f.name === undefined ? {} : { n: f.name }),
         line: toInts(f.line),
       })),
     })),
@@ -949,8 +957,10 @@ export async function packTileStreets(streets: readonly TileStreets[]): Promise<
 
 /**
  * Reads back what {@link packTileStreets} packed, each road field held to the
- * decoder's own values again, so a blob edited on the device cannot put
- * another string into the street graph. Throws for a blob it did not write.
+ * decoder's own values again, and each name to the decoder's own rules
+ * (`@onyourleft/map-features` §`streetNameOf`, ADR 0096 D-1.3), so a blob
+ * edited on the device cannot put another string into the street graph, the
+ * road or the prompt. Throws for a blob it did not write.
  */
 export async function unpackTileStreets(blob: Blob): Promise<TileStreets[]> {
   const json = await gunzipBytes(new Uint8Array(await blob.arrayBuffer()));
@@ -966,15 +976,19 @@ export async function unpackTileStreets(blob: Blob): Promise<TileStreets[]> {
     }
     return {
       tile: { z: 15, x: tile.x, y: tile.y },
-      streets: tile.streets.map((f) => ({
-        kind: typeof f.kind === 'string' ? f.kind : '',
-        kindDetail: typeof f.detail === 'string' ? f.detail : '',
-        grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
-        oneway: f.o === 'with-line' || f.o === 'against-line' ? f.o : 'no',
-        access: f.a === 'no' || f.a === 'private' ? f.a : 'open',
-        isLink: f.l === true,
-        line: fromInts(f.line),
-      })),
+      streets: tile.streets.map((f) => {
+        const name = streetNameOf(f.n);
+        return {
+          kind: typeof f.kind === 'string' ? f.kind : '',
+          kindDetail: typeof f.detail === 'string' ? f.detail : '',
+          grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
+          oneway: f.o === 'with-line' || f.o === 'against-line' ? f.o : 'no',
+          access: f.a === 'no' || f.a === 'private' ? f.a : 'open',
+          isLink: f.l === true,
+          ...(name === undefined ? {} : { name }),
+          line: fromInts(f.line),
+        };
+      }),
     };
   });
 }

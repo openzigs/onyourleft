@@ -78,6 +78,7 @@ import {
 import {
   corridorError,
   describeCorridorFailure,
+  idleYield,
   joinCorridorFeatures,
   readCorridorTiles,
   reframeCorridorFeatures,
@@ -316,7 +317,10 @@ export interface AreaReader {
   held(): readonly HeldBlock[];
   /** Whether the block `position` is in is held. */
   holds(position: AreaPosition): boolean;
-  /** Resolves when no read is running (a delayed one not yet due does not count). */
+  /**
+   * Resolves when no read is running (a delayed one not yet due does not
+   * count) and every block kept has been written to the cache.
+   */
   settled(): Promise<void>;
   /** The ride has ended: the running read is abandoned and nothing more is asked. */
   stop(): void;
@@ -440,6 +444,7 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
   };
 
   const log = options.log ?? ((): void => undefined);
+  const idle = options.yieldToIdle ?? idleYield;
 
   /** The block from the cache, in the ride's frame, or `undefined`; a store that fails is a miss. */
   const cached = async (block: BlockId): Promise<HeldBlock | undefined> => {
@@ -460,27 +465,39 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     }
   };
 
+  /** The cache writes still running: {@link AreaReader.settled} waits for them. */
+  const writes = new Set<Promise<void>>();
+
   /**
    * Keeps a block whose every tile is read, in its own frame, for the next
    * ride. A block read in part is not kept (#2891): the next ride reads it
    * again. A store that refuses it costs that ride a re-read.
+   *
+   * ⚠️ **Never awaited by the read** ({@link keepLater}): the next block's
+   * request, and the start, wait on no IndexedDB write. It yields to idle
+   * before it converts the block and again before it hands it to the store,
+   * so the conversion and the packing are not run inside a frame of a moving
+   * ride the moment the block is read.
    */
   const keep = async (done: HeldBlock, identity: string): Promise<void> => {
     if (options.cache === undefined || !fullyRead(done.tiles)) return;
-    const move = reframer(options.frame, blockFrame(done.block));
     try {
-      await options.cache.put(
-        done.block,
-        {
-          tiles: done.tiles,
-          features: reframeCorridorFeatures(done.features, move),
-          streets: reframeStreets(done.streets, move),
-        },
-        identity,
-      );
+      await idle();
+      const move = reframer(options.frame, blockFrame(done.block));
+      const features = reframeCorridorFeatures(done.features, move);
+      const streets = reframeStreets(done.streets, move);
+      await idle();
+      await options.cache.put(done.block, { tiles: done.tiles, features, streets }, identity);
     } catch (error) {
       log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
     }
+  };
+
+  /** {@link keep}, fire and forget: it catches and says its own failure. */
+  const keepLater = (done: HeldBlock, identity: string): void => {
+    const write = keep(done, identity);
+    writes.add(write);
+    void write.finally(() => writes.delete(write));
   };
 
   const readOne = async (
@@ -525,7 +542,8 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       mustStop: () => stopped || !options.mapTilesOn(),
       yieldToIdle: options.yieldToIdle,
       // #3052, ADR 0096: the open world names its streets on the road and in
-      // the junction prompt. Held in memory with the block, never stored.
+      // the junction prompt. Held in memory with the block, and kept on the
+      // device with it in the ridden-block cache alone (ADR 0098).
       streetNames: true,
     });
     if (read.kind === 'wrong-schema') return 'wrong-schema';
@@ -547,7 +565,7 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     }
     held.set(key, now);
     options.onChange?.();
-    await keep(now, read.identity);
+    keepLater(now, read.identity);
     return 'read';
   };
 
@@ -665,7 +683,11 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       const block = blockOf(position);
       return block !== undefined && held.has(keyOf(block));
     },
-    settled: () => pumping,
+    settled: async () => {
+      await pumping;
+      // And every block a read kept, written or refused by the store (#2891).
+      while (writes.size > 0) await Promise.all([...writes]);
+    },
     stop: () => {
       stopped = true;
       queue.length = 0;

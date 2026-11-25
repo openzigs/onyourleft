@@ -8,8 +8,10 @@
  * leaves the device. This runs the Files screen's own `exportEverything` over
  * an account that holds a ride, its route and a ridden block, and reads every
  * file it produced for any trace of the block: the table's name, the record's
- * own fields, the block's key, a feature value as JSON spells it, and the
- * packed bytes themselves, raw or in base64.
+ * own fields, the block's key, a feature value as JSON spells it, the
+ * packed bytes themselves, raw or in base64 — of the features and of the
+ * streets alike — and, since ADR 0098 kept street names in the streets, the
+ * name of the street it holds.
  */
 
 import {
@@ -17,6 +19,7 @@ import {
   createStoreHarness,
   resetFixtureIds,
   riddenBlockFor,
+  riddenBlockStreetName,
   rideFor,
   routeFor,
   seedAthletes,
@@ -66,17 +69,24 @@ async function tracesOf(
   block: RiddenBlockRecord,
   files: readonly DownloadableFile[],
 ): Promise<string[]> {
+  const base64Of = (bytes: Uint8Array): string => {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  };
   const packed = new Uint8Array(await block.features.arrayBuffer());
   const run = packed.slice(10, 42);
-  let binary = '';
-  for (const byte of packed) binary += String.fromCharCode(byte);
+  const streets = new Uint8Array(await block.streets.arrayBuffer());
+  const streetsRun = streets.slice(10, 42);
   const markers = [
     TABLE.riddenBlocks,
     'ODbL-1.0',
     String(block.block),
     block.archive.identity,
     block.readAt,
-    btoa(binary).slice(16, 56),
+    base64Of(packed).slice(16, 56),
+    base64Of(streets).slice(16, 56),
+    riddenBlockStreetName(block.owner),
     ...featureValues(),
   ];
   const found: string[] = [];
@@ -86,6 +96,9 @@ async function tracesOf(
       if (text.includes(marker)) found.push(`${file.fileName}: ${marker}`);
     }
     if (containsBytes(file.bytes, run)) found.push(`${file.fileName}: the packed features`);
+    if (containsBytes(file.bytes, streetsRun)) {
+      found.push(`${file.fileName}: the packed streets`);
+    }
   }
   return found;
 }
@@ -145,10 +158,23 @@ describe('the account export carries no ridden block — #2891', () => {
       mediaType: 'application/octet-stream',
       bytes: new Uint8Array(await block.features.arrayBuffer()),
     };
-    const found = await tracesOf(block, [planted, raw]);
+    const rawStreets: DownloadableFile = {
+      fileName: 'streets.bin',
+      mediaType: 'application/octet-stream',
+      bytes: new Uint8Array(await block.streets.arrayBuffer()),
+    };
+    // A file that names the street alone, with nothing else of the block.
+    const named: DownloadableFile = {
+      fileName: 'route.gpx',
+      mediaType: 'application/gpx+xml',
+      bytes: new TextEncoder().encode(`<name>${riddenBlockStreetName(ATHLETE_A)}</name>`),
+    };
+    const found = await tracesOf(block, [planted, raw, rawStreets, named]);
     expect(found).toContain('manifest.json: riddenBlocks');
     expect(found).toContain(`manifest.json: ${String(block.block)}`);
     expect(found.some((line) => /^manifest\.json: \d+\.4375$/.test(line))).toBe(true);
     expect(found).toContain('block.bin: the packed features');
+    expect(found).toContain('streets.bin: the packed streets');
+    expect(found).toContain(`route.gpx: ${riddenBlockStreetName(ATHLETE_A)}`);
   });
 });

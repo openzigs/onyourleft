@@ -18,9 +18,9 @@
  *   another's blocks on the same device.
  * - **What is kept** (D-6.1): the decoded features, packed as a corridor's are
  *   (`packCorridorFeatures`), and each tile's streets with their road fields
- *   (`packTileStreets`) for the street graph, with the block's tile states,
- *   the archive it came from and when — never the raw tile bytes, and never a
- *   street's name (ADR 0096 D-1.4).
+ *   (`packTileStreets`) for the street graph, with each street's name (ADR
+ *   0098) for the road and the junction prompt, with the block's tile states,
+ *   the archive it came from and when — never the raw tile bytes.
  * - **Only a block read whole**: the reader keeps no block with a tile still
  *   refused, and a block read whole again replaces what was kept.
  * - **Trusted only from this archive URL and this reader version**, as the

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { decodeTile } from './decode';
+import { decodeTile, streetNameOf } from './decode';
 import { EARTH, FIXTURE_FRAME, FIXTURE_TILE } from './fixtures/tiles';
 import { STREET_NAME_MAX_CHARS } from './schema';
 import { encodeTile, line, type TagValue } from './testing/mvt-encoder';
@@ -189,6 +189,23 @@ describe('a hostile tile’s name is cleaned, bounded or dropped, and never refu
       }
     });
   }
+
+  // #2891, ADR 0098: a name kept on the device and read back is held to the
+  // same rules, so a block from the ridden-block cache names a street exactly
+  // as the tile did — and an edited blob can name it nothing the tile could not.
+  for (const nameCase of cases) {
+    it(`read back from the device, as from a tile: ${nameCase.label}`, () => {
+      expect(streetNameOf(nameCase.name) ?? null).toBe(nameCase.expected);
+    });
+  }
+
+  it('read back from the device, a lone surrogate is no name, and a well-formed pair is kept', () => {
+    expect(streetNameOf('Rue \uD800 Haute')).toBeUndefined();
+    expect(streetNameOf('Rue \uDC00 Basse')).toBeUndefined();
+    expect(streetNameOf('Rue 😀 Pleine')).toBe('Rue 😀 Pleine');
+    expect(streetNameOf(undefined)).toBeUndefined();
+    expect(streetNameOf(null)).toBeUndefined();
+  });
 
   it('malformed UTF-8 is no name, and the tile’s other street keeps its own', () => {
     const bytes = roadsTile([{ name: 'QQZZ' }, { name: 'Control Way' }]);

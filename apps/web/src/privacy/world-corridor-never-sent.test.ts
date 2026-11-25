@@ -65,6 +65,9 @@ const CORRIDOR_NAMES = [
   'getRiddenBlock',
   'RiddenBlockRecord',
   'riddenBlockCache',
+  // ADR 0098: the two functions that write and read a kept street's name.
+  'packTileStreets',
+  'unpackTileStreets',
 ] as const;
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -124,6 +127,15 @@ describe('no instance module names the world corridor store — #1545', () => {
     expect(corridorNamesIn('type Row = RiddenBlockRecord;')).toStrictEqual(['RiddenBlockRecord']);
     expect(corridorNamesIn('const cache = riddenBlockCache(options);')).toStrictEqual([
       'riddenBlockCache',
+    ]);
+    // ADR 0098: the kept street names' packing, each found.
+    expect(corridorNamesIn('body.streets = await packTileStreets(held.streets);')).toStrictEqual([
+      'packTileStreets',
+    ]);
+    // Matched by substring, so the reader's name holds the writer's too.
+    expect(corridorNamesIn('const named = await unpackTileStreets(row.streets);')).toStrictEqual([
+      'packTileStreets',
+      'unpackTileStreets',
     ]);
   });
 

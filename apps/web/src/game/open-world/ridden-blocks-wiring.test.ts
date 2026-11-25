@@ -67,6 +67,26 @@ function fresh(): ActivityStore {
   return store;
 }
 
+/**
+ * Waits, a task at a time, until the athlete keeps `count` blocks: a ride
+ * writes its blocks after it is ready, never before (`area.ts` §`keepLater`).
+ * Bounded by turns, not by a timeout.
+ */
+async function untilKept(count: number): Promise<void> {
+  const store = fresh();
+  const block = blockOf(START.position);
+  if (block === undefined) throw new Error('the start is a position');
+  for (let turn = 0; turn < 2_000; turn += 1) {
+    let kept = 0;
+    for (const each of blocksAround(block)) {
+      if ((await store.getRiddenBlock(ATHLETE_A, blockKey(each))) !== undefined) kept += 1;
+    }
+    if (kept >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`the ride kept fewer than ${String(count)} blocks`);
+}
+
 /** One ride through the real session over a counting archive and a fresh store handle. */
 async function ride(source: CountingSource) {
   const session = createOpenWorldSession({
@@ -94,10 +114,12 @@ describe('the open-world session keeps its blocks, and the next ride asks nothin
     expect((await ride(first)).kind).toBe('ready');
     expect(first.calls.length).toBeGreaterThan(0);
 
-    // Every handle closed, then read back on a fresh one: the start's blocks are kept.
-    for (const store of open.splice(0)) store.close();
+    // The writes are not awaited by the ride (`area.ts` §`keepLater`): wait
+    // for them, then close every handle and read back on a fresh one.
     const block = blockOf(START.position);
     if (block === undefined) throw new Error('the start is a position');
+    await untilKept(blocksAround(block).length);
+    for (const store of open.splice(0)) store.close();
     const store = fresh();
     for (const each of blocksAround(block)) {
       expect((await store.getRiddenBlock(ATHLETE_A, blockKey(each)))?.owner).toBe(ATHLETE_A);
@@ -113,6 +135,7 @@ describe('the open-world session keeps its blocks, and the next ride asks nothin
 describe('the lazy port hands the session the store and athlete it is given', () => {
   it('rides what ride 1 kept with map tiles off and no network, and only when it is given them', async () => {
     expect((await ride(countingSource(archive))).kind).toBe('ready');
+    await untilKept(9);
     const fetches = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
     vi.stubGlobal('fetch', fetches);
     const basemap = () => ({ archiveUrl: ARCHIVE_URL, attribution: BASEMAP_ATTRIBUTION });

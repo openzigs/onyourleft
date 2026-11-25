@@ -1249,6 +1249,14 @@ export async function worldCorridorFor(
 }
 
 /**
+ * The street name {@link riddenBlockFor}'s `streets` carries: one no real
+ * street has, different per athlete and per seed (#2891, ADR 0098).
+ */
+export function riddenBlockStreetName(owner: AthleteId, seed = 0): string {
+  return `Quillfeather Ride ${String(ATHLETES.indexOf(owner) * 10 + seed)}`;
+}
+
+/**
  * One of an athlete's ridden blocks — #2891. ⚠️ **Different features per
  * athlete and per `seed`** ({@link worldCorridorFeaturesFor}'s), so a read
  * that handed back somebody else's block cannot match. `block` defaults to a
@@ -1289,10 +1297,34 @@ export async function riddenBlockFor(
       overrides.features ??
       (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed + 20))),
     // Opaque to the store, as `features` is: the app packs it. Different per
-    // athlete and per seed, so a read that handed back another's cannot match.
+    // athlete and per seed, so a read that handed back another's cannot match,
+    // and carrying a street's name (ADR 0098), {@link riddenBlockStreetName},
+    // so a test can look for the name wherever the block must not go.
     streets:
       overrides.streets ??
-      new Blob([JSON.stringify({ streets: `ridden-block-streets:${owner}:${String(seed)}` })]),
+      new Blob([
+        JSON.stringify({
+          v: 1,
+          tiles: [
+            {
+              x: 9370,
+              y: 12538,
+              streets: [
+                {
+                  kind: 'minor_road',
+                  detail: 'residential',
+                  g: 'ground',
+                  o: 'no',
+                  a: 'open',
+                  l: false,
+                  n: riddenBlockStreetName(owner, seed),
+                  line: [0, 0, 1250, -3375],
+                },
+              ],
+            },
+          ],
+        }),
+      ]),
     licence: 'ODbL-1.0',
   };
 }

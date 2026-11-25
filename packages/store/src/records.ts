@@ -2090,7 +2090,8 @@ export const WORLD_CORRIDOR_FEATURES_LIMIT_BYTES = 16 * 1024 * 1024;
  *
  * ⚠️ **ODbL 1.0, not Apache-2.0**, exactly as {@link WorldCorridorRecord}
  * (ADR 0090 D-6.3): the decoded features and never the raw tile bytes, which
- * carry names and addresses the decoder drops.
+ * carry the addresses and other names the decoder drops. A street's own name
+ * is kept, in {@link RiddenBlockRecord.streets} alone (ADR 0098).
  *
  * ⚠️ **It never leaves the device** (D-6.4): no account export, no sync, no
  * instance call. It is a cache: dropping a row costs a re-read and nothing of
@@ -2130,9 +2131,12 @@ export interface RiddenBlockRecord {
    */
   readonly features: Blob;
   /**
-   * Each of its tiles' streets with their road fields, packed by the app, for
-   * the open-world street graph, which is built a tile at a time. Opaque
-   * here. ⚠️ **Never a street's name** (ADR 0096 D-1.4).
+   * Each of its tiles' streets with their road fields and their names, packed
+   * by the app, for the open-world street graph, which is built a tile at a
+   * time, and for the names on the road and in the junction prompt. Opaque
+   * here. ⚠️ **The one store that holds a street's name** (ADR 0098, in part
+   * superseding ADR 0096 D-1.4): it is never logged, sent or exported, and
+   * goes with the athlete.
    */
   readonly streets: Blob;
   /** What the data is licensed under. The only value there is. */

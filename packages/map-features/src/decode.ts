@@ -1175,6 +1175,32 @@ function streetName(bytes: Uint8Array, start: number, end: number): string | nul
   if (end - start < 1 || end - start > STREET_NAME_MAX_BYTES) return null;
   const text = strictUtf8(bytes, start, end);
   if (text === null) return null;
+  return shownStreetName(text);
+}
+
+/**
+ * A lone UTF-16 surrogate: what a string holds that no strict UTF-8 could
+ * decode to. With `u`, a well-formed pair is one code point and never matches.
+ */
+const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
+
+/**
+ * A street's name as the decoder would hand it out, from a value that did not
+ * come from a tile — #2891, ADR 0098: a name kept in the ridden-block cache,
+ * read back from the device. The same rules as a tile's (#3052, ADR 0096
+ * D-1.3): a string that is well formed and at most `STREET_NAME_MAX_BYTES`
+ * bytes of UTF-8, then {@link shownStreetName}'s cleaning. Anything else, or
+ * nothing left after it, is no name: `undefined`, never `''`.
+ */
+export function streetNameOf(value: unknown): string | undefined {
+  if (typeof value !== 'string' || LONE_SURROGATE.test(value)) return undefined;
+  const bytes = new TextEncoder().encode(value).length;
+  if (bytes < 1 || bytes > STREET_NAME_MAX_BYTES) return undefined;
+  return shownStreetName(value) ?? undefined;
+}
+
+/** A decoded string as a name: every {@link unshown} character dropped, spaces made one, trimmed and cut. */
+function shownStreetName(text: string): string | null {
   const shown = Array.from(text)
     .filter((character) => !unshown(character.codePointAt(0) as number))
     .join('');
