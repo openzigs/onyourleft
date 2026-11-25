@@ -794,6 +794,16 @@ export interface GameView {
    * argument for a chart that throws.
    */
   readonly hasContext: boolean;
+  /**
+   * Which world the view draws now — #3175: `three-renderer.ts`
+   * §`drawnWorld`, read by a capture ride, which tells the capture tool so it
+   * shoots no frame drawn in the stylised world.
+   *
+   * Optional, unlike its neighbours, because only a capture reads it, and a
+   * view without it is read as `'stylised'`: a capture refuses every frame of
+   * such a view, so the member nobody supplies fails rather than passes.
+   */
+  readonly drawnWorld?: QualitySettings['world'] | undefined;
 }
 
 /** Creates views. The one thing `three-renderer.ts` exports. */

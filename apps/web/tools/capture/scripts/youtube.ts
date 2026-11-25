@@ -24,7 +24,7 @@
  * - a word for a feature only an instance runs ("AI", "instance") anywhere
  *   but a line of the closing card that begins "Optional on your own
  *   instance:";
- * - a caption up for under 3 or over 6 seconds, run past its scene, or less
+ * - a caption up for under 3 or over 6 seconds (a card, over 10), run past its scene, or less
  *   than a second from the next; a scene under 6 seconds; a chapter under 10.
  *
  * A scene is a capture scene (`src/game/capture-scene.ts`) ridden from its
@@ -44,7 +44,7 @@ import type { VideoScript } from '../video-script';
 export const YOUTUBE_SCRIPT: VideoScript = {
   id: 'youtube',
   scenes: [
-    // 1. Cold open: the world at speed, then the title.
+    // 1. Cold open: the world at speed, then the logo and the title.
     {
       id: 'opening',
       chapter: 'On Your Left',
@@ -56,7 +56,12 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 1,
           seconds: 6,
           placement: 'title',
-          text: 'On Your Left — free, open-source indoor and outdoor cycling',
+          // Owner ruling 2026-11-25 on #3175: the logo, centred, with the
+          // platforms line beneath it. The logo names the app, so the title
+          // does not (the owner's wording, the same day).
+          logo: true,
+          text: 'Free, open-source indoor and outdoor cycling',
+          lines: ['On Android, and in Chrome or Edge on your computer. iOS coming soon.'],
         },
       ],
     },
@@ -145,6 +150,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'free-ride',
       chapter: 'Free ride',
       capture: 'free-ride',
+      // Past the pull-off from a stop and the post beside the start.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -161,6 +168,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'delivery',
       chapter: 'Delivery',
       capture: 'delivery',
+      // Under way, not pulling off from a stop.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -192,7 +201,9 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 8,
           seconds: 5,
           callout: 'standings',
-          text: 'Bots race with tactics that read the race',
+          // The tactics they ride include attack, chase and sit-in
+          // (`packages/domain/src/lap-race/tactics.ts` §`BotTactic`).
+          text: 'Bots that attack, chase and sit in',
         },
         { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
       ],
@@ -219,21 +230,28 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'closing',
       chapter: 'Free and open',
       capture: 'route-hud',
-      seconds: 12,
+      // Under way, not pulling off from a stop.
+      from: 3,
+      seconds: 15,
       captions: [
         {
           at: 0.5,
-          seconds: 4.5,
-          text: 'No subscription. Your rides are kept on your device; self-hosting is optional',
+          seconds: 5.5,
+          text: 'No subscription. Your rides stay on your device.',
         },
         {
-          at: 6,
-          seconds: 6,
+          at: 7,
+          seconds: 8,
           placement: 'card',
+          logo: true,
           text: 'Free and open source',
           // Owner ruling 2026-11-25: they exist but are not filmed, as each
           // needs an instance; only the closing card may say so, and only so.
-          lines: ['Optional on your own instance: an AI pacer and AI bots'],
+          // #3175, the owner's the same day: the platforms line, as on the opening.
+          lines: [
+            'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
+            'Optional on your own instance: an AI pacer and AI bots',
+          ],
         },
       ],
     },

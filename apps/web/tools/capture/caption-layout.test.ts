@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  balancedWidth,
   CALLOUT_GAP_SHARE,
   inside,
   intersects,
@@ -235,5 +236,28 @@ describe('where a caption goes on the frame — #3156', () => {
     expect(
       placeCaption({ frame, size: frame, placement: 'card', hard: [HUD_1080.credit], soft: [] }),
     ).toBeUndefined();
+  });
+
+  it('draws a wrapped caption at the least width that keeps its lines, and a one-line caption at its own — #3175', async () => {
+    // 600 px of words in a 400 px box: two lines of 40 px, and a third under 300 px.
+    const tried: number[] = [];
+    const wrapped = await balancedWidth({ width: 400, height: 80 }, (width) => {
+      tried.push(width);
+      return Promise.resolve(Math.ceil(600 / width) * 40);
+    });
+    expect(wrapped).toBe(300);
+    expect(tried.every((width) => width > 0 && width < 400)).toBe(true);
+    // One line: any narrower is taller, so it keeps its width, rounded up to a pixel.
+    expect(
+      await balancedWidth({ width: 399.4, height: 40 }, (width) =>
+        Promise.resolve(width >= 399.4 ? 40 : 80),
+      ),
+    ).toBe(400);
+    // The browser's half pixel of rounding is not a new line.
+    expect(
+      await balancedWidth({ width: 400, height: 80 }, (width) =>
+        Promise.resolve(width >= 300 ? 80.4 : 120),
+      ),
+    ).toBe(300);
   });
 });

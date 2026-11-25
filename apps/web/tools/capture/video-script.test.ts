@@ -7,6 +7,7 @@
  * it before it renders.
  */
 
+import { BOT_TACTICS, type BotTactic } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { CAPTURE_SCENES } from '../../src/game/capture-scene';
@@ -16,10 +17,16 @@ import {
   captionAt,
   cardLines,
   chapterTime,
+  FADE_SECONDS,
+  RIDING_PANELS,
+  SCENE_FADE_SECONDS,
+  sceneFade,
+  scenePanels,
   scriptChapters,
   scriptProblems,
   scriptSeconds,
   scriptSrt,
+  shownLines,
   srtTime,
   type CalloutPanel,
   type VideoCaption,
@@ -160,9 +167,9 @@ describe('the demo video’s scene script — #3156', () => {
     ).toEqual([
       'test scene closing, “Race AI bots on your instance”: names a feature only an instance runs, so the card says “Optional on your own instance:”',
     ]);
-    // Lines are a card's, and the instance claim stays refused on the card.
+    // Lines are a card's or a title's, and the instance claim stays refused on the card.
     expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', lines: ['More'] }])).toEqual([
-      'test scene one, “Free”: only a card has lines under its words',
+      'test scene one, “Free”: only a card or a title has lines under its words',
     ]);
     expect(
       scriptProblems(
@@ -175,17 +182,72 @@ describe('the demo video’s scene script — #3156', () => {
       scene.captions.flatMap((caption) => [caption.text, ...(caption.lines ?? [])]),
     );
     expect(said.filter((text) => /\bAI\b|\binstance\b/iu.test(text))).toEqual([statement]);
-    expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([statement]);
+    expect(YOUTUBE_SCRIPT.scenes.at(-1)?.captions.at(-1)?.lines).toEqual([
+      'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
+      statement,
+    ]);
   });
 
-  it('says in the lap race that the bots race with tactics', () => {
+  it('opens on the logo with the platforms line beneath it, and says the line again on the closing card — #3175', () => {
+    // The owner's wording of 2026-11-25 11:20Z, which replaced "On Android. Coming to iOS soon.".
+    const platforms = 'On Android, and in Chrome or Edge on your computer. iOS coming soon.';
+    const opening = YOUTUBE_SCRIPT.scenes[0]?.captions[0];
+    expect(opening).toMatchObject({ placement: 'title', logo: true, lines: [platforms] });
+    expect(shownLines(opening as VideoCaption)).toEqual([
+      'Free, open-source indoor and outdoor cycling',
+      platforms,
+    ]);
+    const card = YOUTUBE_SCRIPT.scenes.at(-1)?.captions.find((c) => c.placement === 'card');
+    expect(card?.lines?.[0]).toBe(platforms);
+    expect(shownLines(card as VideoCaption).slice(0, 2)).toEqual([
+      'Free and open source',
+      platforms,
+    ]);
+  });
+
+  it('draws the logo over a title or a card alone, and lets a title carry lines — #3175', () => {
+    expect(
+      problemsOf({}, [
+        { at: 0, seconds: 4, text: 'Free', placement: 'title', logo: true, lines: ['More'] },
+      ]),
+    ).toEqual([]);
+    expect(
+      problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', placement: 'card', logo: true }]),
+    ).toEqual([]);
+    expect(problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', logo: true }])).toEqual([
+      'test scene one, “Free”: only a title or a card is drawn under the logo',
+    ]);
+    expect(
+      problemsOf({}, [{ at: 0, seconds: 4, text: 'Free', callout: 'map', logo: true }]),
+    ).toEqual(['test scene one, “Free”: only a title or a card is drawn under the logo']);
+  });
+
+  it('asks every riding scene for the whole HUD, and each mode for its own panels — #3175', () => {
+    const of = (name: string): string[] => {
+      const scene = CAPTURE_SCENES[name];
+      if (scene === undefined) throw new Error(`no scene ${name}`);
+      return scenePanels(scene);
+    };
+    expect(RIDING_PANELS).toEqual(['readings', 'totals', 'elevation', 'map', 'controls']);
+    expect(of('route-hud')).toEqual([...RIDING_PANELS]);
+    expect(of('free-ride')).toEqual([...RIDING_PANELS]);
+    // A workout's strip is drawn in the map's place (#1307).
+    expect(of('workout')).toEqual(['readings', 'totals', 'elevation', 'controls', 'workout']);
+    expect(of('pacer')).toEqual([...RIDING_PANELS, 'pacer', 'best']);
+    expect(of('lap-race')).toEqual([...RIDING_PANELS, 'standings', 'item']);
+    expect(of('delivery')).toEqual([...RIDING_PANELS, 'houses', 'throw']);
+    // Every one is a panel the page can find, the controls by the HUD's own class.
+    expect(CALLOUT_PANELS.controls.selector).toBe('.oyl-hud__controls');
+  });
+
+  it('says in the lap race that the bots attack, chase and sit in, tactics they ride', () => {
     const race = YOUTUBE_SCRIPT.scenes.find((scene) => scene.capture === 'lap-race');
     expect(race?.captions).toContainEqual(
-      expect.objectContaining({
-        text: 'Bots race with tactics that read the race',
-        callout: 'standings',
-      }),
+      expect.objectContaining({ text: 'Bots that attack, chase and sit in', callout: 'standings' }),
     );
+    // Each one named is a tactic the on-device bots ride (ADR 0067).
+    const named: BotTactic[] = ['attack', 'chase', 'sit-in'];
+    expect(BOT_TACTICS).toEqual(expect.arrayContaining(named));
   });
 
   it('refuses an instance caption on every capture scene, until #3155 rides one', () => {
@@ -238,6 +300,70 @@ describe('the demo video’s scene script — #3156', () => {
       'test scene one, “Long and late”: runs outside its scene’s 10 seconds',
       'test scene one, “Long and late”: is up for 6.5 seconds, not 3 to 6',
     ]);
+  });
+
+  it('gives a card up to ten seconds, for the address and the credit under its words', () => {
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 10, text: 'Free', placement: 'card' }]),
+    ).toEqual([]);
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 10.5, text: 'Free', placement: 'card' }]),
+    ).toEqual(['test scene one, “Free”: is up for 10.5 seconds, not 3 to 10']);
+    // Only a card: a title of the same length is refused as any caption.
+    expect(
+      problemsOf({ seconds: 12 }, [{ at: 1, seconds: 8, text: 'Free', placement: 'title' }]),
+    ).toEqual(['test scene one, “Free”: is up for 8 seconds, not 3 to 6']);
+  });
+
+  it('closes on the logo, with the card up long enough to find the address — #3175', () => {
+    const closing = YOUTUBE_SCRIPT.scenes.at(-1);
+    const card = closing?.captions.find((caption) => caption.placement === 'card');
+    expect(card).toMatchObject({ logo: true, seconds: 8 });
+    expect((card?.at ?? 0) + (card?.seconds ?? 0)).toBe(closing?.seconds);
+  });
+
+  it('gives every caption read over the ride time to be read: three words a second at most', () => {
+    for (const scene of YOUTUBE_SCRIPT.scenes) {
+      for (const caption of scene.captions) {
+        // The title and the card are read as a card, not in passing over the ride.
+        if (caption.placement === 'card' || caption.placement === 'title') continue;
+        const words = caption.text.split(/\s+/u).length;
+        // The half-second fades are not reading time.
+        expect(words / (caption.seconds - 2 * FADE_SECONDS), caption.text).toBeLessThanOrEqual(3);
+      }
+    }
+  });
+
+  it('starts no scene of the shipped script from a stop', () => {
+    // A capture scene pulls off from rest; the first seconds are not shown.
+    for (const scene of YOUTUBE_SCRIPT.scenes) {
+      expect(scene.from ?? 0, scene.id).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('fades each scene from black and to black, but for the closing card at the end', () => {
+    const middle = { first: false, last: false };
+    expect(sceneFade(0, 10, middle)).toBe(1);
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, middle)).toBeCloseTo(0.5);
+    expect(sceneFade(SCENE_FADE_SECONDS, 10, middle)).toBe(0);
+    expect(sceneFade(5, 10, middle)).toBe(0);
+    expect(sceneFade(10 - SCENE_FADE_SECONDS / 2, 10, middle)).toBeCloseTo(0.5);
+    expect(sceneFade(10, 10, middle)).toBe(1);
+    // The video opens from black, as every scene does.
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, { first: true, last: false })).toBeCloseTo(0.5);
+    // Its last frame is the closing card, not black.
+    const last = { first: false, last: true };
+    expect(sceneFade(10, 10, last)).toBe(0);
+    expect(sceneFade(10 - SCENE_FADE_SECONDS / 2, 10, last)).toBe(0);
+    expect(sceneFade(SCENE_FADE_SECONDS / 2, 10, last)).toBeCloseTo(0.5);
+    // No caption of the shipped script is on screen while its scene is fading.
+    YOUTUBE_SCRIPT.scenes.forEach((scene, index) => {
+      const edges = { first: index === 0, last: index === YOUTUBE_SCRIPT.scenes.length - 1 };
+      for (const caption of scene.captions) {
+        expect(sceneFade(caption.at, scene.seconds, edges), caption.text).toBe(0);
+        expect(sceneFade(caption.at + caption.seconds, scene.seconds, edges), caption.text).toBe(0);
+      }
+    });
   });
 
   it('refuses the words no caption may say', () => {
@@ -379,7 +505,7 @@ describe('the demo video’s scene script — #3156', () => {
       expect.stringContaining('OpenStreetMap'),
       'OpenStreetMap: https://www.openstreetmap.org/copyright',
       'Open Database License: https://opendatacommons.org/licenses/odbl/1-0/',
-      'On Your Left: https://github.com/openzigs/onyourleft',
+      'Get it free: github.com/openzigs/onyourleft',
     ]);
     const last = YOUTUBE_SCRIPT.scenes.at(-1);
     expect(last?.captions.some((caption) => caption.placement === 'card')).toBe(true);

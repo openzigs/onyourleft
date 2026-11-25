@@ -26,8 +26,8 @@
  *   bots and the rest exist only on a rider's own instance, which no scene
  *   rides yet (#3155), so only a line of the closing card may name them, and
  *   only as optional and on your own instance ({@link INSTANCE_ONLY_STATEMENT}).
- * - **The epic's timing**: a caption is up for 3 to 6 seconds, inside its
- *   scene and a second from the next; no scene is under 6 seconds; YouTube's
+ * - **The epic's timing**: a caption is up for 3 to 6 seconds (a card, up to
+ *   10), inside its scene and a second from the next; no scene is under 6 seconds; YouTube's
  *   chapter rules (the first at 0:00, three or more, each 10 s or longer).
  *
  * Where a caption is drawn — clear of the panel it explains and of the map
@@ -92,10 +92,50 @@ export const CALLOUT_PANELS = {
   houses: { selector: '.oyl-hud__field', label: 'Houses', feature: 'delivery' },
   throw: { selector: '.oyl-hud__throws', feature: 'delivery' },
   junction: { selector: '.oyl-hud__junction-prompt', feature: 'junction' },
+  // #3175: Pause, End ride and the rest, drawn only while not faded.
+  controls: { selector: '.oyl-hud__controls' },
 } as const satisfies Readonly<Record<string, CalloutPanel>>;
 
 /** A panel's name in {@link CALLOUT_PANELS}. */
 export type CalloutPanelName = keyof typeof CALLOUT_PANELS;
+
+/**
+ * The panels every riding scene's HUD draws — #3175, the owner's ruling of
+ * 2026-11-25: *"make sure the video shows all of the hud"*: the readings in
+ * full and the ride's totals, the elevation profile and the map, and the
+ * ride's controls, not faded.
+ */
+export const RIDING_PANELS = [
+  'readings',
+  'totals',
+  'elevation',
+  'map',
+  'controls',
+] as const satisfies readonly CalloutPanelName[];
+
+/**
+ * Every panel a frame of `scene` must show, drawn and not faded — #3175:
+ * {@link RIDING_PANELS}, and the panels of each mode the scene rides (the
+ * workout's strip, the pacer's and the best ride's readings, the race's
+ * standings and item, the round's houses and throws). The render stops on a
+ * captioned frame where one is missing (`render-script.ts`).
+ *
+ * Two are left out by design, not by the capture: a workout's strip is drawn
+ * in the map's place in the route panel (#1307, `HudCore.tsx`
+ * §`routeFigure`), so a workout has the strip and no map; and the junction's
+ * prompt is drawn only as a junction comes up.
+ */
+export function scenePanels(scene: CaptureScene): CalloutPanelName[] {
+  const panels: CalloutPanelName[] = RIDING_PANELS.filter(
+    (panel) => scene.workout === undefined || panel !== 'map',
+  );
+  if (scene.workout !== undefined) panels.push('workout');
+  if (scene.pacer !== undefined) panels.push('pacer');
+  if (scene.ghost === true) panels.push('best');
+  if (captureSceneShows('lap-race', scene, 0)) panels.push('standings', 'item');
+  if (captureSceneShows('delivery', scene, 0)) panels.push('houses', 'throw');
+  return panels;
+}
 
 /** The map credit, which no caption may cover. */
 export const CREDIT_SELECTOR = '.oyl-hud__attribution';
@@ -108,7 +148,8 @@ export interface VideoCaption {
   readonly seconds: number;
   readonly text: string;
   /**
-   * - `title`: centred above the middle;
+   * - `title`: centred above the middle, under the project's logo when it
+   *   has {@link logo};
    * - `lower-third`: low in the frame (the default);
    * - `card`: over the whole frame, opaque, with the map credit and the
    *   project's address under the words ({@link cardLines}): the closing card.
@@ -118,13 +159,20 @@ export interface VideoCaption {
   readonly placement?: 'title' | 'lower-third' | 'card' | undefined;
   /** The HUD panel the caption explains, with a leader line to it. */
   readonly callout?: CalloutPanelName | undefined;
+  /**
+   * #3175: draw the project's logo above a `title`'s or a `card`'s words,
+   * centred, no larger than its own pixels so it is sharp
+   * (`render-script.ts`). Only a title or a card has it.
+   */
+  readonly logo?: boolean | undefined;
   /** The feature the caption claims, which its scene must show. */
   readonly feature?: VideoFeature | undefined;
   /**
-   * A `card`'s statements under its words, before the credit: what the card
-   * says of the product as a whole, not of a scene. Only a card has them, and
-   * only the closing card may state an instance-only feature, worded as
-   * {@link INSTANCE_ONLY_STATEMENT} ({@link instanceOnlyProblem}).
+   * A `card`'s or a `title`'s statements under its words — for a card,
+   * before the credit: what it says of the product as a whole, not of a
+   * scene, such as the platforms it runs on (#3175). Only a card or a title
+   * has them, and only the closing card may state an instance-only feature,
+   * worded as {@link INSTANCE_ONLY_STATEMENT} ({@link instanceOnlyProblem}).
    */
   readonly lines?: readonly string[] | undefined;
 }
@@ -157,6 +205,17 @@ export const CAPTION_MAX_SECONDS = 6;
 export const CAPTION_GAP_SECONDS = 1;
 /** Each caption's fade in and out: the epic's half second. */
 export const FADE_SECONDS = 0.5;
+/**
+ * The longest a `card` is up: it carries the platforms, the project's address
+ * and the map credit, which six seconds do not give a viewer time to find.
+ */
+export const CARD_MAX_SECONDS = 10;
+/**
+ * Each scene's fade from black and to black — #3175's review. Every scene
+ * frames the rider alike, so a hard cut between two reads as a glitch in one
+ * ride, not as a new scene; a short dip through black says it is one.
+ */
+export const SCENE_FADE_SECONDS = 0.4;
 /** The shortest scene: the epic's "no scene is under 6 s". */
 export const SCENE_MIN_SECONDS = 6;
 /** YouTube's shortest chapter, and fewest chapters, for a chapter list to be read as one. */
@@ -273,9 +332,10 @@ export function scriptProblems(
       if (!(caption.at >= 0 && end <= scene.seconds)) {
         problems.push(`${said}: runs outside its scene’s ${String(scene.seconds)} seconds`);
       }
-      if (!(caption.seconds >= CAPTION_MIN_SECONDS && caption.seconds <= CAPTION_MAX_SECONDS)) {
+      const longest = caption.placement === 'card' ? CARD_MAX_SECONDS : CAPTION_MAX_SECONDS;
+      if (!(caption.seconds >= CAPTION_MIN_SECONDS && caption.seconds <= longest)) {
         problems.push(
-          `${said}: is up for ${String(caption.seconds)} seconds, not ${String(CAPTION_MIN_SECONDS)} to ${String(CAPTION_MAX_SECONDS)}`,
+          `${said}: is up for ${String(caption.seconds)} seconds, not ${String(CAPTION_MIN_SECONDS)} to ${String(longest)}`,
         );
       }
       const next = captions[index + 1];
@@ -289,8 +349,15 @@ export function scriptProblems(
       if (caption.callout !== undefined && caption.placement !== undefined) {
         problems.push(`${said}: a callout is drawn beside its panel, so it has no placement`);
       }
-      if (caption.lines !== undefined && caption.placement !== 'card') {
-        problems.push(`${said}: only a card has lines under its words`);
+      if (
+        caption.lines !== undefined &&
+        caption.placement !== 'card' &&
+        caption.placement !== 'title'
+      ) {
+        problems.push(`${said}: only a card or a title has lines under its words`);
+      }
+      if (caption.logo === true && caption.placement !== 'title' && caption.placement !== 'card') {
+        problems.push(`${said}: only a title or a card is drawn under the logo`);
       }
       const onClosingCard = scene === closing && caption.placement === 'card';
       for (const text of [caption.text, ...(caption.lines ?? [])]) {
@@ -360,7 +427,8 @@ function chapterProblems(script: VideoScript): string[] {
  * The lines a `card` caption carries under its own words: the map credit,
  * ODbL §4.3's notice and the addresses it asks for, written out since a video
  * cannot link (ADR 0056 D-8.3, as the demo's closing card), and the project's
- * address.
+ * address as the call to action, with no `https://` (the owner's wording of
+ * 2026-11-25 on #3177).
  */
 export function cardLines(): readonly string[] {
   return [
@@ -368,7 +436,7 @@ export function cardLines(): readonly string[] {
     ODBL_NOTICE,
     `OpenStreetMap: ${OSM_COPYRIGHT_URL}`,
     `Open Database License: ${ODBL_LICENCE_URL}`,
-    `On Your Left: ${SOURCE_CODE_URL}`,
+    `Get it free: ${SOURCE_CODE_URL.replace(/^https:\/\//u, '')}`,
   ];
 }
 
@@ -376,7 +444,7 @@ export function cardLines(): readonly string[] {
 export function shownLines(caption: VideoCaption): readonly string[] {
   return caption.placement === 'card'
     ? [caption.text, ...(caption.lines ?? []), ...cardLines()]
-    : [caption.text];
+    : [caption.text, ...(caption.lines ?? [])];
 }
 
 /** A caption on screen: which, and how opaque it is now. */
@@ -408,6 +476,22 @@ export function captionAt(scene: VideoScene, second: number): ShownCaption | und
     return { caption, opacity };
   }
   return undefined;
+}
+
+/**
+ * How black the frame at `second` of a scene `seconds` long is, from 0 to 1:
+ * each scene fades from black and to black over {@link SCENE_FADE_SECONDS}.
+ * The video's `last` scene does not fade out — its closing card is the last
+ * frame — and its `first` fades in like any other.
+ */
+export function sceneFade(
+  second: number,
+  seconds: number,
+  edges: { readonly first: boolean; readonly last: boolean },
+): number {
+  const fromBlack = 1 - second / SCENE_FADE_SECONDS;
+  const toBlack = edges.last ? 0 : 1 - (seconds - second) / SCENE_FADE_SECONDS;
+  return Math.min(1, Math.max(0, fromBlack, toBlack));
 }
 
 /** `seconds` as an SRT time, `HH:MM:SS,mmm`. */

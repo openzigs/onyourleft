@@ -183,6 +183,19 @@ describe('what the capture rides — #3152', () => {
     expect(Math.max(...elevations) - Math.min(...elevations)).toBeGreaterThan(30);
   });
 
+  it('gives the route a shape the HUD’s map can show, not a straight line (#3177)', () => {
+    const points = [...captureRouteGpx().matchAll(/lat="([-\d.]+)" lon="([-\d.]+)"/gu)];
+    const north = points.map((point) => Number(point[1]));
+    const east = points.map((point) => Number(point[2]));
+    const span = (values: number[]): number => Math.max(...values) - Math.min(...values);
+    // At 0° a degree is as long east as north, so the spans compare as drawn,
+    // north-up and fitted whole (`hud/plan.ts`): a quarter as wide as it is long.
+    expect(span(east) / span(north)).toBeGreaterThan(0.25);
+    // And it bends both ways: east of its start, then west of it.
+    expect(Math.max(...east)).toBeGreaterThan(0);
+    expect(Math.min(...east)).toBeLessThan(0);
+  });
+
   it('stands its clock on a midsummer morning', () => {
     expect(new Date(CAPTURE_DATE_MS).toISOString()).toBe('2026-06-20T10:30:00.000Z');
   });

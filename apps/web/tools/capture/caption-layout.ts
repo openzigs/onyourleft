@@ -186,3 +186,25 @@ export function placeCaption(request: CaptionRequest): CaptionPlace | undefined 
   const from = nearestPoint(box, centre(request.target));
   return { box, leader: { from, to: nearestPoint(request.target, from) } };
 }
+
+/**
+ * The least width, in whole pixels, at which a caption that is `natural` in
+ * size at its widest is still no taller — #3175's review. A caption that
+ * wraps is drawn at it, so its lines are even and its box has no empty side;
+ * one that fits on a line keeps its own width.
+ *
+ * `heightAt` lays the caption out at a width and answers its height.
+ */
+export async function balancedWidth(
+  natural: { readonly width: number; readonly height: number },
+  heightAt: (width: number) => Promise<number>,
+): Promise<number> {
+  let fits = Math.ceil(natural.width);
+  let tooNarrow = 0;
+  while (fits - tooNarrow > 1) {
+    const middle = Math.floor((fits + tooNarrow) / 2);
+    if ((await heightAt(middle)) <= natural.height + 0.5) fits = middle;
+    else tooNarrow = middle;
+  }
+  return fits;
+}

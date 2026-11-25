@@ -14,7 +14,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { Box } from './caption-layout';
-import { drawnProblems, finishVideo, partialName, scriptName } from './render-script';
+import {
+  drawnProblems,
+  finishVideo,
+  hudProblems,
+  LOGO_FILE,
+  logoDataUrl,
+  partialName,
+  scriptName,
+} from './render-script';
 
 const box = (x: number, y: number, width: number, height: number): Box => ({
   x,
@@ -83,5 +91,32 @@ describe('the script’s video, named only when whole — #3156', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the whole HUD on every captioned frame — #3175', () => {
+  it('refuses a frame missing or fading a panel its mode draws, and passes one with all of them', () => {
+    expect(hudProblems([], 'callout')).toEqual([]);
+    expect(hudProblems(['controls'], 'lower-third')).toEqual([
+      'the HUD does not show controls, drawn and unfaded',
+    ]);
+    expect(hudProblems(['elevation', 'map'], 'title')).toEqual([
+      'the HUD does not show elevation, map, drawn and unfaded',
+    ]);
+  });
+
+  it('does not ask the closing card, which covers the whole frame', () => {
+    expect(hudProblems(['controls'], 'card')).toEqual([]);
+  });
+});
+
+describe('the logo in the intro — #3175', () => {
+  it('draws the app’s own dark-palette logo, untouched, from its bytes', () => {
+    expect(LOGO_FILE.replaceAll('\\', '/')).toMatch(/\/apps\/web\/src\/brand\/logo-dark\.webp$/u);
+    const url = logoDataUrl();
+    expect(url.startsWith('data:image/webp;base64,')).toBe(true);
+    expect(Buffer.from(url.slice('data:image/webp;base64,'.length), 'base64')).toEqual(
+      readFileSync(LOGO_FILE),
+    );
   });
 });
