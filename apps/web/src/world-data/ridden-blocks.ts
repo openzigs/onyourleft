@@ -6,16 +6,23 @@
  * every request, and a block it holds is never asked of the archive again
  * while it is there (D-6.7).
  *
- * It ships with the reader and has the same caller to come: #2896, the
- * open-world session, builds one per ride with the riding athlete. Until then
- * nothing in the product builds one.
+ * ⚠️ **Nothing in the product builds one yet.** The open-world session
+ * (`game/open-world/session.ts`, #2896) builds the reader and passes it no
+ * cache; handing it one, for the riding athlete, is the step that turns the
+ * cache on. The reader converts what it keeps into and out of each block's
+ * own frame (`area.ts` §`blockFrame`), so a block kept on one ride lands in
+ * the same place on a ride that started elsewhere.
  *
  * - **Scoped to the athlete** (D-6.2): it is built for one `owner`, and every
  *   store call it makes names that owner, so one athlete's ride never reads
  *   another's blocks on the same device.
  * - **What is kept** (D-6.1): the decoded features, packed as a corridor's are
- *   (`packCorridorFeatures`), with the block's tile states, the archive it
- *   came from and when — never the raw tile bytes.
+ *   (`packCorridorFeatures`), and each tile's streets with their road fields
+ *   (`packTileStreets`) for the street graph, with the block's tile states,
+ *   the archive it came from and when — never the raw tile bytes, and never a
+ *   street's name (ADR 0096 D-1.4).
+ * - **Only a block read whole**: the reader keeps no block with a tile still
+ *   refused, and a block read whole again replaces what was kept.
  * - **Trusted only from this archive URL and this reader version**, as the
  *   corridor port trusts a corridor: a block kept from another archive, or by
  *   another `CORRIDOR_READER_VERSION`, is read again and replaced.
@@ -31,7 +38,9 @@ import { blockKey, type AreaCache } from '../game/world-data/area';
 import {
   CORRIDOR_READER_VERSION,
   packCorridorFeatures,
+  packTileStreets,
   unpackCorridorFeatures,
+  unpackTileStreets,
 } from '../game/world-data/corridor';
 
 /** The store calls the cache makes, every one naming the owner. */
@@ -64,20 +73,22 @@ export function riddenBlockCache(options: RiddenBlockCacheOptions): AreaCache {
         return undefined;
       }
       const features = await unpackCorridorFeatures(record.features);
+      const streets = await unpackTileStreets(record.streets);
       await store.markRiddenBlock(owner, key, options.now().toISOString());
-      return { tiles: record.tiles, features };
+      return { tiles: record.tiles, features, streets };
     },
-    put: async (held, identity) => {
+    put: async (block, kept, identity) => {
       const at = options.now().toISOString();
       await store.putRiddenBlock({
         owner,
-        block: blockKey(held.block),
+        block: blockKey(block),
         archive: { url: archiveUrl, identity },
         readerVersion: CORRIDOR_READER_VERSION,
         readAt: at,
         riddenAt: at,
-        tiles: held.tiles,
-        features: await packCorridorFeatures(held.features),
+        tiles: kept.tiles,
+        features: await packCorridorFeatures(kept.features),
+        streets: await packTileStreets(kept.streets),
         licence: 'ODbL-1.0',
       });
     },

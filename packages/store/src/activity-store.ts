@@ -3230,7 +3230,8 @@ export class ActivityStore {
    * read it.
    *
    * @throws {StoreValidationError} if the record is not a ridden block, or its
-   * features are over {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}; nothing is written.
+   * features and streets together are over
+   * {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}; nothing is written.
    * @throws {StoreReferentialError} if there is no such athlete.
    */
   async putRiddenBlock(record: RiddenBlockRecord): Promise<void> {
@@ -3240,11 +3241,15 @@ export class ActivityStore {
     if (!(record.features instanceof Blob)) {
       throw new StoreValidationError('riddenBlocks.features: must be a Blob');
     }
+    if (!(record.streets instanceof Blob)) {
+      throw new StoreValidationError('riddenBlocks.streets: must be a Blob');
+    }
     // The size and the limit, and never the block: which block it is is
     // location data (ADR 0004 D).
-    if (record.features.size > RIDDEN_BLOCK_FEATURES_LIMIT_BYTES) {
+    const size = record.features.size + record.streets.size;
+    if (size > RIDDEN_BLOCK_FEATURES_LIMIT_BYTES) {
       throw new StoreValidationError(
-        `riddenBlocks.features: ${String(record.features.size)} bytes is over the limit of ${String(RIDDEN_BLOCK_FEATURES_LIMIT_BYTES)} bytes`,
+        `riddenBlocks.features and streets: ${String(size)} bytes is over the limit of ${String(RIDDEN_BLOCK_FEATURES_LIMIT_BYTES)} bytes`,
       );
     }
     if (!Number.isSafeInteger(record.block) || record.block < 0) {

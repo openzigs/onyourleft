@@ -417,6 +417,32 @@ export function joinCorridorFeatures(
   };
 }
 
+/**
+ * A read's features in another frame — #2891: the ridden-block cache keeps a
+ * block about its own corner and hands it to a ride drawn about its start
+ * (`area.ts` §`reframer`, which makes `to`). Every ring, line and point moves;
+ * nothing else changes. Here, as {@link joinCorridorFeatures} is, because this
+ * module packs and hands over the place points (`places-never-shown.test.ts`).
+ */
+export function reframeCorridorFeatures(
+  features: CorridorFeatures,
+  to: {
+    readonly point: (x: number, z: number) => { readonly x: number; readonly z: number };
+    readonly line: (line: Float32Array) => Float32Array;
+  },
+): CorridorFeatures {
+  const move = to.line;
+  return {
+    landUse: features.landUse.map((f) => ({ ...f, rings: f.rings.map(move) })),
+    buildings: features.buildings.map((f) => ({ ...f, rings: f.rings.map(move) })),
+    paths: features.paths.map((f) => ({ ...f, line: move(f.line) })),
+    streets: features.streets.map((f) => ({ ...f, line: move(f.line) })),
+    places: features.places.map((f) => ({ ...f, ...to.point(f.x, f.z) })),
+    waterLines: (features.waterLines ?? []).map((f) => ({ ...f, line: move(f.line) })),
+    rails: (features.rails ?? []).map((f) => ({ ...f, line: move(f.line) })),
+  };
+}
+
 /** What {@link readCorridorTiles} came to. */
 export type CorridorRead =
   | {
@@ -869,6 +895,88 @@ export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatur
   return corridorFeaturesOfPacked(
     JSON.parse(new TextDecoder().decode(json)) as PackedCorridorFeatures,
   );
+}
+
+/** The packed format of a ridden block's per-tile streets (#2891): its first version. */
+const PACKED_STREETS_VERSION = 1;
+
+/** What {@link packTileStreets} packs: each tile, and each of its streets with its road fields. */
+interface PackedTileStreets {
+  readonly v: typeof PACKED_STREETS_VERSION;
+  readonly tiles: readonly {
+    readonly x: number;
+    readonly y: number;
+    /** `g` grade, `o` oneway, `a` access, `l` is-link; never a name. */
+    readonly streets: readonly {
+      kind: string;
+      detail: string;
+      g: StreetGrade;
+      o: DecodedStreetFeature['oneway'];
+      a: DecodedStreetFeature['access'];
+      l: boolean;
+      line: number[];
+    }[];
+  }[];
+}
+
+/**
+ * A block's per-tile streets as the ridden-block cache keeps them (#2891):
+ * gzip over JSON, coordinates in centimetres, as {@link packCorridorFeatures}.
+ * ⚠️ **Never a name** (ADR 0096 D-1.4): a street's name is held in memory
+ * with the block and is never stored, so a block read from the cache shows
+ * none until it is read from the archive again.
+ */
+export async function packTileStreets(streets: readonly TileStreets[]): Promise<Blob> {
+  const packed: PackedTileStreets = {
+    v: PACKED_STREETS_VERSION,
+    tiles: streets.map((each) => ({
+      x: each.tile.x,
+      y: each.tile.y,
+      streets: each.streets.map((f) => ({
+        kind: f.kind,
+        detail: f.kindDetail,
+        g: f.grade,
+        o: f.oneway,
+        a: f.access,
+        l: f.isLink,
+        line: toInts(f.line),
+      })),
+    })),
+  };
+  const json = new TextEncoder().encode(JSON.stringify(packed));
+  return new Blob([await gzipBytes(json)], { type: 'application/gzip' });
+}
+
+/**
+ * Reads back what {@link packTileStreets} packed, each road field held to the
+ * decoder's own values again, so a blob edited on the device cannot put
+ * another string into the street graph. Throws for a blob it did not write.
+ */
+export async function unpackTileStreets(blob: Blob): Promise<TileStreets[]> {
+  const json = await gunzipBytes(new Uint8Array(await blob.arrayBuffer()));
+  const packed = JSON.parse(new TextDecoder().decode(json)) as PackedTileStreets;
+  if (packed.v !== PACKED_STREETS_VERSION || !Array.isArray(packed.tiles)) {
+    throw new Error('riddenBlocks.streets: not a version this reads');
+  }
+  // \`Array.isArray\` narrows a readonly array to \`any[]\`: the type is said again.
+  const tiles: PackedTileStreets['tiles'] = packed.tiles;
+  return tiles.map((tile): TileStreets => {
+    if (!Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y)) {
+      throw new Error('riddenBlocks.streets: a tile that is not one');
+    }
+    return {
+      tile: { z: 15, x: tile.x, y: tile.y },
+      streets: tile.streets.map((f) => ({
+        kind: typeof f.kind === 'string' ? f.kind : '',
+        kindDetail: typeof f.detail === 'string' ? f.detail : '',
+        grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
+        oneway: f.o === 'with-line' || f.o === 'against-line' ? f.o : 'no',
+        access: f.a === 'no' || f.a === 'private' ? f.a : 'open',
+        isLink: f.l === true,
+        line: fromInts(f.line),
+      })),
+    };
+  });
 }
 
 /** The features a packed value holds. Throws for one that is not a version this reads. */

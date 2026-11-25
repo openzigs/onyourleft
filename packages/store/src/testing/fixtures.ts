@@ -1262,6 +1262,7 @@ export async function riddenBlockFor(
     readonly seed?: number;
     readonly riddenAt?: string;
     readonly features?: Blob;
+    readonly streets?: Blob;
   } = {},
 ): Promise<RiddenBlockRecord> {
   const seed = overrides.seed ?? 0;
@@ -1287,6 +1288,11 @@ export async function riddenBlockFor(
     features:
       overrides.features ??
       (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed + 20))),
+    // Opaque to the store, as `features` is: the app packs it. Different per
+    // athlete and per seed, so a read that handed back another's cannot match.
+    streets:
+      overrides.streets ??
+      new Blob([JSON.stringify({ streets: `ridden-block-streets:${owner}:${String(seed)}` })]),
     licence: 'ODbL-1.0',
   };
 }

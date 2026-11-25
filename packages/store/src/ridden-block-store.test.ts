@@ -59,7 +59,7 @@ async function rowsOnDisk(): Promise<RiddenBlockRecord[]> {
 const at = (minutes: number): string => new Date(Date.UTC(2026, 10, 20, 8, minutes)).toISOString();
 
 describe('a ridden block round-trips', () => {
-  it('reads back on a fresh connection, its features unpacked to what was packed', async () => {
+  it('reads back on a fresh connection, its features unpacked to what was packed and its streets byte for byte', async () => {
     const block = await riddenBlockFor(ATHLETE_A);
     await harness.write((store) => store.putRiddenBlock(block));
     const read = await harness.read((store) => store.getRiddenBlock(ATHLETE_A, block.block));
@@ -75,6 +75,8 @@ describe('a ridden block round-trips', () => {
     expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
       await unpackWorldCorridorFeatures(block.features),
     );
+    expect(read?.streets).toBeInstanceOf(Blob);
+    expect(await read?.streets.text()).toBe(await block.streets.text());
   });
 
   it('marks a block ridden, and says when there is none to mark', async () => {
@@ -146,10 +148,24 @@ describe('what is refused', () => {
   it.each([
     ['another licence', { licence: 'CC-BY-4.0' }],
     ['features that are not a Blob', { features: new Uint8Array(4) }],
+    ['streets that are not a Blob', { streets: new Uint8Array(4) }],
+    ['no streets at all', { streets: undefined }],
     ['a block that is not a non-negative integer', { block: -1 }],
     ['a fractional block', { block: 1.5 }],
   ])('refuses %s, and writes nothing', async (_name, change) => {
     const block = { ...(await riddenBlockFor(ATHLETE_A)), ...change } as RiddenBlockRecord;
+    await expect(harness.write((store) => store.putRiddenBlock(block))).rejects.toBeInstanceOf(
+      StoreValidationError,
+    );
+    expect(await rowsOnDisk()).toStrictEqual([]);
+  });
+
+  it('refuses features and streets over the limit together, though each is under it', async () => {
+    const half = RIDDEN_BLOCK_FEATURES_LIMIT_BYTES / 2;
+    const block = await riddenBlockFor(ATHLETE_A, {
+      features: new Blob([new Uint8Array(half)]),
+      streets: new Blob([new Uint8Array(half + 1)]),
+    });
     await expect(harness.write((store) => store.putRiddenBlock(block))).rejects.toBeInstanceOf(
       StoreValidationError,
     );

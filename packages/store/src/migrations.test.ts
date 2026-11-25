@@ -1762,6 +1762,8 @@ describe('version 22 to version 23 — #2891’s ridden blocks', () => {
       const blocks = dump.get(TABLE.riddenBlocks) as RiddenBlockRecord[];
       const corridors = dump.get(TABLE.worldCorridors) as WorldCorridorRecord[];
       expect(blocks).toHaveLength(ATHLETES.length);
+      // Every block kept at 23 carries its streets: the field the rollback drops with it.
+      for (const each of blocks) expect(each.streets).toBeInstanceOf(Blob);
       expect(corridors).toHaveLength(ATHLETES.length);
 
       const tablesAtTwentyTwo = await reimportAtTwentyTwo(harness.databaseName, dump);
@@ -1800,16 +1802,22 @@ describe('version 22 to version 23 — #2891’s ridden blocks', () => {
       expect(after.get(TABLE.riddenBlocks)).toStrictEqual([]);
       expect(blockReads).toStrictEqual(blocks.map(() => undefined));
 
-      // Usable at 23 again: a block kept now reads back on a fresh connection.
+      // Usable at 23 again: a block kept now reads back on a fresh connection,
+      // its streets as well as its features.
       const [mine] = blocks;
       if (mine === undefined) return;
+      const again = await riddenBlockFor(mine.owner);
       const writer = openActivityStore(harness.databaseName);
-      await writer.putRiddenBlock(await riddenBlockFor(mine.owner));
+      await writer.putRiddenBlock(again);
       writer.close();
       const reader = openActivityStore(harness.databaseName);
       const read = await reader.getRiddenBlock(mine.owner, mine.block);
       reader.close();
       expect(read?.owner).toBe(mine.owner);
+      expect(await read?.streets.text()).toBe(await again.streets.text());
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(again.features),
+      );
     } finally {
       await harness.destroy();
     }

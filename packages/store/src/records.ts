@@ -2109,8 +2109,18 @@ export interface RiddenBlockRecord {
     readonly y: number;
     readonly state: WorldCorridorTileState;
   }[];
-  /** The decoded features, packed by the app. Opaque here; at most {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}. */
+  /**
+   * The decoded features, packed by the app, about the block's own corner
+   * (its frame is fixed to the grid, so a block serves any ride). Opaque
+   * here; with {@link streets}, at most {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}.
+   */
   readonly features: Blob;
+  /**
+   * Each of its tiles' streets with their road fields, packed by the app, for
+   * the open-world street graph, which is built a tile at a time. Opaque
+   * here. ⚠️ **Never a street's name** (ADR 0096 D-1.4).
+   */
+  readonly streets: Blob;
   /** What the data is licensed under. The only value there is. */
   readonly licence: 'ODbL-1.0';
 }
@@ -2128,8 +2138,8 @@ export interface RiddenBlockRecord {
 export const RIDDEN_BLOCKS_LIMIT = 256;
 
 /**
- * The largest `features` blob one ridden block may hold: **4 MiB**, a quarter
- * of a 600-tile corridor's {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES} for
- * four tiles. ⚠️ Owed to the same measurement as {@link RIDDEN_BLOCKS_LIMIT}.
+ * The most one ridden block's `features` and `streets` blobs may hold
+ * together: **4 MiB**, a quarter of a 600-tile corridor's
+ * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES} for four tiles. ⚠️ Owed to the same measurement as {@link RIDDEN_BLOCKS_LIMIT}.
  */
 export const RIDDEN_BLOCK_FEATURES_LIMIT_BYTES = 4 * 1024 * 1024;
