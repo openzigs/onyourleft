@@ -20,6 +20,7 @@ import {
   captureRouteGpx,
   MAX_CAPTURE_FRAMES,
   parseCaptureArgs,
+  parseScriptArgs,
 } from './capture-args';
 
 describe('capture’s arguments — #3152', () => {
@@ -184,5 +185,57 @@ describe('what the capture rides — #3152', () => {
 
   it('stands its clock on a midsummer morning', () => {
     expect(new Date(CAPTURE_DATE_MS).toISOString()).toBe('2026-06-20T10:30:00.000Z');
+  });
+});
+
+describe('capture -- --script — #3156', () => {
+  const where = ['--start', '40.1,-75.25', '--archive', '/tmp/basemap.pmtiles'];
+
+  it('reads a whole script’s render, 1920×1080 at 60 fps by default', () => {
+    expect(parseScriptArgs(['--', '--script', 'youtube', ...where])).toEqual({
+      ok: true,
+      request: {
+        script: 'youtube',
+        fps: 60,
+        width: 1920,
+        height: 1080,
+        out: undefined,
+        start: '40.1,-75.25',
+        archive: '/tmp/basemap.pmtiles',
+      },
+    });
+    expect(
+      parseScriptArgs(['--script', 'youtube', '--size', '1280x720', '--fps', '30', ...where]),
+    ).toMatchObject({ ok: true, request: { fps: 30, width: 1280, height: 720 } });
+  });
+
+  it('needs the free ride’s start and archive, since the script rides the open world', () => {
+    expect(parseScriptArgs(['--script', 'youtube'])).toEqual({
+      ok: false,
+      message: 'capture: --script youtube rides the open world, so it needs --start and --archive',
+    });
+  });
+
+  it('takes no scene and no length: the script says both', () => {
+    expect(parseScriptArgs(['--script', 'youtube', '--seconds', '20', ...where])).toEqual({
+      ok: false,
+      message: 'capture: --seconds is the script’s to say, not --script’s',
+    });
+    expect(parseScriptArgs(['--script', 'youtube', '--scene', 'delivery', ...where])).toEqual({
+      ok: false,
+      message: 'capture: --scene is the script’s to say, not --script’s',
+    });
+    expect(parseScriptArgs(['--script', 'teaser'])).toEqual({
+      ok: false,
+      message: 'capture: --script is one of youtube, not teaser',
+    });
+    expect(parseScriptArgs(['--script', 'youtube', '--fps', '90', ...where])).toEqual({
+      ok: false,
+      message: 'capture: --fps is a whole number from 1 to 60, not 90',
+    });
+    expect(parseCaptureArgs(['--script', 'youtube'])).toEqual({
+      ok: false,
+      message: 'capture: --script is a whole video: parseScriptArgs reads it',
+    });
   });
 });

@@ -178,6 +178,7 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 | `--out` | a directory | `apps/web/capture/dist` |
 | `--start` | `free-ride` only: where the ride starts, `<lat>,<lon>` in decimal degrees | none: required |
 | `--archive` | `free-ride` only: a local copy of the basemap archive (`.pmtiles`) | none: required |
+| `--script` | `youtube`: the whole video from its scene script, in place of `--scene` and `--seconds` (#3156) | none |
 
 ### How it works
 
@@ -287,3 +288,93 @@ written to a file and handed to `--archive`, with `--start` at its start pin.
   rule, so the lap panel shows them and *Lap* counts from the line.
 - The lap race's countdown is ten seconds, and its first pick-up is a quarter of the way round, so
   on *Bellwether Loop* the item is used about 100 s into the ride. Capture the scene long enough.
+
+### The scene script: the whole video, captioned (#3156)
+
+```sh
+pnpm --filter @onyourleft/web run capture -- --script youtube \
+  --start <lat>,<lon> --archive /path/to/basemap.pmtiles
+```
+
+renders the whole video from **one scene script** and writes three files to
+`apps/web/capture/dist`:
+
+- `youtube-1920x1080-60fps.mp4`: every scene in order, as **one** H.264 file. Each scene is
+  ridden in the real app in turn, and every frame goes into the same encoder, so nothing is joined
+  or re-encoded. It is encoded as `youtube-1920x1080-60fps.partial.mp4` and renamed only once it
+  holds every frame, so a render that stops part-way leaves an earlier video as it was;
+- `youtube-1920x1080-60fps.srt`: every caption, timed in the whole video. The closing card's
+  entry carries the map credit lines that the card shows;
+- `youtube-1920x1080-60fps.chapters.txt`: the chapter list for the YouTube description
+  (`0:00 On Your Left`, `0:10 The HUD`, …), one line per scene that starts a chapter.
+
+The script rides the free ride, so it needs `--start` and `--archive` as that scene does.
+`--size`, `--fps` and `--out` work as they do for one scene. Each scene's event and request logs
+go in `youtube-scenes/<scene>/`.
+
+**The words and scenes are in
+[`apps/web/tools/capture/scripts/youtube.ts`](../apps/web/tools/capture/scripts/youtube.ts).**
+Each scene is a capture scene, ridden from its start and written from `from` seconds in, for
+a whole number of seconds. It may start a chapter, and it has captions. A caption has a
+start, a length and its text. It is either placed (a centred `title`, a `lower-third`, or the
+closing `card`) or a **callout**, which names the HUD panel it explains
+(`video-script.ts` §`CALLOUT_PANELS`: `readings`, `gradient`, `calories`, `elevation`, `map`,
+`workout`, `pacer`, `best`, `standings`, `item`, `houses`, `throw` and others). The owner approves
+every line before the final render, as on #3074.
+
+The epic's scenes 9 (group ride) and 11 (after the ride, the AI write-up) need a self-hosted
+instance. They come from [#3155](https://github.com/openzigs/onyourleft/issues/3155), which the
+owner holds, and are left out of the script; comments in the file mark where they go.
+
+#### What a script may say
+
+`tools/capture/video-script.ts` §`scriptProblems` checks the script before a frame is rendered.
+`video-script.test.ts` holds every shipped script to the same check in `pnpm run test`. It refuses:
+
+- a caption claiming a feature its scene does not ride: `delivery` (a built-in level with
+  throws), `lap-race` (a built-in circuit's race), `workout`, `junction` (a free ride, from its
+  first scripted turn on), `pacer`, and `instance`, which no capture scene rides until #3155.
+  A callout to a panel that only one mode draws, such as the standings or the throw buttons, claims
+  that mode, whatever the caption claims itself;
+- a word for a feature only an instance runs ("AI", "instance") anywhere but a line of the closing
+  card that begins "Optional on your own instance:". The AI pacer and AI bots exist but are not
+  filmed until #3155, so the card may state them as optional and nothing else may name them;
+- the load-metric trademarks, a competitor's name, and "validated", "accurate to" or "professional
+  fit". The word list is `src/demo/caption-words.ts`, shared with the demo's tour;
+- a caption up for under 3 or over 6 seconds, one that runs past its scene, or one less than a
+  second from the next; a scene under 6 seconds; a chapter list that YouTube would not read (the
+  first chapter at 0:00, three or more chapters, each 10 seconds or longer).
+
+#### Captions and callouts are drawn by the page
+
+Before each frame is taken, the caption on screen is laid out **in the page**, over the app, in the
+HUD's tokens (`render-script.ts`):
+
+1. the page measures the caption, the panel it explains (found by the HUD's class and the label a
+   rider reads, never by position), the map credit and every other HUD panel;
+2. `caption-layout.ts` §`placeCaption` chooses the place. A callout goes a gap outside the panel,
+   or outside the panel the reading sits in, and slides toward the middle until it is clear. A lower
+   third goes low and centred, and a title goes above the middle. Every place is inside the 5 %
+   title-safe area and never over the map credit. A place over another HUD panel is used only when
+   the frame has no other;
+3. the page draws the caption there, with a leader line and a ring round the panel. Each caption
+   fades in and out over half a second, but for a card that ends its scene: the closing card holds
+   to the video's last frame.
+
+The drawn box is then measured again. The render **stops** on any frame where a caption covers the
+panel it explains or the map credit, or leaves the title-safe area. It also stops when a callout's
+panel is not drawn, for example the standings below 1080p, where the HUD leaves them out, or the ride
+controls once they have faded after five seconds without input. Such a video is never written.
+`caption-layout.test.ts` sweeps the layout over five frame sizes and the HUD's measured 1080p boxes.
+
+#### Known in the frames
+
+- **Heights unavailable** shows through the free-ride scene. The capture refuses the terrain archive
+  (#3154), so the open world's road is drawn level and the HUD says so. Hiding a true notice would
+  show the product as it is not, so the scene keeps it.
+  [#3173](https://github.com/openzigs/onyourleft/issues/3173) gives the capture a local terrain
+  archive.
+- **Single frames with no world drawn.** A capture of `route-hud` at 5 fps, from `main` before this
+  change, has three frames in 200 where the world is not drawn: the sky is the page's background.
+  This is a capture-mode defect from #3152:
+  [#3172](https://github.com/openzigs/onyourleft/issues/3172).
