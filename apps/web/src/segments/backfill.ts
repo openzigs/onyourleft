@@ -200,6 +200,17 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
 
   for (const summary of page) {
     last = summary;
+    if (summary.rideFacts?.openWorld === true) {
+      // #3088, the owner's ruling of 2026-11-25: an open-world ride is matched
+      // against nothing. Its positions are the streets the game drew under a
+      // simulated rider, so an effort found in them would be a personal best
+      // nobody rode and, once the ride is public, a row on a shared board.
+      // Decided BEFORE its streams are read, so no position is decoded for
+      // it, and written as an empty set, as an indoor ride is below, so a
+      // re-sweep removes anything it once held.
+      await store.putActivityEfforts(athleteId, summary.id, []);
+      continue;
+    }
     const trace = await traceOf(athleteId, summary.id, store);
     if (trace === undefined) {
       // A ride with no positions — an indoor trainer session, which is most

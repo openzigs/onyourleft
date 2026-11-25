@@ -5367,6 +5367,67 @@ select.oyl-input {
 }
 
 /*
+ * The route planner's summary strip — #3185: the distance and the climbing,
+ * and *Routing…* while a leg is out, in one row directly above the map, so a
+ * drag and its result are on the screen together. It wraps on a narrow phone
+ * or at large text rather than scrolling sideways (WCAG 2.2 SC 1.4.10). Each
+ * figure keeps its term and value on one line, and *Routing…* has a slot as
+ * wide as itself whether it is said or not, so a leg going out and coming
+ * back does not re-wrap the strip and move the map under a finger.
+ * Drawn in tokens already paired: ink and ink-muted on the surface, and the
+ * border colour. `controls-first.browser.spec.ts` §"#3185" measures it
+ * against the map.
+ */
+.oyl-planner__summary {
+  align-items: baseline;
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  column-gap: var(--oyl-space-md);
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+.oyl-planner__summary > dl {
+  column-gap: var(--oyl-space-md);
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.oyl-planner__summary dt {
+  color: var(--oyl-color-ink-muted);
+  display: inline;
+  font-size: var(--oyl-font-size-sm);
+  margin-inline-end: var(--oyl-space-xs);
+}
+
+.oyl-planner__summary dd {
+  display: inline;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 0;
+}
+
+.oyl-planner__summary > dl > div {
+  white-space: nowrap;
+}
+
+.oyl-planner__routing {
+  color: var(--oyl-color-ink-muted);
+  margin: 0;
+  min-inline-size: 6em;
+}
+
+/* The strip sits on the map, so the map's own gap above it is the strip's. */
+.oyl-planner__summary + .oyl-map,
+.oyl-planner__summary + .oyl-map-frame {
+  margin-top: var(--oyl-space-xs);
+}
+
+/*
  * The same row layout as the trainer's form, and deliberately a second class
  * rather than a shared one: these two screens have no relationship, and a
  * `.oyl-form-row` would be a promise that a change for one is right for the

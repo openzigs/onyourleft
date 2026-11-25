@@ -3941,6 +3941,10 @@ function GameScreen({
       // HUD all read one view on this frame. @see rideRoadRef
       const following = rideRoadRef.current.follower;
       const followed = following?.follow(simulation.state.ride.distance);
+      // #3088, the owner's ruling of 2026-11-25: every frame of an open-world
+      // ride marks the recording under it, so the saved ride is matched
+      // against no segment. Before anything below can record a position.
+      if (following !== undefined) trainerPortRef.current?.rodeOpenWorld?.();
       if (following !== undefined && followed !== undefined) {
         rideRoadRef.current = { ...followed, follower: following };
         simulation.followRoad(followed.profile, followed.origin);

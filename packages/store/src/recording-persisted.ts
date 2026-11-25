@@ -101,6 +101,8 @@ export interface PersistedRecordingSession {
   replans?: unknown[];
   /** @see RecordingSessionRecord.replansDropped */
   replansDropped?: number;
+  /** @see RecordingSessionRecord.openWorld — #3088. Optional and unindexed, so no schema version moved. */
+  openWorld?: true;
 }
 
 /** One lap of a course. @see RecordedCourseLap */
@@ -196,6 +198,8 @@ export function toPersistedRecordingSession(
     // #1328: only the records that read back are written, so one that does
     // not is left out and counted, and never refuses the header. @see replansOf
     ...replansRow(record.replans, record.replansDropped),
+    // #3088: the one value it has, whatever the caller passed.
+    ...(record.openWorld === true ? { openWorld: true } : {}),
   };
 }
 
@@ -332,6 +336,8 @@ export function fromPersistedRecordingSession(
     ...workoutBlocksOut(row.workoutBlocks, startedAt, updatedAt),
     // #1328: never a throw — @see replansOf
     ...replansOf(row.replans, row.replansDropped),
+    // #3088: never a throw — anything but `true` is a recording with no mark.
+    ...(row.openWorld === true ? { openWorld: true } : {}),
     ...(damaged.length === 0 ? {} : { damaged }),
   };
 }

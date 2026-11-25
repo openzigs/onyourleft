@@ -7,6 +7,7 @@
  * it before it renders.
  */
 
+import { BOT_TACTICS, type BotTactic } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { CAPTURE_SCENES } from '../../src/game/capture-scene';
@@ -193,7 +194,7 @@ describe('the demo video’s scene script — #3156', () => {
     const opening = YOUTUBE_SCRIPT.scenes[0]?.captions[0];
     expect(opening).toMatchObject({ placement: 'title', logo: true, lines: [platforms] });
     expect(shownLines(opening as VideoCaption)).toEqual([
-      'On Your Left — free, open-source indoor and outdoor cycling',
+      'Free, open-source indoor and outdoor cycling',
       platforms,
     ]);
     const card = YOUTUBE_SCRIPT.scenes.at(-1)?.captions.find((c) => c.placement === 'card');
@@ -239,14 +240,14 @@ describe('the demo video’s scene script — #3156', () => {
     expect(CALLOUT_PANELS.controls.selector).toBe('.oyl-hud__controls');
   });
 
-  it('says in the lap race that the bots race with tactics', () => {
+  it('says in the lap race that the bots attack, chase and sit in, tactics they ride', () => {
     const race = YOUTUBE_SCRIPT.scenes.find((scene) => scene.capture === 'lap-race');
     expect(race?.captions).toContainEqual(
-      expect.objectContaining({
-        text: 'Bots that attack, chase and sit in',
-        callout: 'standings',
-      }),
+      expect.objectContaining({ text: 'Bots that attack, chase and sit in', callout: 'standings' }),
     );
+    // Each one named is a tactic the on-device bots ride (ADR 0067).
+    const named: BotTactic[] = ['attack', 'chase', 'sit-in'];
+    expect(BOT_TACTICS).toEqual(expect.arrayContaining(named));
   });
 
   it('refuses an instance caption on every capture scene, until #3155 rides one', () => {
@@ -504,7 +505,7 @@ describe('the demo video’s scene script — #3156', () => {
       expect.stringContaining('OpenStreetMap'),
       'OpenStreetMap: https://www.openstreetmap.org/copyright',
       'Open Database License: https://opendatacommons.org/licenses/odbl/1-0/',
-      'On Your Left: https://github.com/openzigs/onyourleft',
+      'Get it free: github.com/openzigs/onyourleft',
     ]);
     const last = YOUTUBE_SCRIPT.scenes.at(-1);
     expect(last?.captions.some((caption) => caption.placement === 'card')).toBe(true);

@@ -918,6 +918,9 @@ export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
  * same rule, so a race in the realistic world draws at most the realistic
  * bodies a room does, and none of its seven bots goes undrawn; the pacer, a
  * `bot` too, keeps its own realistic place.
+ *
+ * #3176: the stylised belt draws its share in the realistic world's light
+ * (`RiderBelt.setWorld`), not under a Lambert material that world leaves black.
  */
 export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
   readonly realistic: readonly RiderMarker[];
@@ -3338,6 +3341,23 @@ export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
   /**
+   * What the lit riders wear in the REALISTIC world — #3176: the realistic
+   * world's primitive material (@see physicalMaterials), taught the kit, the
+   * steer and the fade the stylised pair are.
+   *
+   * ⚠️ **A `MeshLambertMaterial` there is drawn black.** The realistic world
+   * turns the ambient lamp off (`WorldLamps.apply`'s `ambientShare`, ADR 0026
+   * D-9) because its environment map is the ambient term, and three lights only
+   * a physically based material by `scene.environment` — so every face of a
+   * Lambert rider turned from the sun had no light at all, which is what a
+   * realistic lap race's stylised bots (#1971) and a room's (#783) were.
+   */
+  readonly #physical = physicalRiderMaterial();
+  /** Which world the belt is drawn in. @see setWorld */
+  #world: QualitySettings['world'] = 'stylised';
+  /** The rung's shading. @see setShading */
+  #shading: QualitySettings['shading'] = 'lit';
+  /**
    * What the riders are drawn with into the sun's shadow map — #2596: a
    * depth material made as three 0.185's `WebGLShadowMap` makes its own
    * default (`new MeshDepthMaterial()`, basic depth packing: the directional
@@ -3656,7 +3676,29 @@ export class RiderBelt {
 
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    const material = this.#materials[shading];
+    this.#shading = shading;
+    this.#mount();
+  }
+
+  /**
+   * Which world's light the riders are drawn in — #3176. The realistic world
+   * lights them as it lights its other primitives (@see #physical); an unlit
+   * rung's flat material is the same in both.
+   */
+  setWorld(world: QualitySettings['world']): void {
+    this.#world = world;
+    this.#mount();
+  }
+
+  /** The material the meshes wear. @see setShading @see setWorld */
+  get material(): Material {
+    return this.#world === 'realistic' && this.#shading === 'lit'
+      ? this.#physical
+      : this.#materials[this.#shading];
+  }
+
+  #mount(): void {
+    const material = this.material;
     for (const mesh of this.#all()) mesh.material = material;
   }
 
@@ -3671,10 +3713,11 @@ export class RiderBelt {
     }
   }
 
-  /** Asks three to rebuild both materials' programs. @see ThreeGameView.#applyRiderShadows */
+  /** Asks three to rebuild every material's program. @see ThreeGameView.#applyRiderShadows */
   recompile(): void {
     this.#materials.lit.needsUpdate = true;
     this.#materials.flat.needsUpdate = true;
+    this.#physical.needsUpdate = true;
   }
 
   dispose(): void {
@@ -3686,6 +3729,7 @@ export class RiderBelt {
     // of the two is mounted, and the other would leak.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#physical.dispose();
     this.#depth.dispose();
   }
 
@@ -5009,6 +5053,21 @@ function physicalMaterials(): ShadedMaterials {
     ),
     flat: withAtmosphere(constructed(new MeshBasicMaterial({ vertexColors: true }))),
   };
+}
+
+/**
+ * The stylised rider's lit material in the realistic world — #3176: that
+ * world's primitive material (@see physicalMaterials), taught the kit, the
+ * steer and the fade as the stylised pair are in `RiderBelt`'s constructor.
+ * The kit first, because {@link withKitPerInstance} replaces the compile hook
+ * where the other two chain after it.
+ */
+function physicalRiderMaterial(): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+  );
+  withKitPerInstance(material);
+  return withAtmosphere(withRiderInstance(material, true));
 }
 
 /**
@@ -28231,6 +28290,8 @@ class ThreeGameView implements GameView {
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
     this.#riders.setShown(true);
+    // #3176: and lit by the realistic world's light there, which has no ambient lamp.
+    this.#riders.setWorld(world);
     this.#skyDome.mesh.visible = !realistic;
     this.#realistic?.setShown(realistic);
     this.#realistic?.grounding.setShown(realistic && this.#groundBlobsShown);

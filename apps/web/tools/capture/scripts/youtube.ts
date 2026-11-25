@@ -57,9 +57,10 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           seconds: 6,
           placement: 'title',
           // Owner ruling 2026-11-25 on #3175: the logo, centred, with the
-          // platforms line beneath it.
+          // platforms line beneath it. The logo names the app, so the title
+          // does not (the owner's wording, the same day).
           logo: true,
-          text: 'On Your Left — free, open-source indoor and outdoor cycling',
+          text: 'Free, open-source indoor and outdoor cycling',
           lines: ['On Android, and in Chrome or Edge on your computer. iOS coming soon.'],
         },
       ],
@@ -200,6 +201,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 8,
           seconds: 5,
           callout: 'standings',
+          // The tactics they ride include attack, chase and sit-in
+          // (`packages/domain/src/lap-race/tactics.ts` §`BotTactic`).
           // The owner's wording of 2026-11-25 on #3177. #3198: a bot attacks
           // from Go and is still away, in frame, while this is up.
           text: 'Bots that attack, chase and sit in',
@@ -236,7 +239,7 @@ export const YOUTUBE_SCRIPT: VideoScript = {
         {
           at: 0.5,
           seconds: 5.5,
-          text: 'No subscription. Your rides are kept on your device; self-hosting is optional',
+          text: 'No subscription. Your rides stay on your device.',
         },
         {
           at: 7,

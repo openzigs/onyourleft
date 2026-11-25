@@ -427,7 +427,8 @@ function chapterProblems(script: VideoScript): string[] {
  * The lines a `card` caption carries under its own words: the map credit,
  * ODbL §4.3's notice and the addresses it asks for, written out since a video
  * cannot link (ADR 0056 D-8.3, as the demo's closing card), and the project's
- * address.
+ * address as the call to action, with no `https://` (the owner's wording of
+ * 2026-11-25 on #3177).
  */
 export function cardLines(): readonly string[] {
   return [
@@ -435,7 +436,7 @@ export function cardLines(): readonly string[] {
     ODBL_NOTICE,
     `OpenStreetMap: ${OSM_COPYRIGHT_URL}`,
     `Open Database License: ${ODBL_LICENCE_URL}`,
-    `On Your Left: ${SOURCE_CODE_URL}`,
+    `Get it free: ${SOURCE_CODE_URL.replace(/^https:\/\//u, '')}`,
   ];
 }
 

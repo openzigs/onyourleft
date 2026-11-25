@@ -446,6 +446,18 @@ export interface GameTrainerPort {
    */
   lapRaceEnded?(race: LapRaceModelRecord): void;
   /**
+   * This frame was ridden in the open world — #3088, the owner's ruling of
+   * 2026-11-25: told on every frame of an open-world ride, so the recording
+   * under it is marked (the ride controller's `noteOpenWorld`) and the saved
+   * ride is matched against no segment. Every frame rather than once, so a
+   * recording started part-way through the ride is marked too. ⚠️ Not about
+   * the trainer: it carries nothing, on this port for {@link gameRideEnded}'s
+   * reason, and named so nothing else in production calls a method of that
+   * name. Optional, as {@link soloDraftStepped} is; `gameTrainerPortOver`
+   * always supplies it.
+   */
+  rodeOpenWorld?(): void;
+  /**
    * Whether the recording under this ride is PAUSED by the rider — #1360's
    * review (N1): the game says so while it rides in a room, and resumes
    * nothing (#516). `false` with nothing recording. Read through
@@ -707,6 +719,8 @@ interface GameTrainerSource {
   noteRoomRace?(race: RoomRaceFact): void;
   /** #2710. @see GameTrainerPort.lapRaceEnded */
   noteLapRace?(race: LapRaceModelRecord): void;
+  /** #3088. @see GameTrainerPort.rodeOpenWorld. Optional for a source with no recording. */
+  noteOpenWorld?(): void;
   /**
    * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
    * Optional for {@link recordForRoom}'s reason; the ride controller has both.
@@ -882,6 +896,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
+    },
+    rodeOpenWorld: () => {
+      controller?.noteOpenWorld?.();
     },
     lapRaceEnded: (race) => {
       controller?.noteLapRace?.(race);

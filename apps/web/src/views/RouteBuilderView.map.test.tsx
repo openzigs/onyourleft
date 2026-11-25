@@ -194,6 +194,21 @@ describe('the map is on the planner — #2006', () => {
   });
 });
 
+describe('the distance and climbing sit on the map — #3185', () => {
+  it('puts the summary strip directly above the map, with nothing between them', async () => {
+    const planner = await open({ provider: true });
+    await gesture(planner, (handlers) => {
+      handlers.tap(at(51.5, -0.12));
+    });
+    await gesture(planner, (handlers) => {
+      handlers.tap(at(51.51, -0.12));
+    });
+    const strip = planner.view.container.querySelector('.oyl-planner__summary');
+    expect(strip).not.toBeNull();
+    expect(strip?.nextElementSibling?.classList.contains('oyl-map')).toBe(true);
+  });
+});
+
 describe('tap to add — #2006', () => {
   it('adds a waypoint where the map was tapped, in order', async () => {
     const planner = await open();

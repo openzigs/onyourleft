@@ -187,8 +187,10 @@ every file from disk and refusing every other origin, as the demo's render does.
 first script runs, `tools/capture/capture-clock.ts` replaces the page's `performance.now`, `Date`,
 `requestAnimationFrame` and timers. The capture then:
 
-1. imports a synthetic route through the Routes page's own form. It is eight invented kilometres
-   from 0° 0° under the placeholder name *Capture loop*, so no real street or place is on screen.
+1. imports a synthetic route through the Routes page's own form. It is about 9.5 invented
+   kilometres from 0° 0° under the placeholder name *Capture loop*, so no real street or place is
+   on screen. It runs 8 km north and swings 1.2 km east and then west, so the HUD's map draws it as
+   an S, not a straight line.
    It also sets the rider's weight on the Settings page, so W/kg has one to read. Before that, the
    browser profile already holds the device's choices (#3175, below);
 2. opens `#/game?capture=<scene>`, with `route=` the scene's built-in level or circuit when it
