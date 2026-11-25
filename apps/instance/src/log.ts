@@ -221,6 +221,17 @@ export const EVENT_KEYS: ReadonlyMap<
       evalMs: isCount,
     },
   ],
+  // #2008: one call to the routing engine — which question, how it ended
+  // (`state`) and how long it took (`ms`, shared), and how many legs. Closed
+  // words and a count only: never a waypoint, a shape, a height or anything
+  // the engine said, whose error text can quote a coordinate.
+  [
+    'routing-call',
+    {
+      ask: (value) => value === 'route' || value === 'heights',
+      legs: isCount,
+    },
+  ],
   // #2781 (ADR 0080 D-4): which secret came from its file in the secrets
   // folder, whether this start made it, and whether that folder keeps
   // permission bits at all. Never the secret, and never the file's path.
@@ -311,7 +322,8 @@ const SERVER_SIDE_CLOSES: ReadonlySet<string> = new Set(['room-lost']);
  * - a room worker that died, a room's result or flag the instance could not
  *   write, a rooms sweep or a history catch-up that failed, a voice request
  *   that failed;
- * - an analysis job that failed; the analysis model, the picture model or
+ * - an analysis job that failed; the analysis model, the picture model, the
+ *   routing engine (#2008) or
  *   the history index off for a reason other than not being set (#2859: each
  *   is optional, and not set is not a problem); the instance keys not `ready`; a hosted model key
  *   held with no secret or one that will not open; voice turned off by a
@@ -337,6 +349,7 @@ export function isProblem(line: Readonly<Record<string, unknown>>): boolean {
       return state === 'failed';
     case 'analysis-model':
     case 'picture-model':
+    case 'routing':
     case 'history-index':
       // #2859: each is optional, and not set is not a problem — only one set and not working.
       return state === 'off' && code !== 'not-set';

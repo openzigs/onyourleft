@@ -17,6 +17,7 @@ import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
 import { ROOM_ROUTES } from './rooms/routes.ts';
+import { ROUTING_ROUTES } from './routing/routes.ts';
 import { SEALED_ROUTES } from './sealed/routes.ts';
 import { SEGMENT_ROUTES } from './segments/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
@@ -250,6 +251,7 @@ export const ROUTES: readonly Route[] = [
   ...HOSTED_ROUTES,
   ...TACTICS_ROUTES,
   ...CAMERA_ROUTES,
+  ...ROUTING_ROUTES,
   ...ROOM_ROUTES,
   {
     method: 'POST',

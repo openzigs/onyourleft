@@ -118,6 +118,7 @@ export interface RawConfig extends RawLegalSettings, RawTermsSettings {
   readonly analysisModelReasoningTokens?: string | undefined;
   readonly analysisModelContextTokens?: string | undefined;
   readonly pictureModel?: string | undefined;
+  readonly routingUrl?: string | undefined;
   readonly name?: string | undefined;
 }
 
@@ -207,6 +208,27 @@ export type PictureModelSettings =
 /** Why no local model takes pictures. `no-server` carries the server's own refusal. */
 export type PictureModelOffCode = 'not-set' | 'no-server' | 'bad-model';
 
+/**
+ * The routing engine the route planner snaps to roads with (#2008, ADR 0010
+ * D-4): Valhalla at a LOCAL address — or off, and why. Like every optional
+ * service here, off is never a refusal to start: a rider's planner draws
+ * straight lines, as it does with no instance at all (ADR 0036 D-3).
+ */
+export type RoutingSettings =
+  | {
+      readonly kind: 'on';
+      /** Valhalla's origin: `http://routing:8002`. */
+      readonly endpoint: URL;
+    }
+  | {
+      readonly kind: 'off';
+      readonly code: RoutingOffCode;
+      readonly reason: string;
+    };
+
+/** Why there is no routing engine. */
+export type RoutingOffCode = 'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'tls-by-name';
+
 /** The `.env` lines the analysis model is read from (#2609). */
 export type AnalysisModelEnv = Pick<
   RawConfig,
@@ -255,6 +277,8 @@ export interface Config {
   readonly analysisEnv: AnalysisModelEnv;
   /** The local model for the side camera's pictures, or why there is none (#1106). */
   readonly pictures: PictureModelSettings;
+  /** The routing engine the route planner snaps to roads with, or why there is none (#2008). */
+  readonly routing: RoutingSettings;
   /**
    * What the operator calls this instance, which a rider's app shows once it
    * is connected (#777) — or `null`, and the app then names the instance by
@@ -469,6 +493,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
   const history = readHistorySettings(raw);
   const analysis = readAnalysisModelSettings(raw);
   const pictures = readPictureModelSettings(raw);
+  const routing = readRoutingSettings(raw);
   return {
     ok: true,
     config: {
@@ -492,6 +517,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
         analysisModelContextTokens: raw.analysisModelContextTokens,
       },
       pictures,
+      routing,
       name: instanceName,
       legal,
       terms,
@@ -807,4 +833,61 @@ export function identitySettings(config: Config): {
     moderators: config.moderators,
     publicRooms: config.publicRooms,
   };
+}
+
+/**
+ * The routing engine's settings (#2008), read from `OYL_INSTANCE_ROUTING_URL`.
+ * The same rules as the history index's model address
+ * ({@link readHistorySettings}), and for the same reason: Valhalla's API has
+ * no authentication and answers anything about any place, so it is reached on
+ * this machine or its private network, by its origin alone, and every request
+ * checks where the name resolved to (`routing/valhalla.ts`).
+ */
+export function readRoutingSettings(raw: RawConfig): RoutingSettings {
+  const off = (code: RoutingOffCode, reason: string): RoutingSettings => ({
+    kind: 'off',
+    code,
+    reason,
+  });
+  if (!present(raw.routingUrl)) {
+    return off(
+      'not-set',
+      'OYL_INSTANCE_ROUTING_URL is not set, so no routing engine is configured.',
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw.routingUrl.trim());
+  } catch {
+    return off('not-a-url', 'OYL_INSTANCE_ROUTING_URL is not a URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return off('not-a-url', 'OYL_INSTANCE_ROUTING_URL must be an http: or https: URL.');
+  }
+  if (
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    (url.pathname !== '/' && url.pathname !== '')
+  ) {
+    return off(
+      'not-origin',
+      'OYL_INSTANCE_ROUTING_URL must be the routing engine’s address alone, with no path.',
+    );
+  }
+  const hostProblem = configuredHostProblem(url.hostname);
+  if (hostProblem !== undefined) {
+    return off(
+      'not-local',
+      `OYL_INSTANCE_ROUTING_URL was refused because ${hostProblem}: the routing engine must be on this machine or its private network.`,
+    );
+  }
+  if (url.protocol === 'https:' && !isAddressLiteral(url.hostname)) {
+    return off(
+      'tls-by-name',
+      'OYL_INSTANCE_ROUTING_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network.',
+    );
+  }
+  return { kind: 'on', endpoint: url };
 }

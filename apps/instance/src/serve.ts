@@ -56,6 +56,7 @@ const http = readConfig({
   analysisModelReasoningTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS,
   analysisModelContextTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS,
   pictureModel: process.env.OYL_INSTANCE_PICTURE_MODEL,
+  routingUrl: process.env.OYL_INSTANCE_ROUTING_URL,
   name: process.env.OYL_INSTANCE_NAME,
   contactEmail: process.env.OYL_INSTANCE_CONTACT_EMAIL,
   contactLanguages: process.env.OYL_INSTANCE_CONTACT_LANGUAGES,
@@ -134,6 +135,12 @@ if (http.config.analysis.kind === 'off' && http.config.analysis.code !== 'not-se
 // local model takes pictures.
 if (http.config.pictures.kind === 'off' && http.config.pictures.code !== 'not-set') {
   process.stderr.write(`instance: pictures are off: ${http.config.pictures.reason}\n`);
+}
+
+// Nor is the routing engine (#2008): a refused address is said here, and
+// riders' planners draw straight lines.
+if (http.config.routing.kind === 'off' && http.config.routing.code !== 'not-set') {
+  process.stderr.write(`instance: routing is off: ${http.config.routing.reason}\n`);
 }
 
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');
