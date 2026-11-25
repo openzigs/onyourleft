@@ -12,20 +12,50 @@
  * and beside it the ride's event log, `….events.json` (#3153). `--fps`, `--size` and `--out <dir>` change it.
  * `render-capture.ts` says how; `docs/demo-video.md` §"Capture mode" says why.
  *
+ * #3156: `-- --script youtube` renders a whole scene script instead
+ * (`render-script.ts`): every scene into one MP4, with the captions and HUD
+ * callouts drawn in the frames, and beside it an `.srt` of every caption and
+ * the chapter list for the description.
+ *
  * Needs `ffmpeg` with `libx264` on the PATH and the pinned Chromium
  * (`playwright install chromium`). Neither is shipped.
  */
 
 import { fileURLToPath } from 'node:url';
 
-import { captureName, parseCaptureArgs } from './capture-args';
+import { captureName, parseCaptureArgs, parseScriptArgs } from './capture-args';
 import { renderCapture } from './render-capture';
+import { renderScript } from './render-script';
 
 // #3153: the capture build's own directory (`vite.config.ts`), never `dist`.
 const DIST = fileURLToPath(new URL('../../capture/dist/app', import.meta.url));
 const OUT = fileURLToPath(new URL('../../capture/dist', import.meta.url));
 
-const parsed = parseCaptureArgs(process.argv.slice(2));
+const argv = process.argv.slice(2);
+if (argv.includes('--script')) {
+  const asked = parseScriptArgs(argv);
+  if (!asked.ok) {
+    console.error(asked.message);
+    process.exit(2);
+  }
+  let last = '';
+  const video = await renderScript(asked.request, {
+    dist: DIST,
+    out: asked.request.out ?? OUT,
+    onFrame: (scene, frame, of) => {
+      if (scene !== last || frame === of) {
+        last = scene;
+        console.log(`capture: scene ${scene}, ${String(frame)}/${String(of)} frames`);
+      }
+    },
+  });
+  console.log(`capture: ${video.mp4}`);
+  console.log(`capture: ${video.srt}`);
+  console.log(`capture: ${video.chapters}`);
+  console.log(`capture: ${String(video.frames)} frames`);
+  process.exit(0);
+}
+const parsed = parseCaptureArgs(argv);
 if (!parsed.ok) {
   console.error(parsed.message);
   process.exit(2);
