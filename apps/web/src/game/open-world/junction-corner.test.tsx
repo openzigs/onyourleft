@@ -462,18 +462,33 @@ interface Watched {
 }
 
 /**
- * Rides the real game screen to the junction, presses `key` there, and
- * watches the turn at {@link WATCH_FPS}: every frame the renderer was handed
- * from {@link WATCH_FROM_METRES} to {@link WATCH_TO_METRES}.
+ * One ride of the real game screen to the junction, which the cases of a
+ * describe below share in order — #3161: each case riding all of it ran past
+ * a test's 5 s under coverage on CI.
  */
-async function rideTheTurn(
+interface TurnRide {
+  /** The frames watched at {@link WATCH_FPS}, from and to. */
+  readonly watch: { readonly from: number; readonly to: number };
+  /** The first frame of the watch in {@link drawn}, once the ride has reached it. */
+  watchedFrom: number | undefined;
+  /** How many of its stretches the cases have ridden. */
+  ridden: number;
+}
+
+/**
+ * Rides the real game screen to the junction, presses `key` there, and rides
+ * on to `until`, watching at {@link WATCH_FPS} every frame from `watch.from`:
+ * the first stretch of a {@link TurnRide}.
+ */
+async function rideTheTurnTo(
   key: 'ArrowLeft' | 'ArrowRight' | 'ArrowDown',
+  until: number,
   written: { grade: number; frame: number }[] = [],
   watch: { readonly from: number; readonly to: number } = {
     from: WATCH_FROM_METRES,
     to: WATCH_TO_METRES,
   },
-): Promise<readonly Watched[]> {
+): Promise<TurnRide> {
   mounted = await mount(
     <GameView
       port={port()}
@@ -491,27 +506,66 @@ async function rideTheTurn(
     await Promise.resolve();
   });
   await settle();
-  let watchedFrom: number | undefined;
-  const watchFrom = (): void => {
-    if (watchedFrom !== undefined || odometer() < watch.from) return;
-    watchedFrom = drawn.length;
-    frameMs = 1000 / WATCH_FPS;
-  };
+  const ride: TurnRide = { watch, watchedFrom: undefined, ridden: 0 };
   for (let frame = 0; frame < 200 && odometer() < PRESS_AT_METRES; frame += 1) {
     await pump();
-    watchFrom();
+    watchFrom(ride);
   }
   expect(odometer()).toBeLessThan(JUNCTION_METRES - 100);
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true }));
     await Promise.resolve();
   });
-  for (let frame = 0; frame < 1_200 && odometer() < watch.to; frame += 1) {
+  await rideTheTurnOn(ride, until);
+  ride.ridden = 1;
+  return ride;
+}
+
+/** Starts `ride`'s watch on the first frame at or past its `watch.from`. */
+function watchFrom(ride: TurnRide): void {
+  if (ride.watchedFrom !== undefined || odometer() < ride.watch.from) return;
+  ride.watchedFrom = drawn.length;
+  frameMs = 1000 / WATCH_FPS;
+}
+
+/** Rides `ride` on to `until`. */
+async function rideTheTurnOn(ride: TurnRide, until: number): Promise<void> {
+  for (let frame = 0; frame < 1_200 && odometer() < until; frame += 1) {
     await pump();
-    watchFrom();
+    watchFrom(ride);
   }
-  expect(odometer()).toBeGreaterThanOrEqual(watch.to);
-  const frames = drawn.slice(watchedFrom ?? drawn.length);
+  expect(odometer()).toBeGreaterThanOrEqual(until);
+}
+
+/**
+ * The last stretch of `ride`, on to the end of its watch. A case that finds
+ * the ride elsewhere says so, rather than read another stretch's frames: the
+ * case before it failed.
+ */
+async function rideRoundTheTurn(ride: TurnRide | undefined): Promise<TurnRide> {
+  if (ride?.ridden !== 1) {
+    throw new Error('the case before this one did not ride up to the junction');
+  }
+  await rideTheTurnOn(ride, ride.watch.to);
+  ride.ridden = 2;
+  return ride;
+}
+
+/** {@link rideTheTurnTo} and {@link rideRoundTheTurn} in one, for a case that rides it all. */
+async function rideTheTurn(
+  key: 'ArrowLeft' | 'ArrowRight' | 'ArrowDown',
+  written: { grade: number; frame: number }[] = [],
+  watch: { readonly from: number; readonly to: number } = {
+    from: WATCH_FROM_METRES,
+    to: WATCH_TO_METRES,
+  },
+): Promise<readonly Watched[]> {
+  return turnWatched(await rideRoundTheTurn(await rideTheTurnTo(key, watch.to, written, watch)));
+}
+
+/** The frames of `ride`'s watch so far, in the first watched frame's local metres. */
+function turnWatched(ride: TurnRide): readonly Watched[] {
+  const frames = drawn.slice(ride.watchedFrom ?? drawn.length);
   const common = corridorOrigin((frames[0] as (typeof frames)[number]).input.profile);
   return frames.map(({ frame, input }) => {
     const origin = corridorOrigin(input.profile);
@@ -526,6 +580,12 @@ async function rideTheTurn(
     };
   });
 }
+
+/**
+ * Where a {@link TurnRide}'s first stretch ends: **10 m short of the
+ * junction**, about half of the watch either side.
+ */
+const UP_TO_THE_TURN_METRES = JUNCTION_METRES - 10;
 
 /** What the turn did, frame to frame. */
 interface Turned {
@@ -629,73 +689,131 @@ function expectRoundTheCorner(
   expect(ridden.arc, facts).toBeGreaterThanOrEqual(LEAST_ARC_METRES);
 }
 
+/**
+ * {@link expectRoundTheCorner}'s checks that hold on any stretch of a turn,
+ * not only the whole of it: no jump, and a heading that changes continuously.
+ */
+function expectNoJump(
+  ridden: Turned,
+  cap: number = CAMERA_MAXIMUM_YAW_RATE,
+  fps: number = WATCH_FPS,
+): void {
+  const facts = JSON.stringify(ridden);
+  expect(ridden.riderJump, facts).toBeLessThan(JUMP_METRES);
+  expect(ridden.eyeJump, facts).toBeLessThan(JUMP_METRES);
+  expect(ridden.yawRate, facts).toBeLessThanOrEqual(cap + RATE_ROUNDING);
+  expect(ridden.backTurn, facts).toBeLessThan(BACK_TURN_RADIANS);
+  expect(ridden.yawRateStep, facts).toBeLessThan((YAW_RATE_STEP * FPS) / fps);
+  expect(ridden.riderYawRateStep, facts).toBeLessThan((YAW_RATE_STEP * FPS) / fps);
+}
+
 describe('an open-world ride turns round the corner at a junction, frame by frame — #3051', () => {
-  beforeEach(freshRide);
-  afterEach(endRide);
+  // #3161: each turn is one ride its two cases share, in order: up to
+  // {@link UP_TO_THE_TURN_METRES}, then round the corner, which holds the
+  // whole turn's bounds over every frame of the watch.
+  for (const [name, key, side, cap, reduced] of [
+    ['turns left', 'ArrowLeft', 'left', CAMERA_MAXIMUM_YAW_RATE, false],
+    ['turns right', 'ArrowRight', 'right', CAMERA_MAXIMUM_YAW_RATE, false],
+    ['turns under reduced motion', 'ArrowLeft', 'left', REDUCED_MOTION_MAXIMUM_YAW_RATE, true],
+  ] as const) {
+    describe(name, () => {
+      let ride: TurnRide | undefined;
+      beforeAll(() => {
+        freshRide();
+        if (!reduced) return;
+        vi.stubGlobal('matchMedia', (query: string) => ({
+          matches: query === '(prefers-reduced-motion: reduce)',
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }));
+      });
+      afterAll(endRide);
 
-  it('turns left: the drawn rider and the camera ride round the corner, with no jump', async () => {
-    expectRoundTheCorner(turned(await rideTheTurn('ArrowLeft')), 'left');
-  });
+      it(`${name}: up to 10 m short of the junction, the drawn rider and the camera with no jump`, async () => {
+        ride = await rideTheTurnTo(key, UP_TO_THE_TURN_METRES);
+        expectNoJump(turned(turnWatched(ride)), cap);
+      });
 
-  it('turns right: the drawn rider and the camera ride round the corner, with no jump', async () => {
-    expectRoundTheCorner(turned(await rideTheTurn('ArrowRight')), 'right');
-  });
-
-  it('turns under reduced motion at the gentler cap, and the drawn path still rides the corner', async () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query === '(prefers-reduced-motion: reduce)',
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    }));
-    expectRoundTheCorner(
-      turned(await rideTheTurn('ArrowLeft')),
-      'left',
-      REDUCED_MOTION_MAXIMUM_YAW_RATE,
-    );
-  });
-
-  it('holds a U-turn press to the same bound: the drawn rider and the eye do not jump (#3066)', async () => {
-    // This was the control for every bound above, the one switch this ride
-    // had: a U-turn changed the road under the rider at once (ADR 0088
-    // D-1.6) and its line was drawn at once, so on the frame of the press the
-    // drawn rider's and the eye's move changed by metres (measured on
-    // 2026-11-22 at 30 fps: 4.9 m and 4.0 m). #3066 draws the press round a
-    // half-turn from where the rider was drawn, so this case holds the
-    // measure, not the jump, as the 2026-11-22 note here asked of it. The
-    // control is now a mutation: with `road.ts` §`drawnPath` drawing the
-    // press's line at once, this case goes red at metres.
-    const frames = await rideTheTurn('ArrowDown', [], {
-      from: PRESS_AT_METRES - 5,
-      to: PRESS_AT_METRES + 5,
+      it(
+        reduced
+          ? 'turns under reduced motion at the gentler cap, and the drawn path still rides the corner'
+          : `${name}: the drawn rider and the camera ride round the corner, with no jump`,
+        async () => {
+          expectRoundTheCorner(turned(turnWatched(await rideRoundTheTurn(ride))), side, cap);
+        },
+      );
     });
-    const ridden = turned(frames);
-    expect(ridden.riderJump).toBeLessThan(JUMP_METRES);
-    expect(ridden.eyeJump).toBeLessThan(JUMP_METRES);
+  }
+
+  describe('a U-turn press', () => {
+    beforeEach(freshRide);
+    afterEach(endRide);
+
+    it('holds a U-turn press to the same bound: the drawn rider and the eye do not jump (#3066)', async () => {
+      // This was the control for every bound above, the one switch this ride
+      // had: a U-turn changed the road under the rider at once (ADR 0088
+      // D-1.6) and its line was drawn at once, so on the frame of the press the
+      // drawn rider's and the eye's move changed by metres (measured on
+      // 2026-11-22 at 30 fps: 4.9 m and 4.0 m). #3066 draws the press round a
+      // half-turn from where the rider was drawn, so this case holds the
+      // measure, not the jump, as the 2026-11-22 note here asked of it. The
+      // control is now a mutation: with `road.ts` §`drawnPath` drawing the
+      // press's line at once, this case goes red at metres.
+      const frames = await rideTheTurn('ArrowDown', [], {
+        from: PRESS_AT_METRES - 5,
+        to: PRESS_AT_METRES + 5,
+      });
+      const ridden = turned(frames);
+      expect(ridden.riderJump).toBeLessThan(JUMP_METRES);
+      expect(ridden.eyeJump).toBeLessThan(JUMP_METRES);
+    });
   });
 
-  it('asks the trainer for the road’s own grade at the odometer through the turn: the corner is drawn only', async () => {
+  describe('the trainer through the turn', () => {
     const written: { grade: number; frame: number }[] = [];
-    await rideTheTurn('ArrowRight', written);
-    // The ride went round: the trainer was written to before and after the turn.
-    const atTurn = inputs.findIndex(
-      (input) => (input.state.ride.distance as number) >= JUNCTION_METRES,
-    );
-    expect(atTurn).toBeGreaterThan(0);
-    expect(written.filter((write) => write.frame < atTurn).length).toBeGreaterThan(3);
-    expect(written.filter((write) => write.frame > atTurn).length).toBeGreaterThan(3);
-    // Each grade is the road's at the rider on the view drawn that frame or
-    // the one before: never a grade read where the rider is DRAWN.
-    for (const write of written) {
-      const near = [inputs[write.frame - 1], inputs[write.frame]].filter(
-        (input): input is SceneInput => input !== undefined,
-      );
-      const off = Math.min(
-        ...near.map((input) =>
-          Math.abs((gradeAt(input.profile, input.state.ride.distance) as number) - write.grade),
-        ),
-      );
-      expect(off, `the write on frame ${String(write.frame)}`).toBeLessThan(1e-6);
+    let ride: TurnRide | undefined;
+    let checked = 0;
+    beforeAll(freshRide);
+    afterAll(endRide);
+
+    /**
+     * Holds each grade written since the last check to the road's at the
+     * rider on the view drawn that frame or the one before: never a grade
+     * read where the rider is DRAWN.
+     */
+    function expectDrawnOnly(): void {
+      for (const write of written.slice(checked)) {
+        const near = [inputs[write.frame - 1], inputs[write.frame]].filter(
+          (input): input is SceneInput => input !== undefined,
+        );
+        const off = Math.min(
+          ...near.map((input) =>
+            Math.abs((gradeAt(input.profile, input.state.ride.distance) as number) - write.grade),
+          ),
+        );
+        expect(off, `the write on frame ${String(write.frame)}`).toBeLessThan(1e-6);
+      }
+      checked = written.length;
     }
+
+    it('asks the trainer for the road’s own grade at the odometer up to the junction', async () => {
+      ride = await rideTheTurnTo('ArrowRight', UP_TO_THE_TURN_METRES, written);
+      // The trainer was written to before the turn.
+      expect(written.length).toBeGreaterThan(3);
+      expectDrawnOnly();
+    });
+
+    it('asks the trainer for the road’s own grade at the odometer through the turn: the corner is drawn only', async () => {
+      await rideRoundTheTurn(ride);
+      // The ride went round: the trainer was written to before and after the turn.
+      const atTurn = inputs.findIndex(
+        (input) => (input.state.ride.distance as number) >= JUNCTION_METRES,
+      );
+      expect(atTurn).toBeGreaterThan(0);
+      expect(written.filter((write) => write.frame < atTurn).length).toBeGreaterThan(3);
+      expect(written.filter((write) => write.frame > atTurn).length).toBeGreaterThan(3);
+      expectDrawnOnly();
+    });
   });
 });
 
