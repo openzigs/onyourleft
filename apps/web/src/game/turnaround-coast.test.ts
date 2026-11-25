@@ -49,6 +49,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradeAt,
   metres,
   routeProfile,
   type RoutePoint,
@@ -297,42 +298,32 @@ describe('a one-point turnaround on a coast whose passes are not at one height �
 
   it.each([1, 3])('draws no water above the road beside it, the way back %d m over', (lane) => {
     // Every vertex of the drawn water within 30 m of the drawn road is at its
-    // height or under it. ⚠️ #3140: on the climbing way out, and on one
-    // level all the way out. The way back is drawn at the way out's heights
-    // (`landform.ts` §`drawnProfileOf`), and a mapped sea is drawn only
-    // beside a run of road no steeper than `waterways.ts` §`LAKE_MAX_GRADE_PERCENT`:
-    // so the climbing fixture now draws none — before, it drew one off the
-    // way back's own −0.5 % — and the level one is where water is judged.
+    // height or under it.
+    const profile = coastReversal(lane);
+    const land = coast(profile);
     let judgedVertices = 0;
-    let levelVertices = 0;
-    for (const climb of [0.027, 0]) {
-      const profile = coastReversal(lane, false, LEG_METRES, climb);
-      const land = coast(profile);
-      for (const offset of RIDER) {
-        const { frame, segments } = judged(profile, land, profile.totalDistance / 2 + offset);
-        const { vertices, indices } = frame.water.surface;
-        const used = new Set(indices);
-        for (const index of used) {
-          const at = index * 3;
-          const road = drawnRoadAt(
-            frame.corridor.centre,
-            segments,
-            vertices[at] as number,
-            vertices[at + 2] as number,
-          );
-          if (!(road.across <= 30)) continue;
-          judgedVertices += 1;
-          if (climb === 0) levelVertices += 1;
-          expect(
-            (vertices[at + 1] as number) - road.height,
-            `${String(offset)} m from the turn, ${road.across.toFixed(1)} m from the road`,
-          ).toBeLessThanOrEqual(0);
-        }
+    for (const offset of RIDER) {
+      const { frame, segments } = judged(profile, land, profile.totalDistance / 2 + offset);
+      const { vertices, indices } = frame.water.surface;
+      const used = new Set(indices);
+      for (const index of used) {
+        const at = index * 3;
+        const road = drawnRoadAt(
+          frame.corridor.centre,
+          segments,
+          vertices[at] as number,
+          vertices[at + 2] as number,
+        );
+        if (!(road.across <= 30)) continue;
+        judgedVertices += 1;
+        expect(
+          (vertices[at + 1] as number) - road.height,
+          `${String(offset)} m from the turn, ${road.across.toFixed(1)} m from the road`,
+        ).toBeLessThanOrEqual(0);
       }
     }
     // Non-vacuity: the sea is drawn beside the road in view.
     expect(judgedVertices).toBeGreaterThan(50);
-    expect(levelVertices).toBeGreaterThan(50);
   });
 });
 
@@ -891,6 +882,17 @@ const HOUSES_3140 = [
   [-60, -7],
 ] as const;
 
+/**
+ * How the way out climbs in #3140's house cases, a share: **1 %**, so the two
+ * passes part by 1.5 % of the road from the turn. On the coast's 2.7 % they
+ * part by 2.2 %, and a house more than about 110 m from the turn has more
+ * than 2.5 m of drawn ground under it across the two passes and is
+ * \`too-steep\` (\`footprint-buildings.ts\` rule 4, §\`groundOfAnotherPass\`),
+ * while within 100 m on the inside of the U-turn #2101's seam moves the
+ * ground (\`HOUSES_3140\`): too few are left to judge.
+ */
+const HOUSE_CLIMB = 0.01;
+
 /** The mapped height of #3140's houses, metres: their walls, from the floor to the eaves. */
 const HOUSE_HEIGHT_METRES = 6;
 
@@ -901,7 +903,7 @@ describe('a building beside either pass of a one-point turnaround — #3140', ()
   it.each(LANES_3140)(
     'stands each house on the ground drawn under it on both passes, the way back %d m over',
     (lane) => {
-      const profile = coastReversal(lane);
+      const profile = coastReversal(lane, false, LEG_METRES, HOUSE_CLIMB);
       const origin = corridorOrigin(profile);
       const turn = profile.totalDistance / 2;
       const world = {
@@ -1053,4 +1055,106 @@ describe('one road drawn where it is ridden twice — #3140', () => {
       expect(judgedVertices).toBeGreaterThan(500);
     },
   );
+});
+
+/**
+ * A one-point reversal like {@link coastReversal}, its grades free: north for
+ * `leg` metres at `out`, one vertex, and back `lane` metres east at `back`,
+ * each a share and positive where the rider climbs. #3127's review of #3140.
+ */
+function reversalAt(lane: number, out: number, back: number, leg = 600): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (north: number, east: number, elevation: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(elevation),
+    });
+  };
+  for (let north = 0; north <= leg; north += 10) push(north, 0, 30 + out * north);
+  const top = 30 + out * leg;
+  const turned = leg - lane / Math.tan((6 * Math.PI) / 180);
+  for (let north = turned; north >= 0; north -= 10) push(north, lane, top + back * (leg - north));
+  return routeProfile(points, { loop: false });
+}
+
+/** A frame of `profile` with the rider `offset` metres from its turn. */
+function frameAt(profile: RouteProfile, offset: number): ReturnType<typeof sceneFrame> {
+  const start = atStartLine(profile);
+  return sceneFrame({
+    profile,
+    origin: corridorOrigin(profile),
+    state: {
+      ...start,
+      ride: { ...start.ride, distance: metres(profile.totalDistance / 2 + offset) },
+    },
+  });
+}
+
+describe('the road a rider climbs is drawn climbing — #3127’s review of #3140', () => {
+  it.each([
+    // The reviewer's: an out-and-back 6 m over, level out and climbing 3 % back.
+    ['an out-and-back 6 m over, level out, +3 % back', 6, 0, 0.03],
+    // And a stacked switchback, its legs 3 m apart, both climbing 6 %.
+    ['a stacked switchback 3 m across, +6 % both ways', 3, 0.06, 0.06],
+  ] as const)('draws the way back at its own grade: %s', (_shape, lane, out, back) => {
+    // On the way back, the drawn road under the rider — its centreline 10 m
+    // either side of them — rises as the route's own grade there, the one
+    // the trainer is sent, to within 1 %, and never the other way.
+    const profile = reversalAt(lane, out, back);
+    const turn = profile.totalDistance / 2;
+    const off: Worst = { value: 0, at: 'nowhere' };
+    let read = 0;
+    for (let offset = 30; offset <= 400; offset += 10) {
+      const frame = frameAt(profile, offset);
+      const rider = turn + offset;
+      const rows = frame.corridor.centre.filter(
+        (point) => Math.abs(point.along - rider) <= 10 && point.along > turn,
+      );
+      const first = rows[0];
+      const last = rows[rows.length - 1];
+      if (first === undefined || last === undefined || !(last.along - first.along > 5)) continue;
+      const drawn = (last.y - first.y) / (last.along - first.along);
+      const felt = gradeAt(profile, rider) / 100;
+      read += 1;
+      const apart = Math.abs(drawn - felt);
+      if (apart > off.value) {
+        Object.assign(off, { value: apart, at: `${String(offset)} m from the turn` });
+      }
+      if (Math.abs(felt) > 0.005) {
+        expect(Math.sign(drawn), `drawn against the felt grade, ${String(offset)} m`).toBe(
+          Math.sign(felt),
+        );
+      }
+    }
+    expect(off.value, `drawn grade off the felt one, ${off.at}`).toBeLessThanOrEqual(0.01);
+    expect(read).toBeGreaterThan(30);
+  });
+});
+
+describe('two roads stay two roads — #3127’s review of #3140', () => {
+  it('draws both legs of a switchback 5 m across that are 12 m apart in height', () => {
+    // Legs 5 m apart in plan — inside a road's width, so within
+    // `terrain.ts` §`RETRACE_OVERLAP_METRES` — but climbing 6 % both ways, so
+    // 100 m from the apex the second leg is 12 m over the first: another
+    // road, one above the other, not the same road ridden twice
+    // (`terrain.ts` §`RETRACE_HEIGHT_METRES`).
+    const profile = reversalAt(5, 0.06, 0.06);
+    const turn = profile.totalDistance / 2;
+    const frame = frameAt(profile, -100);
+    const { centre, retraced } = frame.corridor;
+    let beside = 0;
+    for (let row = 0; row < centre.length; row += 1) {
+      const point = centre[row] as CorridorPoint;
+      if (point.along < turn + 60 || point.along > turn + 140) continue;
+      beside += 1;
+      expect(retraced[row], `${(point.along - turn).toFixed(0)} m past the apex`).toBe(0);
+    }
+    // Non-vacuity: the upper leg beside the rider is in the corridor.
+    expect(beside).toBeGreaterThan(5);
+  });
 });

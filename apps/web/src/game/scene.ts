@@ -56,7 +56,6 @@ import {
 } from './land-class';
 import {
   ROAD_CLEARANCE_METRES,
-  drawnProfileOf,
   horizonRelief,
   standingOnGround,
   terrainCorridor,
@@ -769,11 +768,7 @@ function withWaysPlaced(input: SceneInput): SceneInput {
 /** Builds one frame. */
 export function sceneFrame(handed: SceneInput): SceneFrame {
   // #3119: the ways out whose scenery this frame may place, a few new ones a frame.
-  const placed = withWaysPlaced(handed);
-  // #3140: a road ridden twice drawn at one height (`landform.ts`
-  // §`drawnProfileOf`). Everything below draws; nothing below is physics.
-  const drawn = drawnProfileOf(placed.profile);
-  const input: SceneInput = drawn === placed.profile ? placed : { ...placed, profile: drawn };
+  const input = withWaysPlaced(handed);
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
   // where the corridor, the camera and the scenery are built around.
   const riderDistance: number = drawnRider(input).distance;

@@ -121,18 +121,15 @@
  * ## The trainer is untouched
  *
  * **Visual only.** The grade #362 writes to a trainer comes from `gradeAt` on
- * the route profile, and nothing in this file writes a profile: since #3140
- * {@link drawnProfileOf} hands the scene a copy with a later pass's heights,
- * which nothing that reaches a trainer is handed. A landform that changed
- * what the rider felt would be the ground telling the trainer something the
- * route did not.
+ * the route profile, and nothing in this file reads or writes a profile. A
+ * landform that changed what the rider felt would be the ground telling the
+ * trainer something the route did not.
  *
  * Pure, and names no rendering library: `three-renderer.ts` turns what is
  * built here into pixels, and `game.browser.spec.ts` reads those pixels back.
  */
 
 import {
-  altitudeMetres,
   distanceOnRoute,
   elevationAt,
   gradeAt,
@@ -2421,74 +2418,13 @@ const RETRACE_CELL_METRES = 20;
 const RETRACE_CELL_LIMIT = 256;
 
 /**
- * `profile` as it is DRAWN — #3140: where a later pass rides a road an
- * earlier pass rode ({@link retraceOf}), at the earlier pass's elevation
- * there, eased in from its own over {@link RETRACE_BLEND_METRES} where it
- * joins or leaves that road as its relief is; everywhere else, and its
- * distances, positions and grades everywhere, the route's own. The profile
- * itself where the route rides no road twice, and itself handed one it made.
- * One object a profile, so everything keyed on a profile is built once.
- *
- * ⚠️ **Why one place has one height in the drawing.** A recorded way out and
- * way back along one road carry their own elevations: on the synthetic coast
- * turnaround (`turnaround-coast.test.ts`), +2.7 % up and −0.5 % back, the way
- * back is 4.4 m over the way out 200 m short of the turn. Each frame draws the
- * ground beside the road at the height of the pass the rider is on, and a
- * mapped building is planned once, at the height of the pass it is nearest
- * (`footprint-buildings.ts` rule 4): so a house beside the way back stood
- * 4.5 m over the ground drawn under it on the way out, and was as far under
- * it on the way back — the owner's floating house of 2026-11-24. Read off one
- * height, the ground under it is one on every frame.
- *
- * ⚠️ **A drawing, never physics** (ADR 0060 D-3): `GameView`'s simulation,
- * the grade a trainer is sent and the HUD read the route's own profile, never
- * this. Its grades are the route's, so the road's grade tint is too.
- */
-export function drawnProfileOf(profile: RouteProfile): RouteProfile {
-  if (drawnProfiles.has(profile)) return profile;
-  const known = drawnOf.get(profile);
-  if (known !== undefined) return known;
-  // An open-world view is keyed on its own object (`scenery-anchor.ts`), and
-  // is level (`open-world/session.ts`): drawn as it is.
-  const retrace = sceneryAnchor(profile) === undefined ? retraceOf(profile) : undefined;
-  let drawn = profile;
-  if (retrace !== undefined) {
-    const resolution: number = profile.resolution;
-    const segments = retrace.slope.length;
-    const elevations = profile.elevations.map((own, point) => {
-      // The segment a point starts — the last's for the last point.
-      const segment = Math.min(segments - 1, point);
-      const distance = point * resolution;
-      const slope = retrace.slope[segment] as number;
-      if (slope === 0 || distance < (retrace.from[segment] as number)) return own;
-      const first = Math.min(
-        profile.totalDistance,
-        Math.max(0, (retrace.offset[segment] as number) + slope * distance),
-      );
-      const weight = retrace.weight[point] as number;
-      return altitudeMetres(own + (elevationAt(profile, first) - own) * weight);
-    });
-    drawn = { ...profile, elevations };
-  }
-  drawnOf.set(profile, drawn);
-  drawnProfiles.add(drawn);
-  return drawn;
-}
-
-/**
- * Whether `profile` rides a stretch of road it has already ridden, as
- * {@link drawnProfileOf} finds one — #3140, for `footprint-buildings.ts`
- * §`groundOfAnotherPass`.
+ * Whether `profile` rides a stretch of road it has already ridden — #3140,
+ * for `footprint-buildings.ts` §`groundOfAnotherPass`. Never an open-world
+ * view, which is level (`open-world/session.ts`).
  */
 export function ridesARoadTwice(profile: RouteProfile): boolean {
   return sceneryAnchor(profile) === undefined && retraceOf(profile) !== undefined;
 }
-
-/** {@link drawnProfileOf}'s, by the route's own profile. */
-const drawnOf = new WeakMap<RouteProfile, RouteProfile>();
-
-/** Every profile {@link drawnProfileOf} handed back, which it hands back as they are. */
-const drawnProfiles = new WeakSet<RouteProfile>();
 
 function retraceOf(profile: RouteProfile): Retrace | undefined {
   const known = retraces.get(profile);

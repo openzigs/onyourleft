@@ -933,6 +933,20 @@ const REVERSAL_COSINE = Math.cos((150 * Math.PI) / 180);
 export const RETRACE_OVERLAP_METRES = ROAD_WIDTH_METRES;
 
 /**
+ * How far apart in height two passes further apart than half a road may be
+ * and still be one road, in metres: **5** — #3140, #3127's review. Within
+ * half a road a pass is the same road at any height (#1996): its centreline
+ * is on the other's carriageway. Between half a road and
+ * {@link RETRACE_OVERLAP_METRES} it may be another road beside it: the legs of
+ * a tight switchback, one above the other. Recorded passes of one road
+ * disagree by less within the reach a corridor holds both: the coast
+ * turnaround's way back, 4 and 5 m over, by at most 4.4 m in the 200 m before
+ * the turn that its corridor holds it; a switchback 5 m across climbing 6 %
+ * differs by more than this 42 m of road from its apex. Not a measured optimum.
+ */
+export const RETRACE_HEIGHT_METRES = 5;
+
+/**
  * How much further apart along the road than across it two points must be to
  * be two passes rather than one: **2** — #1996. @see retracedRows
  *
@@ -1162,6 +1176,13 @@ export function retracedRows(
         heading > 0 &&
         length > 0 &&
         !(Math.abs(headingX * dx + headingZ * dz) / (heading * length) > RETRACE_HEADING_COSINE)
+      ) {
+        continue;
+      }
+      // #3140: beyond half a road, another road unless at one height with it.
+      if (
+        across >= ROAD_WIDTH_METRES / 2 &&
+        Math.abs(point.y - (from.y + (to.y - from.y) * t)) > RETRACE_HEIGHT_METRES
       ) {
         continue;
       }

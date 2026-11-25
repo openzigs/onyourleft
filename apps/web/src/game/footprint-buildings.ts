@@ -458,7 +458,6 @@ import {
 import {
   ROAD_CLEARANCE_METRES,
   TERRAIN_COLUMN_OFFSETS,
-  drawnProfileOf,
   ridesARoadTwice,
   terrainHeightAt,
 } from './landform';
@@ -5238,6 +5237,7 @@ const nearSegments: number[] = [];
 /** Scratch: {@link groundOfAnotherPass}'s segments, and where it found one. */
 const otherSegments: number[] = [];
 const otherPass: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+const otherFound: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
 
 /**
  * Where `(x, z)` is beside another pass of the road than `own`'s, into
@@ -5246,15 +5246,25 @@ const otherPass: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
  * and no more than `terrain.ts` §`RETRACE_OVERLAP_METRES` further off than
  * `own`. `false`, and `into` untouched, where there is none.
  *
- * ⚠️ **Why a footprint reads it.** Two passes of one road are one place and
- * drawn at one height (`landform.ts` §`drawnProfileOf`), but each frame draws
- * the ground of the pass the rider is on, and the ground's relief grows with
- * the distance from THAT pass's centreline: a lane apart, the two grounds at
- * one point beside them differ by up to `landform.ts` §`RELIEF_SLOPE` times
- * the lane. A building planned on the lower stands that much over the higher
- * on the other pass, and one planned on the higher is buried. Planned on both
- * — its foot under the lower, its floor over the higher — it stands on
- * either.
+ * ⚠️ **Why a footprint reads it.** A recorded way out and way back along one
+ * road carry their own elevations, and each frame draws the ground beside the
+ * road at the height of the pass the rider is on. Planned on its nearest pass
+ * alone, a house beside the way back on `turnaround-coast.test.ts`' coast
+ * turnaround (+2.7 % out, −0.5 % back) stood 5.3 m over the ground drawn
+ * under it on the way out — the owner's floating house of 2026-11-24.
+ * Planned on both — its foot under the lower, its floor over the higher — it
+ * stands on either; and where the two differ by more than
+ * {@link FOOTPRINT_MAX_GROUND_RANGE_METRES} it is `too-steep`, as on any
+ * ground that varies that much under it, rather than drawn on a plinth.
+ *
+ * ⚠️ **Not by drawing the later pass at the earlier's heights.** #3140's
+ * first commit did, and #3127's review found the rider then saw a road
+ * drawn level, or falling, where they climbed (12 m off the recorded heights
+ * on an out-and-back 6 m over, 48 m on a stacked switchback). Held to within
+ * 1 % of the felt grade, the two passes were still metres apart, and the
+ * coast fixture's sea, levelled from the drawn way back, lay 7 m under the
+ * road at the turn, a bank steeper than 2 in 1 (#3103's step test, 0.21 to
+ * 0.29 m over). So each pass keeps its own heights.
  */
 function groundOfAnotherPass(
   road: DrawnRoadPoints,
@@ -5272,12 +5282,11 @@ function groundOfAnotherPass(
       otherSegments.push(segment);
     }
   }
-  const found = { ...into };
-  if (!nearestOnRoadSegments(road, otherSegments, x, z, found)) return false;
-  if (found.distance > reach) return false;
-  into.along = found.along;
-  into.lateral = found.lateral;
-  into.distance = found.distance;
+  if (!nearestOnRoadSegments(road, otherSegments, x, z, otherFound)) return false;
+  if (otherFound.distance > reach) return false;
+  into.along = otherFound.along;
+  into.lateral = otherFound.lateral;
+  into.distance = otherFound.distance;
   return true;
 }
 
@@ -5528,9 +5537,6 @@ export function footprintPlans(
   urban?: UrbanClassMap,
   options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
-  // #3140: on the ground as it is drawn, at one height where a road is ridden
-  // twice (`landform.ts` §`drawnProfileOf`), as `scene.ts` draws it.
-  profile = drawnProfileOf(profile);
   // The ground's seed: the route's, as the scene draws the ground with (`scene.ts`).
   const seed = scatterSeed(profile);
   // #2902: and the seed each plan's own choices are drawn from, the ground's unless given.
