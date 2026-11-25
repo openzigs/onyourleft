@@ -78,7 +78,7 @@ export const YOUTUBE_CAPTIONS: CaptionScript = {
         {
           at: 18,
           seconds: 8,
-          text: 'No subscription. Your rides stay on your device; self-hosting is optional',
+          text: 'No subscription. Your rides are kept on your device; self-hosting is optional',
         },
         // The roadside shot, from 37 s, is the one that frames all four riders.
         { at: 37, seconds: 3.5, text: 'Ride as a group', feature: 'group' },
