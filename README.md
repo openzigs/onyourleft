@@ -1,8 +1,10 @@
 # On Your Left
 
-A free, open alternative to Strava + Zwift for cycling: ride tracking, indoor smart-trainer control,
-and live sensor capture over Bluetooth Low Energy. On Android, and in Chrome or Edge on your
-computer.
+Free, open-source indoor and outdoor cycling. Bring your outdoor rides indoors: import any route
+you have ridden as a GPX file and ride it on your smart trainer. The trainer follows every climb
+and descent, and a 3D world is built from the map around it, so it looks and feels like the road
+you know. Ride tracking, workouts and live Bluetooth Low Energy sensors are in the same app. On
+Android, and in Chrome or Edge on your computer.
 
 **Website: [openzigs.com/on-your-left](https://openzigs.com/on-your-left/)**
 
@@ -309,8 +311,8 @@ Every figure, where it came from, and which of them are guesses:
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Commits are signed off under the DCO; there is no CLA, and
 you keep your copyright.
 
-## Relationship to Strava and Zwift
+## Relationship to other cycling apps
 
-This project is not affiliated with, endorsed by, or derived from Strava or Zwift. It does not use
-their APIs, code, assets or data, and it reimplements product concepts independently. You can bring
+This project is not affiliated with, endorsed by, or derived from any other cycling app or service.
+It does not use their APIs, code, assets or data, and it implements its features independently. You can bring
 your own history in via standard FIT, GPX and TCX file import.
