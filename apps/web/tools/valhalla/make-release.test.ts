@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +18,9 @@ import {
   parseArguments,
   planRelease,
   readGraphArchive,
+  refuseTilesOverLimit,
   runtimeConfig,
+  TILE_LIMIT_BYTES,
   tileIdFromPath,
   writeRelease,
   type GraphArchive,
@@ -418,6 +421,48 @@ describe('refusals while a release is made', () => {
         extractDate: undefined,
       }),
     ).toThrow('manifest.json is over the SDK’s 4 MiB limit');
+  });
+
+  it('refuses a graph.tar holding a tile one byte over the SDK’s 64 MiB limit, names it, and writes nothing', () => {
+    const path = '2/000/519/121.gph';
+    const tar = syntheticGraphTar(SYNTHETIC_TILE_PATHS, {
+      bodies: { [path]: syntheticTile(path, TILE_LIMIT_BYTES + 1) },
+    });
+    const { out, options } = workDirectory(tar);
+    expect(() => makeRelease(options)).toThrow(
+      `graph.tar has 1 tile over valhalla-browser's 67108864-byte (64 MiB) per-tile limit, and the SDK would refuse the whole graph: tile ${tileIdFromPath(path)} (${path}) is 67108865 bytes.`,
+    );
+    expect(() => readdirSync(out)).toThrow();
+  });
+
+  it('uses the limit the installed SDK’s worker holds', () => {
+    // A minified constant: if a new valhalla-browser moves its limit, this goes red and TILE_LIMIT_BYTES is read again.
+    const worker = readFileSync(
+      createRequire(import.meta.url).resolve('valhalla-browser/worker.js'),
+      'utf8',
+    );
+    expect(worker).toContain(`=${TILE_LIMIT_BYTES},`);
+  });
+
+  it('accepts a tile of exactly 64 MiB, as the SDK does, and names every tile over it', () => {
+    const tile = (path: string, size: number) => ({
+      id: tileIdFromPath(path),
+      path,
+      offset: 1024,
+      size,
+      sha256: 'a'.repeat(64),
+      md5: 'b'.repeat(32),
+    });
+    expect(() => refuseTilesOverLimit([tile('2/000/519/120.gph', TILE_LIMIT_BYTES)])).not.toThrow();
+    expect(() =>
+      refuseTilesOverLimit([
+        tile('0/002/025.gph', 300),
+        tile('2/000/519/120.gph', TILE_LIMIT_BYTES + 1),
+        tile('2/000/519/121.gph', 80_000_000),
+      ]),
+    ).toThrow(
+      /has 2 tiles over .*: tile \d+ \(2\/000\/519\/120\.gph\) is 67108865 bytes; tile \d+ \(2\/000\/519\/121\.gph\) is 80000000 bytes\./,
+    );
   });
 
   it('refuses to write when graph.tar changed after it was read, and leaves no release', () => {
