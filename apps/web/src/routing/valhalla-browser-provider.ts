@@ -46,6 +46,15 @@
  * which ends the worker and frees its tile cache and WebAssembly heap; the
  * router stays usable, and the next leg starts a new worker.
  *
+ * Each release also starts a new generation. A leg of an older one that has
+ * not yet reached the SDK (still in the queue, or waiting for the engine to
+ * load) settles without reaching it, so a closed planner's remaining legs do
+ * not start a worker nobody is looking at. A cancel deferred until the engine
+ * has loaded cannot reach a leg of the planner opened since: that leg is
+ * queued behind the closed planner's, which waits on the same load, and the
+ * cancel was attached to the load before either, so it runs first. The test
+ * "released while the engine loads" holds both halves.
+ *
  * ## A refusal is a straight line, not a broken leg
  *
  * When the engine cannot route a leg here and now (outside the graph, too
@@ -105,6 +114,9 @@ export const NOT_LOADED_TEXT =
 /** Said with map tiles off (ADR 0054 D-6.4: one switch for everything the tile host is asked). */
 export const TILES_OFF_TEXT =
   'Map tiles are turned off in Settings, so the road map is not downloaded and this leg is drawn as a straight line.';
+
+/** What a leg of a closed planner settles with. Nobody reads it: the planner that asked is gone. */
+export const RELEASED_TEXT = 'The route planner was closed before this leg was routed.';
 
 /** Said when the graph holds both ends and has no path between them. */
 export const NO_PATH_TEXT =
@@ -193,6 +205,8 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
   const create = options.createRouter ?? loadBrowserRouter;
   const legTimeoutMs = options.legTimeoutMs ?? LEG_TIMEOUT_MS;
   let router: Promise<BrowserRouter> | undefined;
+  // Bumped by every release (see the header); a leg carries the one it was asked in.
+  let generation = 0;
   // Every leg of every request, one at a time (see the header).
   let queue: Promise<unknown> = Promise.resolve();
   const inTurn = <T>(task: () => Promise<T>): Promise<T> => {
@@ -201,7 +215,14 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
     return run;
   };
 
-  const routeLeg = async (request: RouteRequest, leg: number): Promise<RoutedLeg> => {
+  const stale = (asked: number): boolean => asked !== generation;
+
+  const routeLeg = async (
+    request: RouteRequest,
+    leg: number,
+    asked: number,
+  ): Promise<RoutedLeg> => {
+    if (stale(asked)) throw new RoutingError('unavailable', RELEASED_TEXT, leg);
     const from = request.waypoints[leg]?.position;
     const to = request.waypoints[leg + 1]?.position;
     if (from === undefined || to === undefined) {
@@ -216,6 +237,7 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
     let result: BrowserRouteResult;
     try {
       const engine = await router;
+      if (stale(asked)) throw new RoutingError('unavailable', RELEASED_TEXT, leg);
       result = await engine.route(
         {
           costing: 'bicycle',
@@ -230,7 +252,8 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
         { signal: AbortSignal.timeout(legTimeoutMs) },
       );
     } catch (error) {
-      throw refusal(error, leg);
+      // Our own refusal of a closed planner's leg passes through; the SDK's is translated.
+      throw error instanceof RoutingError ? error : refusal(error, leg);
     }
     return legFrom(result, leg);
   };
@@ -240,14 +263,16 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
       if (request.waypoints.length < 2) {
         throw new RoutingError('invalid-request', 'a route needs at least two waypoints');
       }
+      const asked = generation;
       const legs: RoutedLeg[] = [];
       // One worker routes one leg at a time, so in series, and in turn with any other request's.
       for (let leg = 0; leg + 1 < request.waypoints.length; leg += 1) {
-        legs.push(await inTurn(() => routeLeg(request, leg)));
+        legs.push(await inTurn(() => routeLeg(request, leg, asked)));
       }
       return legs;
     },
     release: () => {
+      generation += 1;
       void router?.then(
         (engine) => {
           engine.cancel();

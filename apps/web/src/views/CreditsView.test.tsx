@@ -732,7 +732,7 @@ describe('the road-map engine’s licence texts, read inside the app — #2734',
     );
     await activateWithKeyboard(summary());
     await settle();
-    expect(software()).toContain('need a network the first time');
+    expect(software()).toContain('fetched from the network when you open them');
     expect(shown()).toBeUndefined();
   });
 

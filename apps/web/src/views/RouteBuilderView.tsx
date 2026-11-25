@@ -874,6 +874,7 @@ export function RouteBuilderView({
           </p>
           <select
             id="surface-tolerance"
+            aria-describedby={choicesNote === undefined ? undefined : 'riding-choices-note'}
             value={preferences.surface}
             onChange={(event) => {
               setPreferences({ ...preferences, surface: event.target.value as SurfaceTolerance });
@@ -885,7 +886,11 @@ export function RouteBuilderView({
               </option>
             ))}
           </select>
-          {choicesNote === undefined ? null : <p data-riding-choices="">{choicesNote}</p>}
+          {choicesNote === undefined ? null : (
+            <p id="riding-choices-note" data-riding-choices="">
+              {choicesNote}
+            </p>
+          )}
           {risk === undefined ? null : (
             <StatusMessage tone="warning" label="This setting can refuse a route">
               {risk}

@@ -49,7 +49,7 @@ export function chunkFileName(chunk: { readonly moduleIds: readonly string[] }):
     : 'assets/[name]-[hash].js';
 }
 
-/** Rolldown's `assetFileNames`:the SDK's files under `routing/`, every other asset where Vite puts it. */
+/** Rolldown's `assetFileNames`: the SDK's files under `routing/`, every other asset where Vite puts it. */
 export function assetFileName(asset: { readonly originalFileNames: readonly string[] }): string {
   return isRoutingRuntimeAsset(asset.originalFileNames)
     ? `${ROUTING_RUNTIME_DIRECTORY}[name]-[hash][extname]`

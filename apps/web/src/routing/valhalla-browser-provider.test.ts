@@ -25,6 +25,7 @@ import {
   NOT_LOADED_TEXT,
   OUTSIDE_GRAPH_TEXT,
   refusal,
+  RELEASED_TEXT,
   TILES_OFF_TEXT,
   TOO_LARGE_TEXT,
   TOO_SLOW_TEXT,
@@ -300,6 +301,132 @@ describe('the in-browser Valhalla adapter (#2734)', () => {
     });
     await expect(provider.route(request)).resolves.toHaveLength(1);
     expect(engine.created).toBe(1);
+  });
+
+  /**
+   * An engine as the SDK behaves: `cancel()` rejects every route it holds, and
+   * the router is made only when `load` is called, so a test can release the
+   * planner while the engine is still loading.
+   */
+  function heldEngine(): {
+    readonly asked: number[];
+    readonly cancelled: () => number;
+    readonly created: () => number;
+    readonly createRouter: () => Promise<BrowserRouter>;
+    readonly load: () => void;
+    readonly answerAll: () => void;
+  } {
+    const asked: number[] = [];
+    const outstanding: ((ok: boolean) => void)[] = [];
+    let cancelled = 0;
+    let created = 0;
+    const { promise: loading, resolve: loaded } = Promise.withResolvers<BrowserRouter>();
+    const router: BrowserRouter = {
+      route: (request) => {
+        asked.push(request.locations[0].lat);
+        return new Promise<BrowserRouteResult>((answer, reject) => {
+          outstanding.push((ok) => {
+            if (ok) answer(roadBetween(request));
+            else reject(sdkError('CANCELLED'));
+          });
+        });
+      },
+      cancel: () => {
+        cancelled += 1;
+        for (const settle of outstanding.splice(0)) settle(false);
+      },
+    };
+    return {
+      asked,
+      cancelled: () => cancelled,
+      created: () => created,
+      createRouter: () => {
+        created += 1;
+        return loading;
+      },
+      load: () => {
+        loaded(router);
+      },
+      answerAll: () => {
+        for (const settle of outstanding.splice(0)) settle(true);
+      },
+    };
+  }
+
+  const legAt = (latitude: number) => ({
+    waypoints: [{ position: at(latitude, latitude) }, { position: at(latitude + 0.01, latitude) }],
+    preferences: RIDING_DEFAULTS,
+  });
+
+  it('settles the legs a closed planner left in the queue without asking the engine, so no worker is started for them', async () => {
+    const held = heldEngine();
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: held.createRouter,
+    });
+    const inEngine = provider.route(legAt(0.05));
+    const queued = provider.route(legAt(0.07));
+    held.load();
+    await vi.waitFor(() => {
+      expect(held.asked).toEqual([0.05]);
+    });
+    provider.release();
+    await expect(inEngine).rejects.toThrow(TOO_SLOW_TEXT);
+    await expect(queued).rejects.toThrow(RELEASED_TEXT);
+    // The queued leg never reached the engine, so it started no worker.
+    expect(held.asked).toEqual([0.05]);
+    expect(held.cancelled()).toBe(1);
+  });
+
+  it('does not start loading the engine again for a closed planner’s queued leg after a load failed', async () => {
+    const engine = fakeEngine();
+    const { promise: loading, reject: fail } = Promise.withResolvers<BrowserRouter>();
+    let created = 0;
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: () => {
+        created += 1;
+        return created === 1 ? loading : engine.createRouter();
+      },
+    });
+    const first = provider.route(legAt(0.05));
+    const queued = provider.route(legAt(0.07));
+    await vi.waitFor(() => {
+      expect(created).toBe(1);
+    });
+    provider.release();
+    fail(sdkError('NETWORK'));
+    await expect(first).rejects.toThrow(NOT_LOADED_TEXT);
+    await expect(queued).rejects.toThrow(RELEASED_TEXT);
+    // A failed load is forgotten, but the closed planner's leg does not ask for another.
+    expect(created).toBe(1);
+  });
+
+  it('released while the engine loads: the old leg never reaches it, and the cancel does not touch the planner opened since', async () => {
+    const held = heldEngine();
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: held.createRouter,
+    });
+    const closed = provider.route(legAt(0.05));
+    // Its leg has asked for the engine, which is still loading.
+    await vi.waitFor(() => {
+      expect(held.created()).toBe(1);
+    });
+    provider.release();
+    // The planner is opened again before the engine has loaded.
+    const reopened = provider.route(legAt(0.07));
+    held.load();
+    await expect(closed).rejects.toThrow(RELEASED_TEXT);
+    await vi.waitFor(() => {
+      expect(held.asked).toEqual([0.07]);
+    });
+    held.answerAll();
+    // The new view's first leg follows roads: it was not cancelled and drawn straight.
+    await expect(reopened).resolves.toHaveLength(1);
   });
 
   it('refuses fewer than two waypoints without loading anything', async () => {

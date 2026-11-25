@@ -623,7 +623,7 @@ export function CreditsView({
             summary="Read the road-map engine’s licence texts"
             reading="Reading the road-map engine’s licence texts."
             failedLabel="Could not open the engine’s licence texts"
-            failed="The road-map engine’s licence texts could not be read just now. In a browser they are downloaded when you open them, so they need a network the first time."
+            failed="The road-map engine’s licence texts could not be read just now. In a browser they are fetched from the network when you open them."
             marker={{ 'data-routing-notices-document': '' }}
           />
           {software.app.length === 0 || software.problems.length > 0 ? (

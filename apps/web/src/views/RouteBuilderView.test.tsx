@@ -528,6 +528,11 @@ describe('legs, surfaces and the settings that decide them', () => {
     const view = await open({ provider: routingTiers({ browser: () => scriptedProvider() }) });
     expect(view.container.textContent).toContain(CHOICES_NOT_APPLIED_TEXT);
     const select = view.container.querySelector('select');
+    // The note is read with the choice it qualifies, not only somewhere below it.
+    const described = select?.getAttribute('aria-describedby') ?? '';
+    expect(view.container.querySelector(`[id="${described}"]`)?.textContent).toBe(
+      CHOICES_NOT_APPLIED_TEXT,
+    );
     await chooseOption(select as HTMLSelectElement, 'paved-only');
     await settle();
     expect(view.container.textContent).not.toContain('including your own driveway');
@@ -547,6 +552,7 @@ describe('legs, surfaces and the settings that decide them', () => {
   it('says nothing about the choice with the instance alone', async () => {
     const view = await open({ provider: scriptedProvider() });
     expect(view.container.querySelector('[data-riding-choices]')).toBeNull();
+    expect(view.container.querySelector('select')?.hasAttribute('aria-describedby')).toBe(false);
   });
 });
 
