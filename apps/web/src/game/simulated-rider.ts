@@ -34,15 +34,29 @@
  * one, or join a room — by the ports' absence rather than by a guard inside
  * the loop. `simulated-rider-wiring.test.tsx` holds both halves.
  *
- * ⚠️ Nothing here is a reading from a device. {@link simulatedSensors} says
- * cadence and heart rate are unpaired, so the HUD shows a dash for each rather
- * than an invented number.
+ * ## Its cadence and heart rate are invented — #3210
+ *
+ * ⚠️ Nothing here is a reading from a device. Until the owner's ruling of
+ * 2026-11-25 (*"For the preview I would like to see made up numbers"*) the
+ * simulated rider said cadence and heart rate were unpaired, so the HUD
+ * showed a dash for each and the legs did not turn. Now
+ * {@link SimulatedRiderSensors} reports both, live and paired: a cadence and a
+ * heart rate `simulated-body.ts` invents from the power and the gradient, made
+ * realistic per the same day's *"make sure the made up numbers are
+ * realistic"*, or the fixed values a developer asks for:
+ *
+ *     #/game?simulate=200&cadence=90&hr=140
+ *
+ * They reach the HUD and the cranks and nothing else: a simulated ride has no
+ * trainer port, so they cannot reach a recording, an upload or a room, by the
+ * same absence that keeps it from the trainer.
  */
 
 import { watts } from '@onyourleft/domain';
 
 import type { CaptureScene } from './capture-scene';
 import type { GameSensors } from './sensors';
+import { InventedBody, type OwnThresholds } from './simulated-body';
 
 /** The highest power the query accepts, in watts. Beyond it the mode is off. */
 const SIMULATED_RIDER_MAX_WATTS = 2000;
@@ -57,6 +71,18 @@ const SIMULATED_RIDER_MAX_WATTS = 2000;
  */
 const SIMULATED_RIDER_MAX_SPEEDUP = 32;
 
+/** The highest fixed cadence the query accepts, rpm. Beyond it the cadence is invented. */
+const SIMULATED_RIDER_MAX_CADENCE = 200;
+/** The lowest and highest fixed heart rate it accepts, bpm. Outside them it is invented. */
+const SIMULATED_RIDER_MIN_HEART_RATE = 30;
+const SIMULATED_RIDER_MAX_HEART_RATE = 230;
+
+/**
+ * The seed of the invented readings' wobble (`simulated-body.ts`): one
+ * number, so every preview at one power wobbles alike and a test can pin it.
+ */
+const SIMULATED_BODY_SEED = 3210;
+
 /** What the developer asked for. */
 export interface SimulatedRider {
   /** The steady power the rider is ridden at. */
@@ -65,6 +91,10 @@ export interface SimulatedRider {
   readonly speedup: number;
   /** Where on the route the ride starts, in odometer metres; absent is the start line. */
   readonly startMetres: number | undefined;
+  /** #3210: a fixed cadence, rpm, in place of the invented one (`&cadence=`). */
+  readonly cadence?: number | undefined;
+  /** #3210: a fixed heart rate, bpm, in place of the invented one (`&hr=`). */
+  readonly heartRate?: number | undefined;
   /**
    * The capture scene this ride is scripted by — #3152, `capture-scene.ts`:
    * its readings in place of {@link watts}, and the HUD a rider sees. Absent
@@ -92,7 +122,10 @@ function numberOf(value: string | null): number | undefined {
  * than {@link SIMULATED_RIDER_MAX_WATTS} leaves the mode off. A speed-up
  * outside 1 to {@link SIMULATED_RIDER_MAX_SPEEDUP} is held to that range, and
  * one that is not a number is real time; a start that is not a non-negative
- * number is the start line.
+ * number is the start line. #3210: a `cadence` from 0 to
+ * {@link SIMULATED_RIDER_MAX_CADENCE} rpm and an `hr` from
+ * {@link SIMULATED_RIDER_MIN_HEART_RATE} to {@link SIMULATED_RIDER_MAX_HEART_RATE}
+ * bpm are fixed readings; anything else leaves that reading invented.
  */
 export function simulatedRiderFromHash(hash: string): SimulatedRider | undefined {
   const query = queryOf(hash);
@@ -103,11 +136,24 @@ export function simulatedRiderFromHash(hash: string): SimulatedRider | undefined
   }
   const speedup = numberOf(query.get('speedup')) ?? 1;
   const start = numberOf(query.get('at'));
+  const cadence = within(numberOf(query.get('cadence')), 0, SIMULATED_RIDER_MAX_CADENCE);
+  const heartRate = within(
+    numberOf(query.get('hr')),
+    SIMULATED_RIDER_MIN_HEART_RATE,
+    SIMULATED_RIDER_MAX_HEART_RATE,
+  );
   return {
     watts: power,
     speedup: Math.min(SIMULATED_RIDER_MAX_SPEEDUP, Math.max(1, speedup)),
     startMetres: start === undefined || start < 0 ? undefined : start,
+    ...(cadence === undefined ? {} : { cadence }),
+    ...(heartRate === undefined ? {} : { heartRate }),
   };
+}
+
+/** `value` when it lies in `[low, high]`, else `undefined`. */
+function within(value: number | undefined, low: number, high: number): number | undefined {
+  return value === undefined || value < low || value > high ? undefined : value;
 }
 
 /**
@@ -119,16 +165,58 @@ export function simulatedRiderKey(rider: SimulatedRider | undefined): string {
   return rider === undefined
     ? 'ride'
     : `simulated:${String(rider.watts)}:${String(rider.speedup)}:${String(rider.startMetres)}` +
+        (rider.cadence === undefined ? '' : `:cadence:${String(rider.cadence)}`) +
+        (rider.heartRate === undefined ? '' : `:hr:${String(rider.heartRate)}`) +
         (rider.capture === undefined ? '' : `:capture:${rider.capture.id}`);
 }
 
-/** What the game reads each frame while the simulated rider is on. */
-export function simulatedSensors(rider: SimulatedRider): GameSensors {
-  return {
-    rider: { power: watts(rider.watts), live: true, paired: true },
-    cadence: { value: undefined, live: false, paired: false },
-    heartRate: { value: undefined, live: false, paired: false },
-  };
+/**
+ * What the game reads each frame while the simulated rider is on — #3210:
+ * the chosen power, and a cadence and heart rate invented for it
+ * (`simulated-body.ts`) or fixed by the query, all three live and paired so
+ * the HUD shows them and the cranks turn.
+ *
+ * Like `capture-scene.ts` §`CaptureSensors`, read on the ride's own clock and
+ * started with the ride, which also hands over the gradient under the rider
+ * and the rider's own thresholds. Read before the ride starts, the body is at
+ * rest.
+ */
+export class SimulatedRiderSensors {
+  readonly #rider: SimulatedRider;
+  #body: InventedBody;
+  #startedAtMs: number | undefined;
+  #grade: () => number = () => 0;
+
+  constructor(rider: SimulatedRider) {
+    this.#rider = rider;
+    this.#body = new InventedBody(SIMULATED_BODY_SEED);
+  }
+
+  /**
+   * The ride started at `nowMs`, on the road whose gradient under the rider
+   * `grade` reads, by a rider with these thresholds: a body at rest again.
+   */
+  start(nowMs: number, grade: () => number, own: OwnThresholds): void {
+    this.#startedAtMs = nowMs;
+    this.#grade = grade;
+    this.#body = new InventedBody(SIMULATED_BODY_SEED, own);
+  }
+
+  /** What every sensor reads at `nowMs`. */
+  read(nowMs: number): GameSensors {
+    if (this.#startedAtMs !== undefined) {
+      this.#body.advanceTo(
+        Math.max(0, (nowMs - this.#startedAtMs) / 1000),
+        this.#rider.watts,
+        this.#grade(),
+      );
+    }
+    return {
+      rider: { power: watts(this.#rider.watts), live: true, paired: true },
+      cadence: { value: this.#rider.cadence ?? this.#body.cadence, live: true, paired: true },
+      heartRate: { value: this.#rider.heartRate ?? this.#body.heartRate, live: true, paired: true },
+    };
+  }
 }
 
 /**

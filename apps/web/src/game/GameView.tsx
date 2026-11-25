@@ -182,8 +182,8 @@ import {
   simulatedRideSentences,
   simulatedRiderFromHash,
   simulatedRiderKey,
-  simulatedSensors,
   simulatedStartMetres,
+  SimulatedRiderSensors,
   type SimulatedRider,
 } from './simulated-rider';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
@@ -1378,12 +1378,14 @@ function performanceNow(): number {
  * without it nothing is written to a machine and nothing reaches the store,
  * an export or sync; without the room ports nothing is posted to a room; and
  * a round would keep the week's counts on this device (`delivery-progress.ts`).
- * The sensors are the simulated rider's, and the clock runs at its speed-up.
+ * The sensors are the simulated rider's — #3210: its power and its invented
+ * cadence and heart rate, which by the same absence reach no recording — or a
+ * capture's script, and the clock runs at its speed-up.
  */
 function useSimulatedRide(
   given: GameViewProps,
   simulated: SimulatedRider | undefined,
-  capture: CaptureSensors | undefined,
+  sensors: { read(nowMs: number): GameSensors } | undefined,
 ): GameViewProps {
   const givenNow = given.now;
   const now = useMemo(
@@ -1395,15 +1397,14 @@ function useSimulatedRide(
   );
   const givenPort = given.port;
   const port = useMemo((): GamePort | undefined => {
-    if (simulated === undefined || givenPort === undefined) return givenPort;
-    // #3152: a capture's readings follow its script on the ride's own clock.
-    if (capture !== undefined) {
-      const read = now ?? performanceNow;
-      return { ...givenPort, readSensors: () => capture.read(read()) };
+    if (simulated === undefined || givenPort === undefined || sensors === undefined) {
+      return givenPort;
     }
-    const sensors = simulatedSensors(simulated);
-    return { ...givenPort, readSensors: () => sensors };
-  }, [givenPort, simulated, capture, now]);
+    // #3152: a capture's readings follow its script on the ride's own clock;
+    // #3210: the simulated rider's invented ones follow its body on it.
+    const read = now ?? performanceNow;
+    return { ...givenPort, readSensors: () => sensors.read(read()) };
+  }, [givenPort, simulated, sensors, now]);
   if (simulated === undefined) return given;
   return {
     ...given,
@@ -1472,7 +1473,14 @@ function GameScreen({
     const store = captureStorage();
     return () => store;
   });
-  const props = useSimulatedRide(given, simulated, captureSensors);
+  // #3210: on any other simulated ride, its invented cadence and heart rate,
+  // held for the screen as the rider is.
+  const [inventedSensors] = useState(() =>
+    simulated === undefined || captureScene !== undefined
+      ? undefined
+      : new SimulatedRiderSensors(simulated),
+  );
+  const props = useSimulatedRide(given, simulated, captureSensors ?? inventedSensors);
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
   // the control that shows the refusal and the button the refusal blocks.
@@ -3222,6 +3230,13 @@ function GameScreen({
       // the height it will be and nothing moves when the first second lands.
       recentTraceRef.current = createRecentTrace();
       setRecentTrace({ samples: [], written: 0 });
+      // #3210: the simulated rider's body starts at rest with the ride, on its
+      // road and at the rider's own thresholds.
+      inventedSensors?.start(
+        (props.now ?? performanceNow)(),
+        () => simulation.state.grade,
+        ownThresholdsRef.current,
+      );
       // #3152: a capture's script and its figures start with the ride.
       if (captureSensors !== undefined) {
         captureSensors.start((props.now ?? performanceNow)());
@@ -3610,6 +3625,7 @@ function GameScreen({
       soundsOut,
       simulated,
       captureSensors,
+      inventedSensors,
       level,
     ],
   );
