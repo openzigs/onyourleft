@@ -777,3 +777,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   from GLO-30 where nothing finer exists, and the engine's `/height` as the source for an operator
   who runs one: `RoutingProvider.heights` is unchanged, and with an engine its heights are the
   route's. This entry is a pointer to the ruling and to ADR 0087, and decides nothing itself.
+- **2026-11-24** — D-4's engine is now running, as an optional add-on to the rider's own instance
+  ([#2008](https://github.com/openzigs/onyourleft/issues/2008)): **Valhalla `3.9.1`** (released
+  2026-10-06, MIT, read 2026-11-24), pinned by digest in `apps/instance/deploy/home/compose.yaml`,
+  not the `3.8.3` the *Sources* table records. Reached over HTTP as a separate process, as D-4
+  requires; the app reaches it only through its instance, sealed. Two facts for D-5, recorded and
+  **not** decided here: (1) the heights loaded into that process are **Tilezen's terrain tiles**,
+  the 1-arc-second grid `valhalla_build_elevation` downloads, and not Copernicus GLO-30 — in the
+  United States their source is USGS 3DEP, a bare-earth model and public domain, which answers
+  D-5's first caveat rather than adding to it; their notices are in
+  [`docs/operating-an-instance.md`](../operating-an-instance.md) §"Road routing". Keeping them, or
+  loading GLO-30 as D-5 names, is the owner's call on
+  [#3138](https://github.com/openzigs/onyourleft/issues/3138). (2) D-5's own third caveat, GLO-30's
+  maintenance to 2026, is still open. The in-browser bundle (`apps/web/tools/valhalla`) stays at
+  `3.8.3` until its own change moves it.
+  ([#2008](https://github.com/openzigs/onyourleft/issues/2008))
