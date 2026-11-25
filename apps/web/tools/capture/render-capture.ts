@@ -5,7 +5,7 @@
  *
  * ## How
  *
- * The built app (`apps/web/dist`, `vite build`) is opened in the pinned
+ * The built app (`apps/web/capture/dist/app`, `vite build --mode capture`) is opened in the pinned
  * Chromium at an origin of its own, every file answered from disk by
  * `context.route` and every other request refused, as the demo's render
  * answers the demo (`tools/demo/render-video.ts`). Before the app's first
@@ -31,23 +31,23 @@
  * of the video that is not the ride at its time.
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 
 import { chromium, type Page } from '@playwright/test';
 
 import { LAUNCH_ARGS } from '../../playwright.config';
-import type { CaptureSnapshot } from '../../src/game/capture-scene';
+import type { CaptureEvent, CaptureSnapshot } from '../../src/game/capture-scene';
 import { encoders, startEncoder } from '../demo/render-video';
 import { hasEncoder } from '../demo/video';
 import {
   CAPTURE_DATE_MS,
   CAPTURE_RIDER_KILOGRAMS,
-  CAPTURE_ROUTE_NAME,
   captureFrames,
   captureHash,
   captureMp4Args,
   captureName,
+  captureRideName,
   captureRouteGpx,
   type CaptureRequest,
 } from './capture-args';
@@ -105,7 +105,7 @@ export function servedFile(dist: string, pathname: string): string | undefined {
 
 /** What a capture needs beyond the request. */
 export interface CaptureOptions {
-  /** The built app: `apps/web/dist`. */
+  /** The built app: `apps/web/capture/dist/app` (#3153). */
   readonly dist: string;
   /** Where the video goes. */
   readonly out: string;
@@ -118,6 +118,12 @@ export interface CaptureOptions {
 /** What a capture wrote and saw. */
 export interface CaptureResult {
   readonly mp4: string;
+  /**
+   * #3153: the ride's event log on the last frame, written beside the video
+   * as JSON ({@link captureEventsName}): two captures of a scene are the same
+   * ride when their logs are equal.
+   */
+  readonly events: string;
   readonly frames: number;
   /** The ride on the last frame, as the page reported it. */
   readonly last: CaptureSnapshot;
@@ -151,6 +157,34 @@ async function setRiderWeight(page: Page): Promise<void> {
   await page.getByText('Saved. The trainer game now rides you at this weight.').waitFor();
 }
 
+/** #3153: the event log's file name, beside the video's. */
+export function captureEventsName(request: CaptureRequest): string {
+  return captureName(request).replace(/\.mp4$/u, '.events.json');
+}
+
+/**
+ * #3153: what the event log holds: the scene, the video's frames, and every
+ * event of the ride on the last, each stamped with the frames that had drawn
+ * the world when it happened (the frame drawn before the first counted one
+ * is the first of those: `render-capture.ts` step 3).
+ */
+export function captureEventsFile(
+  request: CaptureRequest,
+  last: CaptureSnapshot,
+): {
+  readonly scene: string;
+  readonly fps: number;
+  readonly frames: number;
+  readonly events: readonly CaptureEvent[];
+} {
+  return {
+    scene: request.scene,
+    fps: request.fps,
+    frames: captureFrames(request),
+    events: last.events ?? [],
+  };
+}
+
 /** Capture `request` from the built app; resolves once the video is written and closed. */
 export async function renderCapture(
   request: CaptureRequest,
@@ -158,7 +192,7 @@ export async function renderCapture(
 ): Promise<CaptureResult> {
   const dist = resolve(options.dist);
   if (!existsSync(join(dist, 'index.html'))) {
-    throw new Error(`no built app at ${dist}: run vite build first`);
+    throw new Error(`no built app at ${dist}: run vite build --mode capture first`);
   }
   const ffmpeg = options.ffmpeg ?? 'ffmpeg';
   if (!hasEncoder(encoders(ffmpeg), 'libx264')) {
@@ -205,7 +239,7 @@ export async function renderCapture(
     await setRiderWeight(page);
 
     await page.goto(`${CAPTURE_ORIGIN}/${captureHash(request.scene)}`);
-    const ride = page.getByRole('button', { name: `Ride ${CAPTURE_ROUTE_NAME}` });
+    const ride = page.getByRole('button', { name: `Ride ${captureRideName(request.scene)}` });
     await ride.waitFor();
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
     await page.evaluate((dateMs) => {
@@ -261,7 +295,9 @@ export async function renderCapture(
       await encoder.end();
     }
     if (last === undefined) throw new Error('capture: no frame was captured');
-    return { mp4, frames, last, refused: [...refused] };
+    const events = join(options.out, captureEventsName(request));
+    writeFileSync(events, `${JSON.stringify(captureEventsFile(request, last), null, 2)}\n`);
+    return { mp4, events, frames, last, refused: [...refused] };
   } finally {
     await browser.close();
   }

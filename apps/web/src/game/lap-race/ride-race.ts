@@ -278,6 +278,12 @@ export interface LapRaceRideStart {
    * a seeded race.
    */
   readonly model?: boolean | undefined;
+  /**
+   * #3153: the race's seed, set by capture mode alone (`capture-scene.ts`,
+   * which only the capture tool's build reads), so a scene deals the same
+   * field twice. Absent — every rider's race — it is drawn at the press.
+   */
+  readonly seed?: number | undefined;
 }
 
 /**
@@ -356,7 +362,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   }
   const course = raceCourse(profile.totalDistance, choice.laps);
   const assist = readLapRaceAssist(input.storage);
-  const seed = drawRaceSeed();
+  const seed = input.seed ?? drawRaceSeed();
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
   const personalities = botFieldPersonalities(seed, ids.length);

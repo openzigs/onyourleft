@@ -162,7 +162,8 @@ capture mode ([#3152](https://github.com/openzigs/onyourleft/issues/3152)).
 pnpm --filter @onyourleft/web run capture -- --scene route-hud --seconds 20
 ```
 
-This builds the app and writes `apps/web/capture/dist/route-hud-1920x1080-60fps.mp4`: H.264 High
+This builds the app into `apps/web/capture/dist/app` and writes
+`apps/web/capture/dist/route-hud-1920x1080-60fps.mp4`: H.264 High
 profile, yuv420p, 1920×1080, 60 fps, CRF 16, `+faststart`. The issue allowed CRF 16 or at least
 12 Mb/s; it is CRF 16, constant quality. The stylised world compresses well, so 20 s of `route-hud`
 came to about 4.9 Mb/s on a Mac. It needs `ffmpeg` with `libx264` on the `PATH` and the pinned
@@ -170,7 +171,7 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 
 | Option | Values | Default |
 |---|---|---|
-| `--scene` | `route-hud` | `route-hud` |
+| `--scene` | `route-hud`, `delivery`, `lap-race`, `workout`, `pacer` | `route-hud` |
 | `--seconds` | seconds of ride, positive; `seconds × fps` must be whole | `20` |
 | `--fps` | whole frames a second, 1 to 60 | `60` |
 | `--size` | `WIDTHxHEIGHT`, each even, at least 64 | `1920x1080` |
@@ -178,7 +179,7 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 
 ### How it works
 
-`tools/capture/render-capture.ts` opens the built app (`apps/web/dist`) in Chromium, answering
+`tools/capture/render-capture.ts` opens the built app (`apps/web/capture/dist/app`) in Chromium, answering
 every file from disk and refusing every other origin, as the demo's render does. Before the app's
 first script runs, `tools/capture/capture-clock.ts` replaces the page's `performance.now`, `Date`,
 `requestAnimationFrame` and timers. The capture then:
@@ -186,8 +187,9 @@ first script runs, `tools/capture/capture-clock.ts` replaces the page's `perform
 1. imports a synthetic route through the Routes page's own form. It is eight invented kilometres
    from 0° 0° under the placeholder name *Capture loop*, so no real street or place is on screen.
    It also sets the rider's weight on the Settings page, so W/kg has one to read;
-2. opens `#/game?capture=<scene>`, holds the clocks at 10:30 UTC on a midsummer morning, and
-   presses *Ride*;
+2. opens `#/game?capture=<scene>`, with `route=` the scene's built-in level or circuit when it
+   names one, holds the clocks at 10:30 UTC on a midsummer morning, and presses that route's
+   *Ride*;
 3. runs animation frames at that one instant until the ride has drawn its world. None of these
    frames is in the video, and no ride time passes during them. The timers keep real time until
    the first step, because the renderer's warm-up waits for the GPU on a timer;
@@ -196,7 +198,10 @@ first script runs, `tools/capture/capture-clock.ts` replaces the page's `perform
    demo's own encoder.
 
 So frame *n* is the ride at *n / fps* seconds, however long the machine takes to draw it. The
-capture stops if a step does not draw the world exactly once.
+capture stops if a step does not draw the world exactly once. Beside the video it writes the ride's
+event log, `<scene>-<size>-<fps>fps.events.json` (#3153): the round's or race's seed and what it
+dealt, each scripted press, each change of score, each lap and each workout block, with the frame
+it happened on. Two captures of one scene are the same ride when their logs are equal.
 
 ### What `?capture=` is in the app
 
@@ -216,8 +221,34 @@ differs in three ways:
 `vite build --mode capture`; every other build, every release among them, is `production`, where
 `captureSceneFromHash` answers `undefined` before it reads the address, so a link carrying
 `?capture=` opens an ordinary ride. The scenes are not in that bundle, and
-`tools/capture/capture-stays-out.ts` fails a product build that carries one. The capture tool leaves
-its build in `apps/web/dist`: run `vite build` again before using that directory for anything else.
+`tools/capture/capture-stays-out.ts` fails a product build that carries one, finding the scene
+table by the mark every scene's id begins with (`oyl-capture-scene:`), never by a name such as
+`delivery` that the product carries anyway. The capture build is written to
+`apps/web/capture/dist/app`, never to `apps/web/dist`, which is Capacitor's `webDir`, so an app
+built by hand after a capture never reads `?capture=` (#3153).
 `src/game/capture-wiring.test.tsx` proves the stepped clock, and `simulated-rider-wiring.test.tsx`
-proves that a capture reaches no trainer and starts no recording. The other scenes (Delivery, lap
-race, workouts, free ride and the instance) are #3153 to #3155.
+proves that a capture reaches no trainer and starts no recording. Free ride and the instance scenes
+are #3154 and #3155.
+
+### The modes' scenes (#3153)
+
+| Scene | Opens on | What is scripted |
+|---|---|---|
+| `delivery` | the first built-in level, *Morning Round*, 680 m in | the round's seed; a throw at each house as a rider aims it, so the parcel lands on the step |
+| `lap-race` | the built-in circuit *Bellwether Loop* | the race's seed, five seeded bots (no instance), two laps; an item used once one is held, after its second |
+| `workout` | the synthetic route | a tailored built-in (`#/ride?workout=built-in:sweet-spot-3x12&length=45&intensity=5`) from 10 s before its warm-up ends, its ERG target held at a 250 W threshold |
+| `pacer` | the synthetic route | the pacer at 3.1 W/kg, and the rider's "own best" as a bundled synthetic ride at 31 km/h |
+
+- **Seeds.** Delivery's round seed and the lap race's are drawn from `crypto.getRandomValues` at the
+  press on every ride. A scene's `seed` is the only other source, and only the capture build reads a
+  scene. `capture-modes-wiring.test.tsx` proves a release build, `?capture=` and all, and the capture
+  build without `?capture=` still draw from crypto.
+- **No rider data.** A capture keeps Delivery's week, the levels finished and the assist settings in
+  an empty store in memory (`capture-scene.ts` §`captureStorage`), and never asks the store for a
+  ghost: its ghost is the bundled synthetic one, or none. A capture writes nothing to a trainer.
+- **The workout's trainer** is `capture-workout.ts`: it holds the ERG target and the power read is
+  the target, as an ERG trainer makes it. Nothing is written to a device.
+- **Laps.** A capture that crosses a course's line keeps its laps in memory with the recorder's own
+  rule, so the lap panel shows them and *Lap* counts from the line.
+- The lap race's countdown is ten seconds, and its first pick-up is a quarter of the way round, so
+  on *Bellwether Loop* the item is used about 100 s into the ride. Capture the scene long enough.

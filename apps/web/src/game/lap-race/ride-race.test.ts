@@ -84,6 +84,50 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('the race’s seed — #3153', () => {
+  /** A seeded race on the loop, from `seed` when one is given. */
+  const seeded = (seed: number | undefined): LapRaceRide => {
+    const ride = startLapRaceRide({
+      choice: DEFAULT_LAP_RACE,
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      seed,
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  };
+  const drawing = (value: number) =>
+    vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = value;
+        return array;
+      });
+
+  it('is drawn from crypto at the press when none is given — every rider’s race', () => {
+    const draw = drawing(91);
+    expect(seeded(undefined).seed).toBe(91);
+    expect(draw).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a capture’s own when given, with nothing drawn, and the same field twice', () => {
+    const draw = drawing(91);
+    const first = seeded(3_153);
+    const second = seeded(3_153);
+    expect(first.seed).toBe(3_153);
+    expect(draw).not.toHaveBeenCalled();
+    expect(second.names).toEqual(first.names);
+    expect(second.bots).toEqual(first.bots);
+    expect(seeded(3_154).names).not.toEqual(first.names);
+  });
+});
+
 describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0076)', () => {
   /** A race with AI bots on the loop, from whatever seed the platform draws. */
   const modelRace = (): LapRaceRide => {

@@ -36,8 +36,9 @@ import {
   type RevolutionsPerMinute,
   type Watts,
 } from '@onyourleft/domain';
-import type { StreamChannelValue } from '@onyourleft/store';
+import type { RecordedCourseLap, RecordedLapMark, StreamChannelValue } from '@onyourleft/store';
 
+import { lapFiguresOf, type CourseLineEvent, type LapFigures } from '../recording/laps';
 import { rideTotals, type RideTotals } from '../recording/totals';
 
 /** One second of a capture ride: what the HUD read, and where the rider was. */
@@ -58,6 +59,10 @@ export class CaptureRecording {
   readonly #cadence: (RevolutionsPerMinute | undefined)[] = [];
   readonly #speed: (MetresPerSecond | undefined)[] = [];
   readonly #altitude: (AltitudeMetres | undefined)[] = [];
+  /** #3153: the laps ended over a course's line, as the recorder keeps them. */
+  readonly #laps: RecordedCourseLap[] = [];
+  /** Where the lap in progress began: the ride's start, or the last line crossed. */
+  #lapFrom: RecordedLapMark = lapMark(0);
   #totals: RideTotals | undefined;
 
   /**
@@ -94,26 +99,66 @@ export class CaptureRecording {
   }
 
   /**
-   * The ride so far, by `recording/totals.ts` §`rideTotals`. The same object
-   * until the next sample, as the recorder's port hands back.
+   * #3153, the review of PR #3160: the seconds of the lap in progress — the
+   * HUD's *Lap* — counted from the last line crossed, as the recorder counts
+   * them (`GameView.tsx` §`useRideLapSeconds`). On a ride that crosses none, {@link seconds}.
+   */
+  get lapSeconds(): number {
+    return this.#power.length - this.#lapFrom.movingTime;
+  }
+
+  /**
+   * #3153, the review of PR #3160: the game said where its course's line is
+   * (`trainer-port.ts` §`GameTrainerPort.courseLine`, which a capture has no
+   * port for). A `lap` ends the lap in progress at the second kept last, with
+   * the course's own distance and climb, and the laps come back as the lap
+   * panel reads them (`recording/laps.ts` §`lapFiguresOf`, the recorder's
+   * rule); `undefined` for an event that ends no lap.
+   */
+  courseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
+    if (event.kind !== 'lap') return undefined;
+    const to = lapMark(this.#power.length);
+    this.#laps.push({
+      from: this.#lapFrom,
+      to,
+      distance: event.distance,
+      ascent: event.ascent,
+      ...(event.partial ? { partial: true } : {}),
+    });
+    this.#lapFrom = to;
+    this.#totals = undefined;
+    const series = this.#series();
+    return this.#laps.map((lap) => lapFiguresOf(series, lap));
+  }
+
+  #series(): RecordedSeries<StreamChannelValue> {
+    return {
+      startedAt: unixSeconds(0),
+      sampleInterval: seconds(1),
+      sampleCount: this.#power.length,
+      channels: {
+        power: [...this.#power],
+        heartRate: [...this.#heartRate],
+        cadence: [...this.#cadence],
+        speed: [...this.#speed],
+        altitude: [...this.#altitude],
+      },
+      pauses: [],
+    };
+  }
+
+  /**
+   * The ride so far, by `recording/totals.ts` §`rideTotals`, over the laps
+   * ended so far. The same object until the next sample or lap, as the
+   * recorder's port hands back.
    */
   totals(): RideTotals {
-    if (this.#totals === undefined) {
-      const series: RecordedSeries<StreamChannelValue> = {
-        startedAt: unixSeconds(0),
-        sampleInterval: seconds(1),
-        sampleCount: this.#power.length,
-        channels: {
-          power: [...this.#power],
-          heartRate: [...this.#heartRate],
-          cadence: [...this.#cadence],
-          speed: [...this.#speed],
-          altitude: [...this.#altitude],
-        },
-        pauses: [],
-      };
-      this.#totals = rideTotals(series, []);
-    }
+    this.#totals ??= rideTotals(this.#series(), this.#laps);
     return this.#totals;
   }
+}
+
+/** The mark of the line at the end of `second`s kept: a capture never pauses, so moving is elapsed. */
+function lapMark(second: number): RecordedLapMark {
+  return { at: unixSeconds(second), movingTime: seconds(second) };
 }

@@ -160,9 +160,23 @@ export const CAPTURE_DATE_MS = Date.UTC(2026, 5, 20, 10, 30, 0);
 /** The capture rider's weight, set on the Settings page as a rider sets theirs: chosen, not anybody's. */
 export const CAPTURE_RIDER_KILOGRAMS = 72;
 
-/** The fragment the capture opens the game at, for `scene`. */
+/**
+ * The fragment the capture opens the game at, for `scene`: on the scene's
+ * built-in route when it names one (#3153), as `shell/routes.ts`
+ * §`hrefForGameRoute` writes it, so the game opens with that card chosen.
+ */
 export function captureHash(scene: string): string {
-  return `#/game?capture=${encodeURIComponent(scene)}`;
+  const route = CAPTURE_SCENES[scene]?.route;
+  const chosen = route === undefined ? '' : `route=${encodeURIComponent(route.id)}&`;
+  return `#/game?${chosen}capture=${encodeURIComponent(scene)}`;
+}
+
+/**
+ * What the *Ride* button of `scene`'s route reads after *Ride*: its built-in
+ * route's name (#3153), or the synthetic route's ({@link CAPTURE_ROUTE_NAME}).
+ */
+export function captureRideName(scene: string): string {
+  return CAPTURE_SCENES[scene]?.route?.name ?? CAPTURE_ROUTE_NAME;
 }
 
 /** What the capture's route is called on the picker: a placeholder, never a real place's name. */

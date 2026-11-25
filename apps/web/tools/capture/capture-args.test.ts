@@ -7,12 +7,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CAPTURE_MODE, captureSceneFromHash } from '../../src/game/capture-scene';
+import { CAPTURE_MODE, CAPTURE_SCENES, captureSceneFromHash } from '../../src/game/capture-scene';
+import { gameRouteFromHash } from '../../src/shell/routes';
 import {
   CAPTURE_DATE_MS,
   CAPTURE_ROUTE_NAME,
   captureFrames,
   captureHash,
+  captureRideName,
   captureMp4Args,
   captureName,
   captureRouteGpx,
@@ -54,7 +56,10 @@ describe('capture’s arguments — #3152', () => {
     [['--preset', 'climb'], /no option --preset/u],
     [['--scene'], /needs a value/u],
     [['--scene', 'x', '--scene', 'y'], /given twice/u],
-    [['--scene', 'delivery'], /--scene is one of route-hud/u],
+    [
+      ['--scene', 'free-ride'],
+      /--scene is one of route-hud, delivery, lap-race, workout, pacer, not free-ride/u,
+    ],
     [['--seconds', '0'], /positive/u],
     [['--fps', '61'], /1 to 60/u],
     [['--fps', '2.5'], /1 to 60/u],
@@ -108,10 +113,20 @@ describe('what the capture rides — #3152', () => {
   it('opens the game at the scene the app reads, in the capture tool’s build', () => {
     vi.stubEnv('MODE', CAPTURE_MODE);
     try {
-      expect(captureSceneFromHash(captureHash('route-hud'))?.id).toBe('route-hud');
+      for (const scene of Object.keys(CAPTURE_SCENES)) {
+        expect(captureSceneFromHash(captureHash(scene))).toBe(CAPTURE_SCENES[scene]);
+      }
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('opens a scene on its built-in route, and presses that route’s Ride (#3153)', () => {
+    expect(captureHash('route-hud')).toBe('#/game?capture=route-hud');
+    expect(captureRideName('route-hud')).toBe(CAPTURE_ROUTE_NAME);
+    expect(captureHash('delivery')).toBe('#/game?route=level%3Amorning-round&capture=delivery');
+    expect(gameRouteFromHash(captureHash('lap-race'))).toBe('circuit:bellwether');
+    expect(captureRideName('lap-race')).toBe('Bellwether Loop');
   });
 
   it('rides an invented route under a placeholder name, from 0° 0°', () => {

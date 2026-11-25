@@ -380,6 +380,13 @@ export interface DeliveryRideStart {
           readonly id: string;
         })
     | undefined;
+  /**
+   * #3153: the round's seed, set by capture mode alone (`capture-scene.ts`,
+   * which only the capture tool's build reads), so a scene picks the same
+   * houses and obstacles twice. Absent — every rider's round — it is drawn
+   * at the press.
+   */
+  readonly seed?: number | undefined;
 }
 
 /**
@@ -392,7 +399,7 @@ export interface DeliveryRideStart {
 export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | undefined {
   const week = readDeliveryProgress(input.storage);
   const assist = readDeliveryAssist(input.storage);
-  const seed = drawRoundSeed();
+  const seed = input.seed ?? drawRoundSeed();
   const pick = pickRoundTargets(
     {
       buildings: input.buildings,

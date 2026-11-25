@@ -130,6 +130,43 @@ function started(storage = storageOf(), riderDistance = 0): DeliveryRide {
 
 const SPEED = 8;
 
+describe('the round’s seed — #3153', () => {
+  /** A round in the town, from `seed` when one is given. */
+  const seeded = (seed: number | undefined): DeliveryRide => {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      seed,
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    return ride;
+  };
+  const houses = (ride: DeliveryRide) => ride.targets.map((target) => target.distance);
+
+  it('is drawn from crypto at the press when none is given — every rider’s round', () => {
+    // The file's draw (`beforeEach`) answers SEED.
+    const draw = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    draw.mockClear();
+    const drawn = seeded(undefined);
+    expect(draw).toHaveBeenCalledTimes(1);
+    expect(houses(drawn)).toEqual(houses(seeded(SEED)));
+  });
+
+  it('is a capture’s own when given, with nothing drawn, and the same houses twice', () => {
+    const draw = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    draw.mockClear();
+    const first = seeded(3_153);
+    expect(draw).not.toHaveBeenCalled();
+    expect(houses(seeded(3_153))).toEqual(houses(first));
+    expect(seeded(3_153).obstacles).toEqual(first.obstacles);
+    expect(houses(first)).not.toEqual(houses(seeded(SEED)));
+  });
+});
+
 /**
  * Ride `ride` on at `speed`, one step a call, to the ride distance `along`
  * (the odometer, #3021: not the drawn distance, which a crash holds back),
