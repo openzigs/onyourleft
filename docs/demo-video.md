@@ -18,8 +18,8 @@ machine's `ffmpeg` has `libx264`. It needs `ffmpeg` on the `PATH` and the pinned
 
 | Option | Values | Default |
 |---|---|---|
-| `--preset` | `climb`, `sprint`, `group` | `climb` |
-| `--seconds` | seconds of ride, positive; `seconds × fps` must be whole | `30` |
+| `--preset` | `climb`, `sprint`, `group`, `hill`, or `youtube`: the captioned feature tour | `climb` |
+| `--seconds` | seconds of ride, positive; `seconds × fps` must be whole; not with `youtube`, whose length is its scenes' | `30` |
 | `--fps` | whole frames a second, 1 to 60 | `30` |
 | `--size` | `WIDTHxHEIGHT`, each even, 64 to 9998 | `1920x1080` |
 | `--route` | a route `demo:bake` wrote into `demo/dist/routes/` | none: the synthetic road |
@@ -28,6 +28,43 @@ machine's `ffmpeg` has `libx264`. It needs `ffmpeg` on the `PATH` and the pinned
 
 `--no-realistic` answers the realistic world's files with a 404, so the render draws the stylised
 world the demo falls back to. The checks use it.
+
+## The YouTube feature tour, with captions
+
+```sh
+pnpm --filter @onyourleft/web run build:demo
+pnpm --filter @onyourleft/web run demo:video -- --preset youtube --size 1920x1080 --fps 30
+```
+
+writes `youtube-1920x1080.webm` (and `.mp4`): about 80 seconds of scenes with a title and captions
+burned into the frames, then four seconds of the closing card
+([#3074](https://github.com/openzigs/onyourleft/issues/3074)). With `--route <id>` the scenes marked
+`route: true` ride that baked route, and their captions about map data are drawn; on the synthetic
+road those captions are left out, because no map data is shown.
+
+**The words are in [`apps/web/demo/captions/youtube.ts`](../apps/web/demo/captions/youtube.ts)**, one
+scene a block: which preset it rides, for how many seconds, and each caption's start, length, text
+and placement (a centred `title` or a lower third). Edit them there; no code changes. Every line must
+be a claim the product makes on the day of the render. `src/demo/caption-claims.ts` refuses, in
+`pnpm run test` and in `demo:video:check`:
+
+- a caption naming a feature its scene does not show: `climb` needs the lead rider on a gradient of
+  6 % or more for the caption's whole time, `group` needs two riders or more in the camera's frame for
+  its whole time, and `map-data` a scene marked `route: true`;
+- the load-metric trademarks, a competitor's name, and "validated", "accurate to" or "professional
+  fit";
+- captions that overlap or sit under a second apart, run past their scene, or stay up under three
+  seconds.
+
+The page draws the captions itself (`src/demo/caption-script.ts`, `DemoPage.tsx`), in the display
+face on the HUD's opaque backing, sized to the frame's height so a 1080p video reads at 720p. The
+title sits above the middle, the lower third between the HUD's bottom panels; neither covers a HUD
+panel or the map credit. Each fades in and out over half a second. To preview a scene live, open the
+built demo with `?captions=youtube&scene=<id>`: there a visitor who asked for reduced motion sees each
+caption cut in and out instead.
+
+The tour always ends on the closing card, which carries the project's address, and the map credit
+when a scene rode a baked route.
 
 ## How it works, and why `ffmpeg`
 
@@ -87,7 +124,17 @@ short videos and reads each one back **from the file**:
   frames;
 - the HUD's primary readings, as a decoded pixel test against the panel's box;
 - the credit's box on a baked route, against the same box on the synthetic road as the control;
-- the closing card at the end of the baked route's video, and not at the end of the road's.
+- the closing card at the end of the baked route's video, and not at the end of the road's;
+- the YouTube tour at 1280 × 720 and one frame a second: its script claims only what its scenes show,
+  each caption's backing is in the pixels in the middle of its time and not the frame before or after
+  it, and it covers no HUD panel; on the fixture route the map-data caption is drawn, no caption
+  covers the credit, and the credit stays in the pixels under them;
+- two renders of the tour, at 320 × 180, decode to the same frames, every one of them.
+
+At 1280 × 720 two renders are not frame-identical: the world itself differs in a few pixels at the far
+left horizon from a frame that varies (the climb preset's 83rd second, before #3074 too), and VP9
+carries that into every later frame. So the every-frame comparison is made at the small size, where
+the world is the same, and the caption checks at 720p read shares of colour.
 
 The baked route is the synthetic corridor fixture, never OpenStreetMap data (ADR 0056 D-9). The
 checks are not part of the browser gate and do not run on every pull request. They need `ffmpeg`.
@@ -96,7 +143,7 @@ checks are not part of the browser gate and do not run on every pull request. Th
 
 [`.github/workflows/demo-video.yml`](../.github/workflows/demo-video.yml), **Demo video**, runs by
 hand (`workflow_dispatch`, with `seconds`, `size` and `fps` inputs), on `ubuntu-latest`. It runs
-the checks, then renders the three presets in parallel on the synthetic road and uploads each as an
+the checks, then renders the three presets and the YouTube tour in parallel on the synthetic road and uploads each as an
 artefact, `demo-video-<preset>`. It uses no secret.
 
 A pull request that changes the video tooling or the demo code the render drives

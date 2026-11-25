@@ -45,10 +45,24 @@ It needs Docker and Node 26, downloads only the pinned image, and writes to
 ```
 
 `<release>` is `oyl-bicycle-<extract date>-<12 hex>`, the hex a hash of the
-archive, configuration and coverage. The tiles of two builds of one extract
-are the same bytes; `graph.tar` is not (Valhalla's tar records each tile's
-build time), so each build is a new release. That is what an immutable
-directory wants anyway.
+archive, configuration and coverage. **A build is not reproducible**: two
+builds of one extract, cut and pinned image give tiles of the same sizes but
+not the same bytes. On 2026-11-24 two builds of one state differed in every
+tile at header bytes 94–95, and in 6 of its 28 tiles at a few more places
+(header bytes 88–93 and some bytes in the body). So `graph.tar` differs too,
+and each build is a new release. That is what an immutable directory wants
+anyway. A lost local release is recovered from the published `graph.tar`, not
+by building again: put it in a work directory beside a `native-config.json`
+from the same `valhalla_build_config` call `build-graph.sh` makes, and run
+`make-release.ts` on that directory. The same archive and configuration give
+the same release id.
+
+⚠️ **No tile may be over 64 MiB.** `valhalla-browser` 0.2.1 refuses a
+manifest that lists one, and then the whole graph fails to open (`DATASET`
+at start). `make-release.ts` refuses such a build and names every tile over
+the limit by id, path and size (#2347). A dense city's local-road tile can
+pass it: one came to about 73 MB. [Spike 0042](../../../../docs/spikes/0042-dense-city-tiles-over-the-browser-sdk-limit.md)
+measures the ways round it.
 
 A synthetic road grid (off Null Island, no real place) built in 36 s on the
 development Mac on 2026-11-06, and the page routed 5, 40 and 150 km pairs on
@@ -106,6 +120,12 @@ checks again and uploads only the manifest.
   }
 ]
 ```
+
+Two changes were made on Cloudflare on 2026-11-07, with the owner's OK:
+`Last-Modified` was added to the bucket's CORS exposed headers (the SDK
+refuses graph metadata without it), and a zone compression rule turns
+compression off for `tiles.openzigs.com/routing/*`, so a strong ETag and the
+`Content-Length` reach the browser unchanged.
 
 Optional: a `Timing-Allow-Origin: *` response header (a Cloudflare transform
 rule) lets the page tell a tile from the network from one in the HTTP cache;
