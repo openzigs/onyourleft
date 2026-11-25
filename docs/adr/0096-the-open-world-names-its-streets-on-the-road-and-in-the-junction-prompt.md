@@ -135,3 +135,17 @@ chosen again every 20 m.
 
 - #3052 (the owner's request of 2026-11-22), #3051 (the ruling of 2026-11-23).
 - ADR 0054 D-2.2 and D-5.7; ADR 0091 D-2; ADR 0088 D-3; ADR 0004 D.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-25** — **D-1.4's *"never stored"* and D-1.2's *"the store … never carry a name"* are
+  superseded in part by
+  [ADR 0098](0098-the-ridden-block-cache-keeps-street-names-on-the-device.md)**
+  ([#2891](https://github.com/openzigs/onyourleft/issues/2891), on the owner's ruling of 2026-11-25
+  on pull request [#2966](https://github.com/openzigs/onyourleft/pull/2966), option (a)): the
+  on-device ridden-block cache (ADR 0090 D-6) keeps each street's name, read back under D-1.3's
+  rules, so a block ridden before still names its streets on the road and in the junction prompt.
+  It is the only store that does. A name is still never logged or sent (D-1.4, D-4.2), never
+  exported, and is erased with the athlete.

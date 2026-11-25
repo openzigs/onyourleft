@@ -12,6 +12,15 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0098 is [ADR 0098](../adr/0098-the-ridden-block-cache-keeps-street-names-on-the-device.md)**,
+  taken by [#2891](https://github.com/openzigs/onyourleft/issues/2891) on 2026-11-25, in its pull
+  request [#2966](https://github.com/openzigs/onyourleft/pull/2966), for the ridden-block cache
+  keeping street names on the device. **Accepted** the same day on the owner's ruling on #2966
+  (option (a)). It supersedes in part ADR 0096 D-1.4 and D-1.2, for the ridden-block store alone;
+  ADR 0096 gained one dated `## Amendments` pointer. It skipped **0097**, which the open pull
+  requests [#3149](https://github.com/openzigs/onyourleft/pull/3149) and
+  [#3194](https://github.com/openzigs/onyourleft/pull/3194) both claim by adding `docs/adr/0097-…`.
+  The next free number is **0099**.
   ⚠️ **0096 is [ADR 0096](../adr/0096-the-open-world-names-its-streets-on-the-road-and-in-the-junction-prompt.md)**,
   taken by [#3052](https://github.com/openzigs/onyourleft/issues/3052) on 2026-11-23 for street
   names in the open world, painted on the road and said in the junction prompt. **Accepted** 2026-11-23 on
