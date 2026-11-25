@@ -17998,9 +17998,17 @@ interface RealisticRiderPool {
  * maps: it is each body's own kit uniform, set every frame from
  * {@link RIDER_KITS} — the rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey, the
  * colour the stylised rider wears too, and the pacer's and the ghost's is
- * `PACER_KIT`'s blue. The tint still multiplies the whole body after it, and
- * it multiplies the kit THAT kind wears, so #368's three stay three: orange
+ * `PACER_KIT`'s blue. The tint still multiplies the kit after it, and it
+ * multiplies the kit THAT kind wears, so #368's three stay three: orange
  * times teal was a jersey whose green led its red (#742's review).
+ *
+ * ⚠️ **Since #3214 the tint never reaches the skin** (the owner's ruling of
+ * 2026-11-25): it multiplied the whole body until then, so every bot's arms,
+ * legs and face were orange. The skin is drawn in the marker's own tone
+ * (`rider-body.ts` §`RIDER_SKIN_TONES`, a lap race's bot's seeded from its
+ * id) and the kit, the helmet and the bicycle under the tint
+ * ({@link RIDER_BODY_GLSL}); the helmet mesh's lenses, eyes and hair are
+ * drawn as the file paints them ({@link markBareHelmet}).
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and

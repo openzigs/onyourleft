@@ -1398,9 +1398,43 @@ describe('the dressed rider — #623', () => {
     expect(roles.bare).toBeGreaterThan(20);
     expect(roles.shell).toBeGreaterThan(100);
     // And its material reads the mark, which a helmet that lost it would not.
-    expect(
-      (helmet.material as unknown as { customProgramCacheKey(): string }).customProgramCacheKey(),
-    ).toContain('oyl-bare');
+    const material = helmet.material as unknown as {
+      customProgramCacheKey(): string;
+      onBeforeCompile(shader: unknown, renderer: unknown): void;
+    };
+    expect(material.customProgramCacheKey()).toContain('oyl-bare');
+    // ⚠️ The file's colour is a vec4, so three declares `color` a vec4 and a
+    // splice that hands it on as it is does not compile — the helmet is then
+    // not drawn at all, which #3214's first capture showed and the browser
+    // gate's "compiles every shader" did not. Hand on its rgb.
+    expect(colour.itemSize).toBe(4);
+    const shader = {
+      vertexShader: [
+        '#include <common>',
+        '#include <fog_pars_vertex>',
+        'void main() {',
+        '#include <begin_vertex>',
+        '#include <color_vertex>',
+        '#include <fog_vertex>',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        '#include <common>',
+        '#include <fog_pars_fragment>',
+        'void main() {',
+        '#include <clipping_planes_fragment>',
+        '#include <opaque_fragment>',
+        '#include <fog_fragment>',
+        '}',
+      ].join('\n'),
+      uniforms: {},
+      defines: {},
+    };
+    material.onBeforeCompile(shader, undefined);
+    expect(shader.vertexShader).toContain(
+      'vColor.rgb = oylRiderColour(oylKit, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);',
+    );
+    expect(shader.vertexShader.split('vec3 oylRiderColour(')).toHaveLength(2);
     // #3214: each body's skin is its own marker's tone, as a share of the
     // maps' — 1 for the first tone, which the maps are drawn in.
     const at = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0, crankAngle: 0 };
