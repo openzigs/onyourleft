@@ -53,6 +53,7 @@ import {
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
+  PACER_POWER_KEY,
   SOLO_DRAFT_KEY,
   hudReadings,
   isDeliveryReading,
@@ -89,6 +90,7 @@ import { ClimbCallout } from './ClimbCallout';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
+import { JunctionChoicePrompt, JunctionUTurn } from './JunctionChoicePrompt';
 import { RecentGraph } from './RecentGraph';
 import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
@@ -346,7 +348,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       ),
   );
   // #1312: the lap's time joins the lap's number in the strip's sentence.
-  const elevation = profileReading(props.state, props.profile, props.lapSeconds);
+  // #3056: and no share of the view on an open-ended ride.
+  const elevation = profileReading(props.state, props.profile, props.lapSeconds, props.openEnded);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
   const noticeShown = hasContent(props.notices) || props.standingNotice?.expanded === true;
   const lap = noticeShown ? undefined : props.lapNotice;
@@ -696,16 +699,29 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             held={props.lapRace === undefined || riderHolds(props.lapRace)}
           />
         )}
+        {/*
+          #2898: an open-world ride's U-turn, where the throws stand on a
+          round, and the turn keys. Inside this region, so the lock refuses a
+          tap on it as on Pause: it is not exempt (ADR 0088 D-3.1.3), and a key
+          or a pad still turns. #3053: the junction's ways are the pop-up
+          below, out of this panel, which fades.
+        */}
+        {props.junction === undefined || asking ? null : (
+          <JunctionUTurn junction={props.junction} touchLocked={touchLocked} />
+        )}
         {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
         {/* #1821: a gamepad's throws, items and lane changes, to the same ports. Nothing drawn. */}
+        {/* #2898: and an open-world ride's turns, to the junction's press. */}
         {props.throwing === undefined &&
         props.steering === undefined &&
-        props.items === undefined ? null : (
+        props.items === undefined &&
+        props.junction === undefined ? null : (
           <GamepadIntents
             throwing={props.throwing}
             steering={props.steering}
             items={props.items}
+            turning={props.junction?.press}
             onPadInUse={setPadInUse}
             // #2600: a pad's press brings the hidden controls back.
             onPress={reveal}
@@ -729,6 +745,23 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             ? props.moreActions(focus)
             : props.moreActions}
       </div>
+
+      {/*
+        #3053, the owner's ruling of 2026-11-22 (ADR 0088's amendment of that
+        date): an open-world ride's next junction, as a pop-up in the upper
+        middle of the view (`theme.css` §"#3053"). The HUD's own child, never
+        the actions panel's, so the controls' fade never reaches it and its
+        first tap is a way's; inside this region, so the touch lock refuses a
+        tap on a way as on Pause (ADR 0088 D-3.1.3). After the controls in
+        the document, so a keyboard meets Pause and End ride first, as before.
+      */}
+      {props.junction === undefined || asking ? null : (
+        <JunctionChoicePrompt
+          junction={props.junction}
+          touchLocked={touchLocked}
+          units={props.units}
+        />
+      )}
 
       {hasContent(props.afterActions) && collapsed('standings') ? (
         // In the class of what it stands for, so it is drawn where that is.
@@ -909,6 +942,11 @@ function hasContent(node: ReactNode): boolean {
  *   to the trainer's line, and a *Use item* left drawn below the line would
  *   be clipped away with it. With nothing held they hide as on any ride.
  *
+ * A junction ahead on an open-world ride does not hold them since #3053: its
+ * ways are a pop-up of their own, which no fade reaches (`JunctionChoicePrompt.tsx`),
+ * where until then they were drawn in the actions panel and held it drawn
+ * while the prompt was up, moving *Pause* and *End ride* as it came and went.
+ *
  * A lap's notice does not hold them: it is nothing to act on. Nor does it
  * decide the two `HudCore` and `HudPanel` add beside it: a Delivery round's
  * throw buttons drawn in the actions panel (the round's play — a first press
@@ -1020,6 +1058,9 @@ function fieldClass(reading: HudReading): string {
     // #2425: a solo ride's draft, drawn on a tablet only (`theme.css`
     // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY").
     ...(reading.key === SOLO_DRAFT_KEY ? ['oyl-hud__field--solo-draft'] : []),
+    // #2864: the AI pacer's power, drawn on a tablet only, as the solo draft
+    // is (`theme.css` §"THE AI PACER'S POWER, ON A TABLET ONLY").
+    ...(reading.key === PACER_POWER_KEY ? ['oyl-hud__field--pacer-power'] : []),
     // And the wind by name, which gives way to it on a tablet when the pacer
     // and the ghost are drawn too (the same section).
     ...(reading.key === 'wind' ? ['oyl-hud__field--wind'] : []),

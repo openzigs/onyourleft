@@ -175,14 +175,17 @@ pnpm run test:coverage:merge
 # slower runner. `check:test-split` fails the two if their excludes differ.
 pnpm run test:required
 
-# The same run as CI runs it since #2154, in two parts (§4c §"Two Vitest
-# shards"): each is `test:required` with a `--project` filter, the `web`
-# project in the first and every other project in the second, one per job.
-# `check:test-split` fails a part that is not that shape, a part over no
-# file, and a file in no part or in two; a NEW Vitest project is in the
-# second part without an edit. Locally `test:required` is the whole of both.
+# The same run as CI runs it since #2154, in three parts since #3019 (§4c
+# §"Three Vitest shards"): each is `test:required` with a `--project` filter
+# and, for the two halves of `web`, a path filter or an exclude. The first
+# is `web`'s files under `src/game/`, the second every other project, the
+# third the rest of `web`, one per job. `check:test-split` fails a part that
+# is not that shape, a part over no file, and a file in no part or in two; a
+# NEW Vitest project is in the second part without an edit. Locally
+# `test:required` is the whole of all three.
 pnpm run test:required:shard-1
 pnpm run test:required:shard-2
+pnpm run test:required:shard-3
 
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed

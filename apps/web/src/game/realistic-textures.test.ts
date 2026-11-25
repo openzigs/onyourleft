@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { metres, metresPerSecond, seconds as secondsOf } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
@@ -63,7 +63,8 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { mixedTownFixture } from './footprint-fixtures-testing';
+import { footwaysFixture, mixedTownFixture } from './footprint-fixtures-testing';
+import { footwayTriangles } from './footway-surfaces';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
@@ -71,11 +72,18 @@ import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { GameView, RiderMarker, RidingInputs } from './port';
 import { readGlb } from './model-bytes-testing';
 import {
+  CRASH_CLIP_RISE_SECONDS,
+  CRASH_CLIP_SECONDS,
   CRASH_FALL_SECONDS,
   CRASH_RISE_AT_SECONDS,
+  CRASH_RISE_SECONDS,
   CRASH_SECONDS,
+  CRASH_THROWN_SECONDS,
+  crashBodyShare,
+  crashClipSeconds,
   crashShare,
 } from './delivery/crash-look';
+import { riderCrashPose } from '../../tools/realistic/rider-crash';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -96,8 +104,10 @@ import {
 } from './world';
 import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
 import {
+  MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TEXTURE_PIXELS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { treeSlots } from './tree-levels';
@@ -112,9 +122,12 @@ import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_BODIES,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
+  REALISTIC_PEOPLE,
   REALISTIC_RIDER_MAPS,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
@@ -128,7 +141,12 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
-import { chainLinkFacts, modelFacts, roadsideFacts } from './realistic-bytes-testing';
+import {
+  accessorValues,
+  chainLinkFacts,
+  modelFacts,
+  roadsideFacts,
+} from './realistic-bytes-testing';
 
 /* ============================================================================
  * Running three's `KTX2Loader` under Vitest, for real
@@ -263,6 +281,23 @@ function servedFrom(origin: string, read: (path: string) => Uint8Array): () => v
 
 const ORIGIN = 'http://oyl.test';
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
+
+/** One fingertip a rider file names — #2839, `process_rider.py` §`grip`. */
+interface NamedFingertip {
+  readonly side: 'L' | 'R';
+  readonly finger: number;
+  readonly vertex: number;
+}
+
+/** The fingertips a committed rider file names in its body mesh's `extras`, as the file holds them. */
+function namedFingertips(file: string): readonly NamedFingertip[] {
+  const json = readGlb(join(PUBLIC, 'realistic', file)).json as unknown as {
+    readonly meshes: readonly { readonly extras?: { readonly fingertips?: unknown } }[];
+    readonly nodes: readonly { readonly name?: string; readonly mesh?: number }[];
+  };
+  const mesh = json.meshes[json.nodes.find((node) => node.name === 'rider')?.mesh ?? -1];
+  return (mesh?.extras?.fingertips ?? []) as readonly NamedFingertip[];
+}
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 
 /** What a device offers, as `KTX2Loader.detectSupport` asks. */
@@ -304,6 +339,20 @@ async function loadedOn(offered: readonly string[], trees?: RealisticTrees): Pro
   });
   expect(outcome).toEqual({ loaded: true });
   return renderer;
+}
+
+/** @see loadedForAView */
+let viewWorld: Promise<Renderer> | undefined;
+
+/**
+ * The world on the tablet for a case that builds a VIEW on it and changes
+ * nothing of the world itself, loaded by the first such case that asks and
+ * shared by the ones after it — as #2839's `models()` shares its two files.
+ * A world load is this file's dear step; a view is not (#1688).
+ */
+function loadedForAView(): Promise<Renderer> {
+  viewWorld ??= loadedOn(TABLET);
+  return viewWorld;
 }
 
 /** The claim #618 makes: every texture a realistic material wears is a GPU block format. */
@@ -529,6 +578,641 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       expect(texture.format).toBe('BC7');
     }
   }, 120_000);
+});
+
+/* ============================================================================
+ * The female rider — #2839
+ * ========================================================================== */
+
+/**
+ * Both committed rider models, through the real model loader, in a belt built
+ * as a view builds it — with stand-in textures, because nothing here draws a
+ * pixel: what is held is WHICH meshes a frame draws, in which body, and that
+ * each body is posed from its own rest pose. The maps themselves are the
+ * dressed rider's cases below.
+ */
+/**
+ * Whether a slot's body in one pool of a realistic belt is drawn — #2839: it
+ * and everything above it, up to the belt, visible.
+ */
+function shown(
+  riders: InstanceType<Renderer['RealisticRiderBelt']>,
+  body: 'female' | 'male',
+  slot: number,
+): boolean {
+  let node: { visible: boolean; parent: unknown } | null | undefined = riders.bodiesOf(body)[slot];
+  if (node === undefined) return false;
+  while (node !== null && node !== undefined && (node as unknown) !== riders.group) {
+    if (!node.visible) return false;
+    node = node.parent as typeof node;
+  }
+  return node !== null && node !== undefined;
+}
+
+describe('the realistic world draws the rider each athlete chose — #2839', () => {
+  type Belt = InstanceType<Renderer['RealisticRiderBelt']>;
+  type Scene = Parameters<Belt['addBody']>[1];
+  interface Loaded {
+    readonly renderer: Renderer;
+    readonly male: Scene;
+    readonly female: Scene;
+  }
+  let loading: Promise<Loaded> | undefined;
+
+  /**
+   * The renderer and the two models, loaded by the first case that asks —
+   * inside a case, because this file serves the committed files to `fetch`
+   * from a `beforeEach`.
+   */
+  function models(): Promise<Loaded> {
+    loading ??= (async () => {
+      vi.resetModules();
+      const renderer = await import('./three-renderer');
+      const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+      try {
+        return {
+          renderer,
+          male: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.male}`),
+          female: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.female}`),
+        };
+      } finally {
+        inner.dispose?.();
+      }
+    })();
+    return loading;
+  }
+
+  /**
+   * A belt of the default body, as a view builds one. The maps are stand-ins
+   * and each its own object — only `three-renderer.ts` may import three
+   * (`three-seam.test.ts`), and nothing here reads a texel.
+   */
+  async function belt(): Promise<{
+    readonly riders: Belt;
+    readonly female: Scene;
+    readonly male: Scene;
+  }> {
+    const { renderer, male, female } = await models();
+    const maps = (names: readonly string[]): Record<string, unknown> =>
+      Object.fromEntries(names.map((name) => [name, { isTexture: true, name }]));
+    const riders = new renderer.RealisticRiderBelt(
+      male,
+      maps(REALISTIC_BICYCLE_MAP_NAMES) as never,
+      maps(REALISTIC_RIDER_MAP_NAMES) as never,
+      // A world of its own, with no other body asked for yet.
+      { otherBodies: new Map() },
+    );
+    return { riders, female, male };
+  }
+
+  const marker = (kind: string, z: number, body?: string): never =>
+    ({
+      kind,
+      x: 0,
+      y: 0,
+      z,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle: 0,
+      ...(body === undefined ? {} : { body }),
+    }) as never;
+
+  /** Every mesh under the belt that a frame would submit: visible all the way up, and holding an instance. */
+  function drawn(riders: Belt): string[] {
+    const names: string[] = [];
+    const walk = (node: {
+      visible: boolean;
+      name: string;
+      children: readonly unknown[];
+      isMesh?: boolean;
+      isInstancedMesh?: boolean;
+      count?: number;
+    }): void => {
+      if (!node.visible) return;
+      if (node.isMesh === true && (node.isInstancedMesh !== true || (node.count ?? 0) > 0)) {
+        names.push(node.name);
+      }
+      for (const child of node.children) walk(child as never);
+    };
+    walk(riders.group);
+    return names;
+  }
+
+  /** Whether one instance of a mesh is drawn at any size. */
+  const instanceDrawn = (
+    mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } } | undefined,
+    slot: number,
+  ): boolean => {
+    const m = mesh?.instanceMatrix.array ?? [];
+    return Math.hypot(m[slot * 16] ?? 0, m[slot * 16 + 1] ?? 0, m[slot * 16 + 2] ?? 0) > 0;
+  };
+
+  it('draws a female rider in the default body until her model has loaded, and never nothing', async () => {
+    const { riders } = await belt();
+    expect(riders.hasBody('male')).toBe(true);
+    expect(riders.hasBody('female')).toBe(false);
+    expect(riders.helmetsOf('female')).toBeUndefined();
+
+    riders.place([marker('rider', 0, 'female')]);
+
+    expect(shown(riders, 'male', 0)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 0)).toBe(true);
+    riders.dispose();
+  });
+
+  it('draws her in her own body and her own helmet once it has, and everybody else in theirs', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    riders.place([marker('rider', 0, 'female'), marker('bot', 10), marker('ghost', 20, 'female')]);
+
+    expect(shown(riders, 'female', 0)).toBe(true);
+    expect(shown(riders, 'male', 0)).toBe(false);
+    expect(shown(riders, 'male', 1)).toBe(true);
+    expect(shown(riders, 'female', 1)).toBe(false);
+    expect(shown(riders, 'female', 2)).toBe(true);
+    expect(shown(riders, 'male', 2)).toBe(false);
+    // A helmet a slot, in the pool of the body that slot wears and no other.
+    expect(instanceDrawn(riders.helmetsOf('female'), 0)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 0)).toBe(false);
+    expect(instanceDrawn(riders.helmetsOf('male'), 1)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('female'), 1)).toBe(false);
+    expect(instanceDrawn(riders.helmetsOf('female'), 2)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 2)).toBe(false);
+    riders.dispose();
+  });
+
+  it('costs a field of one body the draw calls it cost before, and a mixed field one more', async () => {
+    const { riders, female } = await belt();
+    const field = (bodies: readonly (string | undefined)[]): number => {
+      riders.place(
+        bodies.map((body, index) => marker(index === 0 ? 'rider' : 'bot', index * 10, body)),
+      );
+      return drawn(riders).length;
+    };
+    const before = field([undefined, undefined, undefined]);
+    riders.addBody('female', female);
+
+    // Her model loaded and nobody drawn in it: exactly what it was.
+    expect(field([undefined, 'male', undefined])).toBe(before);
+    // Everybody in it: the other body's helmets are not drawn, so the same again.
+    expect(field(['female', 'female', 'female'])).toBe(before);
+    // Both on the road: her helmets are the one extra call, whatever the field's size.
+    expect(field(['female', 'male', 'male'])).toBe(before + 1);
+    expect(field(['female', 'female', 'male'])).toBe(before + 1);
+    // And back to none of her: back to what it was.
+    expect(field(['male', 'male', 'male'])).toBe(before);
+    riders.dispose();
+  });
+
+  it('wears the rider’s own three maps, and a helmet built round her own head', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    const his = riders.bodiesOf('male')[0]?.material as unknown as Record<string, unknown>;
+    const hers = riders.bodiesOf('female')[0]?.material as unknown as Record<string, unknown>;
+
+    for (const map of ['map', 'normalMap', 'aoMap', 'roughnessMap']) {
+      expect(hers[map], map).toBeTruthy();
+      expect(hers[map], map).toBe(his[map]);
+    }
+    expect(riders.bodiesOf('female')[0]?.geometry).not.toBe(riders.bodiesOf('male')[0]?.geometry);
+    expect(riders.helmetsOf('female')?.geometry).not.toBe(riders.helmetsOf('male')?.geometry);
+    expect(riders.helmetsOf('female')?.material).toBe(riders.helmetsOf('male')?.material);
+    riders.dispose();
+  });
+
+  it('holds her body, helmet and glasses inside the rider’s 8 998 triangles', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    const trianglesOf = (
+      geometry:
+        | { index: { count: number } | null; getAttribute: (name: 'position') => { count: number } }
+        | undefined,
+    ): number =>
+      geometry === undefined
+        ? Number.NaN
+        : (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
+    const total =
+      trianglesOf(riders.bodiesOf('female')[0]?.geometry) +
+      trianglesOf(riders.helmetsOf('female')?.geometry);
+
+    expect(total).toBeGreaterThan(8_000);
+    expect(total).toBeLessThanOrEqual(8_998);
+    riders.dispose();
+  });
+
+  it('seats her on the same bicycle from her OWN rest pose: her feet and hands are where his are', async () => {
+    const { riders, female } = await belt();
+    // A vector of the renderer's own three, without importing three here.
+    type Point = Belt['group']['position'];
+    const point = (): Point => riders.group.position.clone();
+    // The two bodies in two slots at the same place, the cranks level.
+    const at = (body: 'female' | 'male', slot: number, bone: string): Point => {
+      const skinned = riders.bodiesOf(body)[slot];
+      // three's loader drops the dot from a node's name: `foot.L` is `footL`.
+      const found = skinned?.skeleton.bones.find(
+        (each) => each.name.replaceAll('.', '') === bone.replaceAll('.', ''),
+      );
+      if (found === undefined) throw new Error(`no bone ${bone}`);
+      riders.group.updateMatrixWorld(true);
+      return found.getWorldPosition(point());
+    };
+    // Where his ankles are while his is the only body: the modeller's pass of
+    // 2026-11-18 puts the BALL of each foot on the pedal, measured off the
+    // body's own rest pose, so an ankle is where its own foot's ball puts it.
+    const ankles = (body: 'female' | 'male', slot: number): Point[] =>
+      ['foot.L', 'foot.R'].map((bone) => at(body, slot, bone));
+    riders.place([marker('bot', 0, 'male'), marker('bot', 0, 'male')]);
+    const hisAlone = ankles('male', 1);
+    riders.addBody('female', female);
+    riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
+
+    // Her body's feet are hers and his are still his: with one measurement
+    // for both bodies his ankles move 6 mm when her body is added. Half a
+    // millimetre is the bound; they do not move at all.
+    for (const [index, ankle] of ankles('male', 1).entries()) {
+      expect(ankle.distanceTo(hisAlone[index] as Point), `his ankle ${index}`).toBeLessThan(0.0005);
+    }
+
+    // She is a smaller body at rest (1.59 m to his 1.67 m): posed with HIS
+    // scale her feet would hang short of the pedals by centimetres.
+    for (const bone of ['foot.L', 'foot.R']) {
+      expect(at('female', 0, bone).distanceTo(at('male', 1, bone)), bone).toBeLessThan(0.02);
+    }
+    for (const bone of ['wrist.L', 'wrist.R']) {
+      expect(at('female', 0, bone).distanceTo(at('male', 1, bone)), bone).toBeLessThan(0.05);
+    }
+    // Her hips are on the saddle, where his are — which her OWN scale puts
+    // them: moved by his, they sit centimetres off it.
+    const hips = (body: 'female' | 'male', slot: number): Point =>
+      at(body, slot, 'upperleg01.L')
+        .add(at(body, slot, 'upperleg01.R'))
+        .multiplyScalar(0.5);
+    expect(hips('female', 0).distanceTo(hips('male', 1))).toBeLessThan(0.005);
+    // And she is not simply him: her shoulders are narrower.
+    const span = (body: 'female' | 'male', slot: number): number =>
+      at(body, slot, 'upperarm01.L').distanceTo(at(body, slot, 'upperarm01.R'));
+    expect(span('female', 0)).toBeLessThan(span('male', 1) - 0.01);
+    riders.dispose();
+  });
+
+  /**
+   * The owner's ruling of 2026-11-18 ("Yes"): the fingers grip the brake
+   * hoods instead of splaying open, for both bodies. `process_rider.py` closes
+   * them in each file's rest pose (§`grip`) and names, in the body mesh's
+   * `extras`, the vertex at each of MakeHuman's fingertip joints. This reads
+   * those names from the file, poses each body on the hoods through the
+   * product's own belt — cranks level, skinned by three — and measures each
+   * fingertip off the hood box `bicycle.ts` draws.
+   *
+   * A hand is 8 cm across and a hood 2.5 cm, so the index and little fingers
+   * close round it either side and their tips cannot all be on it. What is
+   * held: the middle and ring fingertips on the hood (within
+   * {@link ON_THE_HOOD}), the four fingers' mean within
+   * {@link FINGERS_MEAN_REACH}, and none further than
+   * {@link FINGERS_FURTHEST}. The same pipeline with the fingers left open put
+   * her left middle fingertip 4.4 cm off, the ring 5.0 cm and the four's mean
+   * 4.6 cm; closed, the middle is 0.2 cm (his 0.6 cm), the ring on the hood
+   * and the four's mean 1.1 cm (his 1.3 cm). The thumb is
+   * not held: closed or open it lies 5 to 7 cm off, inside the bar's bend.
+   *
+   * Review 5975483536: the tips were once named off their fingers, the
+   * "middle" and "ring" one ring-finger point 3 mm apart. So each hand's five
+   * named tips are held at least {@link TIPS_APART} from each other —
+   * `rider_kit.py` §`TIPS_APART`, which `process_rider.py` holds them to too,
+   * beside each one's distance from its finger's own end. Correctly named,
+   * neighbouring tips are 2.1 to 2.5 cm apart in the closed hand.
+   */
+  const TIPS_APART = 0.01;
+  const ON_THE_HOOD = 0.01;
+  const FINGERS_MEAN_REACH = 0.025;
+  const FINGERS_FURTHEST = 0.05;
+  it('closes each hand’s fingertips round its brake hood, for both bodies — the owner’s ruling of 2026-11-18', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
+    riders.group.updateMatrixWorld(true);
+    // A world point in the first rider's bicycle's frame: through the frame
+    // mesh's own instance matrix, a turn and a move. Both riders are at the
+    // same place, so slot 0's bicycle is slot 1's too.
+    const frame = riders.group.children[0];
+    if (frame === undefined || !('instanceMatrix' in frame)) throw new Error('no frame');
+    const m = (frame as { instanceMatrix: { array: ArrayLike<number> } }).instanceMatrix.array;
+    const inBicycle = (p: { x: number; y: number; z: number }): readonly number[] => {
+      const d = [p.x - (m[12] ?? 0), p.y - (m[13] ?? 0), p.z - (m[14] ?? 0)];
+      return [0, 1, 2].map(
+        (column) =>
+          (m[column * 4] ?? 0) * (d[0] ?? 0) +
+          (m[column * 4 + 1] ?? 0) * (d[1] ?? 0) +
+          (m[column * 4 + 2] ?? 0) * (d[2] ?? 0),
+      );
+    };
+    // How far a point is outside a hood's box: into the box's own frame (a
+    // turn of `pitch` about `+X`), then past its half-extents.
+    const offHood = (point: readonly number[], side: 1 | -1): number => {
+      const hood = RIDER_BICYCLE_PARTS.find((part) => part.name === `bar hood ${String(side)}`);
+      if (hood?.solid.shape !== 'box') throw new Error(`no hood ${String(side)}`);
+      const dx = (point[0] ?? 0) - hood.x;
+      const dy = (point[1] ?? 0) - hood.y;
+      const dz = (point[2] ?? 0) - hood.z;
+      const c = Math.cos(hood.pitch);
+      const s = Math.sin(hood.pitch);
+      const local = [dx, dy * c + dz * s, -dy * s + dz * c];
+      const half = [hood.solid.width / 2, hood.solid.height / 2, hood.solid.depth / 2];
+      return Math.hypot(
+        ...local.map((value, axis) => Math.max(0, Math.abs(value) - (half[axis] ?? 0))),
+      );
+    };
+    const lines: string[] = [];
+    for (const [body, slot] of [
+      ['female', 0],
+      ['male', 1],
+    ] as const) {
+      const named = namedFingertips(REALISTIC_RIDER_BODIES[body]);
+      // Non-vacuity: five a hand, both hands, each a vertex of the body.
+      expect(named.length, `${body}'s fingertips`).toBe(10);
+      const skinned = riders.bodiesOf(body)[slot];
+      if (skinned === undefined) throw new Error(`no ${body} body in slot ${String(slot)}`);
+      const vertex = riders.group.position.clone();
+      for (const side of ['L', 'R'] as const) {
+        const off = new Map<number, number>();
+        const points: (readonly number[])[] = [];
+        for (const tip of named) {
+          if (tip.side !== side) continue;
+          skinned.getVertexPosition(tip.vertex, vertex).applyMatrix4(skinned.matrixWorld);
+          points.push(inBicycle(vertex));
+          off.set(tip.finger, offHood(inBicycle(vertex), side === 'L' ? 1 : -1));
+        }
+        // The five named tips are five fingers' tips, not one finger's twice.
+        let nearest = Number.POSITIVE_INFINITY;
+        for (const [i, a] of points.entries()) {
+          for (const b of points.slice(i + 1)) {
+            nearest = Math.min(
+              nearest,
+              Math.hypot(...a.map((value, axis) => value - (b[axis] ?? 0))),
+            );
+          }
+        }
+        expect(nearest, `${body} ${side} nearest two named tips`).toBeGreaterThan(TIPS_APART);
+        const fingers = [2, 3, 4, 5].map((finger) => off.get(finger) ?? Number.NaN);
+        const label = `${body} ${side}`;
+        lines.push(`${label} ${fingers.map((each) => (each * 100).toFixed(1)).join('/')}`);
+        expect(off.get(3), `${label} middle`).toBeLessThan(ON_THE_HOOD);
+        expect(off.get(4), `${label} ring`).toBeLessThan(ON_THE_HOOD);
+        const mean = fingers.reduce((sum, each) => sum + each, 0) / fingers.length;
+        expect(mean, `${label} mean`).toBeLessThan(FINGERS_MEAN_REACH);
+        expect(Math.max(...fingers), `${label} furthest`).toBeLessThan(FINGERS_FURTHEST);
+      }
+    }
+    console.log(
+      `#2839 grip, the index, middle, ring and little fingertips' cm off each hood: ${lines.join(', ')}`,
+    );
+    riders.dispose();
+  });
+
+  it('adds a body once: a second model for a body that has one is ignored', async () => {
+    const { riders, female, male } = await belt();
+    riders.addBody('female', female);
+    const pool = riders.bodiesOf('female');
+    riders.addBody('female', male);
+
+    expect(riders.bodiesOf('female')).toEqual(pool);
+    riders.dispose();
+  });
+
+  describe('a frame that draws her asks for her model, through the product’s own loaders', () => {
+    /**
+     * The product's own path and none of this file's stand-ins for it:
+     * `RealisticRiderBelt.place` — the call a view's `#stage` makes on every
+     * frame — → `riderBodyOfWorld` with the PRODUCT's loaders → three's
+     * `fetch` of the committed file → `addBody`. PR #2845's review: with the
+     * ask returning on its first line every case above stayed green, because
+     * they call `riderBodyOfWorld` and `addBody` themselves.
+     *
+     * A belt is a ride — a view builds one and disposes it — and `world` is
+     * what outlives it. No world is loaded: the belt asks for nothing else of
+     * one, and a world load is this file's dear step (#1688).
+     */
+    it('asks once a ride, draws her in the default body until it lands and in her own after, asks again on the next ride after a failed load, and hands nothing to a ride that has ended', async () => {
+      const { renderer, male } = await models();
+      // The product's URL for a realistic file is under the build's base,
+      // which is this file's served origin from here on.
+      vi.stubEnv('BASE_URL', `${ORIGIN}/`);
+      undo.push(() => vi.unstubAllEnvs());
+      // What the device is asked for her model, and how it answers.
+      let answer: 'refused' | 'held' | 'served' = 'refused';
+      let asks = 0;
+      let release: () => void = () => undefined;
+      const servedFetch = globalThis.fetch;
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url !== `${ORIGIN}/realistic/${REALISTIC_RIDER_FEMALE}`) {
+          return servedFetch(input, init);
+        }
+        asks += 1;
+        if (answer === 'refused') throw new TypeError('offline');
+        if (answer === 'held') {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return servedFetch(input, init);
+      };
+      undo.push(() => {
+        globalThis.fetch = servedFetch;
+        // A case that fails while an answer is held must not leave three's
+        // own loader waiting on it under the cases after this one.
+        release();
+      });
+
+      const world = { otherBodies: new Map<string, unknown>() };
+      const maps = (names: readonly string[]): Record<string, unknown> =>
+        Object.fromEntries(names.map((name) => [name, { isTexture: true, name }]));
+      const ride = (): Belt =>
+        new renderer.RealisticRiderBelt(
+          male,
+          maps(REALISTIC_BICYCLE_MAP_NAMES) as never,
+          maps(REALISTIC_RIDER_MAP_NAMES) as never,
+          world as never,
+        );
+      /** Lets a load that has been answered run to its end: a refusal is promises only. */
+      const settled = async (): Promise<void> => {
+        for (let turn = 0; turn < 5; turn += 1) {
+          await new Promise((resolve) => setTimeout(resolve));
+        }
+      };
+      const her = [marker('rider', 0, 'female')];
+
+      // The first ride, offline. Nothing that is not a female rider DRAWN asks:
+      // a field of the default body, a marker that is no rider, a rider past
+      // the last slot, and a belt that is not shown.
+      const first = ride();
+      try {
+        first.place([marker('rider', 0), marker('bot', 10, 'male'), marker('ghost', 20)]);
+        first.place([marker('rider', 0), marker('no such rider', 10, 'female')]);
+        first.place([
+          // The rider, the pacer, the ghost and #783's nearest remote riders: every slot.
+          ...Array.from({ length: 3 + REALISTIC_REMOTE_RIDERS }, (_, at) => marker('bot', at * 10)),
+          marker('bot', 1_000, 'female'),
+        ]);
+        first.setShown(false);
+        first.place(her);
+        first.setShown(true);
+        await settled();
+        expect(asks).toBe(0);
+        // Her first frame asks, and no later frame of this ride asks again.
+        first.place(her);
+        await settled();
+        expect(asks).toBe(1);
+        first.place(her);
+        first.place(her);
+        await settled();
+        expect(asks).toBe(1);
+        // A rider in the default body, and never no rider.
+        expect(first.hasBody('female')).toBe(false);
+        expect(shown(first, 'male', 0)).toBe(true);
+      } finally {
+        first.dispose();
+      }
+
+      // The second ride asks again: the fallback is per ride, not per visit.
+      // It ends while her model is still on its way.
+      answer = 'held';
+      const second = ride();
+      try {
+        second.place(her);
+        await settled();
+        expect(asks).toBe(2);
+        // In the world it was built on, where the next ride will find it.
+        expect(world.otherBodies.has('female')).toBe(true);
+      } finally {
+        second.dispose();
+      }
+
+      // The third ride joins the load the second started, and is drawn the
+      // default body until it lands.
+      const third = ride();
+      try {
+        third.place(her);
+        await settled();
+        expect(asks).toBe(2);
+        expect(third.hasBody('female')).toBe(false);
+        expect(shown(third, 'male', 0)).toBe(true);
+
+        answer = 'served';
+        release();
+        await vi.waitFor(() => {
+          expect(third.hasBody('female')).toBe(true);
+        });
+        // The ride that ended asked first, so it was answered first — with nothing.
+        expect(second.hasBody('female')).toBe(false);
+        // And from her next frame she is drawn in her own body and helmet.
+        third.place(her);
+        expect(asks).toBe(2);
+        expect(shown(third, 'female', 0)).toBe(true);
+        expect(shown(third, 'male', 0)).toBe(false);
+        expect(instanceDrawn(third.helmetsOf('female'), 0)).toBe(true);
+        expect(instanceDrawn(third.helmetsOf('male'), 0)).toBe(false);
+      } finally {
+        third.dispose();
+      }
+
+      // And every later ride of the visit is handed the model the world holds.
+      const fourth = ride();
+      try {
+        fourth.place(her);
+        await vi.waitFor(() => {
+          expect(fourth.hasBody('female')).toBe(true);
+        });
+        expect(asks).toBe(2);
+      } finally {
+        fourth.dispose();
+      }
+    });
+  });
+});
+
+describe('another rider body is fetched when a ride first draws it, and once — #2839', () => {
+  it('asks for the body’s own file, joins every later ask, and releases the loaders', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const asked: string[] = [];
+    let disposed = 0;
+    const scene = { name: 'the model' };
+    const loaders = {
+      model: (url: string) => {
+        asked.push(url);
+        return Promise.resolve(scene as never);
+      },
+      texture: () => Promise.reject(new Error('no texture is asked for')),
+      sky: () => Promise.reject(new Error('no sky is asked for')),
+      dispose: () => {
+        disposed += 1;
+      },
+    };
+    const world = { otherBodies: new Map() };
+
+    const first = renderer.riderBodyOfWorld(world, 'female', loaders);
+    const second = renderer.riderBodyOfWorld(world, 'female', loaders);
+
+    expect(second).toBe(first);
+    expect(await first).toBe(scene);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.endsWith(`/${REALISTIC_RIDER_FEMALE}`)).toBe(true);
+    expect(disposed).toBe(1);
+  });
+
+  it('forgets a load that failed, so the next ask in the same world asks the device again', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    let asks = 0;
+    const loaders = {
+      model: () => {
+        asks += 1;
+        return Promise.reject(new Error('offline'));
+      },
+      texture: () => Promise.reject(new Error('unused')),
+      sky: () => Promise.reject(new Error('unused')),
+    };
+    const world = { otherBodies: new Map() };
+
+    const failed = renderer.riderBodyOfWorld(world, 'female', loaders);
+    // Joined while it is in flight, failed or not: one ask.
+    expect(renderer.riderBodyOfWorld(world, 'female', loaders as never)).toBe(failed);
+    await expect(failed).rejects.toThrow('offline');
+    expect(asks).toBe(1);
+    expect(world.otherBodies.size).toBe(0);
+
+    // PR #2845's review: kept, the failure drew her as the default rider on
+    // every later ride of the visit. The next ask is a new load.
+    await expect(renderer.riderBodyOfWorld(world, 'female', loaders as never)).rejects.toThrow(
+      'offline',
+    );
+    expect(asks).toBe(2);
+  });
+
+  it('answers a loader that throws with a failed load, since the ask is made while a frame is placed', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const loaders = {
+      model: () => {
+        throw new Error('no loader could be built');
+      },
+      texture: () => Promise.reject(new Error('unused')),
+      sky: () => Promise.reject(new Error('unused')),
+    };
+    const world = { otherBodies: new Map() };
+
+    let load: Promise<unknown> | undefined;
+    expect(() => {
+      load = renderer.riderBodyOfWorld(world, 'female', loaders);
+    }).not.toThrow();
+    await expect(load).rejects.toThrow('no loader could be built');
+    expect(world.otherBodies.size).toBe(0);
+  });
 });
 
 /* ============================================================================
@@ -1586,7 +2270,16 @@ describe('the realistic rider moves like a rider — #625', () => {
     // "chicken wings" of 2026-11-04 were 68 cm.
     expect(drops.elbows).toBeLessThan(0.55);
   }, 120_000);
-  /** The drawn hand's furthest vertex from its wrist — a fingertip — in the bicycle's frame. */
+  /**
+   * The drawn hand's furthest fingertip from its wrist, in the bicycle's frame.
+   * #2839: the fingers are closed round the bar, so the hand's furthest vertex
+   * from its wrist is now a knuckle, not a fingertip; the file names each
+   * fingertip's vertex (`process_rider.py` §`grip`, the body mesh's `extras`),
+   * and of the index, middle, ring and little fingers' tips this is the one
+   * furthest from the wrist — what the furthest vertex was while the hand was
+   * open.
+   */
+  const fingertips = namedFingertips(REALISTIC_RIDER_BODIES.male);
   const fingertipOf = (
     riders: Riders,
     pose: ReadonlyMap<string, Posed>,
@@ -1594,25 +2287,17 @@ describe('the realistic rider moves like a rider — #625', () => {
   ): readonly number[] => {
     const body = riders.bodies[0];
     if (body === undefined) throw new Error('no body');
-    const wristAt = body.skeleton.bones.findIndex((each) => each.name === wrist);
     const from = at(pose, wrist);
-    const carried = body.geometry.getAttribute('skinIndex');
-    const weights = body.geometry.getAttribute('skinWeight');
+    const side = wrist === 'wristL' ? 'L' : 'R';
+    const named = fingertips.filter((tip) => tip.side === side && tip.finger > 1);
+    if (named.length !== 4)
+      throw new Error(`the rider names ${String(named.length)} ${side} fingertips`);
     const vertex = body.position.clone();
     body.updateMatrixWorld(true);
     let far = 0;
     let tip: readonly number[] = from;
-    for (let at = 0; at < carried.count; at += 1) {
-      let most = 0;
-      let heaviest = -1;
-      for (let slot = 0; slot < 4; slot += 1) {
-        if (weights.getComponent(at, slot) > most) {
-          most = weights.getComponent(at, slot);
-          heaviest = carried.getComponent(at, slot);
-        }
-      }
-      if (heaviest !== wristAt) continue;
-      body.getVertexPosition(at, vertex).applyMatrix4(body.matrixWorld);
+    for (const each of named) {
+      body.getVertexPosition(each.vertex, vertex).applyMatrix4(body.matrixWorld);
       const away = Math.hypot(
         vertex.x - (from[0] ?? 0),
         vertex.y - (from[1] ?? 0),
@@ -1671,8 +2356,14 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(tip.below, name).toBeLessThan(0.05);
       expect(tip.ahead, name).toBeLessThan(0.1);
     }
-    // The tops: the fingers down over the bar, further than in the drops.
-    expect(tops.below).toBeGreaterThan(0.05);
+    // The tops: the fingers down over the bar. #2839, the owner's ruling of
+    // 2026-11-18: closed round it now, so the tips are UNDER it — further
+    // below its top (the grip) than the tube is thick, 2 × `bicycle.ts`
+    // §`BAR_TUBE_RADIUS`'s 12 mm — but curled in under it, not hanging: the
+    // closed hand's furthest named tip is 2.9 cm below, and the same pipeline
+    // with the fingers left open hangs it past 5 cm.
+    expect(tops.below).toBeGreaterThan(0.024);
+    expect(tops.below).toBeLessThan(0.05);
   }, 120_000);
 
   it('PR #2116 — holds every grip below the hips, as a road bicycle’s bar is, so a hand is not drawn on the hip', async () => {
@@ -1988,7 +2679,18 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(clip.times).toEqual(
         expect.arrayContaining([expect.closeTo(CRASH_RISE_AT_SECONDS, 6)]),
       );
-      expect(clip.times.at(-1)).toBeCloseTo(CRASH_SECONDS, 6);
+      // Its own end, on the rise it was made on; the drawn rise is longer
+      // (`crash-look.ts` §`crashClipSeconds`).
+      expect(clip.times.at(-1)).toBeCloseTo(CRASH_CLIP_SECONDS, 6);
+      // And `rider_crash.py`'s thrown moment is where `crash-look.ts` says it is.
+      expect(clip.times[1]).toBeCloseTo(CRASH_THROWN_SECONDS, 6);
+      expect(clip.times.at(-2)).toBeCloseTo(CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2, 6);
+      // What the pipeline makes the clip on is what the file is on, so a
+      // re-run reproduces the committed clip and not one on the drawn rise.
+      const made = riderCrashPose();
+      expect(made.fall).toBeCloseTo(clip.times[2] ?? Number.NaN, 6);
+      expect(made.riseAt).toBeCloseTo(clip.times[3] ?? Number.NaN, 6);
+      expect(made.end).toBeCloseTo(clip.times.at(-1) ?? Number.NaN, 6);
       expect(clip.turns.size).toBe(24);
       expect(clip.rootAt).toHaveLength(clip.times.length * 3);
     });
@@ -1996,10 +2698,20 @@ describe('the realistic rider moves like a rider — #625', () => {
     it('draws the clip’s own pose when the rider is down: every bone the file’s, read back', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
-      // Landed, as the fall ends, and still down as the rise starts: share 1.
-      for (const seconds of [CRASH_FALL_SECONDS, CRASH_RISE_AT_SECONDS]) {
+      // Thrown, part of the way down; landed, as the fall ends; still down as
+      // the rise starts; and half way back up, at the CLIP's half-rise: the
+      // body is wholly the clip's at each (`crash-look.ts` §`crashBodyShare`).
+      const halfUp = CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2;
+      for (const seconds of [
+        CRASH_THROWN_SECONDS,
+        CRASH_FALL_SECONDS,
+        CRASH_RISE_AT_SECONDS,
+        halfUp,
+      ]) {
         const { pose } = drawn(riders, crashMarker(seconds, 1));
-        const key = moment(seconds);
+        const key = moment(
+          seconds === halfUp ? CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2 : seconds,
+        );
         let worst = 0;
         for (const [name, turns] of clip.turns) {
           worst = Math.max(
@@ -2011,7 +2723,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       }
     });
 
-    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', () => {
+    it('blends from the ride to the clip by the body’s own share as it falls and rises: every bone part of the way', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       /** Spherical interpolation, the short way: three's `slerp`, written out. */
@@ -2024,12 +2736,15 @@ describe('the realistic rider moves like a rider — #625', () => {
         const [p, q] = [Math.sin((1 - t) * angle), Math.sin(t * angle)];
         return a.map((each, index) => (each * p + (to[index] ?? 0) * q) / Math.sin(angle));
       };
-      for (const seconds of [0.3, 1.35]) {
-        const share = crashShare(seconds, false) ?? Number.NaN;
-        expect(share, String(seconds)).toBeGreaterThan(0.3);
-        expect(share, String(seconds)).toBeLessThan(0.7);
-        const rolled = drawn(riders, crashMarker(seconds, 1, false)).pose;
-        const { pose } = drawn(riders, crashMarker(seconds, 1));
+      // Before it is thrown, and in the second half of the rise: the body's
+      // own share, at the clip's own time.
+      for (const drawnSeconds of [0.12, CRASH_RISE_AT_SECONDS + 0.75 * CRASH_RISE_SECONDS]) {
+        const share = crashBodyShare(drawnSeconds) ?? Number.NaN;
+        expect(share, String(drawnSeconds)).toBeGreaterThan(0.3);
+        expect(share, String(drawnSeconds)).toBeLessThan(0.7);
+        const rolled = drawn(riders, crashMarker(drawnSeconds, 1, false)).pose;
+        const { pose } = drawn(riders, crashMarker(drawnSeconds, 1));
+        const seconds = crashClipSeconds(drawnSeconds);
         const key = clip.times.findIndex((_, index) => seconds < (clip.times[index + 1] ?? 0));
         const along =
           (seconds - (clip.times[key] ?? 0)) /
@@ -2057,7 +2772,8 @@ describe('the realistic rider moves like a rider — #625', () => {
       for (const [name, seconds] of [
         ['fall', 0.3],
         ['down', 0.8],
-        ['rise', 1.35],
+        // Half way up: the clip's `rising` moment.
+        ['rise', CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2],
       ] as const) {
         const rolled = drawn(riders, crashMarker(seconds, 1, false)).ends;
         const played = apart(drawn(riders, crashMarker(seconds, 1)).ends, rolled);
@@ -3302,6 +4018,202 @@ describe('the mapped buildings’ blobs, through the drawing a view builds — #
   }, 120_000);
 });
 
+describe('every set of mapped buildings is drawn in the one set of materials, by the one belt — #3107, #3119', () => {
+  // An open-world ride plans the buildings round the rider again as it goes:
+  // each plan is another `MappedBuildings`. Until #3119 the drawing built
+  // another belt for each, its buffers allocated and uploaded whole inside
+  // the frame the plan arrived on. Three sets are drawn once, here, through
+  // the drawing a view builds, and the cases read what each was drawn by and
+  // in: the second by the first's belt, and the third, whose cap the belt
+  // cannot hold, by another. Two belts allocated, as before #3119: a belt's
+  // buffers and the world's load are more than a case's time on a slow runner.
+  let drawn:
+    | {
+        /** Whether the second set was drawn by the belt the first was, and the third. */
+        readonly sameBelt: readonly boolean[];
+        /** Whether each set was what the belt drew from after the frame that carried it. */
+        readonly drewTheSetCarried: readonly boolean[];
+        /** The plans the first two sets drew, as plan objects. */
+        readonly plansDrawn: readonly (readonly unknown[])[];
+        /** How many buildings each set drew. */
+        readonly buildings: readonly number[];
+        /** How many of the attributes the second set was drawn in, and of their arrays, the first was not. */
+        readonly newAttributes: number;
+        readonly newArrays: number;
+        readonly attributes: number;
+        /** For each attribute after the second set's refill: what it will upload, and what it holds, in floats. */
+        readonly uploads: readonly { readonly count: number; readonly length: number }[];
+        /** How many materials the first belt and the last drew in. */
+        readonly materials: readonly number[];
+        /** How many of the later sets' materials the first did not draw in. */
+        readonly newMaterials: number;
+        readonly disposed: () => number;
+        readonly dispose: () => void;
+      }
+    | undefined;
+
+  beforeAll(async () => {
+    // The world's files, served as every case's `beforeEach` serves them: a
+    // `beforeAll` runs before it.
+    const whileServed = served();
+    let renderer: Awaited<ReturnType<typeof loadedOn>>;
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of whileServed.reverse()) each();
+    }
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    const mixed = mixedTownFixture();
+    const land = landClassMask(mixed.corridor);
+    const { plans } = footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin);
+    const start = atStartLine(mixed.profile);
+    const frame = sceneFrame({
+      profile: mixed.profile,
+      origin: mixed.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+      worldCorridor: mixed.corridor,
+      landClass: land,
+      mappedBuildings: mappedBuildingsOf(plans),
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+    const carried = frame.mappedBuildings;
+    if (carried === undefined) throw new Error('the frame carried no buildings');
+    type Belt = NonNullable<typeof drawing.mapped>;
+    /** What this reads off a belt's attribute: `three-seam.test.ts` keeps `three` to the renderer. */
+    interface Attribute {
+      readonly array: ArrayLike<number>;
+      readonly updateRanges: readonly { readonly start: number; readonly count: number }[];
+    }
+    const beltOf = (): Belt => {
+      const belt = drawing.mapped;
+      if (belt === undefined) throw new Error('the drawing built no belt');
+      return belt;
+    };
+    const materialsOf = (): Set<unknown> => {
+      const belt = beltOf();
+      const surfaces = belt.mesh.material;
+      return new Set([
+        ...(Array.isArray(surfaces) ? surfaces : [surfaces]),
+        belt.modelMesh.material,
+      ]);
+    };
+    const attributesOf = (): Attribute[] => {
+      const belt = beltOf();
+      return [
+        ...Object.values(belt.mesh.geometry.attributes),
+        ...Object.values(belt.modelMesh.geometry.attributes),
+      ] as Attribute[];
+    };
+    // Read back as a consumer reads what is drawn: its places, through the set the belt holds.
+    const plansOf = (): unknown[] => {
+      const belt = beltOf();
+      return belt.drawnPlans().map((index) => belt.buildings.plans[index]);
+    };
+    const carry = (buildings: ReturnType<typeof mappedBuildingsOf>): void => {
+      drawing.updateMapped({ ...carried, buildings }, frame.scatter, frame.billboards.length);
+    };
+    const sets = [
+      mappedBuildingsOf(plans),
+      // The next plan: the same buildings in another order, so each is at
+      // another place in the set, and a refill that read places in the set
+      // before would draw others.
+      mappedBuildingsOf([...plans].reverse()),
+      // And a set indexed with a larger cap than the belt was built to hold
+      // (#1638's city centre): drawn by another belt.
+      mappedBuildingsOf(plans, MAPPED_BUILDING_MAX + 4),
+    ] as const;
+    carry(sets[0]);
+    const first = beltOf();
+    const before = materialsOf();
+    const attributesBefore = attributesOf();
+    const arraysBefore = new Set(attributesBefore.map((attribute) => attribute.array));
+    const plansDrawn = [plansOf()];
+    const buildings = [first.stats.buildings];
+    const drewTheSetCarried = [first.buildings === sets[0]];
+    let disposed = 0;
+    for (const material of before) {
+      (
+        material as { addEventListener(type: 'dispose', listener: () => void): void }
+      ).addEventListener('dispose', () => {
+        disposed += 1;
+      });
+    }
+    carry(sets[1]);
+    const second = beltOf();
+    const attributesAfter = attributesOf();
+    plansDrawn.push(plansOf());
+    buildings.push(second.stats.buildings);
+    drewTheSetCarried.push(second.buildings === sets[1]);
+    const uploads = attributesAfter.map((attribute) => ({
+      count: attribute.updateRanges.reduce((sum, range) => sum + range.count, 0),
+      length: attribute.array.length,
+    }));
+    const materialsSecond = materialsOf();
+    carry(sets[2]);
+    const third = beltOf();
+    buildings.push(third.stats.buildings);
+    drewTheSetCarried.push(third.buildings === sets[2]);
+    // The same material objects, compared as such: a material holds its textures.
+    const materialsThird = materialsOf();
+    const after = new Set([...materialsSecond, ...materialsThird]);
+    drawn = {
+      sameBelt: [second === first, third === first],
+      drewTheSetCarried,
+      plansDrawn,
+      buildings,
+      newAttributes: attributesAfter.filter((attribute) => !attributesBefore.includes(attribute))
+        .length,
+      newArrays: attributesAfter.filter((attribute) => !arraysBefore.has(attribute.array)).length,
+      attributes: attributesAfter.length,
+      uploads,
+      materials: [before.size, materialsThird.size],
+      newMaterials: [...after].filter((material) => !before.has(material)).length,
+      disposed: () => disposed,
+      dispose: () => {
+        drawing.dispose();
+      },
+    };
+  });
+
+  afterAll(() => {
+    drawn?.dispose();
+  });
+
+  it('draws another set by the belt it has, in its buffers, uploading only what the refill wrote — #3119', () => {
+    if (drawn === undefined) throw new Error('nothing was drawn');
+    // One belt for the first two sets, each refill drawing from the set the
+    // frame carried.
+    expect(drawn.sameBelt[0]).toBe(true);
+    expect(drawn.drewTheSetCarried).toStrictEqual([true, true, true]);
+    // No buffer allocated: every attribute, and every array, is the first set's.
+    expect(drawn.attributes).toBe(13);
+    expect(drawn.newAttributes).toBe(0);
+    expect(drawn.newArrays).toBe(0);
+    // And what is uploaded is the range the refill wrote, not the buffer, as
+    // three uploads an attribute it has not seen whole.
+    expect(drawn.uploads.some(({ count }) => count > 0)).toBe(true);
+    for (const { count, length } of drawn.uploads) expect(count).toBeLessThan(length / 2);
+    // The same buildings drawn, read back through the new set's places.
+    const [firstPlans = [], secondPlans = []] = drawn.plansDrawn;
+    expect(firstPlans.length).toBeGreaterThan(0);
+    expect(secondPlans.every((plan) => plan !== undefined)).toBe(true);
+    expect(new Set(secondPlans)).toStrictEqual(new Set(firstPlans));
+  });
+
+  it('draws a set it cannot hold by another belt, and every set in the same materials, none of them disposed of', () => {
+    if (drawn === undefined) throw new Error('nothing was drawn');
+    expect(drawn.sameBelt[1]).toBe(false);
+    for (const count of drawn.buildings) expect(count).toBeGreaterThan(0);
+    expect(drawn.materials[0]).toBeGreaterThan(1);
+    // Every set in the first's materials and no other, none of them disposed
+    // of: three keeps their programs, and a new set of buildings links none.
+    expect(drawn.materials[1]).toBe(drawn.materials[0]);
+    expect(drawn.newMaterials).toBe(0);
+    expect(drawn.disposed()).toBe(0);
+  });
+});
+
 describe('the village models and the procedural belts, through the drawing a view builds — #1566', () => {
   it('holds the procedural structures to what the models leave of the structure term', async () => {
     const renderer = await loadedOn(TABLET);
@@ -3459,7 +4371,7 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
     // the terrain, read back off the ground mesh's own material, and what it
     // writes for the roofs, read back through a mapped roof's own program as
     // three binds it. A 61° N town on 20 January lies under a full winter.
-    const renderer = await loadedOn(TABLET);
+    const renderer = await loadedForAView();
     const town = mixedTownFixture(61);
     const land = landClassMask(town.corridor);
     const start = atStartLine(town.profile);
@@ -3604,6 +4516,101 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
       realistic.destroy();
     }
   }, 120_000);
+});
+
+describe('a ride’s own frame draws the rider the athlete chose — #2839, PR #2845’s review', () => {
+  it('fetches her model from the frame `ThreeGameView.render` first draws her on, draws her in it from the next, and hands it to the next ride unasked', async () => {
+    // The view's own `#stage` and the PRODUCT's loaders, on the loaded world:
+    // nothing here calls `place`, `riderBodyOfWorld` or `addBody`. What a
+    // ride then does about a failed load, a second ride and a ride that has
+    // ended is held on the belt, in §"a frame that draws her asks for her
+    // model", where it costs no world.
+    const renderer = await loadedForAView();
+    // The product's URL for a realistic file is under the build's base,
+    // which is this file's served origin from here on.
+    vi.stubEnv('BASE_URL', `${ORIGIN}/`);
+    undo.push(() => vi.unstubAllEnvs());
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    // How many times the device is asked for her model.
+    let asks = 0;
+    const servedFetch = globalThis.fetch;
+    globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `${ORIGIN}/realistic/${REALISTIC_RIDER_FEMALE}`) asks += 1;
+      return servedFetch(input, init);
+    };
+    undo.push(() => {
+      globalThis.fetch = servedFetch;
+    });
+    const profile = northRoute(2_000, () => 0);
+    const start = atStartLine(profile);
+    // Built by the SAME module graph as the renderer, whose terrain checks the frame's lease.
+    const scene = await import('./scene');
+    const framed = (riderBody?: 'female'): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: start,
+        ...(riderBody === undefined ? {} : { riderBody }),
+      });
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    const ride = (): {
+      readonly view: GameView;
+      readonly riders: InstanceType<Renderer['RealisticRiderBelt']>;
+    } => {
+      const view = renderer.threeGameRenderer.create(blindCanvas(), top);
+      const riders = (
+        view as unknown as {
+          readonly realisticRiders: InstanceType<Renderer['RealisticRiderBelt']> | undefined;
+        }
+      ).realisticRiders;
+      if (riders === undefined) throw new Error('the view built no realistic riders');
+      return { view, riders };
+    };
+
+    const first = ride();
+    try {
+      expect(renderer.drawnWorldOf(first.view)).toBe('realistic');
+      // The rider this view has always drawn: the default body, and no other asked for.
+      first.view.render(framed());
+      expect(shown(first.riders, 'male', 0)).toBe(true);
+      expect(first.riders.hasBody('female')).toBe(false);
+      expect(asks).toBe(0);
+
+      // Her first frame: still a rider, in the default body, and her model on its way.
+      first.view.render(framed('female'));
+      expect(shown(first.riders, 'male', 0)).toBe(true);
+      await vi.waitFor(() => {
+        expect(first.riders.hasBody('female')).toBe(true);
+      });
+
+      // And from her next frame, her own.
+      first.view.render(framed('female'));
+      expect(shown(first.riders, 'female', 0)).toBe(true);
+      expect(shown(first.riders, 'male', 0)).toBe(false);
+      expect(asks).toBe(1);
+    } finally {
+      first.view.destroy();
+    }
+
+    // The next ride of the visit is a new view on the same world, which
+    // hands it the model it already holds: the device is not asked again.
+    const second = ride();
+    try {
+      second.view.render(framed('female'));
+      await vi.waitFor(() => {
+        expect(second.riders.hasBody('female')).toBe(true);
+      });
+      second.view.render(framed('female'));
+      expect(shown(second.riders, 'female', 0)).toBe(true);
+      expect(asks).toBe(1);
+    } finally {
+      second.view.destroy();
+    }
+  });
 });
 
 describe('the village-square tree, in the realistic world: no depth pre-pass — #1627', () => {
@@ -3875,4 +4882,251 @@ describe('the litter and the chain-link, loaded by the product’s own loader �
       drawing.dispose();
     }
   }, 120_000);
+});
+
+/* ============================================================================
+ * The people's atlas — the owner's pictures of PR #2844
+ * ========================================================================== */
+
+/** Where one region of each person reads the atlas: each triangle's middle, and every corner. */
+function peopleReads(region: string): {
+  readonly centroids: { readonly u: number; readonly v: number }[];
+  readonly corners: { readonly u: number; readonly v: number }[];
+}[] {
+  const file = readGlb(join(PUBLIC, 'realistic', REALISTIC_PEOPLE.model));
+  const json = file.json as unknown as {
+    readonly nodes: readonly { readonly name?: string; readonly mesh?: number }[];
+    readonly meshes: readonly {
+      readonly primitives: readonly {
+        readonly attributes: Readonly<Record<string, number>>;
+        readonly indices: number;
+        readonly material: number;
+      }[];
+    }[];
+    readonly materials: readonly { readonly name: string }[];
+  };
+  return json.nodes
+    .filter((node) => node.mesh !== undefined)
+    .sort((a, b) => ((a.name ?? '') < (b.name ?? '') ? -1 : 1))
+    .map((node) => {
+      const centroids: { u: number; v: number }[] = [];
+      const corners: { u: number; v: number }[] = [];
+      (json.meshes[node.mesh as number]?.primitives ?? [])
+        .filter((primitive) => json.materials[primitive.material]?.name === region)
+        .forEach((primitive) => {
+          const uv = accessorValues(
+            file.json,
+            file.binary,
+            primitive.attributes['TEXCOORD_0'] as number,
+          ).values;
+          const index = accessorValues(file.json, file.binary, primitive.indices).values;
+          for (let at = 0; at + 2 < index.length; at += 3) {
+            const three = [index[at], index[at + 1], index[at + 2]] as number[];
+            for (const corner of three) {
+              corners.push({ u: uv[corner * 2] ?? 0, v: uv[corner * 2 + 1] ?? 0 });
+            }
+            centroids.push({
+              u: three.reduce((sum, corner) => sum + (uv[corner * 2] ?? 0), 0) / 3,
+              v: three.reduce((sum, corner) => sum + (uv[corner * 2 + 1] ?? 0), 0) / 3,
+            });
+          }
+        });
+      return { centroids, corners };
+    });
+}
+
+describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
+  /** The atlas decoded through the real loader, read as the shader reads it: a share of a colour. */
+  async function atlasShares(): Promise<
+    (at: { readonly u: number; readonly v: number }) => readonly [number, number, number]
+  > {
+    const renderer = await loadedOn([]);
+    const inner = renderer.compressedRealisticLoaders(device([]), `${ORIGIN}/basis/`);
+    try {
+      const texture = await inner.texture(`${ORIGIN}/realistic/${REALISTIC_PEOPLE.atlas}`);
+      const level = (texture as unknown as { mipmaps: { data: Uint8Array; width: number }[] })
+        .mipmaps[0];
+      if (level === undefined) throw new Error('the people’s atlas has no level 0');
+      const linear = (byte: number): number => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      // The atlas is encoded top row first, and glTF's v runs down the picture.
+      return ({ u, v }) => {
+        const x = Math.min(level.width - 1, Math.floor(u * level.width));
+        const y = Math.min(level.width - 1, Math.floor(v * level.width));
+        const at = (y * level.width + x) * 4;
+        // The shader's own arithmetic: a texel holds HALF the share.
+        return [
+          2 * linear(level.data[at] ?? 0),
+          2 * linear(level.data[at + 1] ?? 0),
+          2 * linear(level.data[at + 2] ?? 0),
+        ];
+      };
+    } finally {
+      inner.dispose?.();
+    }
+  }
+
+  /**
+   * Decoded once for the three cases below: the real KTX2Loader's transcode is
+   * the slow part, and a per-case timeout is banned (#1688).
+   */
+  let shareAt: Awaited<ReturnType<typeof atlasShares>>;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      shareAt = await atlasShares();
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  /** The atlas's side, in texels (`realistic-budget.ts` §`REALISTIC_TEXTURE_PIXELS`). */
+  const ATLAS_SIDE = REALISTIC_TEXTURE_PIXELS.people;
+
+  const quantile = (values: readonly number[], share: number): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))] ?? Number.NaN;
+  };
+  const light = (share: readonly [number, number, number]): number =>
+    0.2126 * share[0] + 0.7152 * share[1] + 0.0722 * share[2];
+
+  it('draws plain skin as the person’s own colour, on the face and the limbs alike, with no shine painted on', () => {
+    const people = peopleReads('skin');
+    expect(people.length).toBe(3);
+    let cast = 0;
+    people.forEach(({ centroids }, person) => {
+      // `process_people.py` §`TILE`: the face's tile is the first quarter
+      // across, the limbs' the seventh eighth; the eyes are past both.
+      const face = centroids.filter((at) => at.u < 0.25).map(shareAt);
+      const limbs = centroids.filter((at) => at.u >= 0.75 && at.u < 0.875).map(shareAt);
+      expect(face.length, `person ${String(person)}`).toBeGreaterThan(100);
+      expect(limbs.length, `person ${String(person)}`).toBeGreaterThan(30);
+      const of = (shares: typeof face, channel: number, share: number): number =>
+        quantile(
+          shares.map((each) => each[channel] as number),
+          share,
+        );
+      const said = [0, 1, 2].map((channel) => ({
+        faceBright: of(face, channel, 0.9),
+        limbsTypical: of(limbs, channel, 0.5),
+        limbsBright: of(limbs, channel, 0.9),
+      }));
+      console.log(`PR #2844: person ${String(person)} skin shares ${JSON.stringify(said)}`);
+      for (const channel of said) {
+        // Plain skin is the person's colour: the limbs' typical triangle is
+        // not lighter than it (a mean's divisor left it a fifth over).
+        expect(channel.limbsTypical).toBeLessThan(1.05);
+        expect(channel.limbsTypical).toBeGreaterThan(0.85);
+        // And the photograph's shine is all but gone: the brightest tenth of
+        // either tile is within a fifth of the person's colour.
+        expect(channel.faceBright).toBeLessThan(1.2);
+        expect(channel.limbsBright).toBeLessThan(1.2);
+      }
+      cast += (said[1]?.limbsTypical ?? 9) - (said[0]?.limbsTypical ?? 0);
+    });
+    // No cool cast: over the three people, plain skin's green is not lifted
+    // clear of its red — which dividing by the MEAN does, by 0.17 in all (the
+    // mean is dragged down by what is dark and red), and the median does not.
+    console.log(
+      `PR #2844: the limbs' green over their red, the three people together: ${cast.toFixed(3)}`,
+    );
+    expect(cast).toBeLessThan(0.06);
+  });
+
+  it('keeps the trousers’ light and shade and none of their photograph’s dye', () => {
+    peopleReads('bottoms').forEach((reads, person) => {
+      // Every corner as well as every middle: a seam's corners are where a
+      // photograph's outline is.
+      const shares = [...reads.centroids, ...reads.corners].map(shareAt);
+      const dye = Math.max(...shares.map((share) => Math.max(...share) - Math.min(...share)));
+      const lights = shares.map(light);
+      console.log(
+        `PR #2844: person ${String(person)} bottoms dye ${dye.toFixed(3)}, light ${Math.min(...lights).toFixed(2)} to ${Math.max(...lights).toFixed(2)}`,
+      );
+      expect(shares.length).toBeGreaterThan(300);
+      // Grey, to what ETC1S keeps of a grey: the person's colour is the only dye.
+      expect(dye).toBeLessThan(0.25);
+      // Light and shade, and neither the black line round a piece nor a fade's white.
+      expect(Math.min(...lights)).toBeGreaterThan(0.45);
+      expect(Math.max(...lights)).toBeLessThan(1.75);
+      // Nor is that line within two texels of a corner, where a filtered
+      // read and the first mip levels reach: the cloth is spread over it.
+      const reach = [-2, -1, 0, 1, 2];
+      const beside = reads.corners.flatMap((corner) =>
+        reach.flatMap((dx) =>
+          reach.map((dy) =>
+            light(shareAt({ u: corner.u + dx / ATLAS_SIDE, v: corner.v + dy / ATLAS_SIDE })),
+          ),
+        ),
+      );
+      console.log(
+        `PR #2844: person ${String(person)} bottoms, least light within two texels of a corner ${Math.min(...beside).toFixed(2)}`,
+      );
+      expect(Math.min(...beside)).toBeGreaterThan(0.3);
+    });
+  });
+
+  it('wears no painted shadow on a jacket’s chest', () => {
+    peopleReads('top').forEach((reads, person) => {
+      const lights = reads.centroids.map(shareAt).map(light);
+      const dark = lights.filter((each) => each < 0.25).length;
+      console.log(
+        `PR #2844: person ${String(person)} top: ${String(dark)} of ${String(lights.length)} triangles under a quarter of its colour`,
+      );
+      // A stripe may be dark; a twentieth of a garment may not.
+      expect(dark / lights.length).toBeLessThan(0.05);
+    });
+  });
+});
+
+describe('the footways, drawn by a view on the loaded world — #2972', () => {
+  /** The world loaded once, in a hook, for #1688's reason (see the feet on the pedals). */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  it('draws the frame’s footways and zebra in the realistic world, in one mesh, and none in the stylised', async () => {
+    const town = footwaysFixture();
+    const land = landClassMask(town.corridor);
+    const start = atStartLine(town.profile);
+    // Built by the same module graph as the renderer `loadedOn` imported fresh.
+    const scene = await import('./scene');
+    const framed = (): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: town.profile,
+        origin: town.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_250) } },
+        worldCorridor: town.corridor,
+        landClass: land,
+      });
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      const frame = framed();
+      const triangles = footwayTriangles(frame.footways);
+      expect(triangles).toBeGreaterThan(100);
+      realistic.render(framed());
+      const mesh = renderer.footwayMeshOf(realistic);
+      expect(mesh?.visible).toBe(true);
+      expect((mesh?.geometry.index?.count ?? 0) / 3).toBe(triangles);
+      stylised.render(framed());
+      expect(renderer.footwayMeshOf(stylised)?.visible ?? false).toBe(false);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
+    }
+  });
 });

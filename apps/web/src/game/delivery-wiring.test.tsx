@@ -78,11 +78,23 @@ import type { ControllerPort } from './delivery/controller-port';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
 import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
-import { MOVING_HAZARD_KINDS, type ObstacleKind } from './delivery/obstacles';
+import {
+  AVOIDABLE_FASTEST_METRES_PER_SECOND,
+  MOVING_HAZARD_KINDS,
+  type ObstacleKind,
+} from './delivery/obstacles';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
 import { SHIPPED_LEVELS } from './shipped-levels';
 import { pickRoundTargets } from './delivery/targets';
-import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
+import {
+  CRASH_OFFSET_BOUND_METRES,
+  CRASH_PAYOUT_SHARE,
+  CRASH_STOP_SECONDS,
+  payoutSpeed,
+  startDeliveryRide,
+  stepDeliveryRide,
+  type DeliveryRide,
+} from './delivery/ride-round';
 import { FEWEST_DELIVERY_HOUSES, roundTally, type WeekProgress } from './delivery/round';
 import { LANE_OFFSETS_METRES, startSteer, steerToward, type SteerIntent } from './delivery/steer';
 import {
@@ -181,6 +193,13 @@ const cameraInputs = vi.hoisted((): (number | undefined)[] => []);
 const swayInputs = vi.hoisted((): (number | undefined)[] => []);
 /** #2494: the rider's drawn steer on every frame `sceneFrame` made, in order. */
 const steerOutputs = vi.hoisted((): (number | undefined)[] => []);
+/**
+ * #3021, ADR 0094: the distance `GameView` handed `sceneFrame` to draw the
+ * rider, and point the camera, at on every frame, in order. `scene.ts`
+ * §`SceneInput.riderDistance` is optional the unsafe way round (it falls back
+ * to the odometer), so it is read back off the input the frame was made from.
+ */
+const drawnAlongInputs = vi.hoisted((): (number | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -189,6 +208,7 @@ vi.mock('./scene', async (importOriginal) => {
       steeredInputs.push(args[0].steeredLateral);
       cameraInputs.push(args[0].cameraLateral);
       swayInputs.push(args[0].steeredSway);
+      drawnAlongInputs.push(args[0].riderDistance);
       const frame = actual.sceneFrame(...args);
       steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
       return frame;
@@ -524,14 +544,22 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
     // The lane key pressed after this frame, as `GameView`'s port takes it.
     const intent = STEERS.get(index);
     if (intent !== undefined) ride = { ...ride, steer: steerToward(ride.steer, intent) };
+    // #3021, ADR 0094: aimed from where the round DRAWS the rider, which a
+    // crash holds back and pays out, and never while they are down, when a
+    // throw is refused.
+    if (ride.stopTicks > 0) return;
+    const paying = ride.crashOffset < 0;
+    const here = ride.along;
+    const ahead = (shadow[index + 1]?.along ?? Infinity) - frame.along;
+    const next = here + (paying ? ahead * (1 + CRASH_PAYOUT_SHARE) : ahead);
+    const speed = paying ? payoutSpeed(frame.speed) : frame.speed;
     // One throw at each house but the skipped one, from where its parcel lands on the step.
     for (const target of ride.throwTargets) {
       if (target.position === SKIPPED || aimedAt.has(target.position)) continue;
       const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
-      const from = target.along - frame.speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
-      const next = shadow[index + 1]?.along ?? Infinity;
+      const from = target.along - speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
       // This frame, unless the next is nearer the place: a frame is metres of road.
-      if (frame.along < from && next - from <= from - frame.along) continue;
+      if (here < from && next - from <= from - here) continue;
       aimedAt.add(target.position);
       throws.set(index, target.side);
       asked = target.side;
@@ -570,6 +598,8 @@ async function rideTheTrace(options: {
   readonly steered?: Map<number, number | undefined> | undefined;
   /** A paired steering controller (#1827). */
   readonly controller?: ControllerPort | undefined;
+  /** Filled with the distance each frame's input drew the rider at, by frame index (#3021). */
+  readonly drawnAlong?: Map<number, number | undefined> | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
@@ -589,6 +619,7 @@ async function rideTheTrace(options: {
     const built = steeredInputs.length;
     await pump();
     if (steeredInputs.length > built) options.steered?.set(index, steeredInputs.at(-1));
+    if (steeredInputs.length > built) options.drawnAlong?.set(index, drawnAlongInputs.at(-1));
     await options.onFrame?.(index);
     const side = options.delivery ? script.throws.get(index) : undefined;
     if (side !== undefined) await pressThrow(side);
@@ -619,6 +650,10 @@ interface RideResult {
   readonly started: readonly unknown[];
   /** The Score field's phrase after each frame, in order (#2454: "Crashed" while a crash is drawn). */
   readonly scoreDetails: readonly (string | undefined)[];
+  /** The distance each frame's input drew the rider at, by frame index (#3021). */
+  readonly drawnAlong: ReadonlyMap<number, number | undefined>;
+  /** The Next house field's value after each frame, in order (#3021: held while the rider is). */
+  readonly nextHouses: readonly (string | undefined)[];
 }
 
 /** The scripted ride, start to *End ride*, read and unmounted. */
@@ -633,19 +668,25 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   const steered = new Map<number, number | undefined>();
   startedRounds.length = 0;
   const scoreDetails: (string | undefined)[] = [];
+  const drawnAlong = new Map<number, number | undefined>();
+  const nextHouses: (string | undefined)[] = [];
   await rideTheTrace({
     delivery,
     trainer: trainerPort(writes),
     drawn,
     steered,
+    drawnAlong,
     onFrame: () => {
       scoreDetails.push(field('Score')?.detail);
+      nextHouses.push(field('Next house')?.value);
       return Promise.resolve();
     },
   });
   const read = {
     steered,
     scoreDetails,
+    drawnAlong,
+    nextHouses,
     started: [...startedRounds],
     houses: field('Houses'),
     score: field('Score'),
@@ -983,9 +1024,10 @@ describe('a crash drawn inside a game ride — #2454', () => {
     expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
     expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
     expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
-    // #2493: every frame drawn down hands the realistic rider the crash's
-    // time and side, for its crash clip, inside the crash's 1.5 s; a ride
-    // with no round never does.
+    // #2493: every frame drawn down hands the realistic rider its place in
+    // the crash clip, in the clip's own seconds (crashClipSeconds), and its
+    // side, inside the crash's CRASH_SECONDS (1.8 s); a ride with no round
+    // never does.
     const rider = (frame: SceneFrame): RiderMarker | undefined =>
       frame.markers.find((marker) => marker.kind === 'rider');
     const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
@@ -1050,7 +1092,7 @@ describe('a crash drawn inside a game ride — #2454', () => {
     expect(after[0]?.lean).toBeGreaterThan(70);
     expect(after[0]?.detail).toBe('Crashed');
     // …then on the way up, still "Crashed", and back on the bike within the
-    // crash's 1.5 s, with "Crashed" gone.
+    // crash's CRASH_SECONDS (1.8 s), with "Crashed" gone.
     const up = after.findIndex((sight) => sight.detail !== 'Crashed');
     expect(up).toBeGreaterThan(1);
     expect(up).toBeLessThanOrEqual(8);
@@ -1139,6 +1181,248 @@ describe('a crash drawn inside a game ride — #2454', () => {
     }
     expect(crashesShown(details)).toBeGreaterThan(0);
     expect(details.at(-1)).toMatch(/^Day \d of 7$/u);
+  });
+});
+
+/**
+ * How far the drawn rider moved on each frame, metres, by frame index: from
+ * the distance each frame's input drew them at. Nought on the first frame.
+ */
+function movedOn(drawnAlong: ReadonlyMap<number, number | undefined>): Map<number, number> {
+  const moved = new Map<number, number>();
+  for (const [index, along] of drawnAlong) {
+    const before = drawnAlong.get(index - 1);
+    if (along !== undefined && before !== undefined) moved.set(index, along - before);
+  }
+  return moved;
+}
+
+/** Less than this a frame, metres, is a drawn rider held still: a ride's frame here is over a metre. */
+const HELD_METRES = 0.005;
+
+/** The frames of the stop: the longest run of frames on which the drawn rider did not move. */
+function stopFrames(drawnAlong: ReadonlyMap<number, number | undefined>): number[] {
+  let longest: number[] = [];
+  let run: number[] = [];
+  for (const [index, moved] of movedOn(drawnAlong)) {
+    if (Math.abs(moved) < HELD_METRES && run.at(-1) === index - 1) run.push(index);
+    else run = Math.abs(moved) < HELD_METRES ? [index] : [];
+    if (run.length > longest.length) longest = run;
+  }
+  return longest;
+}
+
+/** The stop's length in this file's frames: 9, 1.8 s of 200 ms frames. */
+const STOP_FRAMES = Math.round((CRASH_STOP_SECONDS * 1_000) / FRAME_MS);
+
+/**
+ * How far the round drew the rider behind the plain ride on each frame: the
+ * crash offset, read off two real rides of the same trace (DL5 holds their
+ * simulations equal, so the difference is the round's alone).
+ */
+function offsetsOf(
+  round: ReadonlyMap<number, number | undefined>,
+  plain: ReadonlyMap<number, number | undefined>,
+): Map<number, number> {
+  const offsets = new Map<number, number>();
+  for (const [index, along] of round) {
+    const ridden = plain.get(index);
+    if (along !== undefined && ridden !== undefined) offsets.set(index, along - ridden);
+  }
+  return offsets;
+}
+
+describe('a crash stops the drawn rider, who gets back on and rides on — #3021, ADR 0094', () => {
+  it('holds the drawn rider where they crashed for the stop while the ride rides on, “Crashed” and the next house held with them (D-3.1, D-6.3)', async () => {
+    const round = await withRound();
+    const plain = await without();
+    const stop = stopFrames(round.drawnAlong);
+    // 1.8 s of 200 ms frames: nine, give or take the frame the crash fell in.
+    expect(stop.length).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    expect(stop.length).toBeLessThanOrEqual(STOP_FRAMES);
+    // The ride itself rode on through it, over a metre a frame (DL5's simulation).
+    const ridden = movedOn(plain.drawnAlong);
+    for (const index of stop) expect(ridden.get(index)).toBeGreaterThan(1);
+    // A plain ride has no stop at all.
+    expect(stopFrames(plain.drawnAlong).length).toBeLessThan(3);
+    // It is the crash's: "Crashed" from the frame the stop starts on, or the one before.
+    const first = stop[0] as number;
+    const crashedFrom = round.scoreDetails.findIndex((detail) => detail === 'Crashed');
+    expect(crashedFrom).toBeGreaterThanOrEqual(first - 2);
+    expect(crashedFrom).toBeLessThanOrEqual(first);
+    // D-6.3: the next house's countdown reads the drawn distance, so it holds
+    // too. It reads the newest step, a step ahead of the drawing's blend, so
+    // it moves on the stop's last frame, as the rider does on the next.
+    const counted = stop.slice(0, -1).map((index) => round.nextHouses[index]);
+    expect(counted.length).toBeGreaterThanOrEqual(STOP_FRAMES - 2);
+    expect(Number(counted[0])).toBeGreaterThan(0);
+    expect(new Set(counted).size).toBe(1);
+  });
+
+  it('draws the rider and points the camera where the round holds them: neither moves through the stop (D-6.1)', async () => {
+    const round = await withRound();
+    const rider = (frame: SceneFrame): RiderMarker | undefined =>
+      frame.markers.find((marker) => marker.kind === 'rider');
+    // The rendered frames on which the rider marker stood still.
+    let held = 0;
+    let longest = 0;
+    let cameraMoved = 0;
+    round.drawn.forEach((frame, index) => {
+      const before = round.drawn[index - 1];
+      const now = rider(frame);
+      const then = before === undefined ? undefined : rider(before);
+      if (before === undefined || now === undefined || then === undefined) return;
+      const still = Math.hypot(now.x - then.x, now.z - then.z) < HELD_METRES;
+      held = still ? held + 1 : 0;
+      longest = Math.max(longest, held);
+      if (still) {
+        cameraMoved = Math.max(
+          cameraMoved,
+          Math.hypot(frame.camera.x - before.camera.x, frame.camera.z - before.camera.z),
+        );
+      }
+    });
+    expect(longest).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    // The camera follows the drawn rider, never the odometer, which moved over a metre a frame.
+    expect(cameraMoved).toBeLessThan(0.05);
+  });
+
+  it('pays the banked distance out a quarter faster than the ride, never past 12 m/s, and ends level with the ride (D-4)', async () => {
+    const round = await withRound();
+    const plain = await without();
+    const offsets = offsetsOf(round.drawnAlong, plain.drawnAlong);
+    const stop = stopFrames(round.drawnAlong);
+    const last = stop.at(-1) as number;
+    const banked = offsets.get(last) ?? 0;
+    // Banked: more than a metre behind, and never past the bound (D-2.2, D-2.5).
+    expect(banked).toBeLessThan(-1);
+    expect(CRASH_OFFSET_BOUND_METRES).toBe(25);
+    expect(Math.min(...offsets.values())).toBeGreaterThanOrEqual(-CRASH_OFFSET_BOUND_METRES);
+    const moved = movedOn(round.drawnAlong);
+    const ridden = movedOn(plain.drawnAlong);
+    let paidBy: number | undefined;
+    for (let index = last + 2; index <= FRAMES; index += 1) {
+      const offset = offsets.get(index);
+      if (offset === undefined) break;
+      if (Math.abs(offset) < 1e-6) {
+        paidBy = index;
+        break;
+      }
+      // Faster than the ride by P = 25 %, capped at the fastest avoidable speed.
+      const each = moved.get(index) ?? Number.NaN;
+      const rode = ridden.get(index) ?? Number.NaN;
+      const expected = Math.min(
+        (1 + CRASH_PAYOUT_SHARE) * rode,
+        (AVOIDABLE_FASTEST_METRES_PER_SECOND * FRAME_MS) / 1_000,
+      );
+      expect(each).toBeGreaterThan(rode);
+      expect(each).toBeCloseTo(expected, 1);
+      expect(each).toBeLessThanOrEqual((AVOIDABLE_FASTEST_METRES_PER_SECOND * FRAME_MS) / 1_000);
+    }
+    // Paid out in about CRASH_STOP_SECONDS / P, 7.2 s, as the speed varies.
+    expect(paidBy).toBeDefined();
+    const seconds = (((paidBy ?? 0) - last) * FRAME_MS) / 1_000;
+    expect(seconds).toBeGreaterThan(6);
+    expect(seconds).toBeLessThan(8.5);
+    // And level with the ride from there to the end: the round and the ride finish together.
+    const after = [...offsets].filter(([index]) => index >= (paidBy ?? Infinity));
+    expect(after.length).toBeGreaterThan(10);
+    for (const [, offset] of after) expect(Math.abs(offset)).toBeLessThan(1e-6);
+  });
+
+  it('takes no throw while the rider is down, and the next one once they are back up (D-3.3)', async () => {
+    stubSeed(script.seed);
+    const drawn: SceneFrame[] = [];
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    let index = 0;
+    for (; index < FRAMES; index += 1) {
+      await pump();
+      if (field('Score')?.detail === 'Crashed') break;
+      const side = script.throws.get(index);
+      if (side !== undefined) await pressThrow(side);
+      const intent = STEERS.get(index);
+      if (intent !== undefined) await pressSteer(intent);
+    }
+    expect(field('Score')?.detail).toBe('Crashed');
+    const parcels = (): number => drawn.at(-1)?.delivery?.parcels.length ?? 0;
+    const inAir = parcels();
+    const heldAt = drawnAlongInputs.at(-1);
+    // Down: pressed, and nothing is thrown over the frames that follow.
+    await pressThrow('left');
+    for (let frame = 0; frame < 4; frame += 1) {
+      await pump();
+      expect(parcels()).toBeLessThanOrEqual(inAir);
+    }
+    expect(drawnAlongInputs.at(-1)).toBeCloseTo(heldAt ?? Number.NaN, 2);
+    // Back up: the control, the same key throws.
+    for (let frame = 0; frame < STOP_FRAMES; frame += 1) await pump();
+    expect(field('Score')?.detail).not.toBe('Crashed');
+    const before = parcels();
+    await pressThrow('left');
+    for (let frame = 0; frame < 2; frame += 1) await pump();
+    expect(parcels()).toBeGreaterThan(before);
+  });
+
+  it('stops the rider under reduced motion too, and pays the distance out (D-7)', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const drawnAlong = new Map<number, number | undefined>();
+    await rideTheTrace({ delivery: true, drawnAlong });
+    expect(stopFrames(drawnAlong).length).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    const offsets = offsetsOf(drawnAlong, (await without()).drawnAlong);
+    expect(Math.min(...offsets.values())).toBeLessThan(-1);
+    expect(Math.abs(offsets.get(FRAMES - 1) ?? Number.NaN)).toBeLessThan(1e-6);
+  });
+
+  it('stops the rider with the assisted setting on too (D-8)', async () => {
+    localStorage.setItem(
+      DELIVERY_ASSIST_STORAGE_KEY,
+      JSON.stringify({
+        widerWindows: true,
+        obstacles: 'normal',
+        noFail: true,
+      } satisfies DeliveryAssist),
+    );
+    const drawnAlong = new Map<number, number | undefined>();
+    await rideTheTrace({ delivery: true, drawnAlong });
+    expect(offered).toContain('delivery-crash');
+    expect(stopFrames(drawnAlong).length).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    const offsets = offsetsOf(drawnAlong, (await without()).drawnAlong);
+    expect(Math.abs(offsets.get(FRAMES - 1) ?? Number.NaN)).toBeLessThan(1e-6);
+  });
+
+  it('sends byte-identical writes at identical times through a crash, its stop and its payout as with Delivery off, the road climbing or falling under the stop (D-5.3)', async () => {
+    const plain = await without();
+    const round = await withRound();
+    // Non-vacuity: a stop happened, the drawn rider fell more than a metre
+    // behind the ride and came back to it.
+    const stop = stopFrames(round.drawnAlong);
+    expect(stop.length).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    const offsets = offsetsOf(round.drawnAlong, plain.drawnAlong);
+    expect(Math.min(...offsets.values())).toBeLessThan(-1);
+    expect(Math.abs(offsets.get(FRAMES - 1) ?? Number.NaN)).toBeLessThan(1e-6);
+    // …and the road under the stop is not flat: the grades the plain ride
+    // sent from the stop's start to a second past its end change, so a grade
+    // read at the held distance instead would have differed.
+    const from = START_MS + ((stop[0] as number) - 1) * FRAME_MS;
+    const to = START_MS + ((stop.at(-1) as number) + 5) * FRAME_MS;
+    const under = plain.writes.filter((each) => each.atMs >= from && each.atMs <= to);
+    expect(under.length).toBeGreaterThan(0);
+    expect(under.some((each) => Math.abs(each.parameters.grade) > 0.2)).toBe(true);
+    // The trainer was sent exactly what the plain ride sent, when it sent it.
+    expect(round.writes).toStrictEqual(plain.writes);
   });
 });
 
@@ -1636,6 +1920,8 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     readonly names: readonly string[];
     /** How many distinct steered offsets the ride's frames were handed. */
     readonly steered: number;
+    /** #3021: how many frames the drawn rider was held still for at a crash. */
+    readonly stopped: number;
   }> {
     pending = [];
     nowMs = START_MS;
@@ -1675,9 +1961,11 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     await controller.pair('trainer');
     await controller.start();
     const steered = new Map<number, number | undefined>();
+    const drawnAlong = new Map<number, number | undefined>();
     await rideTheTrace({
       delivery,
       steered,
+      drawnAlong,
       trainer: gameTrainerPortOver(controller),
       // The bench keeps whole seconds; five of the game's frames are one.
       onFrame: async (index) => {
@@ -1724,6 +2012,7 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     return {
       names,
       steered: new Set(steered.values()).size,
+      stopped: stopFrames(drawnAlong).length,
       recorded: {
         power: [...(channels.power ?? [])],
         cadence: [...(channels.cadence ?? [])],
@@ -1770,6 +2059,10 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     expect(withRound.houses).toBe(
       `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
     );
+    // #3021, ADR 0094 D-5.3: and a crash stopped the drawn rider on it, which
+    // the stored ride, read at the odometer, does not see.
+    expect(withRound.stopped).toBeGreaterThanOrEqual(STOP_FRAMES - 1);
+    expect(without.stopped).toBeLessThan(3);
     expect(withRound.recorded).toStrictEqual(without.recorded);
     // #1853, not recorded: the round was steered across the road, and the
     // stored ride has no field for where across it the rider was.
@@ -2639,6 +2932,8 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     /** #2365: a throw pressed after each of these frames, on that side; frames of FRAME_MS only. */
     throwsAt: ReadonlyMap<number, ThrowSide> = new Map(),
     fine?: ReadonlySet<number>,
+    /** Every frame the ride hands the view, for a case that reads what was drawn. */
+    drawn: SceneFrame[] = [],
   ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
@@ -2676,7 +2971,7 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
         trainer={trainerPort(writes)}
         renderer={() =>
           Promise.resolve({
-            ...capturingRenderer([]),
+            ...capturingRenderer(drawn),
             loadRealisticWorld: () => Promise.resolve({ loaded: true }),
           })
         }
@@ -2752,6 +3047,49 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
       expect(withHazards.writes).toStrictEqual(without.writes);
     },
   );
+
+  // Ridden only to the crash, as the case above: two thirds of a round in all.
+  it('hands the view a car pulling out DRIVING out, its indicator flashing, and lit steadily under reduced motion', async () => {
+    const { seed, frame } = crashingRide(
+      MOVING_LEVEL,
+      'car-pulling-out',
+      EARLY_CRASH_SEEDS['car-pulling-out'] ?? 1,
+    );
+    const cars = (frames: readonly SceneFrame[]) =>
+      frames.flatMap((each) =>
+        (each.delivery?.obstacles ?? []).filter((piece) => piece.kind === 'car-pulling-out'),
+      );
+    const moving: SceneFrame[] = [];
+    await rideLevel('normal', MOVING_LEVEL, seed, frame, FRAME_MS, new Map(), undefined, moving);
+    const drawn = cars(moving);
+    expect(drawn.length).toBeGreaterThan(10);
+    // Every one carries its motion: the wheels, the steer and the road-side indicator.
+    expect(drawn.every((piece) => piece.car?.indicator !== undefined)).toBe(true);
+    // It drove: its wheels rolled its whole way out, and it was drawn turned on the way.
+    expect(Math.max(...drawn.map((piece) => piece.car?.travelledMetres ?? 0))).toBeCloseTo(8, 6);
+    expect(drawn.some((piece) => (piece.car?.speedMetresPerSecond ?? 0) > 1)).toBe(true);
+    expect(drawn.some((piece) => Math.abs(piece.car?.steerRadians ?? 0) > 0.1)).toBe(true);
+    // And once set going its indicator flashes, on a clock that runs.
+    const clocks = drawn.flatMap((piece) =>
+      piece.car?.indicatorSeconds === undefined ? [] : [piece.car.indicatorSeconds],
+    );
+    expect(clocks.length).toBeGreaterThan(5);
+    expect(Math.max(...clocks)).toBeGreaterThan(1);
+
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const still: SceneFrame[] = [];
+    await rideLevel('normal', MOVING_LEVEL, seed, frame, FRAME_MS, new Map(), undefined, still);
+    const steady = cars(still);
+    expect(steady.length).toBe(drawn.length);
+    // Lit, with no clock to flash on; the car itself drives out as it did.
+    expect(steady.every((piece) => piece.car?.indicator !== undefined)).toBe(true);
+    expect(steady.every((piece) => piece.car?.indicatorSeconds === undefined)).toBe(true);
+    expect(Math.max(...steady.map((piece) => piece.car?.travelledMetres ?? 0))).toBeCloseTo(8, 6);
+  });
 
   // #1688's ruling: cheaper, never a longer timeout. Both rides are the
   // level's same 66 s in frames of 1 s, not 330 of 200 ms: the simulation's

@@ -38,6 +38,7 @@ import {
   type FootprintRole,
 } from './footprint-buildings';
 import {
+  MIXED_TOWN_EDGE_RUNG,
   mixedTownFixture,
   richmondStreetFixture,
   rowTownFixture,
@@ -80,6 +81,7 @@ import {
   GROUNDING_METRES,
   isConstructedMaterial,
   laysRoofSnow,
+  mappedBeltFor,
   MappedBuildingBelt,
   readsInstanceTint,
   readsTextureLodBias,
@@ -428,6 +430,8 @@ describe('what the buffers hold — #1549', () => {
       'porch-trim': 1,
       // #2206: a spire is shaded as the roof it is built of.
       spire: 1,
+      // #2848: a shop's apron is painted by the shader, as a driveway is.
+      apron: 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
@@ -445,6 +449,7 @@ describe('what the buffers hold — #1549', () => {
       }
       if (
         role === 'driveway' ||
+        role === 'apron' ||
         role === 'shopfront' ||
         (role === 'plinth' && plan.cladding.wall === 'clapboard')
       ) {
@@ -479,9 +484,11 @@ describe('what the buffers hold — #1549', () => {
             1,
             Math.max(0, (y - (plan.base + FOUNDATION_METRES)) / GROUNDING_METRES),
           );
-          // A driveway lies on the ground, and is not grounded.
+          // A driveway lies on the ground, and is not grounded; nor, since #2848, is an apron.
           const ground =
-            standing && role !== 'driveway' ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
+            standing && role !== 'driveway' && role !== 'apron'
+              ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise
+              : 1;
           // #1588: trim facing down — a soffit, a gutter's underside — is in the eaves' shade;
           // #1589: so is a porch's ceiling, and its deck is in its roof's.
           const facing = floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number;
@@ -800,8 +807,13 @@ describe('the share of the structures’ term a refill takes — #1549, P-12', (
 describe('the procedural structures and the mapped buildings, ranked together — #1586', () => {
   const mixed = mixedTownFixture();
   const mixedLand = landClassMask(mixed.corridor);
+  // #2848: without the shops' aprons. This frame carries no `mappedTown`, so procedural lots
+  // stand before the mapped shops; an apron's ground takes four of them off it
+  // (`clearOfDriveways`), and the frame below is no longer one whose structures fill the cap.
   const mixedBuildings = mappedBuildingsOf(
-    footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin).plans,
+    footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin, undefined, undefined, {
+      shopAprons: false,
+    }).plans,
   );
 
   /** #1581's mixed town with the rider at `along`, as a realistic rung carries it. */
@@ -818,6 +830,9 @@ describe('the procedural structures and the mapped buildings, ranked together �
     });
   }
 
+  /** #3132: a refill at a rung of this many structures, which the frame's fill. */
+  const RUNG = MIXED_TOWN_EDGE_RUNG;
+
   it('draws the town’s nearest buildings at its edge, the fields beyond filling every structure slot', () => {
     const frame = mixedFrame(1_750);
     const view = frame.mappedBuildings;
@@ -827,7 +842,7 @@ describe('the procedural structures and the mapped buildings, ranked together �
     );
     const billboards = frame.billboards.length;
     // The issue's frame: the procedural structures alone fill the cap…
-    expect(procedural.length + billboards).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    expect(procedural.length + billboards).toBeGreaterThanOrEqual(RUNG);
     // …and the town's nearest building is nearer than most of them: the fields beyond its end.
     const plans = mixedBuildings.plans;
     const away = (x: number, z: number): number => Math.hypot(x - view.x, z - view.z);
@@ -847,13 +862,7 @@ describe('the procedural structures and the mapped buildings, ranked together �
     expect(beyond.length).toBeGreaterThan(procedural.length / 2);
 
     const belt = aBelt(mixedBuildings);
-    const cap = refillMappedBuildings(
-      belt,
-      view,
-      frame.scatter,
-      billboards,
-      REALISTIC_STRUCTURE_ITEMS,
-    );
+    const cap = refillMappedBuildings(belt, view, frame.scatter, billboards, RUNG);
     // The town is drawn, its nearest building first, read back out of the belt:
     // nearest, since #2429, to the road ahead the refill ranks by.
     const ranked = (index: number): number => {
@@ -878,7 +887,7 @@ describe('the procedural structures and the mapped buildings, ranked together �
     before.refill(
       view.x,
       view.z,
-      Math.max(0, REALISTIC_STRUCTURE_ITEMS - procedural.length - billboards) * structure,
+      Math.max(0, RUNG - procedural.length - billboards) * structure,
       view.chunk,
     );
     expect(before.stats.buildings).toBe(0);
@@ -1390,5 +1399,98 @@ describe('a building the near plane would cut is hidden from that frame, and dra
     expect(rangesOf(geometry).position).toEqual([{ start: drawn.modelAt * 3, count: 9 }]);
     belt.clearOf(undefined);
     expect(positionsOf(geometry)).toEqual(whole);
+  });
+});
+
+describe('a belt handed another set draws it in the buffers it has — #3119', () => {
+  it('refills from the new set on the next frame, whatever its chunk, over the same arrays', () => {
+    const belt = aBelt();
+    const view = viewAt(1_500);
+    refillMappedBuildings(belt, view, [], 0, REALISTIC_STRUCTURE_ITEMS);
+    const drawn = belt.drawnPlans().map((index) => planned[index]);
+    const position = belt.mesh.geometry.getAttribute('position');
+    const array = position.array;
+    // The same buildings in another order: each at another place in the set.
+    const reversed = mappedBuildingsOf([...planned].reverse());
+    belt.rebind(reversed);
+    expect(belt.buildings).toBe(reversed);
+    // The same chunk, and still a refill: the places held were the set before's.
+    expect(
+      refillMappedBuildings(
+        belt,
+        { ...view, buildings: reversed },
+        [],
+        0,
+        REALISTIC_STRUCTURE_ITEMS,
+      ),
+    ).toBeDefined();
+    const redrawn = belt.drawnPlans().map((index) => reversed.plans[index]);
+    expect(redrawn.length).toBeGreaterThan(0);
+    expect(new Set(redrawn)).toStrictEqual(new Set(drawn));
+    expect(belt.mesh.geometry.getAttribute('position')).toBe(position);
+    expect(position.array).toBe(array);
+  });
+
+  it('is the belt the drawing keeps: a frame carrying another set builds no belt and allocates no buffer', () => {
+    // `RealisticDrawing.updateMapped`'s own rule, over an open-world ride's
+    // plans: each another set of buildings. Until #3119 each built a belt,
+    // its buffers allocated whole and uploaded whole on that frame.
+    let built = 0;
+    const builder = (of: MappedBuildings) => (): MappedBuildingBelt => {
+      built += 1;
+      return aBelt(of);
+    };
+    const sets = [
+      buildings,
+      mappedBuildingsOf([...planned].reverse()),
+      mappedBuildingsOf(planned.slice(0, planned.length - 3)),
+    ];
+    const view = viewAt(1_500);
+    let belt: MappedBuildingBelt | undefined;
+    const arrays = new Set<unknown>();
+    let refilled = 0;
+    for (const set of [...sets, ...sets]) {
+      belt = mappedBeltFor(belt, set, builder(set));
+      if (
+        refillMappedBuildings(
+          belt,
+          { ...view, buildings: set },
+          [],
+          0,
+          REALISTIC_STRUCTURE_ITEMS,
+        ) !== undefined
+      ) {
+        refilled += 1;
+      }
+      expect(belt.buildings).toBe(set);
+      expect(belt.stats.buildings).toBeGreaterThan(0);
+      for (const mesh of [belt.mesh, belt.modelMesh]) {
+        for (const attribute of Object.values(mesh.geometry.attributes))
+          arrays.add(attribute.array);
+      }
+    }
+    // One belt built, at the first set; each set after it refilled in its buffers.
+    expect(built).toBe(1);
+    expect(refilled).toBe(6);
+    expect(arrays.size).toBe(13);
+    // The same set again is the same belt, and no refill in the same chunk.
+    expect(mappedBeltFor(belt, belt?.buildings ?? buildings, builder(buildings))).toBe(belt);
+    // And a set it cannot hold is another belt.
+    const larger = mappedBuildingsOf(planned, MAPPED_BUILDING_MAX + 4);
+    const other = mappedBeltFor(belt, larger, builder(larger));
+    expect(other).not.toBe(belt);
+    expect(other.buildings).toBe(larger);
+    expect(built).toBe(2);
+  });
+
+  it('refuses a set indexed with a larger cap than its selection holds', () => {
+    const belt = aBelt();
+    const larger = mappedBuildingsOf(planned, MAPPED_BUILDING_MAX + 4);
+    expect(belt.canHold(mappedBuildingsOf(planned))).toBe(true);
+    expect(belt.canHold(larger)).toBe(false);
+    expect(() => {
+      belt.rebind(larger);
+    }).toThrow(RangeError);
+    expect(belt.buildings).toBe(buildings);
   });
 });

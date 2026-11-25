@@ -41,9 +41,14 @@ import {
   geographicPosition,
   kilograms,
   MODEL_PACER_LAPSE_S,
+  PACER_START_RAMP_S,
+  directedPowerWatts,
+  pacerAsRidden,
+  pacerSurgeAt,
   routeProfile,
   seconds,
   watts,
+  type PacerDirection,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -444,11 +449,16 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
   const PLAN = botPacerPlan(2.5);
   const LIFT = { plan: 'climber', intent: 'lift' } as const;
 
-  /** `advanceBot` run directly, one fixed step at a time, with `direction` in force over [from, until). */
+  /**
+   * `advanceBot` run directly, one fixed step at a time, with `direction` in
+   * force over [from, until) — ridden up the start ramp inside the first
+   * minute (#2835), as the simulation and a replay both ride it.
+   */
   function reference(
     setup: SimulationSetup,
     steps: number,
     direction?: { readonly from: number; readonly until: number },
+    ridden: PacerDirection = LIFT,
   ) {
     const plain: BotCourse = {
       profile: setup.profile,
@@ -462,7 +472,7 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
       state = advanceBot(
         state,
         seconds(SIMULATION_STEP_SECONDS),
-        inForce ? { ...plain, direction: LIFT } : plain,
+        inForce ? { ...plain, direction: pacerAsRidden(ridden, at) } : plain,
       ).state;
     }
     return state;
@@ -481,14 +491,97 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
   }
 
   it('rides the decision from its seconds ridden, step for step through advanceBot', () => {
+    // Past the start ramp, so the lift is a lift.
+    const from = PACER_START_RAMP_S + 2;
+    const steps = Math.round((from + 8) / SIMULATION_STEP_SECONDS);
     const simulation = ride((it) => {
-      it.directPacer(LIFT, 2);
-    }, 200);
-    const expected = reference(hillyRoute(), 200, { from: 2, until: 2 + MODEL_PACER_LAPSE_S });
+      it.directPacer(LIFT, from);
+    }, steps);
+    const expected = reference(hillyRoute(), steps, { from, until: from + MODEL_PACER_LAPSE_S });
     expect(simulation.state.bot?.state.distance).toBe(expected.distance);
     expect(simulation.state.bot?.state.distance).toBeGreaterThan(
-      reference(hillyRoute(), 200).distance,
+      reference(hillyRoute(), steps).distance,
     );
+  });
+
+  it('rides a decision made at the line up the start ramp: gently, and step for step as a replay would — #2835', () => {
+    const HOLD = { plan: 'rolling', intent: 'hold' } as const;
+    const steps = Math.round(10 / SIMULATION_STEP_SECONDS);
+    const simulation = ride((it) => {
+      it.directPacer(HOLD, 0);
+    }, steps);
+    const ramped = reference(hillyRoute(), steps, { from: 0, until: MODEL_PACER_LAPSE_S }, HOLD);
+    expect(simulation.state.bot?.state.distance).toBe(ramped.distance);
+    // `{rolling, hold}` is #92's own rule, so the whole difference is the ramp.
+    expect(simulation.state.bot?.state.distance).toBeLessThan(
+      reference(hillyRoute(), steps).distance - 1,
+    );
+  });
+
+  it('starts from the rider’s own effort at the line, not the bottom of the envelope — the owner’s ruling of 2026-11-20', () => {
+    const steps = Math.round(10 / SIMULATION_STEP_SECONDS);
+    const still = { plan: 'rolling', intent: 'hold', startFrom: 0 } as const;
+    const fromRider = ride((it) => {
+      it.directPacer(still, 0);
+    }, steps);
+    expect(fromRider.state.bot?.state.distance).toBe(
+      reference(hillyRoute(), steps, { from: 0, until: MODEL_PACER_LAPSE_S }, still).distance,
+    );
+    const fromFloor = ride((it) => {
+      it.directPacer({ plan: 'rolling', intent: 'hold' }, 0);
+    }, steps);
+    // A rider still at the line holds the pacer back with them.
+    expect(fromRider.state.bot?.state.distance).toBeLessThan(
+      (fromFloor.state.bot?.state.distance ?? 0) - 1,
+    );
+  });
+
+  it('says on its state the power the pacer rode, surge and all: what the HUD shows', () => {
+    // A second inside a surge, past the ramp, found rather than assumed.
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
+    let at = PACER_START_RAMP_S + 1;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < 0.03) at += 1;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
+    const steps = Math.round(at / SIMULATION_STEP_SECONDS);
+    const HOLD = { plan: 'rolling', intent: 'hold' } as const;
+    const simulation = ride((it) => {
+      it.directPacer(HOLD, at - 5);
+    }, steps);
+    const bot = simulation.state.bot;
+    expect(bot).toBeDefined();
+    if (bot === undefined) return;
+    // The last step began one step before `at`.
+    const last = (steps - 1) * SIMULATION_STEP_SECONDS;
+    expect(bot.power).toBeCloseTo(
+      directedPowerWatts(PLAN, bot.grade, pacerAsRidden(HOLD, last)),
+      9,
+    );
+    expect(bot.power as number).toBeGreaterThan(directedPowerWatts(PLAN, bot.grade, HOLD));
+  });
+
+  it('rides a chase at 110 % and above it only in a surge, to 115 % at the most — ADR 0092 D-4', () => {
+    const CHASE = { plan: 'even', intent: 'lift', by: 0.1 } as const;
+    const flat = directedPowerWatts(PLAN, 0, { plan: 'even', intent: 'hold' }) as number;
+    const ridden = (at: number): number => {
+      const steps = Math.round(at / SIMULATION_STEP_SECONDS);
+      const simulation = ride((it) => {
+        it.directPacer(CHASE, at - 5);
+      }, steps);
+      return (simulation.state.bot?.power as number | undefined) ?? Number.NaN;
+    };
+    // The last step begins one step before the second the ride is read at.
+    const surgeAt = (at: number): number => pacerSurgeAt(at - SIMULATION_STEP_SECONDS);
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
+    let surging = PACER_START_RAMP_S + 1;
+    // A surge deep enough that 110 % times it is past 115 %, so the ceiling is what holds it.
+    while (surging < SEARCH_UNTIL && surgeAt(surging) < 0.06) surging += 1;
+    let steady = PACER_START_RAMP_S + 1;
+    while (steady < SEARCH_UNTIL && surgeAt(steady) !== 0) steady += 1;
+    expect(Math.max(surging, steady)).toBeLessThan(SEARCH_UNTIL);
+    expect(ridden(steady)).toBeCloseTo(flat * 1.1, 9);
+    expect(ridden(surging)).toBeCloseTo(flat * 1.15, 9);
   });
 
   it('lapses a decision nothing replaced, and #92’s rule rides from there', () => {

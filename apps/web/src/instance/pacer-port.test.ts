@@ -160,31 +160,52 @@ describe('the AI pacer, from the instance (#2712)', () => {
     expect(await pacers.consentToPacer(before)).toMatchObject({ kind: 'offered', consented: true });
     // Read back through a fresh status, as the chooser next reads it.
     expect(await pacers.pacerStatus()).toMatchObject({ consented: true });
+    // #2835: the ride menu's warm-up, before the ride: the pacer's own shape, sealed, and no slot.
+    expect(await pacers.warmPacer()).toBe(true);
+    await w.tactics.idle();
+    expect(server.requests).toHaveLength(1);
+    expect(tactics.asksForPacer(server.requests[0]!.body)).toBe(true);
+    expect((server.requests[0]!.body.options as { num_predict: number }).num_predict).toBe(1);
+    server.requests.length = 0;
+
     expect(await pacers.startPacerRide()).toBe(true);
     await w.tactics.idle();
+    // #2835: a line and nothing else. No direction comes back for the device to ride.
     expect(await pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({
       kind: 'answer',
-      direction: { plan: 'climber', intent: 'ease' },
       say: 'Nice and steady, stay on my wheel.',
     });
     await pacers.endPacerRide();
 
-    // The pacer state reached the model as it was built, and nothing else of the rider's.
+    // The pacer state reached the model as it was built, less the plan and
+    // after the instance's own story line, and nothing else of the rider's.
     const asked = server.requests.find((each) => tactics.asksForPacer(each.body));
     const messages = asked?.body.messages as { content: string }[] | undefined;
-    expect(messages?.[1]?.content).toBe(JSON.stringify(tactics.PACER_INPUT));
+    const [story, state] = (messages?.[1]?.content ?? '').split('\n');
+    expect(story).toMatch(/^Story so far: /);
+    const shown = Object.fromEntries(
+      Object.entries(tactics.PACER_INPUT as Record<string, unknown>).filter(
+        ([key]) => key !== 'plan',
+      ),
+    );
+    expect(JSON.parse(state ?? 'null')).toEqual(shown);
     // Every call went out sealed: no inner path is on the wire.
     expect(seen.some((each) => each.includes('/v1/analysis/'))).toBe(false);
 
     expect(await pacers.withdrawPacerConsent()).toMatchObject({ consented: false });
     expect(await pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({ kind: 'refused' });
+    // With no consent the warm-up is refused too, and nothing is sent.
+    const sent = server.requests.length;
+    expect(await pacers.warmPacer()).toBe(false);
+    await w.tactics.idle();
+    expect(server.requests).toHaveLength(sent);
   });
 
-  it('reads an answer the device will not ride as no decision', async () => {
+  it('reads an answer the device will not show as no line', async () => {
     const answers = [
-      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 3000 watts.' }),
-      // #2777: a line that says the opposite of its intent.
-      JSON.stringify({ plan: 'even', intent: 'ease', say: 'I will push on this climb.' }),
+      JSON.stringify({ say: 'Hold 3000 watts.' }),
+      // #2835: an answer that tries to direct the pacer.
+      JSON.stringify({ plan: 'even', intent: 'ease', say: 'Stay with me.' }),
       undefined,
     ];
     let next = 0;
@@ -205,6 +226,7 @@ describe('the AI pacer, from the instance (#2712)', () => {
     expect(await alone.pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({
       kind: 'failed',
     });
+    expect(await alone.pacers.warmPacer()).toBe(false);
     expect(seen).toEqual([]);
     const anna = await connected(send, w);
     expect(anna.pacers.offered()).toBe(true);
@@ -224,15 +246,16 @@ describe('the AI pacer, from the instance (#2712)', () => {
 
 describe('what this device reads back from the instance (#2712)', () => {
   it('reads an answer again, whatever the instance checked', () => {
-    expect(parsePacerReply(200, { plan: 'even', intent: 'hold', say: 'Stay with me.' })).toEqual({
+    expect(parsePacerReply(200, { say: 'Stay with me.' })).toEqual({
       kind: 'answer',
-      direction: { plan: 'even', intent: 'hold' },
       say: 'Stay with me.',
     });
     for (const body of [
-      { plan: 'even', intent: 'hold', say: '', watts: 900 },
-      { plan: 'even', intent: 'hold', say: 'Your TSS is fine.' },
-      { plan: 'sprint', intent: 'hold', say: '' },
+      { say: '', watts: 900 },
+      { say: 'Your TSS is fine.' },
+      // #2835: an instance from before it, or one that answers a direction: no line, and nothing ridden.
+      { plan: 'even', intent: 'hold', say: 'Stay with me.' },
+      { say: 'Stay with me.', intent: 'lift' },
       null,
     ]) {
       expect(parsePacerReply(200, body), JSON.stringify(body)).toEqual({ kind: 'invalid' });

@@ -90,6 +90,7 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
+import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
@@ -227,6 +228,12 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   'route-builder': { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   // #2007: the editor's choice of what to change is drawn only over a route it read.
   'route-editor': { kind: 'fixture', marker: '.oyl-main fieldset' },
+  // #2889: this harness hands the shell no open-world port, so both walks say
+  // the routes and rides cannot be read, beside the pin's buttons.
+  'open-world': {
+    kind: 'none',
+    reason: 'no open-world port is handed to this harness, so it is the same in both walks',
+  },
   'side-camera': {
     kind: 'none',
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
@@ -317,6 +324,10 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
   'route-editor': { kind: 'none', reason: 'one saved route, opened by its id' },
+  'open-world': {
+    kind: 'none',
+    reason: 'three ways to choose a start, each saying so when it has nothing (#2889)',
+  },
   more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
   games: { kind: 'none', reason: 'a card for each game, never empty (#2292)' },
   'delivery-courses': {
@@ -655,6 +666,27 @@ function maskedWordsPort(populated: boolean): MaskedWordsPort {
 }
 
 /**
+ * The rider's one Female / Male choice (#2839, the owner's ruling of
+ * 2026-11-20), so Settings lays out the choice rather than its "no local
+ * store" notice, and the browser gate can count its controls.
+ */
+function riderPort(): AthleteRiderBodyPort {
+  return {
+    athleteId: ATHLETE,
+    store: {
+      setAthleteRider: (id, rider): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: unixSeconds(NOW),
+          riderBody: rider,
+          calorieSex: rider,
+        }),
+    },
+  };
+}
+
+/**
  * The rider's sex and year of birth (#2432) — set in the populated walk, which
  * enters no weight, so its line under the form says the weight is still
  * needed, and unset in the empty one, so it says no figure is shown.
@@ -666,13 +698,13 @@ function calorieInputsPort(populated: boolean): CalorieInputsPort {
     store: {
       getAthlete: (id): Promise<AthleteRecord | undefined> =>
         Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), ...inputs }),
-      setAthleteCalorieInputs: (id, next): Promise<AthleteRecord | undefined> =>
+      setAthleteBirthYear: (id, birthYear): Promise<AthleteRecord | undefined> =>
         Promise.resolve({
           id,
           displayName: 'You',
           createdAt: unixSeconds(NOW),
-          ...(next.calorieSex === undefined ? {} : { calorieSex: next.calorieSex }),
-          ...(next.birthYear === undefined ? {} : { birthYear: next.birthYear }),
+          ...(populated ? { calorieSex: 'female' as const } : {}),
+          ...(birthYear === undefined ? {} : { birthYear }),
         }),
     },
   };
@@ -864,7 +896,12 @@ export type PopulatedShellExtras = Pick<
   AppShellProps,
   'map' | 'basemap' | 'rideController' | 'transfer'
 > &
-  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates' | 'gameTrainer' | 'nativeShell'>>;
+  Partial<
+    Pick<
+      AppShellProps,
+      'capabilities' | 'routeUpdates' | 'gameTrainer' | 'nativeShell' | 'openWorld'
+    >
+  >;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({
@@ -893,6 +930,9 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
       calorieInputs={calorieInputsPort(populated)}
+      athleteRider={riderPort()}
+      // As `main.tsx` reads it: the populated row's calorie sex is female.
+      {...(populated ? { riderBody: 'female' as const } : {})}
       riderText={riderTextPort(populated)}
       workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}

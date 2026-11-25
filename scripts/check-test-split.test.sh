@@ -407,6 +407,50 @@ new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/
 run_check
 assert_red 'an unquoted ! fails: the check reads only plain words and whole single-quoted ones'
 
+# #3019: the `web` project divided between two jobs by path, beside `!web`.
+three_parts() {
+  new_fixture "${REQUIRED}" "${UNINSTRUMENTED}" "${A11Y}" "${REQUIRED/#vitest run/vitest run --coverage}" \
+    "$1" "${SHARD_2}"
+  node -e 'const f=process.argv[1], p=JSON.parse(require("fs").readFileSync(f));
+    p.scripts["test:required:shard-3"]=process.argv[2]; require("fs").writeFileSync(f, JSON.stringify(p));' \
+    "${tmp}/package.json" "$2"
+  lists all apps/web/src/fast.test.ts apps/web/src/slow.test.ts apps/web/src/form.a11y.test.ts \
+    apps/web/src/game/ride.test.ts packages/store/src/store.test.ts
+  lists required apps/web/src/fast.test.ts apps/web/src/game/ride.test.ts packages/store/src/store.test.ts
+  lists required-shard-1 apps/web/src/game/ride.test.ts
+  lists required-shard-2 packages/store/src/store.test.ts
+  lists required-shard-3 apps/web/src/fast.test.ts
+  lists coverage-shard-1 apps/web/src/game/ride.test.ts
+  lists coverage-shard-2 apps/web/src/fast.test.ts packages/store/src/store.test.ts
+}
+
+three_parts 'pnpm run test:required --project web src/game/' \
+  "pnpm run test:required --project web --exclude 'src/game/**'"
+run_check
+assert_green 'three parts, two of them one project divided by path filters and excludes, pass'
+assert_says 'and say how the required run is divided' "the required run's 3 are 1 in \`test:required:shard-1\`, 1 in \`test:required:shard-2\`, 1 in \`test:required:shard-3\`"
+
+three_parts 'pnpm run test:required src/game/' "pnpm run test:required --project web"
+run_check
+assert_red 'a part with a path filter and no project filter fails'
+assert_says 'and names the part' '`test:required:shard-1` is'
+
+three_parts 'pnpm run test:required --project web src/game/ --exclude' \
+  "pnpm run test:required --project web --exclude 'src/game/**'"
+run_check
+assert_red 'a dangling --exclude in a part of the required run fails'
+
+three_parts "pnpm run test:required --project web src/game/ --exclude --coverage" \
+  "pnpm run test:required --project web --exclude 'src/game/**'"
+run_check
+assert_red 'a flag where an exclude glob belongs fails'
+
+three_parts 'pnpm run test:required --project web src/game/' \
+  "pnpm run test:required --project web --exclude 'src/game/**' --coverage"
+run_check
+assert_red 'coverage after a path filter and an exclude fails'
+assert_says 'and names the part' '`test:required:shard-3` is'
+
 # --- The nightly coverage run's halves, one per job (#2285) -------------------
 # Each is red here rather than a merged report that is green and counts less:
 # a file in no half is a file whose lines the report never sees.

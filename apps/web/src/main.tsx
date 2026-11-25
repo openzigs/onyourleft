@@ -22,6 +22,7 @@ import {
   lapId,
   openActivityStore,
   recordingSessionId,
+  riderChoiceOf,
   routeId,
   webCryptoSha256,
   type AthleteRecord,
@@ -75,7 +76,11 @@ import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { FirstRender, launchRelease, launchRootOptions } from './shell/launch';
 import { endIntro, INTRO_ID, LESS_MOTION_QUERY } from './shell/intro';
-import { matchHash } from './shell/routes';
+import { hrefFor, matchHash, routeById } from './shell/routes';
+import { createOpenWorldEntry } from './game/open-world/entry';
+import { lazyOpenWorldSessions } from './game/open-world/session-lazy';
+import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
+import { startCoverage } from './game/open-world/start';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
@@ -164,12 +169,15 @@ import { browserBasemapConfig } from './map/basemap';
 import { readMapTilesChoice } from './map/tiles-preference';
 import { readRealisticWorldChoice } from './game/world-preference';
 import { lazyWorldCorridorPort, readingCorridorOnSave } from './world-data/corridor-lazy';
+import { browserTerrainConfig } from './terrain/config';
+import { lazyRouteHeights, type RouteHeights } from './terrain/heights';
 import type { WorldCorridorPort } from './world-data/corridor-port';
 import type { MapPort } from './map/port';
 import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from './athlete/rider-body-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
 import { calorieRiderFor } from './athlete/calorie-inputs';
@@ -192,6 +200,7 @@ import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
+import { createRoutingPort, type RoutingPort } from './instance/routing-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -665,6 +674,31 @@ function buildMatchPort(): MatchPort {
 }
 
 /**
+ * The open-world ride's way in — #2889. ONE for the tab: the picker hands the
+ * start to it and the open-world session (#2896) takes it, in memory only.
+ */
+const openWorldEntry = createOpenWorldEntry();
+
+/**
+ * Where an open-world ride starts — #2889: the local athlete's own routes and
+ * rides (`start-port.ts` scopes every read on the owner), and the entry the
+ * start is handed to before the trainer game opens, and the coverage of the
+ * build's own basemap archive.
+ */
+function buildOpenWorldStartPort(): OpenWorldStartPort {
+  return openWorldStartPort({
+    store: localStore(),
+    owner: LOCAL_ATHLETE,
+    entry: openWorldEntry,
+    opened: () => {
+      globalThis.location.hash = hrefFor(routeById('game'));
+    },
+    // #2985: the published archive's US boxes, or none for a self-hoster's own.
+    coverage: startCoverage(browserBasemapConfig()),
+  });
+}
+
+/**
  * The routes screen's port (#73).
  *
  * Unconditional, like the segments screen's and for the same reasons: importing
@@ -728,6 +762,26 @@ function buildWorldCorridorPort(rideController: RideController | undefined): Wor
  */
 function buildWorkoutPort(): WorkoutPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * A drawn route's heights (#2013): the terrain archive, read in the app with
+ * no instance and no routing engine.
+ *
+ * `undefined` for a build configured with no terrain archive, or with no
+ * basemap (`terrain/config.ts` §`readTerrainConfig`), and the planner then
+ * saves a drawn route flat, as it did before. The reader, `pmtiles` and the decoder
+ * are loaded on the first request (`terrain/heights.ts` §`lazyRouteHeights`),
+ * and with map tiles off nothing is loaded or asked (ADR 0054 D-6.4: one
+ * switch for everything the tile host is asked).
+ */
+function buildRouteHeights(): RouteHeights | undefined {
+  const config = browserTerrainConfig();
+  if (config === undefined) return undefined;
+  return lazyRouteHeights({
+    config,
+    mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+  });
 }
 
 /**
@@ -823,6 +877,17 @@ function buildGamePort(
     // optional member, so dropping this line is green in `check:wiring`;
     // `world-data/corridor-wiring.test.tsx` is what goes red.
     loadWorldCorridor: (route, signal, progress) => corridors.load(route, signal, progress),
+    // #2896: the open-world ride — the start the picker handed to the tab's
+    // one entry, read into its first blocks, graph and rolling route when the
+    // game opens. ⚠️ An optional member, so dropping this line is green in
+    // `check:wiring`; `game/open-world/session-wiring.test.ts` is what goes red.
+    openWorld: lazyOpenWorldSessions({
+      entry: openWorldEntry,
+      basemap: browserBasemapConfig,
+      mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+      // #2899: the open-world road's real heights, from #2013's archive.
+      terrain: browserTerrainConfig,
+    }),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
@@ -1104,6 +1169,14 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
+ * The settings screen's write of the rider's one Female / Male choice (#2839,
+ * the owner's ruling of 2026-11-20), over the same connection.
+ */
+function buildAthleteRiderBodyPort(): AthleteRiderBodyPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The rider's words to mask (#839), over the same connection. A hosted
  * write-up sends the instance the same row before every job (#1251).
  */
@@ -1111,7 +1184,7 @@ function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
-/** The rider's sex and year of birth (#2432), over the same connection. */
+/** The rider's year of birth (#2432), over the same connection. */
 function buildCalorieInputsPort(): CalorieInputsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
@@ -1271,6 +1344,29 @@ function buildPacerPort(): PacerPort | undefined {
     loadedFrom: loadedFrom(),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
+}
+
+/**
+ * The route planner's roads (#2008): the ONE production place a routing port
+ * is built, so `check:wiring` reports `createRoutingPort` if this goes. Over
+ * the sealed session the Connect screen keeps, through the one instance
+ * module (ADR 0036 D-3 (a)), and only when this device is connected to an
+ * instance it can seal to: with none, the planner is handed no provider and
+ * draws straight lines, sending nothing. Read when the shell is drawn, so a
+ * rider who connects an instance has roads the next time the app starts.
+ */
+function buildRoutingPort(): RoutingPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const port = createRoutingPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    // A waypoint inside one of this device's zones is never sent.
+    zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
+  });
+  return port.offered() ? port : undefined;
 }
 
 /**
@@ -1958,6 +2054,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
+          athleteRider={buildAthleteRiderBodyPort()}
           maskedWords={buildMaskedWordsPort()}
           calorieInputs={buildCalorieInputsPort()}
           riderText={buildRiderTextPort()}
@@ -1975,6 +2072,13 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
+          // #2839: which rider is drawn, undefaulted likewise — `game/rider-body.ts`
+          // §`riderBodyFor` is the one place a missing one becomes the default.
+          // ⚠️ Through `riderChoiceOf` (the owner's ruling of 2026-11-20): the
+          // rider's one Female / Male choice is `calorieSex` when it is set,
+          // else `riderBody`, so Settings, the game and the calorie estimate
+          // read a row whose two fields disagree the same way.
+          riderBody={riderChoiceOf(athlete)}
           // ⚠️ The **stored** preference, read before the first paint. The
           // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
           // place — `AppShell`'s own default — so "a row with no setting" and
@@ -1991,6 +2095,11 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           segments={buildSegmentPort()}
           match={buildMatchPort()}
           routes={buildRoutePort(worldCorridorPort)}
+          // #2008: roads from the rider's instance, or none and straight lines.
+          routing={buildRoutingPort()}
+          heights={buildRouteHeights()}
+          terrain={browserTerrainConfig()}
+          openWorld={buildOpenWorldStartPort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
           boards={buildLeaderboardPort()}

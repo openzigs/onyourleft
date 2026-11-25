@@ -38,8 +38,13 @@ import {
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
 import { rideBack, RideBackContext, type RideBack } from '../shell/ride-back';
-import type { GameRenderer, SceneFrame } from './port';
-import { CAMERA_MAXIMUM_YAW_RATE, REDUCED_MOTION_MAXIMUM_YAW_RATE } from './camera';
+import type { GameRenderer, RiderMarker, SceneFrame } from './port';
+import { pacerBodyFor } from './rider-body';
+import {
+  CAMERA_LOOK_AHEAD_RATE,
+  CAMERA_MAXIMUM_YAW_RATE,
+  REDUCED_MOTION_MAXIMUM_YAW_RATE,
+} from './camera';
 import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
@@ -71,7 +76,7 @@ import {
   type Kilograms,
   type RoutePoint,
 } from '@onyourleft/domain';
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
@@ -295,6 +300,8 @@ async function startRiding(options: {
   readonly camera?: CameraThrottle;
   /** The rider's local day — #1622. @see GameViewProps.today */
   readonly today?: () => CalendarDay;
+  /** Which rider is drawn — #2839. @see GameViewProps.riderBody */
+  readonly riderBody?: RiderBody;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -309,6 +316,7 @@ async function startRiding(options: {
       now={() => nowMs}
       camera={options.camera}
       today={options.today}
+      riderBody={options.riderBody}
     />,
   );
   await settle();
@@ -1478,6 +1486,7 @@ const NO_RENDERER: GameRenderer = {
 async function rideAtMass(
   riderMass: Kilograms | undefined,
   kitColour?: KitColour,
+  riderBody?: RiderBody,
 ): Promise<SceneFrame[]> {
   // ⚠️ Both runs start from the same clock and an empty frame queue. `nowMs`
   // and `pending` are module state reset per *test*, and this helper is called
@@ -1493,6 +1502,7 @@ async function rideAtMass(
       now={() => nowMs}
       {...(riderMass === undefined ? {} : { riderMass })}
       {...(kitColour === undefined ? {} : { kitColour })}
+      {...(riderBody === undefined ? {} : { riderBody })}
     />,
   );
   await settle();
@@ -1571,6 +1581,53 @@ describe('the ride is in the athlete’s own kit colour (#623)', () => {
 
     expect(kitsHanded.length).toBeGreaterThan(0);
     expect(kitsHanded.every((handed) => handed.chosen === undefined)).toBe(true);
+  });
+});
+
+/**
+ * Which rider is drawn reaches the renderer (#2839) — on the frame's own
+ * markers, which is what both worlds draw from. Deleting `riderBody:
+ * riderBodyRef.current` from `GameView.tsx`'s frame, or the read of the prop
+ * at ride start, turns the first red; `scene.ts` dropping the ghost's turns
+ * the third.
+ */
+describe('the ride draws the rider the athlete chose (#2839)', () => {
+  const ridersOf = (frames: readonly SceneFrame[], kind: string): RiderMarker[] =>
+    frames.flatMap((frame) => frame.markers.filter((marker) => marker.kind === kind));
+
+  it('carries the chosen body on the rider’s marker in every frame', async () => {
+    const frames = await rideAtMass(undefined, undefined, 'female');
+
+    const riders = ridersOf(frames, 'rider');
+    expect(riders.length).toBeGreaterThan(10);
+    expect(riders.every((marker) => marker.body === 'female')).toBe(true);
+  });
+
+  it('carries none for a rider who never chose, which a renderer draws as the default', async () => {
+    const frames = await rideAtMass(undefined);
+
+    const riders = ridersOf(frames, 'rider');
+    expect(riders.length).toBeGreaterThan(10);
+    expect(riders.every((marker) => !('body' in marker))).toBe(true);
+  });
+
+  it('draws the pacer in the body its route seeds, whatever the rider chose', async () => {
+    const frames = await startRiding({ pacer: true, riderBody: 'female' });
+    await pump(10);
+
+    const bots = ridersOf(frames, 'bot');
+    expect(bots.length).toBeGreaterThan(0);
+    const seeded = pacerBodyFor(testRoute().id);
+    expect(bots.every((marker) => marker.body === seeded)).toBe(true);
+  });
+
+  it('draws the rider’s ghost as the rider: it is their own earlier ride', async () => {
+    const frames = await startRiding({ pacer: false, ghost: true, riderBody: 'female' });
+    await pump(10);
+
+    const ghosts = ridersOf(frames, 'ghost');
+    expect(ghosts.length).toBeGreaterThan(0);
+    expect(ghosts.every((marker) => marker.body === 'female')).toBe(true);
   });
 });
 
@@ -2557,8 +2614,7 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     return { id: 'route-u', name: 'Turnaround', profile: routeProfile(points), attempts: 0 };
   }
 
-  async function rideTheTurnaround(): Promise<readonly number[]> {
-    const frames: SceneFrame[] = [];
+  async function rideTheTurnaround(frames: SceneFrame[] = []): Promise<readonly number[]> {
     mounted = await mount(
       <GameView
         port={pedallingPort(turnaroundRoute())}
@@ -2603,6 +2659,26 @@ describe('GameView — the chase camera turns at a bounded rate (#1994)', () => 
     expect(largest).toBeLessThanOrEqual(
       REDUCED_MOTION_MAXIMUM_YAW_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6,
     );
+  });
+
+  it('and raises its gaze out of the turnaround over frames, not at once — #3045', async () => {
+    // Coming out, the road 25 m on keeps the rider in the frame again and the
+    // look-ahead the frame asks for jumps back from 10 m: undamped, by more
+    // than the cap allows in one of these 250 ms frames. `camera.ts`
+    // §`dampedLookAhead` is the rule; this is the loop applying it.
+    const frames: SceneFrame[] = [];
+    await rideTheTurnaround(frames);
+    const aheads = frames.map((frame) => frame.camera.targetAheadMetres);
+    let largest = 0;
+    for (let index = 1; index < aheads.length; index += 1) {
+      largest = Math.max(
+        largest,
+        Math.abs((aheads[index] as number) - (aheads[index - 1] as number)),
+      );
+    }
+    // It did look nearer and farther again: a fixed look-ahead would pass below.
+    expect(Math.max(...aheads) - Math.min(...aheads)).toBeGreaterThan(5);
+    expect(largest).toBeLessThanOrEqual(CAMERA_LOOK_AHEAD_RATE * (FRAME_PERIOD_MS / 1000) + 1e-6);
   });
 });
 

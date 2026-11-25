@@ -92,15 +92,19 @@ export const ERROR_STATUS = {
   record_not_your_key: 422,
   record_key_revoked: 422,
   model_without_pictures: 422,
+  no_route: 422,
+  unpaved_endpoint: 422,
   rate_limited: 429,
   too_many: 429,
   internal: 500,
   picture_model_failed: 502,
   tactics_invalid: 502,
   tactics_failed: 502,
+  routing_failed: 502,
   unavailable: 503,
   analysis_off: 503,
   pictures_off: 503,
+  routing_off: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERROR_STATUS;
@@ -197,6 +201,14 @@ const MESSAGES: Record<ErrorCode, string> = {
     'The model answered that it does not take pictures, so it cannot look at the side camera’s. Choose a model that does. The picture was not kept.',
   picture_model_failed:
     'The model gave no usable answer about this picture. The picture was not kept.',
+  // #2008: about a route, never a place — no waypoint is named or echoed.
+  routing_off:
+    'This instance has no routing engine. Its operator has not set one up, so the line between your waypoints stays straight.',
+  no_route:
+    'The routing engine found no road between those waypoints. Moving one of them onto a road is usually the fix.',
+  unpaved_endpoint:
+    'A waypoint is on a surface your paved-only setting refuses, so no route was found. Relax the surface setting or move the waypoint.',
+  routing_failed: 'The routing engine gave no usable answer. Try again in a moment.',
   file_type_unsupported: 'The file is not a FIT, GPX or TCX activity file.',
   file_undecodable: 'The activity file could not be read, or holds no samples.',
   record_malformed: 'The signed record is not an activity record.',

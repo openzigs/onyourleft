@@ -27,10 +27,18 @@ import {
   millionLineToTile,
   NAMED_FIXTURES,
   PLACE_FIXTURE_POINTS,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   PLACE_SENTINEL,
   placesTile,
   placesTileOf,
+  POI_FIXTURE_BUILDINGS,
+  POI_SENTINEL,
   POISON,
+  poisTile,
+  poisTileOf,
+  POI_MATCH_STORM,
+  poiMatchStormTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   ROAD_FIELD_FIXTURE_STREETS,
@@ -53,6 +61,7 @@ import {
   DEFAULT_DECODE_LIMITS,
   MAX_FEATURES_PER_LAYER,
   MAX_PLACES_PER_TILE,
+  MAX_POIS_PER_TILE,
   MAX_VERTICES_PER_TILE,
 } from './limits';
 import {
@@ -60,6 +69,7 @@ import {
   BUILDING_FIELD_RULES,
   NO_BUILDING_FIELDS,
   NO_ROAD_FIELDS,
+  POI_CLASSES,
   type BuildingFieldName,
 } from './schema';
 import type { BuildingFeature, DecodedTile, DecodeRefusal, StreetRoadFields } from './types';
@@ -170,9 +180,16 @@ describe('decodeTile on the named fixtures', () => {
     expect(tile.waterLines.map((f) => [f.kind, f.line.length])).toEqual([['stream', 6]]);
   });
 
-  it('water lines — #2659: a river, a stream and a canal, along their lines; never a ditch, a drain or any other kind', () => {
+  it('water lines — #2659, #2974: a river, a stream, a canal, a ditch and a drain, along their lines; never any other kind', () => {
     const tile = decoded(waterLinesTile());
-    expect(tile.waterLines.map((f) => f.kind)).toEqual([...WATER_LINE_FIXTURE_KEPT]);
+    expect(tile.waterLines.map((f) => f.kind)).toEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
+    expect([...WATER_LINE_FIXTURE_KEPT]).toEqual(tile.waterLines.map((f) => f.kind));
     for (const kept of tile.waterLines) {
       const spec = WATER_LINE_FIXTURE_LINES.find((each) => each.kind === kept.kind);
       const got = vertices(kept.line);
@@ -213,11 +230,12 @@ describe('decodeTile on the named fixtures', () => {
     });
   });
 
-  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway', () => {
+  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway; #2660: rail kept as track apart', () => {
     const tile = decoded(streetsTile());
     const sinkOf = (kind: string, detail: string): string | null => {
       if (tile.streets.some((f) => f.kind === kind && f.kindDetail === detail)) return 'streets';
       if (tile.paths.some((f) => f.kind === kind && f.kindDetail === detail)) return 'paths';
+      if (kind === 'rail' && tile.rails.some((f) => f.kindDetail === detail)) return 'rails';
       return null;
     };
     for (const road of STREET_FIXTURE_ROADS) {
@@ -241,6 +259,13 @@ describe('decodeTile on the named fixtures', () => {
         road.grade ?? 'ground',
       ]);
     }
+    // #2660: a railway kept as track carries its grade as a street does, and nothing else.
+    expect(tile.rails).toHaveLength(STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails').length);
+    for (const road of STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails')) {
+      const rail = tile.rails.find((f) => f.kindDetail === road.kindDetail);
+      expect([road.kindDetail, rail?.grade]).toEqual([road.kindDetail, road.grade ?? 'ground']);
+      expect(Object.keys(rail ?? {}).sort()).toEqual(['grade', 'kindDetail', 'line']);
+    }
     // Along its line, in the corridor frame: the minor road's two ends.
     const minor = tile.streets.find((f) => f.kind === 'minor_road');
     const got = vertices(minor?.line as Float32Array);
@@ -249,6 +274,17 @@ describe('decodeTile on the named fixtures', () => {
       expect(Math.abs((got[i] as [number, number])[0] - point.x)).toBeLessThan(0.01);
       expect(Math.abs((got[i] as [number, number])[1] - point.z)).toBeLessThan(0.01);
     });
+  });
+
+  it('pitches — #2688: a pitch keeps its sport where it is one the world draws, and nothing else does', () => {
+    const tile = decoded(pitchesTile());
+    expect(tile.landUse.map((f) => [f.kind, f.sport ?? null])).toEqual(
+      PITCH_FIXTURE_POLYGONS.map((p) => [p.kind, p.kept]),
+    );
+    // Absent, not undefined-valued, where none is kept: the packed corridor carries no key for it.
+    for (const feature of tile.landUse) {
+      if (feature.sport === undefined) expect('sport' in feature).toBe(false);
+    }
   });
 
   it('building_part: its height and its min_height; the address point is dropped', () => {
@@ -315,11 +351,17 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'populationRank',
         // #2659.
         'waterLines',
+        // #2660.
+        'rails',
+        // #2688: a pitch's sport.
+        'sport',
         // #2892: the road fields and their count.
         'oneway',
         'access',
         'isLink',
         'roadValuesDefaulted',
+        // #2975: a footprint's POI class, and nothing else of a POI.
+        'poi',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];
@@ -396,6 +438,52 @@ describe('decodeTile reads places: the kind and the rank, never the name (#1632,
   });
 });
 
+describe('decodeTile reads POIs: a class on the footprint, never a name, a brand or a point (#2975)', () => {
+  it('gives each footprint the class of the POI it holds or stands beside, and none to the rest', () => {
+    const tile = decoded(poisTile());
+    expect(tile.buildings.map((b) => [b.kind, b.poi])).toStrictEqual(
+      POI_FIXTURE_BUILDINGS.map((b) => [b.kind, b.poi]),
+    );
+  });
+
+  it('keeps the footprints as they were: only `poi` is added, and a footprint with none has no key', () => {
+    const tile = decoded(poisTile());
+    const bare = tile.buildings.find((b) => b.poi === undefined);
+    expect(bare !== undefined && 'poi' in bare).toBe(false);
+    for (const [index, building] of tile.buildings.entries()) {
+      expectRingAt(building.rings[0] as Float32Array, POI_FIXTURE_BUILDINGS[index]?.rings[0] ?? []);
+      expect(building.heightMetres).toBe(6);
+    }
+  });
+
+  it('carries no name, brand, kind_detail, wikidata or point: the sentinel is nowhere in the result', () => {
+    const tile = decoded(poisTile());
+    // Not vacuous: the sentinel's POIs were matched.
+    expect(tile.buildings.filter((b) => b.poi !== undefined)).toHaveLength(5);
+    const text = JSON.stringify(tile);
+    expect(text).not.toContain(POI_SENTINEL);
+    expect(Object.keys(tile)).not.toContain('pois');
+  });
+
+  it('a tile with no pois layer, or only a park in it, gives no footprint a class', () => {
+    expect(decoded(buildingFieldsTile()).buildings.every((b) => b.poi === undefined)).toBe(true);
+    expect(decoded(residentialBlockTile()).buildings.every((b) => b.poi === undefined)).toBe(true);
+  });
+
+  it(`stops at ${String(MAX_POIS_PER_TILE)} POIs a tile, and the tile is not refused`, () => {
+    // Every POI past the bound is a fuel station, which would outrank the bakeries.
+    const over = decoded(poisTileOf(MAX_POIS_PER_TILE + 5));
+    expect(over.buildings.map((b) => b.poi)).toStrictEqual(['shop']);
+    // Control: under a bound one higher, the first fuel station is read and wins.
+    const lifted = decodeTile(poisTileOf(MAX_POIS_PER_TILE + 5), FIXTURE_TILE, FIXTURE_FRAME, {
+      ...DEFAULT_DECODE_LIMITS,
+      maxPoisPerTile: MAX_POIS_PER_TILE + 1,
+    });
+    if ('reason' in lifted) throw new Error(lifted.reason);
+    expect(lifted.buildings.map((b) => b.poi)).toStrictEqual(['fuel']);
+  });
+});
+
 /** A footprint's building fields alone, by name. */
 function fieldsOf(building: BuildingFeature | undefined): Record<string, unknown> {
   return Object.fromEntries(
@@ -439,7 +527,9 @@ describe('decodeTile reads the building fields, whitelisted and clamped (#1789)'
     let set = 0;
     for (const tile of tiles) {
       for (const building of tile.buildings) {
-        const extra = Object.keys(building).filter((key) => !base.includes(key));
+        // #2975: a footprint's POI class, where it has one, is one of the decoder's three.
+        if ('poi' in building) expect(POI_CLASSES as readonly unknown[]).toContain(building.poi);
+        const extra = Object.keys(building).filter((key) => !base.includes(key) && key !== 'poi');
         expect(extra.sort()).toStrictEqual([...BUILDING_FIELD_NAMES].sort());
         for (const name of extra as BuildingFieldName[]) {
           const value: unknown = building[name];
@@ -660,6 +750,54 @@ describe('decodeTile at each limit', () => {
       expect(dense / tenth).toBeLessThan(25);
     });
   }
+});
+
+describe('decodeTile on a POI-matching storm (#2975, the review of #2996)', () => {
+  /**
+   * Matching costs POIs times the vertices near each, which no refusal bounds.
+   * The storm tile is under every limit; with no work budget, 2,048 POIs took
+   * 8.3 s against 10 ms for the same footprints with none. Asserted, as the
+   * limit cases above are, as a ratio in one process: with the budget it is a
+   * few; without, about two thousand. The bound is 25, as above.
+   */
+  it('2,048 POIs over 48 stacked 8,000-vertex footprints cost a bounded multiple of none', () => {
+    const storm = poiMatchStormTile(MAX_POIS_PER_TILE);
+    const tile = decoded(storm);
+    expect(tile.buildings).toHaveLength(POI_MATCH_STORM.footprints);
+    // The budget admitted a POI or two before it stopped; the tile was not refused.
+    expect(tile.buildings[0]?.poi).toBe('fuel');
+    const withPois = bestOfFive(storm);
+    const without = bestOfFive(poiMatchStormTile(0));
+    console.info(
+      `map-features: the POI storm decoded in ${withPois.toFixed(2)} ms (best of 5); ` +
+        `with no POIs in ${without.toFixed(2)} ms; ${cpus()[0]?.model ?? 'unknown CPU'}`,
+    );
+    expect(withPois / without).toBeLessThan(25);
+  });
+
+  it('control: with the budget lifted, the storm costs far more than the budget allows', () => {
+    const storm = poiMatchStormTile(64);
+    const lifted = { ...DEFAULT_DECODE_LIMITS, maxPoiMatchWork: Number.POSITIVE_INFINITY };
+    const time = (limits: typeof lifted): number => {
+      const started = performance.now();
+      const result = decodeTile(storm, FIXTURE_TILE, FIXTURE_FRAME, limits);
+      if ('reason' in result) throw new Error(result.reason);
+      return performance.now() - started;
+    };
+    time(lifted);
+    expect(time(lifted)).toBeGreaterThan(time(DEFAULT_DECODE_LIMITS));
+  });
+
+  it('the budget is the caller’s limits’: at none, no footprint is given a POI', () => {
+    const none = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME, {
+      ...DEFAULT_DECODE_LIMITS,
+      maxPoiMatchWork: 0,
+    });
+    if ('reason' in none) throw new Error(none.reason);
+    expect(none.buildings.every((b) => b.poi === undefined)).toBe(true);
+    // Control: under the default, poisTile's five footprints are.
+    expect(decoded(poisTile()).buildings.filter((b) => b.poi !== undefined)).toHaveLength(5);
+  });
 });
 
 describe('decodeTile on a caller error', () => {

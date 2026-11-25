@@ -4,10 +4,14 @@
  * What this package reads of a Protomaps Basemap v4 tile, and nothing else
  * (ADR 0054 D-2.2, as ADR 0055 D-1 supersedes it in part; #1538's P-4).
  *
- * Five layers and, of each, only the fields placement needs. `pois` is never
- * read: it carries names, and the world names no place. `places` is read since
- * ADR 0055 (#1632) for its `kind`, `kind_detail` and `population_rank` and its
- * point, and for nothing else.
+ * Six layers and, of each, only the fields placement needs. `places` is read
+ * since ADR 0055 (#1632) for its `kind`, `kind_detail` and `population_rank`
+ * and its point, and for nothing else. `pois` is read since #2975 (ADR 0054's
+ * entry of 2026-11-21) for its `kind` alone and its point, and only to tell a
+ * footprint it falls in that it is a shop, a café or a fuel station
+ * ({@link POI_CLASS_OF_KIND}): the world still names no place, so no POI's
+ * name, brand, `kind_detail` or id is ever decoded, and its point is never
+ * handed out.
  * `name`, every `name:*`, `pmap:*`, `wikidata`, `population`, `capital`,
  * `addr_housenumber`, `sort_rank`, `layer` and the feature `id` are **not
  * decoded at all**: the decoder looks a key up only to compare it with the
@@ -28,8 +32,12 @@
 
 import type { BuildingFields, StreetRoadFields } from './types';
 
-/** The layers decoded, in the order their features are returned. */
-export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places'] as const;
+/**
+ * The layers decoded, in the order their features are returned. `pois` comes
+ * after `buildings`: its points are matched to the footprints already decoded
+ * (#2975).
+ */
+export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places', 'pois'] as const;
 export type ReadLayer = (typeof READ_LAYERS)[number];
 
 /**
@@ -57,6 +65,33 @@ export const KEY_IS_TUNNEL = 'is_tunnel';
  * in `places`, and looked up nowhere else.
  */
 export const KEY_POPULATION_RANK = 'population_rank';
+/**
+ * A `landuse` pitch's sport (#2688, read from docs.protomaps.com/basemaps/layers
+ * on 2026-11-19: "Which sports are played on a pitch", a string). Looked up
+ * only in `landuse`, kept only on a {@link PITCH_KIND} polygon and only when
+ * it is one of {@link PITCH_SPORTS}.
+ */
+export const KEY_SPORT = 'sport';
+
+/** The `landuse.kind` a {@link KEY_SPORT} is kept on (#2688). */
+export const PITCH_KIND = 'pitch';
+
+/**
+ * The sports a pitch's {@link KEY_SPORT} is kept as (#2688): the ones the
+ * world draws a goal, a net, a hoop or a backstop for. Any other value —
+ * another sport, several joined by `;` (which is not a kind's shape), or
+ * none — is not kept, and the pitch is drawn with its lines alone.
+ */
+export const PITCH_SPORTS = [
+  'soccer',
+  'american_football',
+  'rugby_union',
+  'rugby_league',
+  'baseball',
+  'softball',
+  'tennis',
+  'basketball',
+] as const;
 
 /*
  * ## The road fields (#2892, ADR 0091 D-2)
@@ -70,8 +105,9 @@ export const KEY_POPULATION_RANK = 'population_rank';
  * own. A value the lists do not name — another string, a number where a
  * string belongs, a string where a boolean belongs — is read as the field's
  * default (`NO_ROAD_FIELDS`) and counted in `DecodedTile.roadValuesDefaulted`,
- * never thrown and never refused. `name`, `ref`, `network*`, `shield_text*`,
- * `service` and `min_zoom` stay unread (D-2).
+ * never thrown and never refused. `ref`, `network*`, `shield_text*`,
+ * `service` and `min_zoom` stay unread (D-2), and so does `name` unless the
+ * caller asks for it (#3052, ADR 0096: {@link KEY_NAME}).
  */
 
 /** A street's one-way flag: an OSM `oneway` string. */
@@ -80,6 +116,23 @@ export const KEY_ONEWAY = 'oneway';
 export const KEY_ACCESS = 'access';
 /** Whether a street is a `*_link`: a boolean. */
 export const KEY_IS_LINK = 'is_link';
+
+/**
+ * A street's name — #3052, ADR 0096: the OSM `name`, read in `roads` alone,
+ * only when the caller asks for it (`decodeTile`'s `streetNames`), and kept
+ * only on a street. No `name:*`, `ref` or any other label key is read.
+ */
+export const KEY_NAME = 'name';
+
+/**
+ * The most characters of a street's name that are kept: **48**. A longer
+ * value is cut at the last whole word inside it; no mapped US street name is
+ * near it, and a hostile tile's megabyte string costs one bounded read.
+ */
+export const STREET_NAME_MAX_CHARS = 48;
+
+/** The most UTF-8 bytes of a name value that are read at all: four a character of {@link STREET_NAME_MAX_CHARS}, and a margin. */
+export const STREET_NAME_MAX_BYTES = 256;
 
 /**
  * The `oneway` strings the decoder recognises (ADR 0091 D-2): `yes` runs along
@@ -121,6 +174,7 @@ export const LAYER_GEOMETRY_TYPES: Readonly<Record<ReadLayer, readonly number[]>
   buildings: [GEOMETRY_POINT, GEOMETRY_POLYGON],
   roads: [GEOMETRY_LINE],
   places: [GEOMETRY_POINT, GEOMETRY_LINE, GEOMETRY_POLYGON],
+  pois: [GEOMETRY_POINT, GEOMETRY_LINE, GEOMETRY_POLYGON],
 };
 
 /**
@@ -134,19 +188,29 @@ export const LAYER_KEPT_GEOMETRIES: Readonly<Record<ReadLayer, readonly number[]
   buildings: [GEOMETRY_POLYGON],
   roads: [GEOMETRY_LINE],
   places: [GEOMETRY_POINT],
+  pois: [GEOMETRY_POINT],
 };
 
 /**
- * The `water` line `kind`s kept — #2659. Protomaps v4 writes a waterway line
- * with its `waterway` tag as its `kind` and no `kind_detail`
- * (protomaps/basemaps `Water.java`, read 2026-11-15): `river`, `stream`,
- * `canal`, `ditch` and `drain`. The first three are kept. **A ditch and a
- * drain are not**: a road crosses one in a culvert, which is invisible from a
- * bicycle (`apps/web/src/game/waterways.ts` §"What there is not"), and the
- * archive marks no culvert on a line — so one kept would be a bridge over
- * every roadside drain. Any other `kind`, or none, drops the line unread.
+ * The `water` line `kind`s kept — #2659, and since #2974 all five. Protomaps
+ * v4 writes a waterway line with its `waterway` tag as its `kind` and no
+ * `kind_detail` (protomaps/basemaps `Water.java`, read 2026-11-15 and again
+ * 2026-11-21): `river`, `stream`, `canal`, `ditch` and `drain`. Until #2974 a
+ * ditch and a drain were dropped here, because a road crosses one in a
+ * culvert and the archive marks no culvert on a line; now they are kept for
+ * where one runs BESIDE the road, and `apps/web/src/game/waterways.ts`
+ * bridges only {@link BRIDGED_WATER_LINE_KINDS}. Any other `kind`, or none,
+ * drops the line unread.
  */
-export const WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_KINDS = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
+
+/**
+ * The water line `kind`s a road crosses on a bridge — #2659. A ditch or a
+ * drain passes under it in a culvert, which is invisible from a bicycle
+ * (`apps/web/src/game/waterways.ts` §"What there is not"), so one bridged
+ * would be a bridge over every roadside drain.
+ */
+export const BRIDGED_WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
 
 /** The `buildings.kind` values kept. Address points and anything else are dropped. */
 export const BUILDING_KINDS = ['building', 'building_part'] as const;
@@ -178,6 +242,27 @@ export const FOOTWAY_KIND_DETAILS = [
  * `pier` and `aeroway` are not streets and are dropped.
  */
 export const STREET_KINDS = ['highway', 'major_road', 'minor_road'] as const;
+
+/** The `roads.kind` of a railway line in Protomaps v4 (#2660). */
+export const RAIL_KIND = 'rail';
+
+/**
+ * The `kind_detail` values that make a {@link RAIL_KIND} line a railway kept
+ * as track — #2660, read from docs.protomaps.com/basemaps/layers on
+ * 2026-11-19, where a line's `kind_detail` is its OSM `railway` value: a main
+ * line (`rail`), light rail, narrow gauge, a preserved line and a disused one,
+ * which keeps its rails. **Not** a `subway`, which runs underground, a
+ * `monorail` or a `funicular`, which are not ballasted track, a `tram`, which
+ * runs in a street rather than across it, or a `miniature` park railway. Any
+ * other detail, or none, drops the line unread.
+ */
+export const RAIL_KIND_DETAILS = [
+  'rail',
+  'light_rail',
+  'narrow_gauge',
+  'preserved',
+  'disused',
+] as const;
 
 /** The `roads.kind` kept only where its `kind_detail` says it is a street (#1565). */
 export const OTHER_ROAD_KIND = 'other';
@@ -219,6 +304,136 @@ export const PLACE_KIND_DETAILS = [
  */
 export const MIN_POPULATION_RANK = 1;
 export const MAX_POPULATION_RANK = 18;
+
+/*
+ * ## The POI classes (#2975, ADR 0054's entry of 2026-11-21)
+ *
+ * A `pois` point is read for its `kind` alone — Protomaps v4 writes an OSM
+ * `amenity`, `shop` or `tourism` value there as it is (`Pois.java`) — and
+ * only to give the footprint it stands in one of three looks. Every POI is
+ * written at z15 (`setZoomRange(min(minZoom, 15), 15)`), so the corridor's
+ * z15 tiles hold them all. A named polygon (a shop mapped on its building, a
+ * fuel station's forecourt) is written as a point on its surface; an unnamed
+ * one is not written at all.
+ *
+ * Measured on 2026-11-21 on nine z15 tiles of `basemap-us-oyl-20261031`:
+ * every feature of the layer was a point, and the densest tile (midtown
+ * Manhattan) held 2,584, of which most are trees, crossings and street
+ * furniture and 754 are of a class below. The keys besides the names were `kind`, `kind_detail`,
+ * `min_zoom`, `elevation`, `iata` and `script2`; only `kind` is looked up.
+ */
+
+/** What a POI makes of the footprint it falls in: its three looks. */
+export const POI_CLASSES = ['shop', 'cafe', 'fuel'] as const;
+export type PoiClass = (typeof POI_CLASSES)[number];
+
+/**
+ * Which `kind`s are which class. A shop: a `shop` value whose premises have a
+ * shop window on the street. A café: somewhere to eat or drink, which gets an
+ * awning. A fuel station: `fuel`. Any other kind — a tree, a crossing, a bus
+ * stop, a hotel, a car dealer — drops the point unread. A `Map`, not an
+ * object, so a kind such as `constructor` is never found on a prototype.
+ */
+export const POI_CLASS_OF_KIND: ReadonlyMap<string, PoiClass> = new Map<string, PoiClass>([
+  ...(
+    [
+      'alcohol',
+      'bakery',
+      'bank',
+      'beauty',
+      'beverages',
+      'bicycle',
+      'books',
+      'butcher',
+      'charity',
+      'cheese',
+      'chemist',
+      'chocolate',
+      'clothes',
+      'coffee',
+      'computer',
+      'confectionery',
+      'convenience',
+      'copyshop',
+      'cosmetics',
+      'deli',
+      'department_store',
+      'doityourself',
+      'dry_cleaning',
+      'electronics',
+      'fabric',
+      'fashion',
+      'florist',
+      'furniture',
+      'gift',
+      'greengrocer',
+      'grocery',
+      'hairdresser',
+      'hardware',
+      'hifi',
+      'jewelry',
+      'laundry',
+      'mobile_phone',
+      'music',
+      'newsagent',
+      'optician',
+      'outdoor',
+      'pastry',
+      'perfumery',
+      'pet',
+      'pharmacy',
+      'photo',
+      'post_office',
+      'retail',
+      'second_hand',
+      'shoes',
+      'sports',
+      'stationery',
+      'supermarket',
+      'tea',
+      'tobacco',
+      'toys',
+      'travel_agency',
+      'variety_store',
+      'video_games',
+      'wine',
+    ] as const
+  ).map((kind) => [kind, 'shop'] as const),
+  ...(
+    [
+      'bar',
+      'biergarten',
+      'cafe',
+      'fast_food',
+      'food_court',
+      'ice_cream',
+      'pub',
+      'restaurant',
+    ] as const
+  ).map((kind) => [kind, 'cafe'] as const),
+  ['fuel', 'fuel'],
+]);
+
+/**
+ * When two POIs fall in one footprint, the class it takes: a fuel station's
+ * over a café's over a shop's, so a forecourt shop is still a fuel station
+ * and a strip with one café gets the café's awning.
+ */
+export const POI_CLASS_RANK: Readonly<Record<PoiClass, number>> = { shop: 0, cafe: 1, fuel: 2 };
+
+/**
+ * How far outside a footprint's outer ring a POI may stand and still be its,
+ * metres, where no footprint holds it. A shop or a café is mapped as a node
+ * inside its building or at its door, so **3** m. A fuel station is mapped as
+ * its forecourt, which Protomaps writes as a point on the forecourt's surface
+ * — under the canopy or on the tarmac between it and the kiosk — so **30** m,
+ * to the nearest footprint.
+ */
+export const POI_REACH_METRES: Readonly<Record<PoiClass, number>> = {
+  shop: 3,
+  cafe: 3,
+  fuel: 30,
+};
 
 /** The MVT layer version this decoder reads (spec 2.1). */
 export const MVT_VERSION = 2;

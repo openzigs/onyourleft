@@ -697,3 +697,101 @@ function nearerBox(boxes: Float64Array, a: number, b: number, x: number, z: numb
   const bz = ((boxes[b * 4 + 1] as number) + (boxes[b * 4 + 3] as number)) / 2 - z;
   return ax * ax + az * az <= bx * bx + bz * bz;
 }
+
+// --- Which land is near the road at all (#3106) --------------------------------
+
+/**
+ * The side of one cell of a {@link RoadNeighbourhood}, in metres: **64** for a
+ * reach up to 128 m, and **256** past it, so a long reach is a few cells
+ * either side of the road's and not hundreds.
+ */
+function neighbourhoodCellMetres(reach: number): number {
+  return reach <= 128 ? 64 : 256;
+}
+
+/** The most cells one box is looked up in before it is called near: **1 024**. */
+const NEIGHBOURHOOD_MOST_CELLS = 1_024;
+
+/**
+ * The land within a reach of the drawn road, as cells — #3106. What a reader
+ * of a whole corridor's streets asks before it spends anything on one: "can
+ * any of this segment matter to this road?"
+ *
+ * `cross-streets.ts` and `nearby-streets.ts` read a corridor's streets in file
+ * order against a bound on their metres (`cross-streets.ts`
+ * §`STREET_MAX_METRES`), and past it read no more. A route ride's corridor is
+ * the tiles along the route, and never came near it. An open-world ride holds
+ * the nine blocks round the rider, most of which no view of the road comes
+ * within a kilometre of, in the order they were read: where they hold more
+ * street than the bound, it was spent on streets nowhere near the road, and
+ * the blocks read last — the ones AHEAD of a rider who has crossed into a new
+ * block — were not read at all.
+ * No junction's stub, no street: a turn the prompt offered into a hedge (the
+ * owner's ride of 2026-11-23). A segment that {@link RoadNeighbourhood.near}
+ * rules out costs a reader nothing and none of its bound.
+ *
+ * ⚠️ **Conservative**: a box is near when a cell it touches is within the
+ * reach of a cell the road passes through, so it answers `true` for land up
+ * to a cell's diagonal past the reach, and never `false` within it.
+ */
+export interface RoadNeighbourhood {
+  /** Whether the box `minX … maxX`, `minZ … maxZ` may come within the reach of the drawn road. */
+  near(minX: number, maxX: number, minZ: number, maxZ: number): boolean;
+}
+
+const neighbourhoods = new WeakMap<RouteProfile, Map<number, RoadNeighbourhood>>();
+
+/**
+ * The land within `reach` metres of the drawn road of `profile`. Built once a
+ * route and reach, from the grid every other reader here shares.
+ * @see RoadNeighbourhood
+ */
+export function roadNeighbourhood(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  reach: number,
+): RoadNeighbourhood {
+  let byReach = neighbourhoods.get(profile);
+  if (byReach === undefined) {
+    byReach = new Map();
+    neighbourhoods.set(profile, byReach);
+  }
+  const known = byReach.get(reach);
+  if (known !== undefined) return known;
+  const { points } = roadGrid(profile, origin);
+  const side = neighbourhoodCellMetres(reach);
+  const cellOf = (value: number): number => Math.floor(value / side);
+  // The cells the road passes through, then every cell within the reach of one.
+  const on = new Set<number>();
+  const spread = Math.ceil(Math.max(0, reach) / side);
+  const within = new Set<number>();
+  for (let at = 0; at + 1 < points.length; at += 2) {
+    const column = cellOf(points[at] as number);
+    const row = cellOf(points[at + 1] as number);
+    const key = roadCellKey(column, row);
+    if (on.has(key)) continue;
+    on.add(key);
+    for (let c = column - spread; c <= column + spread; c += 1) {
+      for (let r = row - spread; r <= row + spread; r += 1) within.add(roadCellKey(c, r));
+    }
+  }
+  const neighbourhood: RoadNeighbourhood = {
+    near(minX, maxX, minZ, maxZ) {
+      const firstColumn = cellOf(minX);
+      const lastOfColumns = cellOf(maxX);
+      const firstRow = cellOf(minZ);
+      const lastOfRows = cellOf(maxZ);
+      // A box that is not one (a `NaN`), or too wide to look up: read it.
+      const cells = (lastOfColumns - firstColumn + 1) * (lastOfRows - firstRow + 1);
+      if (!(cells <= NEIGHBOURHOOD_MOST_CELLS)) return true;
+      for (let c = firstColumn; c <= lastOfColumns; c += 1) {
+        for (let r = firstRow; r <= lastOfRows; r += 1) {
+          if (within.has(roadCellKey(c, r))) return true;
+        }
+      }
+      return false;
+    },
+  };
+  byReach.set(reach, neighbourhood);
+  return neighbourhood;
+}

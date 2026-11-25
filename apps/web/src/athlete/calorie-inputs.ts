@@ -18,13 +18,20 @@
  *
  * ## On this device only
  *
+ * ## The sex is the rider's one choice
+ *
+ * The owner's ruling of 2026-11-20: Settings asks Female or Male once, under
+ * *Your rider*, and that choice is both the rider drawn and this estimate's
+ * sex. {@link calorieRiderFor} reads it through `riderChoiceOf`, the same rule
+ * Settings shows and the game draws.
+ *
  * Both are kept on the athlete row and leave it only in the rider's own account
  * export. Nothing sent to an instance or a model reads them;
  * `privacy/calorie-inputs-stay-here.test.ts` holds that.
  */
 
 import type { CalorieRider, UnixSeconds } from '@onyourleft/domain';
-import type { AthleteRecord, CalorieSex } from '@onyourleft/store';
+import { riderChoiceOf, type AthleteRecord } from '@onyourleft/store';
 
 /** How far back a year of birth may be: 120 years before this one. */
 export const BIRTH_YEAR_SPAN_YEARS = 120;
@@ -40,33 +47,27 @@ export function birthYearRefusal(currentYear: number): string {
   );
 }
 
-/** What the panel's two controls come to: a write, or a refusal and no write. */
-export type CalorieInputsSave =
-  | {
-      readonly kind: 'save';
-      readonly calorieSex: CalorieSex | undefined;
-      readonly birthYear: number | undefined;
-    }
+/** What the panel's year of birth comes to: a write, or a refusal and no write. */
+export type BirthYearSave =
+  | { readonly kind: 'save'; readonly birthYear: number | undefined }
   | { readonly kind: 'refused'; readonly reason: string };
 
 /**
- * Turn the sex choice and the typed year into a write or a refusal.
+ * Turn the typed year into a write or a refusal.
+ *
+ * Since the owner's ruling of 2026-11-20 the sex is not on this panel: it is
+ * the rider's one Female / Male choice under *Your rider*, saved on change by
+ * `setAthleteRider`, so only the year is left here.
  *
  * A pure function rather than a branch in the click handler, for the reason
- * `mass.ts` §`massToSave` gives. `''` is *Not set* for the choice and blank
- * for the year, and each clears its field. A year that is not a whole number,
- * is after `currentYear`, or is more than {@link BIRTH_YEAR_SPAN_YEARS} before
- * it is refused and nothing is written.
+ * `mass.ts` §`massToSave` gives. Blank clears the year. A year that is not a
+ * whole number, is after `currentYear`, or is more than
+ * {@link BIRTH_YEAR_SPAN_YEARS} before it is refused and nothing is written.
  */
-export function calorieInputsToSave(
-  sexChoice: string,
-  typedYear: string,
-  currentYear: number,
-): CalorieInputsSave {
-  const calorieSex = sexChoice === 'female' || sexChoice === 'male' ? sexChoice : undefined;
+export function birthYearToSave(typedYear: string, currentYear: number): BirthYearSave {
   const trimmed = typedYear.trim();
   if (trimmed === '') {
-    return { kind: 'save', calorieSex, birthYear: undefined };
+    return { kind: 'save', birthYear: undefined };
   }
   const year = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
   if (
@@ -76,7 +77,7 @@ export function calorieInputsToSave(
   ) {
     return { kind: 'refused', reason: birthYearRefusal(currentYear) };
   }
-  return { kind: 'save', calorieSex, birthYear: year };
+  return { kind: 'save', birthYear: year };
 }
 
 /**
@@ -99,8 +100,11 @@ export function calorieRiderFor(
 ): CalorieRider {
   const rideYear = new Date(rideStartedAt * 1000).getUTCFullYear();
   const ageYears = athlete?.birthYear === undefined ? undefined : rideYear - athlete.birthYear;
+  // The rider's one Female / Male choice (2026-11-20): `calorieSex`, else a
+  // `riderBody` written before the ruling. Never a default.
+  const sex = riderChoiceOf(athlete);
   return {
-    ...(athlete?.calorieSex === undefined ? {} : { sex: athlete.calorieSex }),
+    ...(sex === undefined ? {} : { sex }),
     ...(ageYears === undefined || ageYears < 1 ? {} : { ageYears }),
     ...(athlete?.mass === undefined ? {} : { mass: athlete.mass }),
   };

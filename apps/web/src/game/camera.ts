@@ -480,8 +480,128 @@ export function cameraRig(pose: CameraPose): CameraRig {
  * — a few degrees through a bend — and swings round the rider at a
  * turnaround, as the old camera's did.
  */
-export function turnedPose(pose: CameraPose, heading: GroundHeading): CameraPose {
-  return { ...pose, headingX: heading.headingX, headingZ: heading.headingZ };
+export function turnedPose(
+  pose: CameraPose,
+  heading: GroundHeading,
+  lookAhead: number = pose.targetAheadMetres,
+): CameraPose {
+  const turned = { ...pose, headingX: heading.headingX, headingZ: heading.headingZ };
+  if (lookAhead === pose.targetAheadMetres) return turned;
+  // #3045: looking `lookAhead` on instead, at the road's height there as the
+  // line from the eye to the road the pose looks at has it — the same
+  // slope, so a climb is still looked up and a descent down.
+  const wanted = CAMERA_BEHIND_METRES + pose.targetAheadMetres;
+  const held = CAMERA_BEHIND_METRES + lookAhead;
+  return {
+    ...turned,
+    targetAheadMetres: lookAhead,
+    targetRoadY: pose.eyeRoadY + (pose.targetRoadY - pose.eyeRoadY) * (held / wanted),
+  };
+}
+
+/**
+ * Over how much of the ride after a U-turn pressed in an open-world ride the
+ * chase camera turns about the drawn rider, in metres — #3066: brought onto
+ * them over the first **5**, held there to **45**, and handed back to the
+ * frame's own point over the next **15**.
+ *
+ * A pose's `x`/`z` are {@link CAMERA_BEHIND_METRES} on from its eye towards
+ * what it looks at (`scene.ts` §`cameraPose`), which {@link turnedPose} turns
+ * the eye about. A U-turn turns the road round at the rider (ADR 0088 D-1.6),
+ * so on the frame of the press the road the camera looks at swung from ahead
+ * of the rider to behind them, and that point swung with it, 2 m in one
+ * frame on the grid #3066 measured on; and through the half-turn, where the
+ * road comes back past the rider, it stepped each time the camera's target
+ * settled on another stretch of it. The drawn rider moves smoothly through
+ * all of it, the half-turn included (`open-world/road.ts` §`pressedTurn`),
+ * and on a straight is where that point is. 45 m is past the longest
+ * half-turn's end and the eye's 4.5 m behind it. @see pivotDuringUTurn
+ */
+export const U_TURN_PIVOT_METRES = { onto: 5, held: 45, handedBack: 15 } as const;
+
+/** A smoothstep of `share`, clamped to nought and one. */
+function smoothstep(share: number): number {
+  const clamped = Math.max(0, Math.min(1, share));
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+/**
+ * `pose` with the point it turns about moved onto the drawn rider across a
+ * pressed U-turn, `ridden` metres after it — #3066, @see U_TURN_PIVOT_METRES.
+ * `held` is how far that point was from the rider on the frame before the
+ * press, eased out over the first stretch. The pose as it is once the ride
+ * is past them, and where `ridden` is not a number. A rider drawn a step
+ * behind the press (`ridden` below nought) is on the first stretch.
+ */
+export function pivotDuringUTurn(
+  pose: CameraPose,
+  rider: { readonly x: number; readonly z: number },
+  held: { readonly x: number; readonly z: number },
+  ridden: number,
+): CameraPose {
+  const { onto, held: hold, handedBack } = U_TURN_PIVOT_METRES;
+  if (!(ridden < hold + handedBack)) return pose;
+  if (ridden < onto) {
+    const kept = 1 - smoothstep(ridden / onto);
+    return { ...pose, x: rider.x + held.x * kept, z: rider.z + held.z * kept };
+  }
+  const back = smoothstep((ridden - hold) / handedBack);
+  return {
+    ...pose,
+    x: rider.x + (pose.x - rider.x) * back,
+    z: rider.z + (pose.z - rider.z) * back,
+  };
+}
+
+/**
+ * How quickly the camera's look-ahead settles onto the one the frame asks
+ * for: the time constant of {@link dampedLookAhead}'s exponential approach,
+ * **0.1 s** — #3045. @see CAMERA_LOOK_AHEAD_RATE
+ */
+export const CAMERA_LOOK_AHEAD_SETTLE_SECONDS = 0.1;
+
+/**
+ * The fastest the camera's look-ahead ever changes, metres a second: **15** —
+ * #3045.
+ *
+ * Coming out of a turnaround the frame's look-ahead (`scene.ts`
+ * §`roadTarget`) jumps from the 10 m it is held to while the road comes back
+ * past the rider to the 25 m of the straight, as soon as the road that far on
+ * keeps the rider in the frame: 9 m to 23 m in two frames on a single-point
+ * reversal at 30 km/h, which pitched the view up by 5° in one frame. At this
+ * rate the camera raises its gaze over about a second. Only the pitch moves
+ * with it: the heading is {@link dampedHeading}'s, and the eye stays where it
+ * was.
+ */
+export const CAMERA_LOOK_AHEAD_RATE = 15;
+
+/**
+ * The camera's look-ahead, metres past `pose.x`/`pose.z`, after `seconds`
+ * more of following `wanted` from `held` — #3045: {@link dampedHeading}'s
+ * rule for a length, toward `wanted` at a rate proportional to how far off it
+ * is ({@link CAMERA_LOOK_AHEAD_SETTLE_SECONDS}) and never faster than
+ * {@link CAMERA_LOOK_AHEAD_RATE}, solved exactly over the step, so no frame
+ * rate changes it. `held` undefined is a ride's first frame, which takes
+ * `wanted`.
+ */
+export function dampedLookAhead(held: number | undefined, wanted: number, seconds: number): number {
+  if (held === undefined || !Number.isFinite(held)) return wanted;
+  const error = wanted - held;
+  const knee = CAMERA_LOOK_AHEAD_RATE * CAMERA_LOOK_AHEAD_SETTLE_SECONDS;
+  let left = Math.abs(error);
+  let time = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+  if (left > knee) {
+    const capped = (left - knee) / CAMERA_LOOK_AHEAD_RATE;
+    if (time <= capped) {
+      left -= CAMERA_LOOK_AHEAD_RATE * time;
+      time = 0;
+    } else {
+      left = knee;
+      time -= capped;
+    }
+  }
+  left *= Math.exp(-time / CAMERA_LOOK_AHEAD_SETTLE_SECONDS);
+  return wanted - Math.sign(error) * left;
 }
 
 /** A unit vector in the ground plane, as {@link CameraPose} carries its heading. */
@@ -492,19 +612,30 @@ export interface GroundHeading {
 
 /**
  * How quickly the camera's heading settles onto the road ahead: the time
- * constant of {@link dampedHeading}'s exponential approach, **0.1 s** — #1994.
+ * constant of {@link dampedHeading}'s exponential approach, **0.04 s** — #1994,
+ * #2989.
  *
  * Short on purpose. The heading it settles onto is already continuous
  * (`scene.ts` §`cameraPose` aims at a point ON the road, which moves with the
  * rider), so the damping is not what makes a bend smooth; it is what makes a
  * corridor that jumps — a room's correction, a road that doubles back — a
- * turn instead of a cut. Every tenth of a second here is a tenth of a second
- * the target trails the road through a bend at the rate the road turns:
- * `chase-camera-bend.test.ts` measured the trail at 1.6 m from the centreline
- * through a 90° corner at 30 km/h, against 2.5 m at 0.15 s; 3.5 m is the
- * road's edge.
+ * turn instead of a cut, and {@link CAMERA_MAXIMUM_YAW_RATE} does most of
+ * that. Every hundredth of a second here is a hundredth of a second the
+ * target trails the road through a bend at the rate the road turns, 25 m out.
+ *
+ * ⚠️ **0.1 s until #2989.** A junction drawn from map streets is one node
+ * where two streets meet, sampled every 10 m, and much sharper than the
+ * planner's corner `chase-camera-bend.test.ts` rides: there the undamped
+ * target stays on the drawn path, 2.89 m from the centreline, and a 0.1 s
+ * trail took the drawn one to 3.95 m at 30 km/h and 4.26 m at 40, off the
+ * 3.5 m road (ADR 0089 C-2). Measured at 40 km/h and 60 fps with
+ * `scene.ts` §`easedReach`: 4.16 m at 0.1 s, 3.77 at 0.07, 3.50 at 0.05,
+ * **3.36 at 0.04**, 3.22 at 0.03 (`open-world/rolling-camera.test.ts`). The
+ * price is the camera's turn rate through a jittered junction, which follows
+ * the road more closely: at most 69°/s where it was 60, under C-1's 90°/s
+ * (`drawn-line.test.ts` §`MOST_CAMERA_TURN`).
  */
-export const CAMERA_YAW_SETTLE_SECONDS = 0.1;
+export const CAMERA_YAW_SETTLE_SECONDS = 0.04;
 
 /**
  * The fastest the camera ever turns, in radians a second: **90°/s** — #1994.

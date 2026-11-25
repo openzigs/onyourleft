@@ -69,6 +69,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { MIXED_TOWN_EDGE_RUNG } from '../src/game/footprint-fixtures-testing';
 import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
@@ -76,7 +77,6 @@ import {
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_SCENERY_CYCLIST_TRIANGLES,
-  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
   STYLISED_SCENE_DRAW_CALLS,
   stylisedSceneDrawCallCeiling,
@@ -3897,8 +3897,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       `${people.clearanceOff.toFixed(2)} m without (${people.drawnOff.join(' bodies, ')} impostors); ` +
       `${String(people.drawCalls)} draw calls; ${String(people.triangles)} triangles a body; ` +
       `${String(people.animationBytes)} bytes of animation; pixels changed: body ${String(people.bodyPixels)}, impostor ${String(people.impostorPixels)}; ` +
-      `${String(people.blendedTriangles)} triangles fading a colour; clothes stand off ${people.clothesStandOff.toFixed(4)} m, skin ${people.skinStandOff.toFixed(4)} m; ` +
-      `the hem strays ${people.hemSpread.toFixed(3)} m`;
+      `${String(people.bodies)} bodies in the model, ${String(people.bodiesWorn)} of them worn by the people drawn near`;
     testInfo.annotations.push({ type: 'people', description: measured });
     console.log(`people — ${measured}`);
     // Somebody was drawn, so the rule had somebody to hold.
@@ -3916,16 +3915,11 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // What is drawn is a person, where `people.ts` put them, near and far.
     expect(people.bodyPixels).toBeGreaterThan(10);
     expect(people.impostorPixels).toBeGreaterThan(0);
-    // #1618: every seam an edge, no colour faded across a triangle, and the
-    // clothes standing off the body — a centimetre and more — where the skin
-    // stays, in the mean, under half that.
-    expect(people.blendedTriangles).toBe(0);
-    expect(people.clothesStandOff).toBeGreaterThan(0.01);
-    expect(people.skinStandOff).toBeLessThan(people.clothesStandOff / 2);
-    // The modeller's pass of 2026-11-18: a top's hem runs straight round the
-    // body — 3 cm of stray, a waist's own tilt — where the cut's own edges
-    // left it a saw's edge straying 11 cm.
-    expect(people.hemSpread).toBeLessThan(0.06);
+    // The owner's request of 2026-11-18: the bodies are models, more than
+    // one of them, and a street's people are not one of them repeated — all
+    // still inside the one call counted above.
+    expect(people.bodies).toBeGreaterThanOrEqual(2);
+    expect(people.bodiesWorn).toBeGreaterThanOrEqual(2);
   });
 
   test('#1541 people up close: a body is smooth-shaded, never compiled FLAT_SHADED', async ({
@@ -4373,8 +4367,11 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
     testInfo.annotations.push({ type: 'a town’s edge', description: measured });
     console.log(`a town’s edge — ${measured}`);
-    // The issue's frame: the procedural structures alone fill the cap.
-    expect(edge.structures).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // The issue's frame: the procedural structures alone fill the cap — since
+    // #3161 a rung of `MIXED_TOWN_EDGE_RUNG`, which the probe draws it at. At
+    // the realistic rung's 36 the frame's 15 since #3132 (32 since #2848)
+    // leave room, and the town is drawn whatever the ranking does.
+    expect(edge.structures).toBeGreaterThanOrEqual(MIXED_TOWN_EDGE_RUNG);
     // Ranked by distance, the houses round the rider are drawn, and submitted.
     expect(edge.buildings).toBeGreaterThan(0);
     expect(edge.drawCalls).toBeGreaterThan(0);

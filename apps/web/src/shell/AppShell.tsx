@@ -47,7 +47,12 @@ import {
   type MouseEvent,
 } from 'react';
 
-import { DEFAULT_UNIT_SYSTEM, type KitColour, type UnitSystem } from '@onyourleft/store';
+import {
+  DEFAULT_UNIT_SYSTEM,
+  type KitColour,
+  type RiderBody,
+  type UnitSystem,
+} from '@onyourleft/store';
 import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
@@ -66,6 +71,7 @@ import type { BlocksPort } from '../instance/blocks-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
@@ -89,6 +95,9 @@ import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
+import type { TerrainConfig } from '../terrain/config';
+import type { RouteHeights } from '../terrain/heights';
+import type { OpenWorldStartPort } from '../game/open-world/start-port';
 import type { WorkoutPort } from '../workouts/store-port';
 
 import { CameraIndicator } from '../camera/indicator';
@@ -177,6 +186,7 @@ const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetail
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
 const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
+const OpenWorldStartView = lazyView(RIDE_GROUP, (group) => group.OpenWorldStartView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -508,14 +518,28 @@ export interface AppShellProps {
   /** Saved routes (#73), or `undefined` where this browser has no local store. */
   readonly routes?: RoutePort | undefined;
   /**
+   * Where an open-world ride starts (#2889): the rider's routes and rides,
+   * and the entry the start is handed to. `undefined` with no local store.
+   */
+  readonly openWorld?: OpenWorldStartPort | undefined;
+  /**
    * The routing engine the drawing canvas asks for roads (#70, #71).
    *
-   * ⚠️ `undefined` everywhere today, and not by oversight: ADR 0010 D-4 chose
-   * Valhalla and #53 has not stood one up, so there is nothing to pass. The
-   * builder screen places and moves waypoints without it and says why the roads
-   * between them are missing — see `views/RouteBuilderView.tsx`.
+   * Since #2008, the rider's instance's Valhalla (`instance/routing-port.ts`)
+   * when this device is connected to an instance it can seal to, and
+   * `undefined` otherwise — and then the builder screen places and moves
+   * waypoints without it and says why the roads between them are missing
+   * (`views/RouteBuilderView.tsx`).
    */
   readonly routing?: RoutingProvider | undefined;
+  /**
+   * Heights along a drawn or redrawn line, read from the terrain archive in
+   * the app (#2013): no instance and no routing engine. `undefined` for a
+   * build configured with no terrain archive.
+   */
+  readonly heights?: RouteHeights | undefined;
+  /** The terrain archive those heights are read from, for Settings to name beside the map-tiles switch. */
+  readonly terrain?: TerrainConfig | undefined;
   /** Saved workouts (#14), or `undefined` where this browser has no local store. */
   readonly workouts?: WorkoutPort | undefined;
   /**
@@ -570,6 +594,12 @@ export interface AppShellProps {
    * choice that lasted only for the visit.
    */
   readonly athleteKit?: AthleteKitColourPort | undefined;
+  /**
+   * The settings screen's write of which rider is drawn (#2839). A port of its
+   * own for the reason `athlete/rider-body-port.ts` gives, optional like every
+   * other port here, and the choice is absent without one, as the kit's is.
+   */
+  readonly athleteRider?: AthleteRiderBodyPort | undefined;
   /**
    * The settings screen's read and write of the rider's words to mask (#839).
    * Optional like every other port here; without one the panel says there is
@@ -638,6 +668,13 @@ export interface AppShellProps {
    */
   readonly kitColour?: KitColour | undefined;
   /**
+   * Which rider is drawn, read from the athlete row at start-up (#2839). The
+   * initial value only, and undefaulted, for {@link kitColour}'s reason:
+   * `game/rider-body.ts` §`riderBodyFor` is the one place a missing one
+   * becomes the default.
+   */
+  readonly riderBody?: RiderBody | undefined;
+  /**
    * Which units this client starts in, read from the athlete row at start-up.
    *
    * ⚠️ **The initial value only.** The shell owns the live value from here on,
@@ -673,6 +710,9 @@ function viewFor(
   kit: {
     readonly colour: KitColour | undefined;
     readonly onChange: (colour: KitColour | undefined) => void;
+    /** #2839: which rider is drawn, live, and its setter — the colour's shape. */
+    readonly body: RiderBody | undefined;
+    readonly onBodyChange: (body: RiderBody | undefined) => void;
   },
   onLevelChosen: (chosen: boolean) => void,
 ): JSX.Element {
@@ -751,11 +791,22 @@ function viewFor(
       return (
         <RouteBuilderView
           provider={props.routing}
+          // #2013: with no engine, the drawn line's heights from the terrain archive.
+          heights={props.heights}
           // #2006: drawn on the map a saved route's page draws, and saved
           // into the same routes.
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+        />
+      );
+    case 'open-world':
+      return (
+        <OpenWorldStartView
+          port={props.openWorld}
+          // #2889: the route planner's map, with one pin on it.
+          map={props.map}
+          basemap={props.basemap}
         />
       );
     case 'route-editor':
@@ -765,6 +816,7 @@ function viewFor(
           routes={props.routes}
           selected={match.parameter}
           provider={props.routing}
+          heights={props.heights}
           map={props.map}
           basemap={props.basemap}
         />
@@ -795,6 +847,8 @@ function viewFor(
           riderMass={riderMass}
           // #623: the live value, for `riderMass`' reason above.
           kitColour={kit.colour}
+          // #2839: the live value likewise.
+          riderBody={kit.body}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
           // #2362: a built-in level's card chosen, for the line under the title.
@@ -890,6 +944,8 @@ function viewFor(
           // #623, the same argument again: the recreated row carries no kit
           // colour, and `undefined` is what the game should then be told.
           onKitColourReset={kit.onChange}
+          // #2839, the same again: a recreated row carries no chosen rider.
+          onRiderBodyReset={kit.onBodyChange}
         />
       );
     case 'settings':
@@ -904,8 +960,12 @@ function viewFor(
           {...(props.athleteKit === undefined ? {} : { kit: props.athleteKit })}
           kitColour={kit.colour}
           onKitColourChange={kit.onChange}
+          {...(props.athleteRider === undefined ? {} : { rider: props.athleteRider })}
+          riderBody={kit.body}
+          onRiderBodyChange={kit.onBodyChange}
           {...(props.storage === undefined ? {} : { storage: props.storage })}
           basemap={props.basemap}
+          terrain={props.terrain}
           maskedWords={props.maskedWords}
           calorieInputs={props.calorieInputs}
           riderText={props.riderText}
@@ -983,6 +1043,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const [riderMass, setRiderMass] = useState<Kilograms | undefined>(props.riderMass);
   // #623. Seeded from the prop and then owned here, undefaulted, like the mass.
   const [kitColour, setKitColour] = useState<KitColour | undefined>(props.kitColour);
+  // #2839. Which rider is drawn: seeded from the prop and owned here likewise.
+  const [riderBody, setRiderBody] = useState<RiderBody | undefined>(props.riderBody);
   /**
    * Whether a ride has the screen — #423.
    *
@@ -1157,6 +1219,8 @@ export function AppShell(props: AppShellProps): JSX.Element {
                 {
                   colour: kitColour,
                   onChange: setKitColour,
+                  body: riderBody,
+                  onBodyChange: setRiderBody,
                 },
                 setLevelChosen,
               )}

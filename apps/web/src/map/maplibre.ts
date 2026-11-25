@@ -225,11 +225,20 @@ function fullStyle(
  *   buttons, a double click and a pinch remain.
  * - **Rotation and pitch are off.** The pan buttons are named north, south,
  *   east and west, which is only true of a map that keeps north up.
- * - **One finger scrolls the page.** MapLibre's touch pan calls
- *   `preventDefault` on a one-finger `touchmove`, so a thumb on a map that
- *   fills a phone's screen would pan the map and never the page. The touch pan
- *   is turned off (see `create`); a mouse drag still pans, a pinch still zooms,
- *   and the panel's compass buttons move the view for a touch.
+ * - **One finger scrolls the page, on a map nobody draws on.** MapLibre's
+ *   touch pan calls `preventDefault` on a one-finger `touchmove`, so a thumb on
+ *   a map that fills a phone's screen would pan the map and never the page. On
+ *   a saved route's map the touch pan is turned off (see `create`); a mouse
+ *   drag still pans, a pinch still zooms, and the panel's compass buttons move
+ *   the view for a touch.
+ * - **One finger drags an editable map** — the route planner's and the route
+ *   editor's (#3134). With the touch pan off, the owner found on the tablet
+ *   that a drag did not move the planner's map and a pinch did not zoom it:
+ *   the first finger's move went to the page, which then had the gesture. On a
+ *   map a rider draws on, moving it by hand is the work, so the touch pan stays
+ *   on there, as on the {@link DIRECT} map (#3014). A tap still adds a
+ *   waypoint and a marker still drags; the compass buttons stay for the
+ *   keyboard and for switch access.
  * - **Box zoom and the keyboard handler are off.** The keyboard handler
  *   listens on the canvas, which is kept out of the tab order (see the module
  *   note), and its equivalents are the panel's buttons.
@@ -245,6 +254,46 @@ const EXPLORABLE = {
   touchPitch: false,
   keyboard: false,
 } as const;
+
+/**
+ * The gestures a {@link MapCreateOptions.direct} map answers (#2889, the
+ * owner's ruling of 2026-11-20: "fully interactive", and no rows of buttons).
+ *
+ * - **The wheel zooms**, as the owner asked. A page scrolled by the wheel
+ *   stops while the pointer is over the map; the map is the picker's hero, and
+ *   the page scrolls beside and below it.
+ * - **One finger drags it on touch**, as the mouse does (#3014: the owner
+ *   found on the tablet that a drag did not move it while it was left to the
+ *   page). A tap still drops the pin, a pinch zooms, a double tap zooms in.
+ *   The page scrolls on the rest of the screen: the map is as tall as the
+ *   screen leaves it under the title, never all of it (`theme.css`
+ *   §`.oyl-map--direct`).
+ * - **The keyboard handler is on**: the canvas is focusable on this map, and
+ *   arrow keys pan it and `+`/`-` zoom it.
+ * - **Rotation, pitch and box zoom stay off**, so north stays up.
+ */
+const DIRECT = {
+  interactive: true,
+  dragPan: true,
+  doubleClickZoom: true,
+  touchZoomRotate: true,
+  scrollZoom: true,
+  boxZoom: false,
+  dragRotate: false,
+  touchPitch: false,
+  keyboard: true,
+} as const;
+
+/** How far a {@link MapView.show} zooms in to: a few streets across. */
+const SHOW_ZOOM = 13;
+
+/** The arrow keys a focused pin answers (#2889), and the way each moves it. */
+const PIN_KEYS: Readonly<Record<string, MapPanDirection>> = {
+  ArrowUp: 'north',
+  ArrowDown: 'south',
+  ArrowRight: 'east',
+  ArrowLeft: 'west',
+};
 
 /** How far one press of a pan button moves the view: a third of the map. */
 const PAN_FRACTION = 1 / 3;
@@ -263,6 +312,34 @@ function positionOf(lngLat: LngLat): GeographicPosition {
 function onMarker(event: MapMouseEvent | MapTouchEvent): boolean {
   const target = event.originalEvent.target;
   return target instanceof Element && target.closest(`.${WAYPOINT_CLASS}`) !== null;
+}
+
+/**
+ * A map pin (#2889): a drop with a hole, its tip at the bottom centre, which
+ * is the point the marker is anchored by. Drawn here rather than as a word
+ * on a disc, which a 1.75 rem disc clipped to "Star". Its colours are
+ * `theme.css` §`.oyl-map__pin-drop` and §`.oyl-map__pin-hole`, so it follows
+ * the palette.
+ */
+function pinGraphic(): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 32');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const drop = document.createElementNS(ns, 'path');
+  drop.setAttribute('class', 'oyl-map__pin-drop');
+  drop.setAttribute(
+    'd',
+    'M12 1.5C6.2 1.5 1.75 5.9 1.75 11.4 1.75 19 12 30.5 12 30.5S22.25 19 22.25 11.4C22.25 5.9 17.8 1.5 12 1.5Z',
+  );
+  const hole = document.createElementNS(ns, 'circle');
+  hole.setAttribute('class', 'oyl-map__pin-hole');
+  hole.setAttribute('cx', '12');
+  hole.setAttribute('cy', '11.25');
+  hole.setAttribute('r', '4');
+  svg.append(drop, hole);
+  return svg;
 }
 
 /** A marker's element: ours, so it is out of the tab order — see the module note. */
@@ -284,7 +361,10 @@ function markerElement(extra?: string): HTMLElement {
  * The planner's pointer, on an editable map (#2006): the tap, the markers and
  * the line. Returns what the view needs to keep its markers in step.
  */
-function editing(map: MapLibreMap): {
+function editing(
+  map: MapLibreMap,
+  direct: boolean,
+): {
   readonly listen: (handlers: MapPointerHandlers) => void;
   readonly setWaypoints: (waypoints: readonly MapWaypoint[]) => void;
 } {
@@ -297,6 +377,10 @@ function editing(map: MapLibreMap): {
 
   map.on('click', (event) => {
     if (onMarker(event)) return;
+    // On a direct map a double click zooms in (`DIRECT`), so its second click
+    // is the zoom's and not a second drop of the pin (#2985). The planner's
+    // two quick taps stay two waypoints (#2006).
+    if (direct && event.originalEvent.detail > 1) return;
     handlers?.tap(positionOf(event.lngLat));
   });
 
@@ -359,12 +443,52 @@ function editing(map: MapLibreMap): {
         if (held !== undefined) {
           held.setLngLat(at);
           // An insert or a delete before it renumbers it (#2006's owner review).
-          held.getElement().textContent = waypoint.label;
+          // A pin's label is its name, not its face (#2889).
+          if (waypoint.kind === 'pin') {
+            held.getElement().setAttribute('aria-label', waypoint.label);
+          } else {
+            held.getElement().textContent = waypoint.label;
+          }
           continue;
         }
-        const element = markerElement();
-        element.textContent = waypoint.label;
-        const marker = new Marker({ element, draggable: true }).setLngLat(at).addTo(map);
+        const pin = waypoint.kind === 'pin';
+        const element = markerElement(pin ? `${WAYPOINT_CLASS}--pin` : undefined);
+        if (pin) {
+          element.append(pinGraphic());
+          if (direct) {
+            // The pin is a control on this map (#2889): focusable, named, and
+            // moved by its arrow keys, which stop here so the map under it
+            // does not pan as well. An `application`, as the canvas is, so a
+            // screen reader in browse mode passes the arrow keys through to
+            // it; a `button` would have them read the page instead, and
+            // promise an Enter that does nothing (#2985).
+            element.removeAttribute('aria-hidden');
+            element.setAttribute('role', 'application');
+            element.setAttribute('aria-roledescription', 'pin');
+            element.setAttribute('tabindex', '0');
+            element.setAttribute('aria-label', waypoint.label);
+            const id = waypoint.id;
+            element.addEventListener('keydown', (event) => {
+              // Alt, Ctrl and Meta with an arrow are the browser's and the
+              // screen reader's own keys, not a nudge (#2985).
+              if (event.altKey || event.ctrlKey || event.metaKey) return;
+              const direction = PIN_KEYS[event.key];
+              if (direction === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              handlers?.nudgeWaypoint?.(id, direction);
+            });
+          }
+        } else {
+          element.textContent = waypoint.label;
+        }
+        const marker = new Marker({
+          element,
+          draggable: true,
+          ...(pin ? { anchor: 'bottom' as const } : {}),
+        })
+          .setLngLat(at)
+          .addTo(map);
         marker.on('dragend', () => {
           handlers?.moveWaypoint(waypoint.id, positionOf(marker.getLngLat()));
         });
@@ -379,6 +503,7 @@ const renderer: MapRenderer = {
     /** The line the map shows, so a new style is handed it too. */
     let current: TrackFeature | undefined;
     const editable = options.explorable === true && options.editable === true;
+    const direct = editable ? options.direct : undefined;
     const map = new MapLibreMap({
       container,
       // The style is built by `basemap.ts` from configuration and is never
@@ -386,25 +511,46 @@ const renderer: MapRenderer = {
       // the configured one; a `style: 'https://…/style.json'` here would put
       // that back outside the assertion's reach.
       style: fullStyle(options, current, editable),
-      ...(options.explorable === true ? EXPLORABLE : { interactive: false }),
+      ...(direct !== undefined
+        ? DIRECT
+        : options.explorable === true
+          ? EXPLORABLE
+          : { interactive: false }),
       // Two quick taps on the planner are two waypoints, not a zoom (#2006).
-      ...(editable ? { doubleClickZoom: false } : {}),
+      ...(editable && direct === undefined ? { doubleClickZoom: false } : {}),
       attributionControl: false,
     });
-    map.getCanvas().setAttribute('aria-hidden', 'true');
-    // MapLibre makes an interactive map's canvas a tab stop. See the module note.
-    map.getCanvas().setAttribute('tabindex', '-1');
-    if (options.explorable === true) {
+    if (direct !== undefined) {
+      // The map is the control (#2889): a focusable application, so a screen
+      // reader passes its arrow keys through to the keyboard handler.
+      const canvas = map.getCanvas();
+      canvas.setAttribute('tabindex', '0');
+      canvas.setAttribute('role', 'application');
+      canvas.setAttribute('aria-roledescription', 'map');
+      canvas.setAttribute('aria-label', direct.label);
+      canvas.setAttribute('aria-describedby', direct.describedBy);
+      map.keyboard.disableRotation();
+      map.touchZoomRotate.disableRotation();
+      // MapLibre's own touch pan is left as it is: one finger drags the map
+      // (#3014). `browser/controls-first.browser.spec.ts` §"#2889" drags with
+      // one finger and with two, and taps the pin down after the drag.
+    } else {
+      map.getCanvas().setAttribute('aria-hidden', 'true');
+      // MapLibre makes an interactive map's canvas a tab stop. See the module note.
+      map.getCanvas().setAttribute('tabindex', '-1');
+    }
+    if (options.explorable === true && direct === undefined) {
       // A pinch zooms; it does not also turn the map. See `EXPLORABLE`.
       map.touchZoomRotate.disableRotation();
       // `dragPan` switches the mouse and the touch pan together; only the
-      // touch half is unwanted. See `EXPLORABLE`.
-      map.dragPan._touchPan.disable();
+      // touch half is unwanted, and only on a map nobody draws on: one finger
+      // pans the planner's and the editor's map (#3134). See `EXPLORABLE`.
+      if (!editable) map.dragPan._touchPan.disable();
     }
     /** The box the line was last fitted to, for `fitTrack`. */
     let fitted: TrackBounds | undefined;
     /** The planner's pointer, on an editable map only (#2006). */
-    const edit = editable ? editing(map) : undefined;
+    const edit = editable ? editing(map, direct !== undefined) : undefined;
 
     /**
      * The line, handed over before the style had loaded, waiting for it.
@@ -490,6 +636,12 @@ const renderer: MapRenderer = {
       },
       centre(): GeographicPosition {
         return positionOf(map.getCenter());
+      },
+      show(position: GeographicPosition): void {
+        map.flyTo({
+          center: [position.longitude, position.latitude],
+          zoom: Math.max(map.getZoom(), SHOW_ZOOM),
+        });
       },
       listen(handlers: MapPointerHandlers): void {
         edit?.listen(handlers);

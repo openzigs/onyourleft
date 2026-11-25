@@ -11,9 +11,10 @@ map data and names no rendering library.** The archive read is #1539's one modul
 
 | Module | What it is |
 |---|---|
-| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name; and since #1789 (ADR 0054's entry of 2026-11-01) the twelve building fields #1557's archive writes on `buildings`, each whitelisted or clamped at read and `null` where it cannot be; and since #2892 (ADR 0091 D-2) a street's `oneway`, `access` and `is_link`, each its default where the tile's value is not recognised. A refusal, never a throw |
-| `src/limits.ts` | The five bounds, with what each sits above on the published archive, and the count of places kept a tile (#1632), at which the decoder stops |
-| `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551), and the building fields' rules, `BUILDING_FIELD_RULES` (#1789) |
+| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name; and since #1789 (ADR 0054's entry of 2026-11-01) the twelve building fields #1557's archive writes on `buildings`, each whitelisted or clamped at read and `null` where it cannot be; and since #2892 (ADR 0091 D-2) a street's `oneway`, `access` and `is_link`, each its default where the tile's value is not recognised; and since #2975 (ADR 0054's entry of 2026-11-21, proposed) `pois`, of which only `kind` and the point, matched to a footprint (`poi-match.ts`) and kept only as that footprint's `poi` — a shop, a café or a fuel station — never a name, a brand or the point. A refusal, never a throw |
+| `src/limits.ts` | The five bounds, with what each sits above on the published archive, and the counts of places (#1632) and of POIs (#2975) kept a tile, at which the decoder stops |
+| `src/poi-match.ts` | `matchPoisToBuildings` (#2975): a POI is the footprint's that holds it, or the nearest within 3 m (a shop, a café) or 30 m (a fuel station's forecourt); never a `building_part`'s |
+| `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551), the building fields' rules, `BUILDING_FIELD_RULES` (#1789), and the POI classes, `POI_CLASS_OF_KIND` (#2975) |
 | `src/protobuf.ts` | A bounded protobuf reader: every read is inside its message or a refusal |
 | `src/refusal.ts` | `describeRefusal`: the layer and the limit, never a coordinate or the tile's `x`/`y` (ADR 0004 D) |
 | `src/projection.ts` | The game's projection, restated (see below) |
@@ -78,6 +79,26 @@ The decoder is our own over a bounded reader of our own (`protobuf.ts`), rather 
 `@mapbox/vector-tile` over `pbf`: `pbf`'s reader does not bounds-check, and `@mapbox/vector-tile`
 materialises a feature's whole geometry before anything could count it. #1544 admits either.
 
+## A height tile is untrusted input too (#2013)
+
+`height-tile.ts` is the terrain archive's half: a z12 tile of Terrarium-encoded heights
+(`R × 256 + G + B / 256 − 32768` m) as a 512 px lossless WebP (ADR 0087 D-3). **It decodes no
+image**: a WebP decoder is the platform's, and `apps/web/src/terrain/decode.ts` hands the pixels
+back. What is here needs no platform:
+
+| Bound | Value | Where |
+|---|---|---|
+| compressed bytes | `MAX_TILE_BYTES`, 4 MiB | `checkHeightTileBytes`, before anything is read |
+| container | a simple lossless WebP (`VP8L`) only: a lossy tile decodes to heights that are wrong and in range | `checkHeightTileBytes` |
+| pixels | exactly 512 × 512, read from the header, so a decode allocates 1 MiB and no more | `checkHeightTileBytes` |
+| decoded pixels | exactly 512 × 512 × 4 bytes | `heightTileFromRgba` |
+| heights | −200 m to 4,600 m, and opaque; anything else is no-data | `heightTileFromRgba` |
+| no-data | the nearest valid pixel within 2 pixels, else no height there | `sampleHeightTile` |
+
+A refusal names a reason and at most a limit this package chose, never a tile or a coordinate.
+ADR 0087 D-3's last row, the 4 m step between neighbouring road samples, is about a road and not
+a tile, and is #2899's.
+
 ## What it may not depend on
 
 - **Any platform API at all**, as `packages/domain`: `tsconfig.platform-free.json` (`lib:
@@ -100,3 +121,11 @@ roundabout, a loop, a dead end, a one-way pair, the ways the graph leaves out, a
 through one point). **No OpenStreetMap data of any kind**: rectangles, regular polygons
 and evenly spaced points, for the reason `apps/web/browser/pmtiles-fixture.ts` gives. They are code
 rather than committed binaries, and `fixtures.test.ts` pins the named ones by SHA-256.
+
+`src/fixtures/height.ts` holds the height tiles: a flat block, a steady slope, a plateau cut by a
+valley for a bridge, a malformed tile (a true header and a body cut short), an oversize tile (a
+header stating 4,096 × 4,096 over a few bytes), a lossy container and a tile of heights outside
+the range. **No terrain data from any source**: each ground is a formula.
+`src/testing/webp-encoder.ts` writes them as real lossless WebP in one fixed shape, and reads that
+shape back for a Vitest suite, since Node has no WebP decoder;
+`apps/web/browser/terrain.browser.spec.ts` reads the same bytes through Chromium's.

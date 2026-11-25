@@ -49,6 +49,7 @@
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
+ * | `lookOnlyRiderStoreFactory` | *wrong layer* — the rider's one Female / Male choice written to the look and not to the calorie estimate's sex (#2839, the owner's ruling of 2026-11-20) | the call answers with both fields as chosen and the game draws the chosen rider, and a fresh connection's **calorie sex is still the old word** |
  * | `lastWordDroppedStoreFactory` | *wrong layer* — a layer above dropped the last entry of the rider's masked-word list on its way in | the call answers with the whole list, and a fresh connection reads one word short — the one the rider typed last, which is then sent to a hosted model unmasked |
 | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
@@ -103,6 +104,7 @@ import type {
 import { fromPersistedActivity, type PersistedActivity, type PersistedAthlete } from '../persisted';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import type { KitColour } from '../kit-colour';
+import type { RiderBody } from '../rider-body';
 import type { UnitSystem } from '../unit-system';
 import {
   STREAM_CHANNELS,
@@ -136,8 +138,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
-    setAthleteCalorieInputs: async (id, inputs) => real.setAthleteCalorieInputs(id, inputs),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
+    setAthleteRider: async (id, rider) => real.setAthleteRider(id, rider),
+    setAthleteBirthYear: async (id, year) => real.setAthleteBirthYear(id, year),
     setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
@@ -1116,6 +1119,45 @@ export function misfiledKitColourStoreFactory(): StoreFactory {
 }
 
 /**
+ * A repository whose rider write **writes the look and not the calorie
+ * estimate's sex** — what `setAthleteRider` did before the owner's ruling of
+ * 2026-11-20 that the two are one choice.
+ *
+ * *Wrong layer*: the write is real and commits, and the call answers with
+ * both fields as chosen, so Settings shows the choice and the game draws it.
+ * A fresh connection reads the old `calorieSex`, so every heart-rate calorie
+ * estimate from then on uses the sex the rider just changed away from.
+ *
+ * ⚠️ **Which is why the assertion it calibrates reads `calorieSex` back, and
+ * starts from a row whose calorie sex is the OTHER word**: from a row with the
+ * same one, a half write and a correct one read alike.
+ *
+ * The red/green pair is in `activity-store.rider-body.test.ts`.
+ */
+export function lookOnlyRiderStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteRider: async (id: AthleteId, rider: RiderBody) => {
+          const before = await real.getAthlete(id);
+          if (before === undefined) {
+            return undefined;
+          }
+          await real.putAthlete({ ...before, riderBody: rider });
+          const written = await real.getAthlete(id);
+          return written === undefined ? undefined : { ...written, calorieSex: rider };
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
  * A repository whose masked-word write **drops the last entry on its way in**
  * — the twenty-first fake, for #839.
  *
@@ -1148,14 +1190,13 @@ export function lastWordDroppedStoreFactory(): StoreFactory {
 }
 
 /**
- * A repository whose calorie-input write **keeps the sex and drops the year of
- * birth** — for #2432.
+ * A repository whose year-of-birth write **drops the year** — for #2432.
  *
- * *Wrong layer*: the write is real and commits, and the call answers with both
- * fields as asked, so the screen says "Saved" and shows the year. A fresh
- * connection reads a row with a sex and no year, which is a rider whose
- * heart-rate rides quietly show no calorie figure. A round trip that checked
- * only the sex passes against this; the red/green pair is in
+ * *Wrong layer*: the write is real and commits, and the call answers with the
+ * year as asked, so the screen says "Saved" and shows it. A fresh connection
+ * reads a row with a sex and no year, which is a rider whose heart-rate rides
+ * quietly show no calorie figure. A round trip that checked only the sex
+ * passes against this; the red/green pair is in
  * `activity-store.calorie-inputs.test.ts`.
  */
 export function droppedBirthYearStoreFactory(): StoreFactory {
@@ -1164,14 +1205,12 @@ export function droppedBirthYearStoreFactory(): StoreFactory {
       const real = openActivityStore(name);
       return {
         ...bindStore(real),
-        setAthleteCalorieInputs: async (id, inputs) => {
-          const written = await real.setAthleteCalorieInputs(id, {
-            calorieSex: inputs.calorieSex,
-            birthYear: undefined,
-          });
-          return written === undefined || inputs.birthYear === undefined
+        // The panel's one write of the year since the owner's ruling of 2026-11-20.
+        setAthleteBirthYear: async (id, birthYear) => {
+          const written = await real.setAthleteBirthYear(id, undefined);
+          return written === undefined || birthYear === undefined
             ? written
-            : { ...written, birthYear: inputs.birthYear };
+            : { ...written, birthYear };
         },
       };
     },

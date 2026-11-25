@@ -58,6 +58,7 @@ import {
 } from '../routing/draft';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
+import type { RouteHeights } from '../terrain/heights';
 import {
   canRedo,
   canUndo,
@@ -94,7 +95,12 @@ import {
   unresolvedSentence,
 } from '../routing/present';
 import { ScrollTable } from '../design/ScrollTable';
-import { FLAT_DRAWN_ROUTE_TEXT, routeFromDraft, type SaveRefusal } from '../routes/save';
+import {
+  FLAT_DRAWN_ROUTE_TEXT,
+  FLAT_WITHOUT_ELEVATION_TEXT,
+  routeFromDraft,
+  type SaveRefusal,
+} from '../routes/save';
 import type { RoutePort } from '../routes/store-port';
 import { hrefForSelection, routeById } from '../shell/routes';
 
@@ -132,11 +138,15 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * reviewer who remembers this paragraph saying there is no tile archive is
  * reading the old file.
  *
- * ⚠️ **There is no routing engine.** `routing/testing.ts` says why at length:
- * ADR 0010 D-4 chose Valhalla and nothing is running, so the provider arrives
- * as a prop and this screen explains itself when there is none. With none, a
- * new leg is freehand — a straight line whose distance is a lower bound — so
- * a route can still be drawn and saved (#2006).
+ * ## The routing engine — #2008
+ *
+ * The provider arrives as a prop: the rider's instance's Valhalla
+ * (`instance/routing-port.ts`) when this device is connected to an instance
+ * it can seal to, and nothing otherwise. With none this screen explains
+ * itself, and a new leg is freehand — a straight line whose distance is a
+ * lower bound — so a route can still be drawn and saved (#2006). ⚠️ A
+ * reviewer who remembers this paragraph saying nothing is running is reading
+ * the old file.
  *
  * ## Saving it — #2006
  *
@@ -178,6 +188,12 @@ export interface RouteBuilderViewProps {
    */
   readonly provider?: RoutingProvider | undefined;
   /**
+   * Heights along the drawn line from the terrain archive (#2013), or
+   * `undefined` for a build configured with none. Asked only where there is no
+   * engine: with one, the engine's own heights are the route's.
+   */
+  readonly heights?: RouteHeights | undefined;
+  /**
    * Where a half-drawn route is kept across a reload.
    *
    * Injected so a test can supply one that is not the browser's — `jsdom`'s
@@ -207,6 +223,14 @@ type MapEngine =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly port: MapPort }
   | { readonly kind: 'failed' };
+
+/** What the planner says with no routing engine and no terrain archive to read (#2006). */
+export const NO_ROUTING_NO_HEIGHTS_TEXT =
+  'Lines are drawn straight between your points: the distance is at least the one shown, and climbing stays empty. Connect a home instance that runs road routing to follow roads and see surfaces and climbing.';
+
+/** What it says with no routing engine and the terrain archive to read (#2013). */
+export const NO_ROUTING_TERRAIN_HEIGHTS_TEXT =
+  'Lines are drawn straight between your points: the distance is at least the one shown, and the climbing is that of the ground under the straight line. Connect a home instance that runs road routing to follow roads and see their surfaces and climbing.';
 
 /** What the planner says when the map engine itself could not be loaded (#2006). */
 export const PLANNER_MAP_FAILED_TEXT =
@@ -276,6 +300,7 @@ const DEFAULT_ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitud
 
 export function RouteBuilderView({
   provider,
+  heights,
   storage,
   origin,
   map,
@@ -370,14 +395,18 @@ export function RouteBuilderView({
   // The profile follows the geometry rather than the edit, so it is not
   // recomputed while a leg is still being routed.
   const routedLegs = draft.legs.filter((leg) => leg.state === 'routed').length;
+  // #2013: with no engine, the terrain archive answers, at its own spacing.
+  const heightSource = provider ?? heights;
+  const heightInterval = provider === undefined ? heights?.interval : undefined;
   useEffect(() => {
-    if (provider === undefined || routedLegs === 0) {
+    if (heightSource === undefined || routedLegs === 0) {
       setElevation(undefined);
+      setElevationFault(undefined);
       return;
     }
     let live = true;
     setElevationFault(undefined);
-    void planElevation(draft, provider)
+    void planElevation(draft, heightSource, heightInterval)
       .then((planned) => {
         if (live) setElevation(planned === undefined ? undefined : { draft, planned });
       })
@@ -394,7 +423,7 @@ export function RouteBuilderView({
     return () => {
       live = false;
     };
-  }, [draft, provider, routedLegs]);
+  }, [draft, heightSource, heightInterval, routedLegs]);
 
   // The map engine, fetched once (#2006): the loader is the module's `import()`.
   useEffect(() => {
@@ -507,9 +536,7 @@ export function RouteBuilderView({
     <>
       {provider === undefined ? (
         <StatusMessage tone="warning" label="No routing service">
-          Nothing can work out the roads between waypoints until a routing service is configured, so
-          each leg is a straight line: the distance is at least the one shown, and climbing stays
-          empty.
+          {heights === undefined ? NO_ROUTING_NO_HEIGHTS_TEXT : NO_ROUTING_TERRAIN_HEIGHTS_TEXT}
         </StatusMessage>
       ) : null}
 
@@ -840,7 +867,10 @@ export function RouteBuilderView({
           </p>
 
           {elevationFault === undefined ? null : (
-            <StatusMessage tone="danger" label="No elevation">
+            <StatusMessage
+              tone={provider === undefined ? 'warning' : 'danger'}
+              label="No elevation"
+            >
               {elevationFault}
             </StatusMessage>
           )}
@@ -974,7 +1004,9 @@ export function RouteBuilderView({
               {saved?.kind === 'saved' ? (
                 <StatusMessage tone="success" live>
                   {`Saved “${saved.name}” to your routes. It is private.`}
-                  {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}
+                  {saved.flat
+                    ? ` ${heightSource === undefined ? FLAT_DRAWN_ROUTE_TEXT : FLAT_WITHOUT_ELEVATION_TEXT}`
+                    : ''}
                   {saved.loop ? ` ${SAVED_LOOP_TEXT}` : ''}{' '}
                   <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
                 </StatusMessage>

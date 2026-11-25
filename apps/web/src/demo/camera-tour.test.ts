@@ -184,6 +184,7 @@ describe('the demo camera tour — #1649', () => {
         {
           "climb": "3b9b3e75e806355b7edbe71fd87295785bc435436d8788745334604244770760",
           "group": "b963b0237b8f475f8a1772e9ce3305edfddcdfc9948e7712676598f3facb79f4",
+          "hill": "00bdbcb758fa49bfb505fe30d858f37ab495362ef46df3fb2772a6d238435cb8",
           "sprint": "112a9b6ee0828bcc46b8567ceab2815b50af585efefd59412fdaaee75feb77d4",
         }
       `);

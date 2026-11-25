@@ -88,6 +88,7 @@ import type { RaceStandingsView } from '../room-ride';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
+import type { JunctionInput } from './JunctionChoicePrompt';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import { deviceStorage } from './announce-preference';
 import { HIDES_ATTRIBUTE } from './controls-reveal';
@@ -355,7 +356,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    * on every ride with no corridor, which draws the route's outline as before.
    * A workout's strip still takes the panel while one runs. `GameView` hands
    * it exactly when it hands {@link attribution}, so the map is never drawn
-   * without its credit.
+   * without its credit. #3106: on an open-world ride it is the streets the
+   * ride holds round the rider (`open-world/street-corridor.ts`), a new one
+   * whenever a block is read or let go, and the map follows it.
    */
   readonly corridor?: WorldCorridor | undefined;
   /**
@@ -390,6 +393,18 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
   readonly controller?: ControllerPort | undefined;
   /** A Delivery round's lane, as a controller's handlebar angle asks for one — #1827. */
   readonly lanes?: LaneInputPort | undefined;
+  /**
+   * An open-world ride's junctions — #2898, ADR 0088 D-3 and D-3.1: the
+   * prompt for the next junction as the rider stands now, and where a press
+   * goes. With it the HUD shows `JunctionChoicePrompt` in its actions panel,
+   * inside the touch lock and exempt from none of it, listens for the turn
+   * keys, and hands a pad's turn buttons to the same press
+   * (`GamepadIntents.tsx`). `undefined` on every other ride. `GameView` hands
+   * it in on an open-world ride (#3013). ⚠️ It is an optional prop, which the
+   * wiring gate cannot see dropped (`wiring-gate.md` §Limits):
+   * `open-world/junction-wiring.test.tsx` is what goes red.
+   */
+  readonly junction?: JunctionInput | undefined;
 }
 
 /**
@@ -528,6 +543,8 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               corridor={corridor}
               profile={props.profile}
               distance={props.state.ride.distance}
+              // #3106: an open-world ride's map says no share of a route ridden.
+              openEnded={props.openEnded}
             />
           )
         ) : (

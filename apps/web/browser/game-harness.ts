@@ -199,6 +199,7 @@ import {
   denseTownFixture,
   kerbsideFixture,
   landBeside,
+  MIXED_TOWN_EDGE_RUNG,
   mixedTownFixture,
   rectangleBeside,
 } from '../src/game/footprint-fixtures-testing';
@@ -3573,24 +3574,20 @@ interface PeopleMeasurement {
   readonly drawnOff: readonly number[];
   /** The draw calls a frame with bodies and impostors makes, less the same frame with the people switched off. */
   readonly drawCalls: number;
-  /** One body's triangles, as cut, and the animation texture's bytes, read off the belt. */
+  /**
+   * The most triangles one body is — what an instance submits — and the bytes
+   * of the animation and slot textures together, read off the belt.
+   */
   readonly triangles: number;
   readonly animationBytes: number;
   /**
-   * #1618, read off the belt: how many of a body's triangles fade a colour
-   * across them (corners of two regions), and how far its clothes and its skin
-   * stand off the bare body as the animation texture holds them, metres at a
-   * person's 1.75 m.
+   * The owner's request of 2026-11-18, read off the belt: how many different
+   * bodies its model holds, and how many of them the people the view drew
+   * near at the probe's second are between them — a street is not one person
+   * repeated.
    */
-  readonly blendedTriangles: number;
-  readonly clothesStandOff: number;
-  readonly skinStandOff: number;
-  /**
-   * The modeller's pass of 2026-11-18, read off the belt: how far a top's hem
-   * over the bottoms strays up and down round the body, metres at a person's
-   * 1.75 m (`three-renderer.ts` §`peopleDrawnOf`).
-   */
-  readonly hemSpread: number;
+  readonly bodies: number;
+  readonly bodiesWorn: number;
   /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
@@ -3618,10 +3615,8 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   drawCalls: -1,
   triangles: -1,
   animationBytes: -1,
-  blendedTriangles: -1,
-  clothesStandOff: Number.NaN,
-  skinStandOff: Number.NaN,
-  hemSpread: Number.NaN,
+  bodies: -1,
+  bodiesWorn: -1,
   bodyPixels: -1,
   impostorPixels: -1,
   bodyFragments: -1,
@@ -3734,10 +3729,13 @@ function peopleProbe(
     }
     return found;
   };
+  // Which of the model's bodies the people drawn near were, over every frame read.
+  const worn = new Set<number>();
   // What the view DREW at a second: its people's least clearance, and how many.
   const drawnAt = (frame: SceneFrame): { clearance: number; drawn: number[] } => {
     view.render(frame);
     const drawn = peopleDrawnOf(view);
+    for (const body of drawn?.worn ?? []) worn.add(body);
     const all = [...(drawn?.near ?? []), ...(drawn?.far ?? [])];
     return {
       clearance: Math.min(...all.map((person) => shoulderClear(person.x, person.z))),
@@ -3828,10 +3826,8 @@ function peopleProbe(
     drawCalls,
     triangles: belt?.triangles ?? -1,
     animationBytes: belt?.animationBytes ?? -1,
-    blendedTriangles: belt?.blendedTriangles ?? -1,
-    clothesStandOff: (belt?.standOff.clothes ?? Number.NaN) * 1.75,
-    skinStandOff: (belt?.standOff.skin ?? Number.NaN) * 1.75,
-    hemSpread: (belt?.hemSpread ?? Number.NaN) * 1.75,
+    bodies: belt?.bodies.length ?? -1,
+    bodiesWorn: worn.size,
     bodyPixels,
     impostorPixels,
     bodyFragments: fragments.length,
@@ -6351,7 +6347,11 @@ function facadeTrimProbe(
 
 /** What {@link townEdgeProbe} publishes — #1586. */
 interface TownEdgeMeasurement {
-  /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
+  /**
+   * The procedural structures and billboards in the frame: the issue's frame
+   * fills the cap with them — since #3161 the cap of a rung of
+   * `MIXED_TOWN_EDGE_RUNG` structures, which the view draws the frame at.
+   */
   readonly structures: number;
   /** The mapped buildings the belt drew at the frame's refill. */
   readonly buildings: number;
@@ -6380,11 +6380,34 @@ const NO_TOWN_EDGE: TownEdgeMeasurement = {
  * here; ranked together by distance, the houses round the rider are. The
  * frame is the view's own: its scatter, through `updateMapped`. The control
  * of the old rule is `mapped-building-belt.test.ts` §"#1586", in Node.
+ *
+ * ⚠️ **Drawn on a rung of `MIXED_TOWN_EDGE_RUNG` structures, not the realistic
+ * rung's 36** — #3161. Since #3132 no procedural building stands on a mapped
+ * building's plot, and the frame carries 15 structures, so at 36 the cap is
+ * never full and the town would be drawn whatever the ranking did. The Node
+ * twin was moved to the same rung by #3132; this is the same frame, its plans
+ * without the shops' aprons as the twin's are (#2848), drawn at the same rung,
+ * and the view is put back on `top` after it.
  */
-function townEdgeProbe(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
+function townEdgeProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  top: QualitySettings,
+): TownEdgeMeasurement {
+  view.setQuality({ ...top, structureItems: MIXED_TOWN_EDGE_RUNG });
+  try {
+    return townEdgeAtTheRung(view);
+  } finally {
+    view.setQuality(top);
+  }
+}
+
+/** {@link townEdgeProbe}'s frame and reading, on a view already on the probe's rung. */
+function townEdgeAtTheRung(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
   const { profile, origin, corridor } = mixedTownFixture();
   const land = landClassMask(corridor);
-  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const plans = footprintPlans(corridor, land, profile, origin, undefined, undefined, {
+    shopAprons: false,
+  }).plans;
   const start = atStartLine(profile);
   const frame = sceneFrame({
     profile,
@@ -14035,7 +14058,7 @@ function townProbes(
   phaseEnds('town: a mapped window’s lintel — #1663');
 
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
-  const townEdge = townEdgeProbe(view);
+  const townEdge = townEdgeProbe(view, REALISTIC_LADDER[0] as QualitySettings);
   phaseEnds('town: a town’s edge — #1586');
 
   // #1550, on the same view: procedural lots in a mapped town with no footprints.

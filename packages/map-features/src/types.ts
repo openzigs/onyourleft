@@ -14,8 +14,11 @@
 import type {
   BUILDING_TYPES,
   LANDMARKS,
+  PoiClass,
+  RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
+  PITCH_SPORTS,
   ROOF_SHAPES,
   WALL_MATERIALS,
   WATER_LINE_KINDS,
@@ -35,10 +38,18 @@ export interface PolygonFeature {
 /** Protomaps v4 `landuse.kind`, for example `residential` or `wood`. */
 export type LandUseKind = string;
 
-/** A `landuse` or `water` polygon and its `kind`, and nothing else (ADR 0054 D-2.2). */
+/** A pitch's sport, where it is one the world draws (#2688). */
+export type PitchSport = (typeof PITCH_SPORTS)[number];
+
+/**
+ * A `landuse` or `water` polygon and its `kind`, and nothing else (ADR 0054
+ * D-2.2) — but, since #2688, a `pitch`'s `sport` where it is one of
+ * {@link PITCH_SPORTS}. Absent on every other polygon.
+ */
 export interface LandUseFeature extends PolygonFeature {
   readonly layer: 'landuse' | 'water';
   readonly kind: LandUseKind;
+  readonly sport?: PitchSport;
 }
 
 export type BuildingType = (typeof BUILDING_TYPES)[number];
@@ -83,12 +94,20 @@ export interface BuildingFeature extends PolygonFeature, BuildingFields {
   readonly heightMetres: number | null;
   /** Metres, `null` when the tile carries none. */
   readonly minHeightMetres: number | null;
+  /**
+   * #2975: a shop, a café or a fuel station, where a `pois` point of that
+   * class falls in it or within `schema.ts` §`POI_REACH_METRES` of it — on a
+   * `building` only, never a `building_part`. Absent where none does, and on
+   * a footprint built by hand. The POI's name, brand and point are never
+   * kept: this is all that is.
+   */
+  readonly poi?: PoiClass;
 }
 
 /**
  * A `water` line that is a river, a stream or a canal — #2659, ADR 0054's
- * entry of 2026-11-15. Its `kind` and its line, and nothing else: no name, no
- * id, no `layer`.
+ * entry of 2026-11-15 — or since #2974 a ditch or a drain. Its `kind` and its
+ * line, and nothing else: no name, no id, no `layer`.
  */
 export interface WaterLineFeature {
   readonly kind: (typeof WATER_LINE_KINDS)[number];
@@ -125,6 +144,19 @@ export interface StreetFeature {
 }
 
 /**
+ * A `roads` line that is a railway kept as track (#2660): `kind`
+ * {@link RAIL_KIND} with a `kind_detail` in {@link RAIL_KIND_DETAILS}. Its
+ * detail, its grade and its line; never a name, an operator or an id.
+ */
+export interface RailFeature {
+  readonly kindDetail: (typeof RAIL_KIND_DETAILS)[number];
+  /** From `is_bridge` and `is_tunnel`, as a street's. */
+  readonly grade: StreetGrade;
+  /** `x0, z0, x1, z1, …` in local metres. */
+  readonly line: Float32Array;
+}
+
+/**
  * A street's `oneway` (#2892, ADR 0091 D-2): `'with-line'` for `yes`, which
  * runs along the line's vertex order, `'against-line'` for `-1`, and `'no'`
  * for `no`, for none, and for anything else. A fact about the street: it never
@@ -153,7 +185,24 @@ export interface StreetRoadFields {
  * road fields. A corridor's packed streets (`apps/web` §`world-data/corridor.ts`)
  * keep the {@link StreetFeature} alone, which is why the fields are not on it.
  */
-export interface DecodedStreetFeature extends StreetFeature, StreetRoadFields {}
+export interface DecodedStreetFeature extends StreetFeature, StreetRoadFields {
+  /**
+   * #3052, ADR 0096: its OSM `name`, as mapped, when the caller asked for
+   * names (`decodeTile`'s `streetNames`) and the tile carried one: at most
+   * `schema.ts` §`STREET_NAME_MAX_CHARS` characters, with no control or
+   * bidirectional-override character. Absent otherwise — never `''`.
+   */
+  readonly name?: string;
+}
+
+/** What {@link decodeTile} is asked to read beyond its default. */
+export interface DecodeOptions {
+  /**
+   * #3052, ADR 0096: read each street's `name` onto it. Off by default: a
+   * route ride's corridor reads no name (ADR 0054 D-2.2 stands for it).
+   */
+  readonly streetNames?: boolean;
+}
 
 /**
  * A point from `places` (#1632, ADR 0055 D-2): what kind of settlement stands
@@ -189,8 +238,13 @@ export interface DecodedTile {
   readonly roadValuesDefaulted: number;
   /** #1632: the place points, at most `DecodeLimits.maxPlacesPerTile` of them. */
   readonly places: readonly PlaceFeature[];
-  /** #2659: the rivers, streams and canals, for where they cross the route. */
+  /**
+   * #2659: the rivers, streams and canals, for where they cross the route;
+   * since #2974 the ditches and drains too, for where they run beside it.
+   */
   readonly waterLines: readonly WaterLineFeature[];
+  /** #2660: the railway lines, for the level crossings where they cross the route. */
+  readonly rails: readonly RailFeature[];
 }
 
 /**

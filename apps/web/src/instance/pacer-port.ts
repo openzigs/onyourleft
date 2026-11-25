@@ -19,15 +19,21 @@
  *   the rider's instance and its local model address (ADR 0072 D-1.3).
  * - **The ride's slot**: `POST /v1/analysis/tactics/start` and `end`, so
  *   write-ups on the instance wait while the ride runs (ADR 0071 D-6).
- * - **One decision**: `POST /v1/analysis/pacer/decide`, carrying
- *   `@onyourleft/domain` §`ModelPacerInput` — the pacer's W/kg, plan and
- *   intent, the rider's gap, W/kg and draft, the grade ahead, the metres to
- *   the finish, the seconds ridden, and since #2760 the rider's own power,
- *   cadence and heart rate where the sensor is live, and the model's last
- *   lines. **No coordinate, no name, no date, no id.**
- *   Back: a plan, an intent and a line, **read again here** by
- *   §`readModelPacerAnswer`, so an instance that answered a power, a bad
- *   word or a field it should not have has answered nothing.
+ * - **One line**: `POST /v1/analysis/pacer/decide`, carrying
+ *   `@onyourleft/domain` §`ModelPacerInput` — the pacer's W/kg, what it is
+ *   doing and why (the device's own decision, #2835), the rider's gap, W/kg
+ *   and draft, the grade ahead, the metres to the finish, the seconds
+ *   ridden, and since #2760 the rider's own power, cadence and heart rate
+ *   where the sensor is live, and the model's last lines. **No coordinate,
+ *   no name, no date, no id.**
+ *   Back: **a line and nothing else** (#2835, ADR 0083), **read again here**
+ *   by §`readModelPacerAnswer`, so an instance that answered a power, an
+ *   intent, a bad word or a field it should not have has answered nothing —
+ *   and no answer, of any kind, moves the pacer.
+ * - **A warm-up**: `POST /v1/analysis/pacer/warm` (#2835), when the rider
+ *   turns the AI pacer on in the ride menu, so the model is loaded and has
+ *   read the pacer's own words before the ride starts. It carries nothing of
+ *   the rider's and takes no model slot.
  *
  * ## Nothing for a rider with no instance
  *
@@ -37,11 +43,7 @@
  * rider with no instance loses this and nothing else (ADR 0036 D-3 (a)).
  */
 
-import {
-  readModelPacerAnswer,
-  type ModelPacerInput,
-  type PacerDirection,
-} from '@onyourleft/domain';
+import { readModelPacerAnswer, type ModelPacerInput } from '@onyourleft/domain';
 
 import { heldInstanceSession, heldSealedSession, type SealingDependencies } from './instance-port';
 import { sealedRouteGate } from './instance-pin';
@@ -72,8 +74,9 @@ export type PacerStatus =
 
 /** What one decision came to. */
 export type PacerReply =
-  | { readonly kind: 'answer'; readonly direction: PacerDirection; readonly say: string }
-  /** The instance or this device read the model's answer as no decision. */
+  /** A line, `''` for none. **No direction**: the device decided that before it asked (#2835). */
+  | { readonly kind: 'answer'; readonly say: string }
+  /** The instance or this device read the model's answer as no line. */
   | { readonly kind: 'invalid' }
   /** Refused before a model was called: no consent, not offered, busy, rate limited. */
   | { readonly kind: 'refused' }
@@ -90,9 +93,15 @@ export interface PacerPort {
   consentToPacer(status: Extract<PacerStatus, { kind: 'offered' }>): Promise<PacerStatus>;
   /** Withdraw it (ADR 0071 D-5.4): the next decision is refused. The status after. */
   withdrawPacerConsent(): Promise<PacerStatus>;
+  /**
+   * The rider turned the AI pacer on in the ride menu (#2835): load the model
+   * and have it read the pacer's own words, before the ride. Whether a
+   * warm-up went out. Never rejects.
+   */
+  warmPacer(): Promise<boolean>;
   /** A directed ride is starting: take the model slot, and warm the model. Never rejects. */
   startPacerRide(): Promise<boolean>;
-  /** One decision on the ride as it stands. Never rejects. */
+  /** One line for the ride as it stands, and what the pacer is doing in it. Never rejects. */
   decidePacer(input: ModelPacerInput): Promise<PacerReply>;
   /** The directed ride has ended: let the slot go. Never rejects. */
   endPacerRide(): Promise<void>;
@@ -130,9 +139,7 @@ const REFUSALS: ReadonlySet<unknown> = new Set([
 export function parsePacerReply(status: number, body: unknown): PacerReply {
   if (status === 200) {
     const read = readModelPacerAnswer(JSON.stringify(body));
-    return read.ok
-      ? { kind: 'answer', direction: read.direction, say: read.say }
-      : { kind: 'invalid' };
+    return read.ok ? { kind: 'answer', say: read.say } : { kind: 'invalid' };
   }
   const code = (body as { error?: { code?: unknown } } | null)?.error?.code;
   if (code === 'tactics_invalid') return { kind: 'invalid' };
@@ -186,6 +193,18 @@ export function createPacerPort(dependencies: PacerPortDependencies): PacerPort 
         return answer.status === 200 ? parsePacerStatus(answer.body) : { kind: 'unavailable' };
       } catch {
         return { kind: 'unavailable' };
+      }
+    },
+    warmPacer: async () => {
+      try {
+        const held = await session();
+        if (held.kind === 'closed') return false;
+        const answer = await held.sealed.call('POST', '/v1/analysis/pacer/warm', {
+          token: held.token,
+        });
+        return answer.status === 202;
+      } catch {
+        return false;
       }
     },
     startPacerRide: async () => {

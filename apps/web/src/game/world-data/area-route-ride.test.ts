@@ -12,7 +12,7 @@
  * that may import it are an exact list**, and none of them is on a route
  * ride's path. A route-ride module that imported it — the corridor port, the
  * lazy port, `main.tsx`'s corridor wiring, the game's route-ride code — goes
- * red here. #2896 (the open-world session) adds its own module to the list.
+ * red here. #2896 added the open-world session, the one module on the list.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -26,12 +26,20 @@ import { stripComments } from '../../units/no-inline-units';
 const SOURCE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
- * The modules permitted to import the streamed reader. None of them builds a
- * reader yet: `world-data/ridden-blocks.ts` (#2891) is the cache the reader
- * asks before the network, and takes the block's key and the cache's shape
- * from it.
+ * The modules permitted to import the streamed reader's module: the
+ * open-world session (#2896), and the open-world ride's height tiles (#2899),
+ * which take its block arithmetic and its crossing delay (`blockOf`,
+ * `blocksAround`, `crossingDelayMs`) so that the heights are read on the same
+ * grid and under the same delay as the map (ADR 0087 D-2.2), and
+ * `world-data/ridden-blocks.ts` (#2891), the cache the reader asks before the
+ * network, which takes the block's key and the cache's shape from it. All are
+ * the open-world ride's, and none is on a route ride's path.
  */
-const AREA_READER_IMPORTERS: readonly string[] = [join('world-data', 'ridden-blocks.ts')];
+const AREA_READER_IMPORTERS: readonly string[] = [
+  join('game', 'open-world', 'heights.ts'),
+  join('game', 'open-world', 'session.ts'),
+  join('world-data', 'ridden-blocks.ts'),
+];
 
 /** The route ride's own read: each must keep to the corridor (ADR 0054 D-2.4). */
 const ROUTE_RIDE_READ = [

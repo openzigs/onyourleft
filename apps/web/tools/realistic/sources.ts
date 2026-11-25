@@ -71,6 +71,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_PACK,
   RIDER_PACK_PHASES,
@@ -78,10 +79,12 @@ import {
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
+  REALISTIC_PEOPLE,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
   REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_ATLAS,
   houseModelFile,
   type HouseModelId,
   type RealisticBicycleMap,
@@ -121,7 +124,7 @@ import {
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
 
-/** One row of ADR 0049 D-10's **In** table. */
+/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0085). */
 export interface AdmittedSource {
   /** The source, as the ADR's table names it. */
   readonly name: string;
@@ -249,6 +252,17 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
       'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
       'https://files.makehumancommunity.org/asset_packs/poses02/',
     ],
+  },
+  {
+    // #2847: ADR 0085 adds this row to ADR 0049 D-10's In table, for the
+    // realistic world's cars. Its archive is the owner's own download through
+    // the pack's page, as Kenney's Car Kit's was (no script fetches it).
+    name: 'GGBotNet’s PSX Style Cars',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0085 D-1',
+    kind: 'files',
+    // The author's own itch.io pages: the pack's page states its licence.
+    prefixes: ['https://ggbot.itch.io/'],
   },
 ];
 
@@ -522,6 +536,28 @@ export const RIDER_BUILD_TARGETS: readonly string[] = [
     ),
     ...['african', 'asian', 'caucasian'].map((ethnic) => `${ethnic}-${sex}-young.target`),
   ]),
+  // #2839's second round: the female rider's figure — `rider_kit.py`'s
+  // BREAST_SIZE and BREAST_FIRMNESS, by MakeHuman's own breast arithmetic at
+  // her build (the cups and firmnesses a weight above nothing names), and its
+  // FIGURE_TARGETS. A name with a directory is under `targets/`, from the same
+  // commit; one without is a macro target, under `targets/macrodetails/`.
+  ...['averagemuscle', 'maxmuscle'].flatMap((muscle) =>
+    ['averageweight', 'minweight'].flatMap((weight) =>
+      ['maxcup-averagefirmness', 'maxcup-maxfirmness', 'averagecup-maxfirmness'].map(
+        (shape) => `breast/female-young-${muscle}-${weight}-${shape}.target`,
+      ),
+    ),
+  ),
+  ...[
+    'torso/torso-scale-horiz-decr',
+    'hip/hip-scale-horiz-incr',
+    'stomach/stomach-pregnant-decr',
+    'neck/neck-scale-horiz-decr',
+    'chin/chin-width-decr',
+    'chin/chin-bones-decr',
+    'chin/chin-prominent-decr',
+    'eyebrows/eyebrows-trans-backward',
+  ].map((name) => `${name}.target`),
 ];
 
 /**
@@ -1473,43 +1509,113 @@ export const CHAIN_LINK_SOURCE = {
 } as const;
 
 /**
- * The car Delivery's parked cars are drawn as in the realistic world — #2540,
- * the owner's rulings of 2026-11-12 on it: Kenney's CC0 **Car Kit** (3.1),
- * its `sedan`, a plain civilian car with no maker's name. The kit's zip is
- * served only from a signed link a browser is handed, so the owner had it
- * downloaded through Kenney's own page and placed under `build/raw/<id>/`
- * (`archive`), as #1585's house archives were; its digest is in the lock.
+ * The cars Delivery's parked cars are drawn as in the realistic world —
+ * #2847, the owner's rulings of 2026-11-18 (*"PSX Style Cars
+ * (Recommended)"*) and 2026-11-19 (*"Saloon, hatchback, station wagon
+ * (Recommended)"*), under ADR 0085: three bodies out of GGBotNet's CC0
+ * **PSX Style Cars** pack, its `Car 02` (a 4-door saloon, 312 triangles),
+ * `Car 03` (a 3-door hatchback, 448) and `Car 01` (a 5-door station wagon,
+ * 438), as its page lists them. None names a maker. It replaces #2540's one
+ * Kenney sedan, a toy stretched to a car's footprint.
  *
- * {@link VEHICLE_SCRIPT} keeps the body whole (704 triangles in the kit),
- * collapses one wheel from the kit's 332 to `wheelTriangles` and draws all
- * four from it (one mesh under four nodes: 55 372 bytes, where four meshes
- * were 90 788 and over `realistic-budget.ts` §`REALISTIC_BUILD_BYTES`), adds two
- * indicator quads a side, and brings it to `obstacles.ts`' parked car's
- * footprint, `lengthMetres` by `widthMetres`, at `heightMetres` tall: 1 376
- * triangles, under `realistic-budget.ts` §`DELIVERY_CAR_TRIANGLES`, the
- * owner's ruling of about 1 450 a car. `paintCell` is the colour map's
- * swatch the kit paints the sedan's body with (`column,row`, 32 by 128 px
- * cells), split off so the renderer paints it per instance.
+ * The pack's zip is served only through itch.io's own download flow, which a
+ * script is not handed, so the owner had it downloaded through the pack's page
+ * and placed under `build/raw/<id>/` (`archive`), unrenamed, as Kenney's Car
+ * Kit was; its digest is in the lock. The pack carries no licence file: its
+ * page states the grant, and the lock records the page's words.
  *
- * Candidates read on 2026-11-12 and not taken, in #2540's pull request:
- * two Sketchfab cars under CC-BY-4.0 (an account to download, and one a
- * third over the budget), Poly Haven's `covered_car` (CC0, but under a dust
- * sheet: no wheels to turn) and Quaternius' cars (CC0, but not a source ADR
- * 0049 D-10 admits).
+ * {@link VEHICLE_SCRIPT} keeps each body whole — its wheels apart, so they
+ * roll and steer — brings it to `lengthMetres`, scaled evenly (the pack's own
+ * proportions; its page warns that "the scale unit between cars is not
+ * correct"), inside `obstacles.ts`' parked car's footprint, `widthMetres`
+ * across but for its mirrors, and lays the three pictures into one atlas,
+ * `atlasPixels` square, so the three are still one call. `paints` are each
+ * body's pictures in the pack's paints, the first the one its model wears:
+ * the texels that differ between them are its paint, which the renderer
+ * paints per instance.
  */
 export const DELIVERY_CAR_SOURCE = {
-  id: 'kenney-car-kit',
-  page: 'https://kenney.nl/assets/car-kit',
-  archive: 'kenney-car-kit.zip',
-  model: 'Models/GLB format/sedan.glb',
-  colourMap: 'Models/GLB format/Textures/colormap.png',
-  licenceFile: 'License.txt',
-  wheelTriangles: 120,
-  lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+  id: 'ggbot-psx-style-cars',
+  page: 'https://ggbot.itch.io/psx-style-cars',
+  archive: 'PSX_Style_Cars_by_GGBot_(August2023).zip',
+  bodies: [
+    {
+      name: 'saloon',
+      model: 'Car 02/Car2.obj',
+      paints: ['Car 02/car2.png', 'Car 02/car2_black.png', 'Car 02/car2_red.png'],
+      lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+    },
+    {
+      name: 'hatchback',
+      model: 'Car 03/Car3.obj',
+      paints: ['Car 03/car3.png', 'Car 03/car3_red.png', 'Car 03/car3_yellow.png'],
+      lengthMetres: 4.2,
+    },
+    {
+      name: 'wagon',
+      model: 'Car 01/Car.obj',
+      paints: [
+        'Car 01/car.png',
+        'Car 01/car_blue.png',
+        'Car 01/car_gray.png',
+        'Car 01/car_red.png',
+      ],
+      lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+    },
+  ],
   widthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfWidth,
-  heightMetres: 1.45,
-  paintCell: '13,1',
+  atlasPixels: 256,
 } as const;
+
+/** The picture {@link VEHICLE_SCRIPT} writes beside the cars' GLB, before `encode-ktx2.ts` — #2847. */
+export const DELIVERY_CAR_ATLAS_MADE = 'cars_atlas.png';
+
+/**
+ * What the people on the pavements wear — the owner's request of 2026-11-18,
+ * under ADR 0026's amendment of the same date: garments, shoes and hair out
+ * of MakeHuman's own CC0 system assets pack, the archive the rider's skin and
+ * eyebrow already come from ({@link SYSTEM_ASSETS_ARCHIVE}), each on its own
+ * `makehuman_system`, CC0 row of the pack's page, read 2026-11-18. `type` is
+ * the page's type column and the archive's directory.
+ *
+ * ⚠️ **Nothing that prints a mark is worn as it came.** The pack's
+ * `male_casualsuit02`, `male_casualsuit04`, `female_casualsuit01` and
+ * `female_casualsuit02` carry MakeHuman's own wordmark across the chest and
+ * are not taken; `male_casualsuit06` carries it smaller, on a plain white
+ * shirt, and `blender/process_people.py` §`PAINT_OVER` paints it out before
+ * anything reads the picture (ADR 0049 D-6).
+ */
+export const PEOPLE_GARMENTS: readonly { readonly type: string; readonly name: string }[] = [
+  { type: 'clothes', name: 'male_casualsuit06' },
+  { type: 'clothes', name: 'female_elegantsuit01' },
+  { type: 'clothes', name: 'male_casualsuit05' },
+  { type: 'clothes', name: 'shoes05' },
+  { type: 'clothes', name: 'shoes01' },
+  { type: 'clothes', name: 'shoes02' },
+  { type: 'hair', name: 'short02' },
+  { type: 'hair', name: 'ponytail01' },
+  { type: 'hair', name: 'short01' },
+];
+
+/** The people's second skin, beside the rider's `young_caucasian_male`: the same pack's, for the woman. */
+export const PEOPLE_SECOND_SKIN = {
+  name: 'young_caucasian_female',
+  picture: 'young_lightskinned_female_diffuse.png',
+} as const;
+
+/** The script that makes the people, and what its run is asked for. */
+export const PEOPLE_SCRIPT = 'blender/process_people.py';
+/**
+ * How many triangles each person is cut to: **1 800**, inside
+ * `people-body.ts` §`PERSON_MAX_TRIANGLES` (2 000), which leaves three of
+ * them room in the people's animation texture
+ * (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`).
+ */
+export const PEOPLE_TRIANGLES = 1_800;
+/** The side of the people's atlas, in pixels. */
+export const PEOPLE_ATLAS_PIXELS = 1024;
+/** The picture `process_people.py` writes beside its GLB, before `encode-ktx2.ts`. */
+export const PEOPLE_ATLAS_MADE = 'people_atlas.png';
 
 /**
  * Every upstream input. Why each one, briefly — `docs/spikes/0005` has the
@@ -1612,7 +1718,7 @@ export const SOURCES: readonly AssetSource[] = [
         // #623: the build's targets, from the same commit.
         ...RIDER_BUILD_TARGETS.map((name) => ({
           path: `targets/${name}`,
-          url: `${MAKEHUMAN_RAW}/makehuman/data/targets/macrodetails/${name}`,
+          url: `${MAKEHUMAN_RAW}/makehuman/data/targets/${name.includes('/') ? name : `macrodetails/${name}`}`,
           mustContain: MAKEHUMAN_CC0_HEADER,
         })),
       ],
@@ -1656,6 +1762,24 @@ export const SOURCES: readonly AssetSource[] = [
           asset: { type: 'eyebrows', name: 'eyebrow001' },
           mustContain: MAKEHUMAN_CC0_HEADER,
         },
+        // The people's skin, garments and hair (PEOPLE_GARMENTS), each on its own row.
+        {
+          path: `skins/${PEOPLE_SECOND_SKIN.name}/${PEOPLE_SECOND_SKIN.picture}`,
+          asset: { type: 'skins', name: PEOPLE_SECOND_SKIN.name },
+        },
+        ...PEOPLE_GARMENTS.flatMap(({ type, name }) => [
+          {
+            path: `${type}/${name}/${name}.obj`,
+            asset: { type, name },
+            mustContain: MAKEHUMAN_CC0_HEADER,
+          },
+          {
+            path: `${type}/${name}/${name}.mhclo`,
+            asset: { type, name },
+            mustContain: MAKEHUMAN_CC0_HEADER,
+          },
+          { path: `${type}/${name}/${name}_diffuse.png`, asset: { type, name } },
+        ]),
       ],
     },
   }, // #1585: the house models, placed by the owner (HOUSE_MODEL_SOURCES).
@@ -1670,28 +1794,23 @@ export const SOURCES: readonly AssetSource[] = [
     resolution: '1k',
     maps: [CHAIN_LINK_SOURCE.opacity],
   }),
-  // #2540: the realistic world's car, placed by the owner.
+  // #2847: the realistic world's cars, placed by the owner (ADR 0085).
   {
     id: DELIVERY_CAR_SOURCE.id,
     licencePage: DELIVERY_CAR_SOURCE.page,
-    licencePhrase: 'Creative Commons CC0',
+    licencePhrase: 'This game assets is licensed under a CC0 1.0 Universal',
     licence: 'CC0-1.0',
-    author: 'Kenney',
+    author: 'GGBotNet',
     origin: {
       from: 'placed',
-      host: 'Kenney',
-      issue: 2540,
+      host: 'itch.io',
+      issue: 2847,
       archive: DELIVERY_CAR_SOURCE.archive,
       page: DELIVERY_CAR_SOURCE.page,
-      members: [
-        { path: DELIVERY_CAR_SOURCE.model },
-        { path: DELIVERY_CAR_SOURCE.colourMap },
-        // The kit's own licence file, which names the grant.
-        {
-          path: DELIVERY_CAR_SOURCE.licenceFile,
-          mustContain: 'License: (Creative Commons Zero, CC0)',
-        },
-      ],
+      members: DELIVERY_CAR_SOURCE.bodies.flatMap((body) => [
+        { path: body.model },
+        ...body.paints.map((path) => ({ path })),
+      ]),
     },
   },
 ];
@@ -2115,16 +2234,29 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   [REALISTIC_RIDER_PACK.lod]: { triangles: 1998, vertices: 1352, moving: 361, phases: 32 },
   // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
   [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8996, crashMoments: 6 },
-  // #2540: the car, part by part. A run that cut a wheel differently, or
-  // split the paint off another swatch, is not this one.
+  // #2839: the female rider, held to the same eyes and the same crash clip.
+  [REALISTIC_RIDER_FEMALE]: {
+    eyeTriangles: RIDER_EYE_TRIANGLES,
+    // #2839's second round: and her hair, paid for out of her body's share.
+    hairTriangles: 212,
+    triangles: 8994,
+    crashMoments: 6,
+  },
+  // The people (PR #2844): the thigh's faces dropped under the one skirt, and
+  // the vertices the fingers' curl moved, over all three. A run that found a
+  // different hem, or curled other hands, is not this one.
+  [REALISTIC_PEOPLE.model]: { underSkirtFacesDropped: 179, fingerVerticesCurled: 9036 },
+  // #2847: the cars. A run that split a wheel off differently, read another
+  // texel as paint, or took another body, is not this one.
   [REALISTIC_DELIVERY_CAR]: {
-    triangles: 1192,
-    bodyTriangles: 570,
-    paintTriangles: 134,
-    glassTriangles: 10,
-    wheelTriangles: 120,
-    wheels: 4,
-    indicatorTriangles: 8,
+    triangles: 1222,
+    sourceTriangles: 1198,
+    bodies: 3,
+    nodes: 21,
+    wheelTriangles: 336,
+    indicatorTriangles: 24,
+    paintTexels: 33_135,
+    atlasPixels: DELIVERY_CAR_SOURCE.atlasPixels,
     levelsOfDetail: 1,
   },
 };
@@ -2180,7 +2312,7 @@ export const ROADSIDE_SCRIPT = 'blender/process_roadside_model.py';
 /** The script that builds the chain-link fence's 8 m piece — #1274. */
 export const CHAIN_LINK_SCRIPT = 'blender/process_chain_link.py';
 
-/** The script that makes the realistic world's car — #2540. */
+/** The script that makes the realistic world's cars — #2540, and since #2847 the three PSX cars and their atlas. */
 export const VEHICLE_SCRIPT = 'blender/process_vehicle.py';
 
 /** What the house models' atlas run writes, before the KTX2 step. */
@@ -2310,7 +2442,55 @@ export const OUTPUTS: readonly OutputSpec[] = [
         },
       ],
     },
-    modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with closed vents, and straps laid along the head) and glasses (forward-facing lenses, and arms along the temples) built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493): the skeleton posed at each of the moments in ${RIDER_CRASH} — thrown, landed, down and rising, between the riding pose at the start and the end — on the timeline of src/game/delivery/crash-look.ts and from the riding joints src/game/bicycle.ts gives (read by ${RIDER_CRASH_POSE}), as src/game/three-renderer.ts poses the rider, every bone's rotation and the root's position at each. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+    modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own — and the fingers of each hand closed round the brake hood (#2839) by MakeHuman's own finger bones and weights, after the bakes; and the helmet (a plain shell with closed vents, and straps laid along the head) and glasses (forward-facing lenses, and arms along the temples) built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493): the skeleton posed at each of the moments in ${RIDER_CRASH} — thrown, landed, down and rising, between the riding pose at the start and the end — on the timeline of src/game/delivery/crash-look.ts and from the riding joints src/game/bicycle.ts gives (read by ${RIDER_CRASH_POSE}), as src/game/three-renderer.ts poses the rider, every bone's rotation and the root's position at each. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+  },
+  // #2839: the female rider — the same run at `process_rider.py` §`BUILDS`'
+  // female build. It draws and bakes its own three maps into the scratch
+  // stage, as the run always does, and NONE of them ships (no `alsoWrites`):
+  // she wears the rider's, at MakeHuman's own texture coordinates
+  // (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`).
+  {
+    file: REALISTIC_RIDER_FEMALE,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: RIDER_SCRIPT,
+      args: [
+        'female',
+        // #2839's second round: her hair is paid for out of her body's share,
+        // and the whole held to the 8 996 she was first built to.
+        '8996',
+        String(RIDER_TEXTURE_PIXELS),
+        `female_${RIDER_MADE.colour}`,
+        `female_${RIDER_MADE.normal}`,
+        `female_${RIDER_MADE.orm}`,
+      ],
+      alsoReads: ['makehuman-system-assets'],
+      mark: RIDER_MARK_PIXELS,
+      crash: true,
+    },
+    modified: `the female rider (#2839): the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at the female end of its gender slider, with its default age and ethnic mix, muscle at 70 % and weight at 30 % — and her figure: MakeHuman’s own breast targets at its breast size slider’s 65 % and firmness slider’s 60 %, by its own arithmetic, and its own shape targets for narrower shoulders, waist and neck, wider hips and a softer jaw and brow, at the shares in ${RIDER_KIT} — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses, eyes and hair leave of 8 996 triangles, with texture coordinates and tangents and no colour of its own — and the fingers of each hand closed round the brake hood (#2839) by MakeHuman's own finger bones and weights, after the bakes; and the helmet, glasses and an eyeball in each socket (${String(RIDER_EYE_TRIANGLES)} triangles) built round this head’s own vertices exactly as the rider’s are, and her hair — a ponytail laid down the back of the neck from under the helmet’s back rim, and a band under the rim — from the numbers in ${RIDER_KIT} — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493), posed from the moments in ${RIDER_CRASH} on the riding joints read by ${RIDER_CRASH_POSE}, as the rider’s is. It carries no map: it wears the rider’s three at MakeHuman’s own texture coordinates. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+  },
+  // The people on the pavements (the owner's request of 2026-11-18): three
+  // dressed bodies in one GLB, and the one atlas they wear.
+  {
+    file: REALISTIC_PEOPLE.model,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: PEOPLE_SCRIPT,
+      args: [String(PEOPLE_TRIANGLES), String(PEOPLE_ATLAS_PIXELS), PEOPLE_ATLAS_MADE],
+      alsoReads: ['makehuman-system-assets'],
+      alsoWrites: [
+        {
+          file: REALISTIC_PEOPLE.atlas,
+          made: PEOPLE_ATLAS_MADE,
+          ktx2: { encoding: 'colour', origin: 'top-left' },
+          modified: `the people's one atlas, made in the same run by ${PIPELINE_DIRECTORY}${PEOPLE_SCRIPT}: for each of the three people a row of tiles — MakeHuman's CC0 system skins young_caucasian_male and young_caucasian_female (the face in one tile, the neck, arms and legs in another), the garments' and shoes' own photographs (male_casualsuit06, female_elegantsuit01, male_casualsuit05; shoes05, shoes01, shoes02), the hair's (short02, ponytail01, short01) and eyebrow001 — each cropped to what its faces use, box-filtered down to its tile, cut to the texels its faces cover and DIVIDED by a colour of its own and halved, so it holds the weave, the features and the strands as a share of a colour the renderer supplies — a garment's, a shoe's and the hair's by its mean; the skin's two tiles each by its median, the photograph's plain skin, with what is brighter than that (the shine the photograph was lit with) raised to 0.35; the bottoms by their median luminance alone, raised to 0.4, so a pair of trousers keeps its light and shade and none of its photograph's dye; and in a garment's or a shoe's tile neither the line its photograph draws round each piece nor a painted shadow is read, the cloth beside it spread over both; the hair's and the brows' own opacity in alpha, everything else opaque; the eyes and the scalp one flat tone each. MakeHuman's own wordmark, which male_casualsuit06 prints on its chest, back and sleeve, is painted out before the picture is read, and no photograph's corner (which carries its publisher's address) is inside a tile`,
+        },
+      ],
+    },
+    modified: `three people for the pavements, each MakeHuman's base mesh in a build of its own — MakeHuman’s own macro targets at its default age and ethnic mix: the rider's own build (gender 50 %, muscle 85 %, weight 25 %), a woman (gender 0 %, muscle 50 %, weight 50 %) and a man (gender 100 %, muscle 50 %, weight 50 %) — dressed in MakeHuman's own CC0 garments, shoes, hair and eyebrows, each fitted through its own .mhclo as MakeHuman fits a proxy (a weighted mean of three base vertices and an offset scaled by the body) and skinned by the same three vertices' weights; the base vertices each garment hides dropped, and under the woman's skirt every face of the thigh that reaches above its hem; each finger curled in the rest mesh, by MakeHuman's own finger bones and weights, into a relaxed hand before those bones are dropped; the eyes the base mesh's own eye helpers; the head under the hair drawn as hair; the skeleton reduced from 163 bones to the rider's 24 with each dropped bone’s weights merged into its nearest kept ancestor; each part (head, limbs, top, bottoms, shoes, hair) collapse-decimated to its share of ${String(PEOPLE_TRIANGLES)} triangles a person, and its texture coordinates moved into the people's atlas; three skinned meshes in the rest pose, a primitive a region (skin, top, bottoms, shoes, hair), with no picture and no colour of their own. Nobody is posed here: src/game/three-renderer.ts poses each from src/game/gait.ts when a ride begins`,
   },
   // #2485: the pack's rider — the bake half of #681. The same body, cut to
   // about 2 000 triangles, and its vertices posed at every phase of a crank
@@ -2331,7 +2511,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
         },
       ],
     },
-    modified: `the pack's rider: the body mesh only, in the rider's athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a cheaper helmet and glasses leave of ${String(RIDER_PACK_TRIANGLES)} triangles, with texture coordinates and no colour of its own; and the helmet (a plain shell of three rings, without vents or straps) and glasses (one forward-facing quad a lens) built round the head’s own vertices, coloured per vertex and skinned wholly to the head bone; two skinned meshes in the rest pose`,
+    modified: `the pack's rider: the body mesh only, in the rider's athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a cheaper helmet and glasses leave of ${String(RIDER_PACK_TRIANGLES)} triangles, with texture coordinates and no colour of its own — and the fingers of each hand closed round the brake hood (#2839) by MakeHuman's own finger bones and weights; and the helmet (a plain shell of three rings, without vents or straps) and glasses (one forward-facing quad a lens) built round the head’s own vertices, coloured per vertex and skinned wholly to the head bone; two skinned meshes in the rest pose`,
   },
   // #624: the bicycle's four maps, drawn here. ⚠️ `top-left`: they are drawn
   // in the orientation the bicycle's texture coordinates read them — row 0 is
@@ -2378,7 +2558,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     },
     modified: `the wire's opacity map (${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg), ${encodingWords({ encoding: 'data', origin: 'top-left' })}`,
   },
-  // #2540: the realistic world's car.
+  // #2847: the realistic world's three cars and their one atlas (ADR 0085).
   {
     file: REALISTIC_DELIVERY_CAR,
     from: DELIVERY_CAR_SOURCE.id,
@@ -2386,15 +2566,25 @@ export const OUTPUTS: readonly OutputSpec[] = [
       how: 'blender',
       script: VEHICLE_SCRIPT,
       args: [
-        String(DELIVERY_CAR_SOURCE.wheelTriangles),
-        String(DELIVERY_CAR_SOURCE.lengthMetres),
+        DELIVERY_CAR_ATLAS_MADE,
+        String(DELIVERY_CAR_SOURCE.atlasPixels),
         String(DELIVERY_CAR_SOURCE.widthMetres),
-        String(DELIVERY_CAR_SOURCE.heightMetres),
-        DELIVERY_CAR_SOURCE.paintCell,
+        ...DELIVERY_CAR_SOURCE.bodies.map(
+          (body) =>
+            `${body.name}|${body.model}|${String(body.lengthMetres)}|${body.paints.join(';')}`,
+        ),
+      ],
+      alsoWrites: [
+        {
+          file: REALISTIC_DELIVERY_CAR_ATLAS,
+          made: DELIVERY_CAR_ATLAS_MADE,
+          ktx2: { encoding: 'colour-alpha', origin: 'top-left' },
+          modified: `the cars' one atlas, made in the same run as the cars: the pack's own pictures of the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), 128 px each, and a white cell, two by two; in each picture the texels whose colour differs between the pack's paints of that body are its paint, stored as a grey shade (each paint's linear luminance over its own 90th percentile, averaged and kept at most 1) with alpha 1, and every other texel keeps the pack's own colour with alpha 0`,
+        },
       ],
     },
-    modified: `the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about ${String(DELIVERY_CAR_SOURCE.wheelTriangles)} triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part, and its glass coloured a dark tint in place of the kit's pale swatch; stood on the origin and brought to ${String(DELIVERY_CAR_SOURCE.lengthMetres)} m by ${String(DELIVERY_CAR_SOURCE.widthMetres)} m by ${String(DELIVERY_CAR_SOURCE.heightMetres)} m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture`,
-    credit: { creator: 'Kenney', url: DELIVERY_CAR_SOURCE.page },
+    modified: `three of the pack's cars, the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), each read from its OBJ: kept whole, its four wheels split off as their own parts at their hubs, scaled evenly to ${DELIVERY_CAR_SOURCE.bodies.map((body) => `${String(body.lengthMetres)} m`).join(', ')} long and stood on the origin, its texture coordinates moved into its cell of the cars' atlas; an amber indicator added at each corner; every corner coloured white (the indicators amber), the pack's own normals kept, and its material and picture dropped; geometry, colour a corner and texture coordinates only, the picture in the atlas`,
+    credit: { creator: 'GGBotNet', url: DELIVERY_CAR_SOURCE.page },
   },
 ];
 

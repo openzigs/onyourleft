@@ -22,6 +22,8 @@ import {
   GRADIENT_KEY,
   MOVING_TIME_KEY,
   NO_READING,
+  PACER_POWER_KEY,
+  PACER_POWER_LABEL,
   POWER_QUALIFIERS,
   RIDE_CLOCK_LABEL,
   RIDE_TOTAL_KEYS,
@@ -41,6 +43,7 @@ import {
   type HudInput,
 } from './fields';
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
+import { PACER_DOING_TEXT, PACER_OWN_PACE_TEXT } from '../pacer-doing';
 import { atStartLine } from '../simulation';
 import { FRESH_WEEK, recordDelivery, recordMiss, startRound } from '../delivery/round';
 import {
@@ -1216,6 +1219,39 @@ describe('the room on the HUD — #783', () => {
     expect(withIt.filter((key) => key !== 'solo-draft')).toEqual(without);
   });
 
+  it('shows the AI pacer’s power, whole, and what it is doing, beside its gap — #2864', () => {
+    const pacer = (watts: number | undefined, doing?: keyof typeof PACER_DOING_TEXT) =>
+      hudReadings({ ...baseInput(), aiPacer: { watts, doing } }).find(
+        (r) => r.key === PACER_POWER_KEY,
+      );
+    // The owner's examples: "Pacer 185 W · waiting for you", "Pacer 215 W · chasing".
+    expect(pacer(184.6, 'waiting')).toMatchObject({
+      label: PACER_POWER_LABEL,
+      value: '185',
+      unit: 'W',
+      detail: 'waiting for you',
+      stale: false,
+    });
+    expect(pacer(215.2, 'chasing')).toMatchObject({ value: '215', detail: 'chasing' });
+    for (const [doing, words] of Object.entries(PACER_DOING_TEXT)) {
+      expect(pacer(200, doing as keyof typeof PACER_DOING_TEXT)?.detail).toBe(words);
+    }
+    // With no decision in force it rides #92's own rule, and says so.
+    expect(pacer(200)?.detail).toBe(PACER_OWN_PACE_TEXT);
+    // A dash before the pacer has ridden a step, never a zero.
+    expect(pacer(undefined)?.value).toBe(NO_READING);
+    expect(pacer(Number.NaN)?.value).toBe(NO_READING);
+    // Absent on every other ride, and every other field where it was; after the gaps.
+    const without = hudReadings(baseInput()).map((r) => r.key);
+    const withIt = hudReadings({
+      ...baseInput(),
+      aiPacer: { watts: 200, doing: 'with-you' },
+    }).map((r) => r.key);
+    expect(without).not.toContain(PACER_POWER_KEY);
+    expect(withIt.filter((key) => key !== PACER_POWER_KEY)).toEqual(without);
+    expect(withIt.indexOf(PACER_POWER_KEY)).toBe(withIt.indexOf('gap') + 1);
+  });
+
   it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {
     const draft = (value: number | 'off' | undefined) =>
       hudReadings({ ...baseInput(), room: { nearby: 1, draft: value, draftShown: true } }).find(
@@ -2097,5 +2133,49 @@ describe('power as a 3 s average or instant — #2420', () => {
     expect(pick(effort('average'), ZONE_KEY)).toBe('3');
     expect(pick(effort('instant'), WATTS_PER_KILOGRAM_KEY)).toBe('4.8');
     expect(pick(effort('instant'), ZONE_KEY)).toBe('6');
+  });
+});
+
+/**
+ * #3056: an open-world ride's profile is the rolling view of the road held round
+ * the rider (`HudInput.openEnded`), which a new view replaces every 2–3 km. A
+ * place in that view is not how much of the ride is done, so the strip states
+ * no share of it at all — in the sentence or in the name a screen reader reads.
+ */
+describe('an open-ended ride — #3056', () => {
+  const along = (input: HudInput, fraction: number): HudInput => ({
+    ...input,
+    state: {
+      ...input.state,
+      ride: {
+        speed: metresPerSecond(6),
+        distance: metres((input.profile.totalDistance as number) * fraction),
+      },
+    },
+  });
+  const strip = (input: HudInput, openEnded?: boolean) =>
+    profileReading(input.state, input.profile, input.lapSeconds, openEnded);
+
+  it('states no percentage anywhere in the view, in the sentence or the accessible name', () => {
+    for (const fraction of [0, 0.16, 0.38, 1]) {
+      const reading = strip(along(baseInput(), fraction), true);
+      expect(reading.text).toBe('Open road');
+      expect(reading.label).toBe('Road profile, open road');
+    }
+  });
+
+  it('states no lap or lap time either, whatever shape the view has', () => {
+    const reading = strip({ ...along(loopInput(), 1.25), lapSeconds: 65 }, true);
+    expect(reading.text).toBe('Open road');
+    expect(reading.label).toBe('Road profile, open road');
+  });
+
+  it('still draws the marker at the rider’s place in the view', () => {
+    expect(strip(along(baseInput(), 0.38), true).position).toBeCloseTo(0.38, 6);
+  });
+
+  it('leaves a route ride exactly as it was', () => {
+    expect(strip(along(baseInput(), 0.38), false).text).toBe('38% complete');
+    expect(strip(along(baseInput(), 0.38)).label).toBe('Route profile, 38 per cent complete');
   });
 });

@@ -30,8 +30,13 @@ import {
   BUILDING_PART_FIELDS_DECODED,
   buildingFieldsTile,
   lakeTile,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   PLACE_SENTINEL,
   placesTile,
+  POI_FIXTURE_BUILDINGS,
+  POI_SENTINEL,
+  poisTile,
   residentialBlockTile,
   sidewalkTile,
   woodWithHoleTile,
@@ -297,7 +302,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(5);
+    expect(CORRIDOR_READER_VERSION).toBe(9);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
@@ -343,6 +348,114 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(state).length).toBeGreaterThan(0);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+  });
+});
+
+describe('#2975 POI classes: through the real store and back, with no name or point', () => {
+  it('reads a tile of POIs, keeps each footprint’s class, and a fresh connection hands the plan the same classes', async () => {
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: poisTile() })),
+      }),
+    );
+    const classes = (state: CorridorState): unknown[] => {
+      if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+      return state.corridor.buildings.map((building) => building.poi);
+    };
+    const first = classes(await load(portOver(freshStore(), source, on()), route));
+    const want = POI_FIXTURE_BUILDINGS.map((building) => building.poi);
+    // Every covered tile's footprints, each with its fixture's class.
+    expect(first.length).toBeGreaterThanOrEqual(want.length);
+    expect(first).toStrictEqual(
+      Array.from({ length: first.length / want.length }).flatMap(() => want),
+    );
+    const calls = source.calls.length;
+
+    for (const store of stores) store.close();
+    const second = classes(await load(portOver(freshStore(), source, on()), route));
+    // Read from the store, not the archive: the class was kept.
+    expect(source.calls.length).toBe(calls);
+    expect(second).toStrictEqual(first);
+
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    if (kept === undefined) throw new Error('nothing kept');
+    const text = await new Response(
+      kept.features.stream().pipeThrough(new DecompressionStream('gzip')),
+    ).text();
+    expect(text).toContain('"p":"fuel"');
+    // No name, brand or `kind_detail` of a POI reached the store.
+    expect(text).not.toContain(POI_SENTINEL);
+  });
+
+  it('reads again a row kept at reader version 7, before POI classes were kept, rather than trusting it', async () => {
+    // #2975 lands at reader 8 on top of #2974's 7: a row the version-7 build
+    // kept holds no footprint's class, so this build must not trust it. The
+    // blob is this build's own packed version, so only the reader version
+    // stands between that row and the ride.
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: poisTile() })),
+      }),
+    );
+    await keepRow(
+      route,
+      7,
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    expect(state.corridor.buildings.map((building) => building.poi)).toContain('fuel');
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+    expect(kept?.readerVersion).toBe(9);
+  });
+});
+
+describe('#2688 pitches’ sports: a row kept before them read again', () => {
+  it('reads again a row kept at reader version 8, by the build with POI classes and no pitch’s sport, rather than trusting it', async () => {
+    // #2688 lands at reader 9 on top of #2975's 8: a row the version-8 build
+    // kept holds POI classes but no pitch's sport, so this build must not
+    // trust it. The blob is this build's own packed version, so only the
+    // reader version stands between that row and the ride.
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: pitchesTile() })),
+      }),
+    );
+    await keepRow(
+      route,
+      8,
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    expect(new Set(state.corridor.landUse.map((polygon) => polygon.sport))).toStrictEqual(
+      new Set(
+        PITCH_FIXTURE_POLYGONS.map((pitch) => (pitch.kept === null ? undefined : pitch.kept)),
+      ),
+    );
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+    expect(kept?.readerVersion).toBe(9);
   });
 });
 
@@ -427,8 +540,9 @@ describe('#1789 building fields: through the real store and back, and a row with
     await keepRow(
       route,
       CORRIDOR_READER_VERSION,
-      // #2659: 6, since 5 is now this reader's own.
-      await gzipJson({ v: 6, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      // #2659: 6, since 5 was this reader's own; #2660: 7, since 6 then was;
+      // #2975: 8, since 7 then was; #2688: 9, since 8 now is.
+      await gzipJson({ v: 9, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
     );
     const state = await load(portOver(freshStore(), source, on()), route);
     expect(state.kind).toBe('ready');

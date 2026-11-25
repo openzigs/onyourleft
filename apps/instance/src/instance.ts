@@ -46,6 +46,8 @@ import {
 import type { ModelConnection } from './analysis/model-turn.ts';
 import { hostedForPictures, SIDE_POSE_PICTURE_QUESTION } from './camera/hosted-pictures.ts';
 import { createSidePose } from './camera/side-pose.ts';
+import { createRouting, type InstanceRouting } from './routing/routing.ts';
+import { createValhalla } from './routing/valhalla.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
@@ -345,6 +347,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let hostedSettings: HostedSettings | undefined;
   let tactics: Tactics | undefined;
   let sidePose: SidePose | undefined;
+  let routing: InstanceRouting | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
@@ -383,25 +386,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   /**
    * #2855: where the setup would have run but the address is the template's
    * example, its paths answer the page that says what to set, and no setup
-   * code is made. This is the loopback port it is served on, or `undefined`.
+   * code is made. Its page is made once the loopback listener is up (below).
    */
-  const refusedSetupPort =
-    exampleOrigin && options.config.moderators.owner === undefined
-      ? server.adminLoopbackPort
-      : undefined;
-  const setupRefused = refusedSetupPort !== undefined;
-  let setup: Setup | undefined =
-    refusedSetupPort === undefined
-      ? undefined
-      : createExampleAddressSetup({ port: refusedSetupPort, name: options.config.name });
-  if (exampleOrigin) {
-    // Said at every such start, with where the page that explains it is, when there is one.
-    logEvent(
-      log,
-      EXAMPLE_ADDRESS_LOG_EVENT,
-      refusedSetupPort === undefined ? {} : { open: setupAddress(refusedSetupPort) },
-    );
-  }
+  const setupRefused =
+    exampleOrigin &&
+    options.config.moderators.owner === undefined &&
+    server.adminLoopbackPort !== undefined;
+  let setup: Setup | undefined;
   /** Whether this start voided a claim code the process before it showed (#2858). */
   let claimCodesVoidedAtStart = false;
   let stopSetup = (): void => undefined;
@@ -614,6 +605,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           },
         )
       : undefined;
+  // #3015: the port the loopback listener holds, read back from it: the operator's
+  // own, or the one the system chose when a test asked for 0. Every page, code and
+  // log line that names the setup's address is told this one.
+  const boundLoopback = adminLoopback?.server.address();
+  const loopbackPort =
+    typeof boundLoopback === 'object' && boundLoopback !== null ? boundLoopback.port : undefined;
+  if (setupRefused && loopbackPort !== undefined) {
+    setup = createExampleAddressSetup({ port: loopbackPort, name: options.config.name });
+  }
+  if (exampleOrigin) {
+    // Said at every such start, with where the page that explains it is, when there is one.
+    logEvent(
+      log,
+      EXAMPLE_ADDRESS_LOG_EVENT,
+      setupRefused && loopbackPort !== undefined ? { open: setupAddress(loopbackPort) } : {},
+    );
+  }
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();
   });
@@ -673,6 +681,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       options.config.pictures.kind === 'on'
         ? { state: 'on' }
         : { state: 'off', code: options.config.pictures.code },
+    );
+    // The routing engine (#2008): off unless the operator named one. Never its address.
+    logEvent(
+      log,
+      'routing',
+      options.config.routing.kind === 'on'
+        ? { state: 'on' }
+        : { state: 'off', code: options.config.routing.code },
     );
     // The hosted model key (#1097): whether one is held, and whether this
     // secret opens it. A key that will not open — a restore onto a box with
@@ -983,6 +999,21 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
       });
       sidePose = looks;
+      // #2008: the route planner's roads and heights, from the routing engine
+      // the operator named. With none, every request is `routing_off` and the
+      // rider's planner draws straight lines. Handed no store: nothing is kept.
+      const routingSettings = options.config.routing;
+      routing = createRouting({
+        engine:
+          routingSettings.kind === 'on'
+            ? createValhalla({
+                endpoint: routingSettings.endpoint,
+                resolve: options.resolve ?? systemResolver,
+              })
+            : undefined,
+        log,
+        now,
+      });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
@@ -1089,9 +1120,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           accounts === undefined ? undefined : (athleteId) => accounts.moderation.roleOf(athleteId),
         now,
         name: options.config.name,
-        ...(server.adminLoopbackPort === undefined
-          ? {}
-          : { loopbackPort: server.adminLoopbackPort }),
+        ...(loopbackPort === undefined ? {} : { loopbackPort }),
         addresses: server.adminAddresses,
         // #2650: the Keys page's; the card is drawn on the loopback listener only.
         instanceKeys: keys,
@@ -1117,7 +1146,6 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     }
     // #2784 (ADR 0080 D-1, D-2, D-7): the first-run setup wizard on the
     // loopback listener, with the owner's claim it mints and confirms.
-    const loopbackPort = server.adminLoopbackPort;
     if (setupOn && identity !== undefined && loopbackPort !== undefined && server.origin !== null) {
       const wizard = createSetup({
         store,
@@ -1216,6 +1244,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
             ...(tactics === undefined ? {} : { tactics }),
             ...(sidePose === undefined ? {} : { sidePose }),
+            ...(routing === undefined ? {} : { routing }),
           }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).

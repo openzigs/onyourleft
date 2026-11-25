@@ -339,3 +339,90 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [#2964](https://github.com/openzigs/onyourleft/pull/2964) implements it for #2897, and
   [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s taps go through the same path.
   (#2959)
+- **2026-11-20** — **The owner ruled that straight is the way most nearly dead ahead by bearing.** At
+  a junction with three ways on or fewer, a straight press chooses the way with the smallest
+  absolute turn from the rider's heading, not the middle way of three by position: at ways leaving
+  at −90°, −30° and 0°, straight takes 0°, and so does right. Left still takes the furthest-left way
+  and right the furthest-right, so with two ways left and right take the two ends and straight
+  takes the one more nearly ahead. That is D-1.4's default, so a straight press and no press always
+  agree, and a tie is broken as D-1.4 breaks one: the turn counted in whole degrees, then the higher
+  road class, then the right-hand way. With more than three ways on, D-1.3's parenthesis and the
+  earlier amendment of this date are unchanged. Because straight no longer names a position,
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s D-3.1 symbols point each way's
+  actual direction, its turn from the rider's heading, rather than a fixed left, up and right.
+  The ruling is posted on [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
+- **2026-11-20** — **The owner ruled that at three ways on, when straight is an end, that end's
+  press steps inward, so every way shown has a press.** Straight stays the way most nearly dead
+  ahead by bearing, as the amendment above records. At a junction of three ways on, when that way is
+  also the furthest left or the furthest right, the press for that end does not take it a second
+  time: it takes the middle way instead, and the other end's press keeps its end. At ways leaving at
+  −90°, −30° and 0°, left takes −90°, straight 0° and right −30°; at −15°, 40° and 95°, left takes
+  40°, straight −15° and right 95°. With two ways on each way already has a press, so left and right
+  keep the two ends even when straight is one of them. With more than three ways on, D-1.3's
+  parenthesis is unchanged. Nothing in this reaches the trainer: a press still changes only which
+  branch the rolling route appends (D-5.1). The ruling is posted on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
+- **2026-11-22** — **The owner ruled that the prompt is a pop-up in the middle of the screen, which
+  the ride controls' fade does not reach.** The owner reported on 2026-11-22, on the Pixel Tablet:
+  *"the controls also disappear in the box. I was thinking we would see popups in the middle of the
+  screen when possible turns were upcoming to make turns"*.
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898) had drawn D-1.2's prompt and D-3.1's
+  symbols in the HUD's ride-controls panel. That panel fades and is then clipped after a few seconds
+  with no touch ([ADR 0075](0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md)), and its
+  first tap only brings it back. So D-1.2 and D-3.1 now read as follows. The prompt's ways are a
+  pop-up in the upper middle of the view, clear of the drawn rider and of the road just ahead. It is
+  drawn from the prompt distance until the choice is final, then shows the chosen way alone briefly
+  and goes away. It is never subject to the controls' fade, and its first tap is that way's press.
+  The U-turn button of D-3's screen row stays with the ride controls and fades with them, because it
+  is not a junction's. D-3.1's taps and D-3's keys, pad and numbered buttons go through the same
+  press path as before. D-3.1.3 is unchanged: the pop-up is inside the HUD's touch-locked region and
+  carries no `TOUCH_LOCK_EXEMPT`. The owner also asked for a semi-transparent pop-up. The HUD's
+  surface stays opaque, because translucency needs its own ADR (#423, ADR 0063). The pop-up paints
+  nothing between its parts, and each part a rider reads is on the opaque surface. Nothing in this
+  reaches the trainer (D-5). The ruling is posted on
+  [#3053](https://github.com/openzigs/onyourleft/issues/3053), whose pull request implements it.
+  (#3053)
+- **2026-11-24** — **The owner ruled that while the next junction's choice is final, the prompt is
+  for the first junction after it whose choice is not, within 250 m.** The owner's tablet ride of
+  2026-11-24 found streets that offered no turn, and
+  [#3128](https://github.com/openzigs/onyourleft/pull/3128) found the cause in a dense town: D-1.2
+  prompted only the next junction, so a junction less than 100 m after the last one was inside
+  D-1.5's lock from the moment it was prompted, and took its default. So D-1.2 now reads as follows.
+  The prompt is for the next junction while its choice is not final. Once it is, the prompt is for
+  the first junction after it whose choice is not final, within the 250 m prompt distance, and a
+  press is for that junction. When no such junction is within 250 m, the prompt stays on the
+  furthest junction whose choice is final, which is the one it showed last, so it never steps back
+  to a junction it has left (*the implementer's choice*; the ruling did not say). When the junction
+  prompted is not the next one, the prompt says which junction it is for: "At the 2nd junction"
+  (new wording, for the owner's approval). D-1.5's 100 m lock and ADR 0087 D-6.2's grade safety are
+  unchanged: the rolling route refuses a choice within 100 m of its junction, whichever junction is
+  shown, so no choice is ever made inside 100 m, and a choice at the junction after next changes no
+  grade before it. D-1.5's last sentence still holds for a junction whose choice is final before it
+  is ever prompted, and the owner ruled the words: the prompt shows "Too close to the last junction
+  to choose" in place of "Choice locked" for such a junction, and only for one. A roundabout's ring
+  is a run of ordinary junctions in the street graph (ADR 0091 D-5) until
+  [#2893](https://github.com/openzigs/onyourleft/issues/2893) flags it, so nothing here treats its
+  exits apart. Three things this changes for a junction with another less than 150 m after it,
+  which the prompt reaches as the first one locks. D-1.5's "the prompt shows that it is locked" no
+  longer holds for it: the pop-up moves on to the next junction as its choice becomes final, so
+  its lock is not shown. D-3's "announced … once when it locks" still holds, in another form: the
+  lock, with the way taken, is said at the front of the next junction's first sentence ("Junction
+  choice locked: left. At the 2nd junction: …", or "Choice at the 2nd junction locked: left. At
+  the 3rd junction: …" while the junction before it is still ahead; new wording for the owner's
+  approval). And the Consequences bullet "Late presses do nothing" no longer holds for it: a press
+  inside its lock chooses at the junction the prompt shows, and still does nothing at the locked
+  one. The ruling is posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129), whose
+  pull request implements it. (#3129)
+- **2026-11-24** — **The owner ruled that a U-turn within 100 m past the junction just turned at
+  takes, as its default there, the way back onto the street the rider came along.** The owner's
+  same ride: *"i turned off a street then did a u turn and was not offered to turn back onto the
+  street I originally turned off"*. Turned round within 100 m past a junction, the rider faces it
+  inside D-1.5's lock, so D-1.4's default, the way most nearly straight on, was taken and no press
+  could change it. Now the road back from such a U-turn takes, as its default at that junction, the
+  way back onto the street the rider came along, which undoes the turn. The U-turn itself sets it:
+  D-1.6's U-turn already changes the road under the rider at once and walks the grade there (ADR
+  0087 D-6.4), so no choice is made inside a lock. A U-turn more than 100 m past the junction keeps
+  D-1.4's default, and a press before the lock chooses there as at any junction. The ruling is
+  posted on [#3129](https://github.com/openzigs/onyourleft/issues/3129), whose pull request
+  implements it. (#3129)

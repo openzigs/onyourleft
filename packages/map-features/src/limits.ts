@@ -47,6 +47,18 @@ export interface DecodeLimits {
    * decoder stops reading `places` at it, and the tile's other layers stand.
    */
   readonly maxPlacesPerTile: number;
+  /**
+   * POI points of a kept class matched from one tile (#2975). Not a refusal,
+   * as {@link maxPlacesPerTile} is not: the decoder stops reading `pois` at
+   * it, and the tile's footprints stand.
+   */
+  readonly maxPoisPerTile: number;
+  /**
+   * Work matching a tile's POIs to its footprints may spend (#2975, the
+   * review of #2996). Not a refusal: matching stops at it, the matches made
+   * stand, and the tile's footprints stand.
+   */
+  readonly maxPoiMatchWork: number;
 }
 
 /**
@@ -95,6 +107,38 @@ export const MAX_RINGS_PER_POLYGON = 256;
  */
 export const MAX_PLACES_PER_TILE = 768;
 
+/**
+ * 2,048 (#2975). Counted over the points whose `kind` is one of
+ * `schema.ts` §`POI_CLASS_OF_KIND`'s, not over the layer: on 2026-11-21, of
+ * nine z15 tiles of `basemap-us-oyl-20261031` (five downtowns, two main
+ * streets, two suburban strips), the densest — midtown Manhattan, 2,584
+ * points in all — held 754 of those, 435 places to eat or drink and 319
+ * shops; the next was 327. Past it the decoder **stops**, as it does for
+ * places: the points after it are dropped, and the tile is not refused, since
+ * a shopfront is a cue and worth less than the footprints it would dress. The
+ * layer's own feature count is still held to {@link MAX_FEATURES_PER_LAYER},
+ * 7.7 times the 2,584.
+ */
+export const MAX_POIS_PER_TILE = 2_048;
+
+/**
+ * 2,000,000 (#2975, the review of #2996). Matching costs the POIs times the
+ * vertices of the footprints near each, and {@link MAX_POIS_PER_TILE} and
+ * {@link MAX_VERTICES_PER_TILE} each bound one side but not the product: a
+ * hostile tile of 48 stacked 8,000-vertex footprints and 2,048 fuel stations,
+ * under every other limit, took 8.3 s on the main thread. A unit is one
+ * footprint a POI looks at or one vertex a distance walks, and a cell a
+ * footprint is bucketed in is eight (`poi-match.ts`), so the budget is about
+ * 25 ms of work on an M4 Pro. **Not measured against the archive**: it is
+ * set from the densest tile #2975 counted, midtown Manhattan's 754 kept POIs,
+ * which at a dozen neighbours of a few dozen vertices each is a few hundred
+ * thousand units, and a downtown's 13,000 footprints of two or three cells
+ * each, a few hundred thousand more. Past it matching **stops**, and the POIs
+ * after are dropped: a shopfront is a cue, and that is the safe direction to
+ * be wrong in.
+ */
+export const MAX_POI_MATCH_WORK = 2_000_000;
+
 /** The limits a caller gets when it names none. */
 export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxBytes: MAX_TILE_BYTES,
@@ -103,4 +147,6 @@ export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxVerticesPerTile: MAX_VERTICES_PER_TILE,
   maxRingsPerPolygon: MAX_RINGS_PER_POLYGON,
   maxPlacesPerTile: MAX_PLACES_PER_TILE,
+  maxPoisPerTile: MAX_POIS_PER_TILE,
+  maxPoiMatchWork: MAX_POI_MATCH_WORK,
 };

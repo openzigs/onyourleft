@@ -143,6 +143,9 @@ services:
       # #2840: the context the `ollama` service below loads the model with, from one variable.
       OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS:-16384}
       OYL_INSTANCE_PICTURE_MODEL: ${OYL_INSTANCE_PICTURE_MODEL:-}
+      # #2008: http://routing:8002 with the `routing` service below running;
+      # empty, and riders' planners draw straight lines.
+      OYL_INSTANCE_ROUTING_URL: ${OYL_INSTANCE_ROUTING_URL:-}
       # The secret a hosted model key (#1097) and the instance's own keys
       # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
       # it, so nothing that writes a snapshot holds the secret that opens the
@@ -318,6 +321,69 @@ services:
     volumes:
       - models:/root/.ollama
 
+  # Road routing for the route planner (#2008, ADR 0010 D-4): Valhalla, MIT,
+  # reached by the instance over HTTP by this service's name, never linked.
+  # OPTIONAL, like Ollama: with it off, the planner draws straight lines
+  # between waypoints and a rider loses nothing else (ADR 0036 D-3).
+  #
+  # Two services, each behind its own profile, so `deploy.sh` starts neither:
+  #
+  #   1. `routing-build`, ONCE and again when the map should be newer:
+  #        docker compose --profile routing-build run --rm routing-build
+  #      Builds the routing graph, with heights, from the OpenStreetMap
+  #      extract OYL_ROUTING_PBF names (one `.osm.pbf` on this machine, read
+  #      only), into the `routing` volume, and prints how long each step took,
+  #      the most memory it held and the disk it used. Stop `routing` first:
+  #      the build replaces the graph it reads.
+  #   2. `routing` (COMPOSE_PROFILES=routing in .env), then
+  #      OYL_INSTANCE_ROUTING_URL=http://routing:8002 in .env.
+  #
+  # The heights are Tilezen's terrain tiles, downloaded by
+  # `valhalla_build_elevation` from their public bucket for the graph's area
+  # only (docs/operating-an-instance.md, "Road routing", names the sources).
+  #
+  # ⚠️ NO `ports:`, EVER: Valhalla's API has NO AUTHENTICATION and answers
+  # anything about any place. The instance is the only thing that talks to it,
+  # for signed-in riders, sealed, rate limited, and logs no coordinate.
+  # Pinned by digest: `docker buildx imagetools inspect
+  # ghcr.io/valhalla/valhalla:3.9.1`, read 2026-11-24 (amd64 and arm64). MIT.
+  routing-build:
+    image: &valhalla-image ghcr.io/valhalla/valhalla:3.9.1@sha256:4fd114eb1d26b8fc2f43bcb3df234c1b63a0bf13c277405e5943d5361dc575de
+    profiles: ['routing-build']
+    restart: 'no'
+    environment:
+      OYL_ROUTING_THREADS: ${OYL_ROUTING_THREADS:-4}
+    entrypoint: ['bash', '-c']
+    command:
+      - >-
+        set -euo pipefail;
+        step() { local name="$$1"; shift; local began=$$(date +%s); "$$@" >"/data/graph/$$name.log" 2>&1 || { echo "routing-build: $$name failed; its log is /data/graph/$$name.log in the routing volume"; tail -n 20 "/data/graph/$$name.log"; exit 1; }; echo "routing-build: $$name $$(( $$(date +%s) - began )) s"; };
+        test -f /input/extract.osm.pbf || { echo 'routing-build: set OYL_ROUTING_PBF in .env to an .osm.pbf extract on this machine'; exit 1; };
+        began=$$(date +%s);
+        rm -rf /data/graph; mkdir -p /data/graph; cd /data/graph;
+        valhalla_build_config --mjolnir-tile-dir /data/graph/tiles --mjolnir-tile-extract /data/graph/graph.tar --mjolnir-admin /data/graph/admins.sqlite --mjolnir-concurrency "$$OYL_ROUTING_THREADS" --additional-data-elevation /data/graph/elevation --httpd-service-listen tcp://*:8002 --loki-use-connectivity False >/data/graph/valhalla.json;
+        step admins valhalla_build_admins -c /data/graph/valhalla.json /input/extract.osm.pbf;
+        step tiles valhalla_build_tiles -c /data/graph/valhalla.json /input/extract.osm.pbf;
+        step elevation valhalla_build_elevation --from-tiles --decompress -c /data/graph/valhalla.json -p "$$OYL_ROUTING_THREADS" -v;
+        rm -rf /data/graph/tiles;
+        step tiles-with-heights valhalla_build_tiles -c /data/graph/valhalla.json /input/extract.osm.pbf;
+        step extract valhalla_build_extract -c /data/graph/valhalla.json -v;
+        rm -rf /data/graph/tiles;
+        echo "routing-build: done in $$(( $$(date +%s) - began )) s";
+        echo "routing-build: peak memory $$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo unknown) bytes";
+        echo "routing-build: disk $$(du -sb /data/graph | cut -f1) bytes ($$(du -sb /data/graph/elevation | cut -f1) of them heights)"
+    volumes:
+      - routing:/data
+      - ${OYL_ROUTING_PBF:-/dev/null}:/input/extract.osm.pbf:ro
+
+  routing:
+    image: *valhalla-image
+    profiles: ['routing']
+    restart: unless-stopped
+    command: ['valhalla_service', '/data/graph/valhalla.json', '${OYL_ROUTING_THREADS:-4}']
+    volumes:
+      - routing:/data:ro
+
   # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
   # second directory on the box, and a copy of it OFF the box — a USB drive
   # or a share, whatever OYL_OFFBOX_DIR names. The newest OYL_BACKUP_KEEP of
@@ -396,6 +462,9 @@ volumes:
   # `ollama pull`, so not backed up. The history index itself is in `data`,
   # and is made again from the synced items if it is ever lost (ADR 0040 D-1).
   models:
+  # The routing graph and its heights (#2008): built again from the extract
+  # by `routing-build`, so not backed up. Nothing of a rider's is in it.
+  routing:
   # #2805: Tailscale's state, this machine's identity on the tailnet. Not
   # backed up: lost, the machine signs in again as a new one, and keeps its
   # name only if the old one is removed from the tailnet first — a new name is

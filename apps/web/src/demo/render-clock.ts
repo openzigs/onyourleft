@@ -27,8 +27,12 @@ export interface DemoRenderControl {
    * page to show it; how many frames were drawn (one on a playing stage).
    */
   step(stepMs: number): Promise<number>;
-  /** Show the closing card a baked route's video ends on, and wait for the page to show it. */
-  closingCard(): Promise<void>;
+  /**
+   * Show the closing card a baked route's video, and a captioned tour, ends on,
+   * and wait for the page to show it. `credit`: whether the video drew a baked
+   * route's map data in any scene (#3074).
+   */
+  closingCard(options: { readonly credit: boolean }): Promise<void>;
 }
 
 /** A {@link FrameScheduler} whose time moves only when {@link step} is called. */

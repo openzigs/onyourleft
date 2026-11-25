@@ -48,8 +48,10 @@
  * - {@link REALISTIC_CHAIN_LINK} is the chain-link fence beside industrial,
  *   school and sports grounds (#1274): Poly Haven's, its frame coloured a
  *   vertex at a time and its wire a cut-out picture.
- * - {@link REALISTIC_DELIVERY_CAR} is Delivery's parked car since #2540:
- *   Kenney's CC0 sedan, a colour a corner, its wheels and indicators apart.
+ * - {@link REALISTIC_DELIVERY_CAR} is Delivery's parked cars since #2847:
+ *   three of GGBotNet's CC0 "PSX Style Cars", their wheels and indicators
+ *   apart, wearing one atlas ({@link REALISTIC_DELIVERY_CAR_ATLAS}). It was
+ *   Kenney's sedan from #2540.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -57,6 +59,8 @@
  */
 
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
+
+import type { RiderBody } from '@onyourleft/store';
 
 import type { BuildingRole, BuiltKind } from './buildings';
 import type { ScatterKind, StructureKind } from './scatter';
@@ -603,6 +607,34 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The FEMALE rider's body — #2839, the owner's ruling of 2026-11-18: the same
+ * pipeline run as {@link REALISTIC_RIDER} at MakeHuman's female build, with
+ * its own helmet, glasses and eyes built round its own head and its own crash
+ * clip, inside the same triangle budget.
+ *
+ * ⚠️ **It ships no maps of its own**: it wears {@link REALISTIC_RIDER_MAPS} at
+ * its own MakeHuman texture coordinates, as the pack's rider does
+ * ({@link REALISTIC_RIDER_PACK}) — every MakeHuman build shares one set of
+ * texture coordinates — so a ride with both bodies holds one set of rider
+ * textures, not two, and the second body costs a download of this one file.
+ *
+ * ⚠️ **Loaded only when a ride draws a female rider** (`three-renderer.ts`
+ * §`loadRealisticWorld`), so a ride with none downloads and holds what it did.
+ */
+export const REALISTIC_RIDER_FEMALE = 'rider_female.glb';
+
+/**
+ * The model each rider body is drawn with in the realistic world — #2839. A
+ * `Record` over `@onyourleft/store`'s `RiderBody`, so a body the store accepts
+ * with no model here is a compile error. `male` is the rider every athlete
+ * was drawn as before #2839, and the default (`rider-body.ts` §`riderBodyFor`).
+ */
+export const REALISTIC_RIDER_BODIES: Readonly<Record<RiderBody, string>> = {
+  female: REALISTIC_RIDER_FEMALE,
+  male: REALISTIC_RIDER,
+};
+
+/**
  * The animation in {@link REALISTIC_RIDER} that is the body's own fall and
  * get-up in a Delivery crash — #2493, made by `tools/realistic/blender/
  * process_rider.py` from `rider_crash.py`'s moments on #2475's timeline, and
@@ -822,16 +854,60 @@ export const REALISTIC_CHAIN_LINK = {
 } as const;
 
 /**
- * The car a Delivery round's parked cars are drawn as in the realistic world —
- * #2540: Kenney's CC0 Car Kit sedan, made by `tools/realistic/blender/
- * process_vehicle.py` into eight named parts — `body`, `paint` (the body's
- * paint, which each car wears its own of), four wheels (`wheel-front-left`
- * and so on, each node at its hub) and `indicator-left` and
- * `indicator-right` — each a colour a corner, with no picture and no
- * material, so it is drawn inside the Delivery obstacles' one instanced call
- * (`three-renderer.ts` §`DeliveryBelt`). The stylised world keeps its own car.
+ * The cars a Delivery round's parked cars are drawn as in the realistic world
+ * — #2847, ADR 0085: three bodies of GGBotNet's CC0 "PSX Style Cars" pack, a
+ * saloon, a hatchback and a station wagon, made by `tools/realistic/blender/
+ * process_vehicle.py` into seven named parts a body, each node named
+ * `<body>-<part>`: `body`, four wheels (`wheel-front-left` and so on, each
+ * node at its hub) and `indicator-left` and `indicator-right`. Each corner
+ * carries a colour and a texture coordinate into
+ * {@link REALISTIC_DELIVERY_CAR_ATLAS}, and no material, so all three are drawn
+ * inside the Delivery obstacles' one instanced call (`three-renderer.ts`
+ * §`DeliveryBelt`). It was Kenney's sedan, `car_sedan.glb`, from #2540. The
+ * stylised world keeps its own car (ADR 0049 D-10: it stays Kenney's alone).
  */
-export const REALISTIC_DELIVERY_CAR = 'car_sedan.glb';
+export const REALISTIC_DELIVERY_CAR = 'cars.glb';
+
+/**
+ * The cars' one picture — #2847: the three bodies' own pictures and a white
+ * cell, two by two. A texel of a body's paint is a grey with alpha 1, which the
+ * renderer multiplies by the instance's paint; every other texel is the pack's
+ * own colour with alpha 0. The white cell is where every other obstacle's and
+ * the indicators' coordinates point, so they keep their own colour.
+ */
+export const REALISTIC_DELIVERY_CAR_ATLAS = 'cars_atlas_256.ktx2';
+
+/**
+ * The cars' bodies, in the order the atlas lays them out and a body's number
+ * names it — #2847, the owner's ruling of 2026-11-19: the pack's 4-door saloon,
+ * its 3-door hatchback and its 5-door station wagon. A node of
+ * {@link REALISTIC_DELIVERY_CAR} is named `<body>-<part>`.
+ */
+export const REALISTIC_DELIVERY_CAR_BODIES = ['saloon', 'hatchback', 'wagon'] as const;
+
+/**
+ * The people on the pavements — the owner's request of 2026-11-18 ("can we
+ * use a real model for the pedestrian"): MakeHuman's CC0 base mesh in three
+ * builds, each dressed in MakeHuman's own CC0 clothes, shoes and hair by
+ * `tools/realistic/blender/process_people.py`.
+ *
+ * - `model` — three skinned meshes, `person-a` to `person-c`, each under its
+ *   own skeleton of the rider's 24 bones and each a primitive a region,
+ *   named by the region (`people-body.ts` §`PersonRegion`). `person-a` is the
+ *   rider's own build, so a scenery cyclist is that body seated by the
+ *   rider's skeleton.
+ * - `atlas` — one picture for all three: each garment's photograph, the face
+ *   and the hair, every part DIVIDED by its own mean colour and halved, so
+ *   the renderer multiplies it by the person's seeded colours
+ *   (`people.ts` §`personLook`) and a street is not three outfits repeated.
+ *   Its alpha is the hair's and the brows' cut-out; everything else is opaque.
+ *
+ * `three-renderer.ts` §`PeopleBelt` draws them, all in one instanced call.
+ */
+export const REALISTIC_PEOPLE = {
+  model: 'people.glb',
+  atlas: 'people_atlas_1024.ktx2',
+} as const;
 
 /**
  * Every file the tables above name, once.
@@ -870,6 +946,7 @@ export function realisticFiles(): readonly string[] {
       REALISTIC_STRUCTURE_SURFACES[surface].normal,
     ]),
     REALISTIC_RIDER,
+    REALISTIC_RIDER_FEMALE,
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     REALISTIC_RIDER_PACK.lod,
     REALISTIC_RIDER_PACK.vat,
@@ -881,6 +958,9 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_CHAIN_LINK.model,
     REALISTIC_CHAIN_LINK.wire,
     REALISTIC_DELIVERY_CAR,
+    REALISTIC_DELIVERY_CAR_ATLAS,
+    REALISTIC_PEOPLE.model,
+    REALISTIC_PEOPLE.atlas,
   ];
 }
 

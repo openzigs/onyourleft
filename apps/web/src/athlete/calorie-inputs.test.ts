@@ -11,7 +11,7 @@ import { athleteId } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from './mass';
-import { birthYearRefusal, calorieInputsToSave, calorieRiderFor } from './calorie-inputs';
+import { birthYearRefusal, birthYearToSave, calorieRiderFor } from './calorie-inputs';
 
 /** 2026-06-01T08:00:00Z. */
 const A_RIDE_IN_2026 = unixSeconds(Date.UTC(2026, 5, 1, 8) / 1000);
@@ -55,31 +55,33 @@ describe('calorieRiderFor', () => {
     expect(calorieRiderFor(ROW, A_RIDE_IN_2026)).not.toHaveProperty('sex');
   });
 
+  it('takes the sex from the rider choice: a pre-ruling riderBody when no calorie sex is stored (2026-11-20)', () => {
+    expect(calorieRiderFor({ ...ROW, riderBody: 'female' }, A_RIDE_IN_2026).sex).toBe('female');
+  });
+
+  it('takes the calorie sex when the two stored fields disagree (2026-11-20)', () => {
+    expect(
+      calorieRiderFor({ ...ROW, riderBody: 'male', calorieSex: 'female' }, A_RIDE_IN_2026).sex,
+    ).toBe('female');
+  });
+
   it('gives an empty rider with no athlete row', () => {
     expect(calorieRiderFor(undefined, A_RIDE_IN_2026)).toStrictEqual({});
   });
 });
 
-describe('calorieInputsToSave', () => {
-  it('saves a choice and a year', () => {
-    expect(calorieInputsToSave('female', '1985', 2026)).toStrictEqual({
-      kind: 'save',
-      calorieSex: 'female',
-      birthYear: 1985,
-    });
+describe('birthYearToSave', () => {
+  it('saves a year', () => {
+    expect(birthYearToSave('1985', 2026)).toStrictEqual({ kind: 'save', birthYear: 1985 });
   });
 
-  it('clears both with Not set and a blank year', () => {
-    expect(calorieInputsToSave('', '  ', 2026)).toStrictEqual({
-      kind: 'save',
-      calorieSex: undefined,
-      birthYear: undefined,
-    });
+  it('clears it with a blank year', () => {
+    expect(birthYearToSave('  ', 2026)).toStrictEqual({ kind: 'save', birthYear: undefined });
   });
 
   it('accepts this year and the year 120 years back, the two ends of the range', () => {
-    expect(calorieInputsToSave('male', '2026', 2026)).toMatchObject({ birthYear: 2026 });
-    expect(calorieInputsToSave('male', '1906', 2026)).toMatchObject({ birthYear: 1906 });
+    expect(birthYearToSave('2026', 2026)).toStrictEqual({ kind: 'save', birthYear: 2026 });
+    expect(birthYearToSave('1906', 2026)).toStrictEqual({ kind: 'save', birthYear: 1906 });
   });
 
   it.each([
@@ -90,7 +92,7 @@ describe('calorieInputsToSave', () => {
     ['a negative', '-1985'],
     ['an exponent', '2e3'],
   ])('refuses %s, naming the field and the constraint', (_, typed) => {
-    const decision = calorieInputsToSave('female', typed, 2026);
+    const decision = birthYearToSave(typed, 2026);
     expect(decision).toStrictEqual({ kind: 'refused', reason: birthYearRefusal(2026) });
     expect(birthYearRefusal(2026)).toBe(
       'Year of birth must be a whole year from 1906 to 2026, or blank.',

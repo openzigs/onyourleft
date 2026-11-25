@@ -416,6 +416,31 @@ export interface ControlResponse {
   readonly result: ControlResult;
 }
 
+/**
+ * Who refused a control point procedure, and with what — #3104: the one
+ * thing a `control-rejected` error's code does not say. Either the machine
+ * answered with a result that is not success, or the attribute protocol
+ * refused the write before the machine ran anything.
+ */
+export type ControlRefusal =
+  | { readonly by: 'machine'; readonly result: ControlResult }
+  | { readonly by: 'attribute-protocol' };
+
+/** The refusals {@link createTrainerControl} threw, by the error it threw. */
+const refusals = new WeakMap<object, ControlRefusal>();
+
+/**
+ * What refused the procedure `error` reports — #3104 — or `undefined` where
+ * `error` is not a refusal a {@link createTrainerControl} client threw.
+ *
+ * ⚠️ **By the error object, never by its message's words** (#724): a caller
+ * telling a rider which result came back reads it here, so rewording the
+ * message cannot change what the rider is told.
+ */
+export function controlRefusalOf(error: unknown): ControlRefusal | undefined {
+  return typeof error === 'object' && error !== null ? refusals.get(error) : undefined;
+}
+
 function resultOf(code: number): ControlResult {
   switch (code) {
     case FTMS_RESULT_CODE.success:
@@ -1015,6 +1040,7 @@ export function createTrainerControl(
         'the control point write was refused by the attribute protocol',
         { ...(deviceId === undefined ? {} : { deviceId }), cause },
       );
+      refusals.set(refused, { by: 'attribute-protocol' });
       const waiting = pending;
       if (waiting?.expectedOpCode === expectedOpCode) {
         pending = undefined;
@@ -1044,10 +1070,12 @@ export function createTrainerControl(
       );
     }
     if (response.result !== 'success') {
-      throw fail(
+      const refused = fail(
         'control-rejected',
         `the machine refused op code 0x${expectedOpCode.toString(16)}: ${response.result}`,
       );
+      refusals.set(refused, { by: 'machine', result: response.result });
+      throw refused;
     }
     return response;
   };

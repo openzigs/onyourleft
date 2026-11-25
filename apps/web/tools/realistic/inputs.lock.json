@@ -866,7 +866,7 @@
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",
       "evidence": "These assets have been released under CC0 1.0 Universal",
-      "read": "2026-09-28",
+      "read": "2026-11-19",
       "authors": "The MakeHuman team",
       "files": [
         {
@@ -976,6 +976,126 @@
           "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/caucasian-male-young.target",
           "bytes": 396479,
           "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness.target",
+          "bytes": 15334,
+          "sha256": "b5aaa1595cf4efcee69022fc60034d93ab6f6fc473e6f8e162e5526803b074bf"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-maxcup-maxfirmness.target",
+          "bytes": 15581,
+          "sha256": "76737472bf148e69bd5e80da982b88aa0926b51ef9ea1ac6217da88d86cf55cf"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness.target",
+          "bytes": 6193,
+          "sha256": "31f1d91824fcbb98ccf52f2c4d20c8e7c77c77ae596c58d1cf91c34801552b60"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-maxcup-averagefirmness.target",
+          "bytes": 15444,
+          "sha256": "bc0653099dc3c7bd490642b0a5e718939bbeec33f86095b69d724567adfba3b6"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-maxcup-maxfirmness.target",
+          "bytes": 15446,
+          "sha256": "2e975bc0268147d938198ca76093fdfc44279be08a80052e7e73926ab29e97fb"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-averagecup-maxfirmness.target",
+          "bytes": 4866,
+          "sha256": "cb35d792634d1cba1a532c7e172f44bd6db563ab45b42faa91fe794e8cb1e697"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-maxcup-averagefirmness.target",
+          "bytes": 15430,
+          "sha256": "ee30c72778b92897da2cb71c65cee08a0f9d299d19d26a99288ad7bf13e5b4b1"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-maxcup-maxfirmness.target",
+          "bytes": 15460,
+          "sha256": "3a99cd342479e57e1b20aae5515d87cbd17499505dbdffd6346d1d734b250f65"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-averagecup-maxfirmness.target",
+          "bytes": 6236,
+          "sha256": "2a7f7d1cfeab45fba2b2f89318694c89f7b5afa1ab4395fdf2f5e37c46e6f634"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-maxcup-averagefirmness.target",
+          "bytes": 15450,
+          "sha256": "1ea8f093dda8a93c04608a4f78bc54898e6979105244f21946e11db3f7514c2a"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-maxcup-maxfirmness.target",
+          "bytes": 15400,
+          "sha256": "4a4230c96fbe4d7dc68f6088923c1705d47f81534c50573afd9366e191a96aac"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-averagecup-maxfirmness.target",
+          "bytes": 4866,
+          "sha256": "cb35d792634d1cba1a532c7e172f44bd6db563ab45b42faa91fe794e8cb1e697"
+        },
+        {
+          "path": "targets/torso/torso-scale-horiz-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/torso/torso-scale-horiz-decr.target",
+          "bytes": 116893,
+          "sha256": "8377c248eec6838292f55287b6a399398f7cb88e6d7d0af6781d8e30298e0d6f"
+        },
+        {
+          "path": "targets/hip/hip-scale-horiz-incr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/hip/hip-scale-horiz-incr.target",
+          "bytes": 32914,
+          "sha256": "2863ee4478f548cd2cdd932037fcd21e6b364b9a2d86911d3b603be18f598da7"
+        },
+        {
+          "path": "targets/stomach/stomach-pregnant-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/stomach/stomach-pregnant-decr.target",
+          "bytes": 4957,
+          "sha256": "c312c72444527d7db00e84a144d15ea7a9ebe43dfdd6673936ddac3c46a75e1b"
+        },
+        {
+          "path": "targets/neck/neck-scale-horiz-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/neck/neck-scale-horiz-decr.target",
+          "bytes": 8453,
+          "sha256": "9f63b4b73461064d2f5173eefe7f3929870025b040c2fe70a5508be493067c99"
+        },
+        {
+          "path": "targets/chin/chin-width-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-width-decr.target",
+          "bytes": 2853,
+          "sha256": "ac081bd1652c203fc8973f20988a868a423a49f1fe6449cb974727fd46c26af1"
+        },
+        {
+          "path": "targets/chin/chin-bones-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-bones-decr.target",
+          "bytes": 3902,
+          "sha256": "fc54c1572b2562b095e5a5e48882bab16c1b24e64b106b2d54e6be64ce20121c"
+        },
+        {
+          "path": "targets/chin/chin-prominent-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-prominent-decr.target",
+          "bytes": 3522,
+          "sha256": "071afc623e6feb38afa5dde7abca83710c062bf1281e30a51fa42a6fbacfc00e"
+        },
+        {
+          "path": "targets/eyebrows/eyebrows-trans-backward.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/eyebrows/eyebrows-trans-backward.target",
+          "bytes": 3863,
+          "sha256": "0ad186047e809629f169c72502b12d95ad64597294ba6553aaafe9b880e19f11"
         }
       ]
     },
@@ -984,7 +1104,7 @@
       "licence": "CC0-1.0",
       "licencePage": "https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html",
       "evidence": "Makehuman system assets",
-      "read": "2026-09-28",
+      "read": "2026-11-19",
       "authors": "The MakeHuman team (makehuman_system)",
       "files": [
         {
@@ -1028,6 +1148,174 @@
           "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.mhmat",
           "bytes": 1098,
           "sha256": "976e5f4f1d3922d7a11c6e2db233f8b4584b068d00619d5749687e81c92d61fc"
+        },
+        {
+          "path": "skins/young_caucasian_female/young_lightskinned_female_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#skins/young_caucasian_female/young_lightskinned_female_diffuse.png",
+          "bytes": 4391156,
+          "sha256": "b2a6ac8cd4f9febdb447368e29c76cd68410bb66e46d9dcfa2d5f75126eea8fc"
+        },
+        {
+          "path": "clothes/male_casualsuit06/male_casualsuit06.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit06/male_casualsuit06.obj",
+          "bytes": 300507,
+          "sha256": "9a86386435d7557a520320b8db4cd0ffe4755040044d1925c2b5730b864a603e"
+        },
+        {
+          "path": "clothes/male_casualsuit06/male_casualsuit06.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit06/male_casualsuit06.mhclo",
+          "bytes": 252642,
+          "sha256": "9cebda22a0fa57fc556a1a77723f59b176724dc7e987c01214283677444ddcc5"
+        },
+        {
+          "path": "clothes/male_casualsuit06/male_casualsuit06_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit06/male_casualsuit06_diffuse.png",
+          "bytes": 1923464,
+          "sha256": "e9a581e0d4eb64c7a031886f2faf109a4703a3046a5fcc97ea9ce9112e99a344"
+        },
+        {
+          "path": "clothes/female_elegantsuit01/female_elegantsuit01.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/female_elegantsuit01/female_elegantsuit01.obj",
+          "bytes": 174924,
+          "sha256": "3b46cef6d63968954dc00c39ede649d76c05e5d36fe9f9c677349c88fd424de9"
+        },
+        {
+          "path": "clothes/female_elegantsuit01/female_elegantsuit01.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/female_elegantsuit01/female_elegantsuit01.mhclo",
+          "bytes": 151008,
+          "sha256": "8ed657dbc49466e6a485993cfdcfd7b6ac30a0f44408dfd38de7a649477d8928"
+        },
+        {
+          "path": "clothes/female_elegantsuit01/female_elegantsuit01_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/female_elegantsuit01/female_elegantsuit01_diffuse.png",
+          "bytes": 1996561,
+          "sha256": "ebe6f2afcbaadbe56d5cee6e00bab45e97ce482f0be0e34491d16ca5f98b38ac"
+        },
+        {
+          "path": "clothes/male_casualsuit05/male_casualsuit05.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit05/male_casualsuit05.obj",
+          "bytes": 261223,
+          "sha256": "6069dd8b828591c16f74678c235387954775b815b5b77640d24fb7c9541b85c2"
+        },
+        {
+          "path": "clothes/male_casualsuit05/male_casualsuit05.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit05/male_casualsuit05.mhclo",
+          "bytes": 217422,
+          "sha256": "df41c9fba3da054e35b964706ad2f8d189e65cc00a45f4a34f65235946f647f0"
+        },
+        {
+          "path": "clothes/male_casualsuit05/male_casualsuit05_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/male_casualsuit05/male_casualsuit05_diffuse.png",
+          "bytes": 3345738,
+          "sha256": "d4345efe9332c23e9302f5a3bca8c895004be841b5ebea593c96189870e3852a"
+        },
+        {
+          "path": "clothes/shoes05/shoes05.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes05/shoes05.obj",
+          "bytes": 125457,
+          "sha256": "5726aabac42ff489998d0a769545dea013961bbb71b9c6024d75170181a98818"
+        },
+        {
+          "path": "clothes/shoes05/shoes05.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes05/shoes05.mhclo",
+          "bytes": 110217,
+          "sha256": "75fc467264b085d7a05ce0c9b5628bb364b246392c59524c556fa09f92b6cb16"
+        },
+        {
+          "path": "clothes/shoes05/shoes05_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes05/shoes05_diffuse.png",
+          "bytes": 1291907,
+          "sha256": "7fe5ea2600f6578cdf017da3392ae13aedabea8e8cc1dd6302a8f57e8fb7e5af"
+        },
+        {
+          "path": "clothes/shoes01/shoes01.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes01/shoes01.obj",
+          "bytes": 136910,
+          "sha256": "eac355a842a8eb8ae2f09fac8dd18a877a24ef2521ed2d6bf38559b42ce4b49a"
+        },
+        {
+          "path": "clothes/shoes01/shoes01.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes01/shoes01.mhclo",
+          "bytes": 119049,
+          "sha256": "7994e38f7cdcee0bd5f55101660badcce0162fcdfc7f432218dd1eb301626252"
+        },
+        {
+          "path": "clothes/shoes01/shoes01_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes01/shoes01_diffuse.png",
+          "bytes": 1335772,
+          "sha256": "50c9a406a7f1cb6aa7b42912348e78f09d0252aa3963c8229cf18dfe8353cdbf"
+        },
+        {
+          "path": "clothes/shoes02/shoes02.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes02/shoes02.obj",
+          "bytes": 125457,
+          "sha256": "5726aabac42ff489998d0a769545dea013961bbb71b9c6024d75170181a98818"
+        },
+        {
+          "path": "clothes/shoes02/shoes02.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes02/shoes02.mhclo",
+          "bytes": 110217,
+          "sha256": "0d447fd6b7415d6b2603e91697336ee51ac2f00ef85878d6667e9acfb45a20fe"
+        },
+        {
+          "path": "clothes/shoes02/shoes02_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#clothes/shoes02/shoes02_diffuse.png",
+          "bytes": 1282057,
+          "sha256": "efef94ea34b0e0c2283095cb47a9e0389b55449c61a4f4972d0ad4d2bf06b4f0"
+        },
+        {
+          "path": "hair/short02/short02.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short02/short02.obj",
+          "bytes": 139742,
+          "sha256": "48f979114adfa712165a69cc55c45a70831af1fb3cba8e2a89120f0c87407b64"
+        },
+        {
+          "path": "hair/short02/short02.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short02/short02.mhclo",
+          "bytes": 119240,
+          "sha256": "625736cdb73e6d094df6e5a2df18f371781f1d2cd37b0ae15795c5d7051c3ec2"
+        },
+        {
+          "path": "hair/short02/short02_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short02/short02_diffuse.png",
+          "bytes": 3553543,
+          "sha256": "47fe33831a3929567c733356dd66243116e05df2ace1f884ddca0080b728229f"
+        },
+        {
+          "path": "hair/ponytail01/ponytail01.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/ponytail01/ponytail01.obj",
+          "bytes": 264384,
+          "sha256": "d9f5fe96fbedbc8006220d87aad0e4a33d15286eb6b21f5929661cdc490ebf5a"
+        },
+        {
+          "path": "hair/ponytail01/ponytail01.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/ponytail01/ponytail01.mhclo",
+          "bytes": 252080,
+          "sha256": "97fc50b12bcb3b1c7b33edddd8d427a2604ffb06fe79b31132bf47f82d7afbac"
+        },
+        {
+          "path": "hair/ponytail01/ponytail01_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/ponytail01/ponytail01_diffuse.png",
+          "bytes": 3910782,
+          "sha256": "dcb364300cac06ce8bef91b2f7c0970baf310898bbdd06b0c6b884ee9306eb97"
+        },
+        {
+          "path": "hair/short01/short01.obj",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short01/short01.obj",
+          "bytes": 194450,
+          "sha256": "d998d8416f9b5d5591f1d756f4d292288d000a6951bc0f4d2e8e72727bbc44fa"
+        },
+        {
+          "path": "hair/short01/short01.mhclo",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short01/short01.mhclo",
+          "bytes": 201588,
+          "sha256": "ae1ffaa98da5753b803b3a173bede4895d2215e6bb94763f3765a71f0e984f35"
+        },
+        {
+          "path": "hair/short01/short01_diffuse.png",
+          "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#hair/short01/short01_diffuse.png",
+          "bytes": 2354146,
+          "sha256": "f34a0957184e3d1e911ed59245f874f8d4843f61ee44ff49f43edb4be0196949"
         }
       ]
     },
@@ -1926,36 +2214,96 @@
       ]
     },
     {
-      "id": "kenney-car-kit",
+      "id": "ggbot-psx-style-cars",
       "licence": "CC0-1.0",
-      "licencePage": "https://kenney.nl/assets/car-kit",
-      "evidence": "Creative Commons CC0",
-      "read": "2026-11-12",
-      "authors": "Kenney",
+      "licencePage": "https://ggbot.itch.io/psx-style-cars",
+      "evidence": "This game assets is licensed under a CC0 1.0 Universal",
+      "read": "2026-11-19",
+      "authors": "GGBotNet",
       "files": [
         {
-          "path": "kenney-car-kit.zip",
-          "url": "https://kenney.nl/assets/car-kit",
-          "bytes": 4814237,
-          "sha256": "fac7dacac5c7874348cf19729af3ef205f3d366493edaf0a827d93f4fdf3d0c4"
+          "path": "PSX_Style_Cars_by_GGBot_(August2023).zip",
+          "url": "https://ggbot.itch.io/psx-style-cars",
+          "bytes": 2610303,
+          "sha256": "db67b0b0fbaa02454a5d000dc9ec1cc53f360e8f41ab44f3fb1c7e8f71e699e4"
         },
         {
-          "path": "Models/GLB format/sedan.glb",
-          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/sedan.glb",
-          "bytes": 172216,
-          "sha256": "b532ea7d2c59f7f6b22b138cf1955218a2c1898f1cea932af4d3fd563c3959b7"
+          "path": "Car 02/Car2.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/Car2.obj",
+          "bytes": 24405,
+          "sha256": "c7134a010b108865281321bf2ee7f9662e4118ba537bebc3b2117bc766c9f0e5"
         },
         {
-          "path": "Models/GLB format/Textures/colormap.png",
-          "url": "https://kenney.nl/assets/car-kit#Models/GLB format/Textures/colormap.png",
-          "bytes": 12371,
-          "sha256": "f3622a03a20c6696065cae9cbe391351be873508af190c2ebd1d420c055787a5"
+          "path": "Car 02/car2.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2.png",
+          "bytes": 17437,
+          "sha256": "b4a4220eff6d0411a774b79446e042aa956defd3ba8ddf3bdef231021f6eac17"
         },
         {
-          "path": "License.txt",
-          "url": "https://kenney.nl/assets/car-kit#License.txt",
-          "bytes": 696,
-          "sha256": "c33b7f6453d134deae7b1b8493717d9ccfa754c25ab97f6de89b88f8fda19b00"
+          "path": "Car 02/car2_black.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2_black.png",
+          "bytes": 15020,
+          "sha256": "49c6c9269d188cdb5a032008fdb1d7c7a55b14c67b59cbe4c2f45e2d81d4d9c8"
+        },
+        {
+          "path": "Car 02/car2_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 02/car2_red.png",
+          "bytes": 18404,
+          "sha256": "10a18ee2d8a45acb2589102242c93a4713fd463d8e5e9e2fdf5d8d1c1e34c7b6"
+        },
+        {
+          "path": "Car 03/Car3.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/Car3.obj",
+          "bytes": 37218,
+          "sha256": "7525a0264841b24bd5f04ec6da72b7d833015a55e932cfbd895191ac1d2a4fe0"
+        },
+        {
+          "path": "Car 03/car3.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3.png",
+          "bytes": 16556,
+          "sha256": "467cc5964f6cd39cab646f466b763be2864ea69a3408ec21c301c1d40d6f4ed7"
+        },
+        {
+          "path": "Car 03/car3_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3_red.png",
+          "bytes": 14647,
+          "sha256": "e87ca54e7a8b7ff0d3b071e9fcd5c31abe63cdcb53f4d55374b630ce009bab49"
+        },
+        {
+          "path": "Car 03/car3_yellow.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 03/car3_yellow.png",
+          "bytes": 16032,
+          "sha256": "e301bf10edb6672db92fefee48f350b4e3b1c00150763d677a49d26ed2eca456"
+        },
+        {
+          "path": "Car 01/Car.obj",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/Car.obj",
+          "bytes": 37686,
+          "sha256": "88de04afe087cd95c1eef048cb97aa1e1207d337a1c5b0b0a2f9a83579963a83"
+        },
+        {
+          "path": "Car 01/car.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car.png",
+          "bytes": 20640,
+          "sha256": "725782405e7b51fa7fae4881fc3045ab4ef65926b3569838dac086abd57f1153"
+        },
+        {
+          "path": "Car 01/car_blue.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_blue.png",
+          "bytes": 19810,
+          "sha256": "99bb01f86fc7d60dfe1b8c8bb557c66a0418dcf31c61eb124329d7268163c70c"
+        },
+        {
+          "path": "Car 01/car_gray.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_gray.png",
+          "bytes": 17496,
+          "sha256": "ad69d6fb264476cc8217097668ef1e874bc15076ecc8d23238105cb1e9253ea3"
+        },
+        {
+          "path": "Car 01/car_red.png",
+          "url": "https://ggbot.itch.io/psx-style-cars#Car 01/car_red.png",
+          "bytes": 18780,
+          "sha256": "777b1b8d2b845d7d52413ef6ef76d9958cf1e602785a28bf2b9c738aa3b60278"
         }
       ]
     }

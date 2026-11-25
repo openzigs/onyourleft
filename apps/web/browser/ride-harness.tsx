@@ -679,12 +679,11 @@ function aiPacerStandIn(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => Promise.resolve(AI_PACER_SAYING),
     startPacerRide: () => Promise.resolve(AI_PACER_SAYING),
     decidePacer: () =>
       Promise.resolve(
-        AI_PACER_SAYING
-          ? { kind: 'answer', direction: { plan: 'even', intent: 'hold' }, say: AI_PACER_LINE }
-          : { kind: 'failed' },
+        AI_PACER_SAYING ? { kind: 'answer', say: AI_PACER_LINE } : { kind: 'failed' },
       ),
     endPacerRide: () => Promise.resolve(),
   };
@@ -1367,6 +1366,9 @@ function measure(): StageMeasurement {
       // DRAWN, which it gives way to on a tablet beside the pacer and the
       // ghost (the same section).
       field.classList.contains('oyl-hud__field--solo-draft') ||
+      // #2864: the AI pacer's power, away from a tablet (`theme.css` §"THE AI
+      // PACER'S POWER, ON A TABLET ONLY").
+      field.classList.contains('oyl-hud__field--pacer-power') ||
       (field.classList.contains('oyl-hud__field--wind') && soloDraftDrawn(field));
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);
@@ -1779,12 +1781,12 @@ async function run(): Promise<void> {
   // #2760's review: the AI pacer on, its consent already given.
   if (AI_PACER_SAYING) {
     const box = await until('the AI pacer switch', () =>
-      labelled<HTMLInputElement>('input[role="switch"]', 'Let the AI on your instance'),
+      labelled<HTMLInputElement>('input[role="switch"]', 'Let the AI on your server'),
     );
     if (!box.checked) box.click();
     await until('the AI pacer consent to be read', () =>
       (document.querySelector('.oyl-game__ai-pacer')?.textContent ?? '').includes(
-        'The AI will steer the pacer',
+        'The AI will coach you on this ride',
       )
         ? true
         : undefined,

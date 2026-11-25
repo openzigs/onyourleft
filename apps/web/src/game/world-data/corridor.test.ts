@@ -33,9 +33,14 @@ import {
   HOSTILE_FIXTURES,
   lakeTile,
   placesTile,
+  poisTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   sidewalkTile,
+  STREET_FIXTURE_ROADS,
+  streetsTile,
   waterLinesTile,
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
@@ -51,14 +56,17 @@ import {
   corridorFeaturesOfPacked,
   coveredLookup,
   describeCorridorFailure,
+  joinCorridorFeatures,
   packCorridorFeatures,
   packedCorridorFeatures,
   planCorridor,
   readCorridorTiles,
   tileTouchesZone,
   unpackCorridorFeatures,
+  worldCorridorOf,
   type CorridorArchive,
   type CorridorFailure,
+  type CorridorFeatures,
   type CorridorPlan,
   type CorridorState,
 } from './corridor';
@@ -519,6 +527,18 @@ describe('packing', () => {
     });
   });
 
+  it('keeps each tile’s railway lines through the read (#2660)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => streetsTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    const tiles =
+      outcome.features.streets.length /
+      STREET_FIXTURE_ROADS.filter((road) => road.sink === 'streets').length;
+    expect(tiles).toBeGreaterThan(0);
+    // Two railway lines a tile, the fixture's main line and its light rail on a bridge.
+    expect(outcome.features.rails?.length).toBe(tiles * 2);
+  });
+
   it('keeps every building field through the pack, and packs none for a footprint with none (#1789)', async () => {
     const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
     const outcome = await read(plan, memoryArchive(() => buildingFieldsTile()).archive);
@@ -542,8 +562,9 @@ describe('packing', () => {
       true,
       false,
     ]);
-    // 5 since #2659 added the water lines.
-    expect(packed.v).toBe(5);
+    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines,
+    // 7 since #2975 added the POI class, 8 since #2688 a pitch's sport.
+    expect(packed.v).toBe(8);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -576,10 +597,53 @@ describe('packing', () => {
     ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
   });
 
-  it('keeps the water lines through the store, and only the decoder’s kinds (#2659)', async () => {
+  it('keeps each footprint’s POI class through the store, and only the decoder’s three (#2975)', async () => {
+    const decoded = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    const classes = decoded.buildings.map((building) => building.poi);
+    expect(classes).toContain('fuel');
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: decoded.buildings,
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+    expect(back.buildings.map((building) => building.poi)).toStrictEqual(classes);
+    // A footprint with none packs no `p` and reads back with no key.
+    const packed = packedCorridorFeatures({
+      landUse: [],
+      buildings: decoded.buildings,
+      paths: [],
+      streets: [],
+      places: [],
+    });
+    expect(packed.buildings.map((building) => building.p)).toStrictEqual(classes);
+    expect(back.buildings.filter((building) => 'poi' in building)).toHaveLength(
+      classes.filter((poi) => poi !== undefined).length,
+    );
+    // A blob edited on the device cannot put another string into the plan.
+    const edited = corridorFeaturesOfPacked({
+      ...packed,
+      buildings: [
+        { kind: 'building', h: null, mh: null, p: 'zz_not_a_class', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'toString', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'cafe', rings: [] },
+      ],
+    });
+    expect(edited.buildings.map((building) => building.poi)).toStrictEqual([
+      undefined,
+      undefined,
+      'cafe',
+    ]);
+  });
+
+  it('keeps the water lines through the store, and only the decoder’s kinds (#2659, #2974)', async () => {
     const decoded = decodeTile(waterLinesTile(), FIXTURE_TILE, FIXTURE_FRAME);
     if ('reason' in decoded) throw new Error(decoded.reason);
-    expect(decoded.waterLines.length).toBe(3);
+    expect(decoded.waterLines.length).toBe(5);
     const back = await unpackCorridorFeatures(
       await packCorridorFeatures({
         landUse: [],
@@ -590,7 +654,13 @@ describe('packing', () => {
         waterLines: decoded.waterLines,
       }),
     );
-    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual(['river', 'stream', 'canal']);
+    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
     back.waterLines?.forEach((line, index) => {
       const want = decoded.waterLines[index]?.line as Float32Array;
       expect(line.line.length).toBe(want.length);
@@ -603,10 +673,11 @@ describe('packing', () => {
       ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
       waterLines: [
         { kind: 'stream', line: [0, 0, 100, 100] },
-        { kind: 'ditch' as 'stream', line: [0, 0, 100, 100] },
+        { kind: 'ditch', line: [0, 0, 100, 100] },
+        { kind: 'riverbank' as 'stream', line: [0, 0, 100, 100] },
       ],
     });
-    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream']);
+    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream', 'ditch']);
     // A corridor with none packs no `waterLines` at all, as it did at version 4.
     const none = packedCorridorFeatures({
       landUse: [],
@@ -618,6 +689,121 @@ describe('packing', () => {
     });
     expect('waterLines' in none).toBe(false);
     expect(corridorFeaturesOfPacked(none).waterLines).toStrictEqual([]);
+  });
+
+  it('keeps the railway lines through the store, and only the decoder’s details and grades (#2660)', async () => {
+    const decoded = decodeTile(streetsTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    expect(decoded.rails.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+      ['light_rail', 'bridge'],
+    ]);
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+        rails: decoded.rails,
+      }),
+    );
+    expect(back.rails?.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+      ['light_rail', 'bridge'],
+    ]);
+    back.rails?.forEach((rail, index) => {
+      const want = decoded.rails[index]?.line as Float32Array;
+      expect(rail.line.length).toBe(want.length);
+      rail.line.forEach((value, at) => {
+        expect(Math.abs(value - (want[at] as number))).toBeLessThanOrEqual(0.006);
+      });
+    });
+    // The corridor a ride is handed carries them; one built from features with none carries none.
+    expect(worldCorridorOf('r', { ...FIXTURE_FRAME, elevation: 0 }, [], back).rails).toBe(
+      back.rails,
+    );
+    expect(
+      worldCorridorOf('r', { ...FIXTURE_FRAME, elevation: 0 }, [], {
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }).rails,
+    ).toStrictEqual([]);
+    // A detail the decoder would not keep, edited into a blob, is not read back,
+    // and a grade it would not write is at grade.
+    const edited = corridorFeaturesOfPacked({
+      ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      rails: [
+        { detail: 'rail', g: 'sky' as 'bridge', line: [0, 0, 100, 100] },
+        { detail: 'subway' as 'rail', g: 'ground', line: [0, 0, 100, 100] },
+      ],
+    });
+    expect(edited.rails?.map((rail) => [rail.kindDetail, rail.grade])).toStrictEqual([
+      ['rail', 'ground'],
+    ]);
+    // A corridor with none packs no `rails` at all, as it did at version 5.
+    const none = packedCorridorFeatures({
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+      places: [],
+      rails: [],
+    });
+    expect('rails' in none).toBe(false);
+    expect(corridorFeaturesOfPacked(none).rails).toStrictEqual([]);
+  });
+
+  it('keeps a pitch’s sport through the read and the store, and only the decoder’s (#2688)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => pitchesTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    const kept = PITCH_FIXTURE_POLYGONS.map((p) => p.kept);
+    const tiles = outcome.features.landUse.length / PITCH_FIXTURE_POLYGONS.length;
+    expect(tiles).toBeGreaterThan(0);
+    const back = await unpackCorridorFeatures(await packCorridorFeatures(outcome.features));
+    expect(back.landUse.map((f) => f.sport ?? null)).toStrictEqual(
+      Array.from({ length: tiles }).flatMap(() => kept),
+    );
+    // A sport the decoder would not keep, or one on what is not a pitch, edited into a blob, is not read back.
+    const edited = corridorFeaturesOfPacked({
+      ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      landUse: [
+        { layer: 'landuse', kind: 'pitch', sp: 'soccer', rings: [] },
+        { layer: 'landuse', kind: 'pitch', sp: 'curling' as 'soccer', rings: [] },
+        { layer: 'landuse', kind: 'park', sp: 'soccer', rings: [] },
+        // Nor on a pitch-kinded polygon of another layer: the decoder keeps it in `landuse` only.
+        { layer: 'water', kind: 'pitch', sp: 'soccer', rings: [] },
+      ],
+    });
+    expect(edited.landUse.map((f) => f.sport ?? null)).toStrictEqual(['soccer', null, null, null]);
+    // A polygon with none packs no `sp`, as it did at version 6.
+    expect('sp' in (packedCorridorFeatures(back).landUse.at(-1) ?? {})).toBe(false);
+  });
+
+  it('refuses a blob of the reader before a pitch’s sport (#2688)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 6, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
+  });
+
+  it('refuses a blob of the reader before the railway lines (#2660)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 5, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob of the reader before the water lines (#2659)', async () => {
@@ -661,6 +847,51 @@ describe('packing', () => {
     await expect(
       unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
     ).rejects.toThrow(/not a version/);
+  });
+});
+
+describe('joinCorridorFeatures', () => {
+  /**
+   * Every kind {@link CorridorFeatures} holds, optional ones included. Typed
+   * over `Required<CorridorFeatures>`, so a kind added there and not here is a
+   * type error, and the walk below then proves the join keeps it (#3037: the
+   * railway lines were declared, read and dropped by the join).
+   */
+  const EVERY_KIND: { readonly [K in keyof Required<CorridorFeatures>]: K } = {
+    landUse: 'landUse',
+    buildings: 'buildings',
+    paths: 'paths',
+    streets: 'streets',
+    places: 'places',
+    waterLines: 'waterLines',
+    rails: 'rails',
+  };
+  const kinds = Object.values(EVERY_KIND);
+
+  /** Features with one stand-in of every kind, each naming its read and kind. */
+  const oneOfEach = (read: string): CorridorFeatures =>
+    Object.fromEntries(kinds.map((kind) => [kind, [`${read}:${kind}`]])) as never;
+
+  it('keeps every kind of both reads, the first’s before the second’s', () => {
+    const joined = joinCorridorFeatures(oneOfEach('first'), oneOfEach('second'));
+    expect(Object.keys(joined).sort()).toStrictEqual([...kinds].sort());
+    for (const kind of kinds) {
+      expect(joined[kind], kind).toStrictEqual([`first:${kind}`, `second:${kind}`]);
+    }
+  });
+
+  it('takes an optional kind a read leaves out as none', () => {
+    const bare: CorridorFeatures = {
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+      places: [],
+    };
+    const full = oneOfEach('full');
+    expect(joinCorridorFeatures(bare, full).rails).toStrictEqual(full.rails);
+    expect(joinCorridorFeatures(full, bare).waterLines).toStrictEqual(full.waterLines);
+    expect(joinCorridorFeatures(bare, bare).rails).toStrictEqual([]);
   });
 });
 

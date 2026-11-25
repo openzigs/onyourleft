@@ -10,11 +10,14 @@
  */
 
 import type { TileId } from '@onyourleft/map-features';
-import { residentialBlockTile } from '@onyourleft/map-features/testing';
+import {
+  residentialBlockTile,
+  roadFieldsTile,
+  streetsTile,
+} from '@onyourleft/map-features/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  blockFrame,
   blockOf,
   blocksAround,
   createAreaReader,
@@ -22,6 +25,7 @@ import {
   CROSSING_DELAY_MAX_MS,
   MAX_HELD_BLOCKS,
   MAX_HELD_TILES,
+  MAX_PARTIAL_REREADS,
   tilesOfBlock,
   type AreaPosition,
   type AreaReaderOptions,
@@ -46,6 +50,7 @@ const START: AreaPosition = inside(
   0.5,
   0.5,
 );
+const FRAME = { latitude: START.latitude, longitude: START.longitude };
 const METRES_PER_DEGREE = 111_320;
 
 /** A position `east` and `north` metres from `from`. */
@@ -113,6 +118,7 @@ function manualClock() {
 
 function reader(overrides: Partial<AreaReaderOptions> & Pick<AreaReaderOptions, 'archive'>) {
   return createAreaReader({
+    frame: FRAME,
     mapTilesOn: () => true,
     random: () => 0,
     schedule: (run) => {
@@ -226,18 +232,36 @@ describe('R-1: what is asked for is a function of the rider’s block alone', ()
     expect(blockKeys(area.held().map((h) => h.block))).toStrictEqual(
       blockKeys(blocksAround(block)),
     );
-    // Each held block carries its own decoded features, in its own frame:
-    // its corner on the grid, whatever the start (#2891 keeps them so).
-    for (const held of area.held()) {
-      expect(held.features.buildings.length).toBeGreaterThan(0);
-      expect(held.frame).toStrictEqual(blockFrame(held.block));
-    }
-    const corner = blockFrame(block);
-    expect(
-      blockOf({ latitude: corner.latitude - 1e-6, longitude: corner.longitude + 1e-6 }),
-    ).toStrictEqual(block);
+    // Each held block carries its own decoded features, in the ride's frame.
+    for (const held of area.held()) expect(held.features.buildings.length).toBeGreaterThan(0);
     // The archive's header and metadata are asked for once per ride, not per block.
     expect(opened).toHaveLength(1);
+  });
+
+  it('keeps each tile’s own streets, with their road fields, for the street graph (#2896)', async () => {
+    const { archive: answering } = countingArchive();
+    const archive: CorridorArchive = {
+      open: (signal) => answering.open(signal),
+      tile: () => Promise.resolve(roadFieldsTile()),
+    };
+    const area = reader({ archive });
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    for (const held of area.held()) {
+      // One entry a decoded tile, each the block's own tile, in its order.
+      expect(tileKeys(held.streets.map((each) => each.tile))).toStrictEqual(
+        tileKeys(tilesOfBlock(held.block)),
+      );
+      for (const { streets } of held.streets) {
+        expect(streets.length).toBeGreaterThan(0);
+        // The graph's fields, which the joined corridor features do not promise.
+        for (const street of streets) {
+          expect(['with-line', 'against-line', 'no']).toContain(street.oneway);
+          expect(typeof street.isLink).toBe('boolean');
+        }
+      }
+      // The same street objects as the block's joined features, not copies.
+      expect(held.streets.flatMap((each) => each.streets)).toStrictEqual(held.features.streets);
+    }
   });
 });
 
@@ -513,6 +537,7 @@ describe('reads that fail, and reads left behind', () => {
       const { archive, asked } = countingArchive();
       const area = createAreaReader({
         archive,
+        frame: FRAME,
         mapTilesOn: () => true,
         random: () => 1,
         yieldToIdle: () => Promise.resolve(),
@@ -666,5 +691,114 @@ describe('R-6: map tiles off asks for nothing', () => {
   it('with no archive configured, is off and asks for nothing', async () => {
     const area = reader({ archive: undefined });
     expect(await area.start(START)).toStrictEqual({ kind: 'off', why: 'no-archive' });
+  });
+});
+
+describe('a block read in part is read again during the ride — #2990', () => {
+  /** The start block's first tile: the one these archives fail. */
+  const FAILING = tilesOfBlock(blockOf(START) as BlockId)[0] as TileId;
+  const isFailing = (tile: TileId): boolean => tile.x === FAILING.x && tile.y === FAILING.y;
+
+  /**
+   * An archive that fails {@link FAILING} the first `failures` times it is
+   * asked for, and answers every other ask with `answer`'s tile.
+   */
+  function failingArchive(failures: number, answer: () => Uint8Array = roadFieldsTile) {
+    const { archive: answering } = countingArchive();
+    const asked: TileId[] = [];
+    let failed = 0;
+    const archive: CorridorArchive = {
+      open: (signal) => answering.open(signal),
+      tile: (tile) => {
+        asked.push(tile);
+        if (isFailing(tile) && failed < failures) {
+          failed += 1;
+          return Promise.reject(new Error('the connection dropped'));
+        }
+        return Promise.resolve(answer());
+      },
+    };
+    return { archive, asked };
+  }
+
+  const startBlock = (area: ReturnType<typeof reader>) =>
+    area
+      .held()
+      .find((held) => blockKeys([held.block])[0] === blockKeys([blockOf(START) as BlockId])[0]);
+
+  it('holds the tiles it read, and reads the failed one alone at the next crossing, then holds all four', async () => {
+    const { archive, asked } = failingArchive(1);
+    let changes = 0;
+    const area = reader({
+      archive,
+      onChange: () => {
+        changes += 1;
+      },
+    });
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    expect(changes).toBe(9);
+    const before = startBlock(area);
+    expect(before?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+    expect(before?.streets).toHaveLength(3);
+    const streetsBefore = before?.features.streets.length ?? 0;
+
+    const asking = asked.length;
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    // The new column's twelve tiles, and the failed tile once more: nothing else.
+    const again = asked.slice(asking).filter(isFailing);
+    expect(again).toHaveLength(1);
+    expect(asked.length - asking).toBe(12 + 1);
+    const after = startBlock(area);
+    expect(after?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+    expect(tileKeys(after?.streets.map((each) => each.tile) ?? []).sort()).toStrictEqual(
+      tileKeys(tilesOfBlock(blockOf(START) as BlockId)).sort(),
+    );
+    // What it read before is kept, and the tile read again is added to it.
+    expect(after?.features.streets.length).toBeGreaterThan(streetsBefore);
+    expect(after?.features.streets.slice(0, streetsBefore)).toStrictEqual(before?.features.streets);
+    // Told: the west column dropped, three blocks read, and the block read again.
+    expect(changes).toBe(9 + 1 + 3 + 1);
+  });
+
+  it('keeps the railway lines of both reads when the block is read again (#3037)', async () => {
+    // The street fixture carries two railway lines a tile (#2660).
+    const { archive } = failingArchive(1, streetsTile);
+    const area = reader({ archive });
+    await area.start(START);
+    const before = startBlock(area);
+    expect(before?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+    const railsBefore = before?.features.rails ?? [];
+    expect(railsBefore).toHaveLength(3 * 2);
+
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    const after = startBlock(area);
+    expect(after?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+    // The three tiles read first keep theirs, and the tile read again adds its two.
+    expect(after?.features.rails).toHaveLength(4 * 2);
+    expect(after?.features.rails?.slice(0, railsBefore.length)).toStrictEqual(railsBefore);
+  });
+
+  it('reads it again at most twice while it is held, however many crossings keep it', async () => {
+    const { archive, asked } = failingArchive(Number.POSITIVE_INFINITY);
+    const area = reader({ archive });
+    await area.start(START);
+    for (let crossing = 0; crossing < 6; crossing += 1) {
+      area.moveTo(offset(START, crossing % 2 === 0 ? 2_000 : 0, 0));
+      await area.settled();
+    }
+    expect(asked.filter(isFailing)).toHaveLength(1 + MAX_PARTIAL_REREADS);
+    expect(startBlock(area)?.tiles.filter((tile) => tile.state === 'refused')).toHaveLength(1);
+  });
+
+  it('asks nothing again for a block every tile of which was read', async () => {
+    const { archive, asked } = failingArchive(0);
+    const area = reader({ archive });
+    await area.start(START);
+    const asking = asked.length;
+    area.moveTo(offset(START, 2_000, 0));
+    await area.settled();
+    expect(asked.length - asking).toBe(12);
   });
 });

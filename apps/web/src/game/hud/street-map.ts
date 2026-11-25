@@ -219,9 +219,20 @@ interface Shape {
   readonly bottom: number;
 }
 
+/** The layers that are the corridor's: every one but the route. */
+type CorridorLayer = Exclude<Layer, 'route'>;
+
 /** The map's shapes, filed by cell. */
 export interface StreetMapIndex {
-  readonly cells: ReadonlyMap<string, Readonly<Record<Layer, readonly Shape[]>>>;
+  /**
+   * The corridor's shapes. #3106: the SAME map for the same corridor, whatever
+   * the route — an open-world ride's route is a view that is replaced at
+   * every choice and every kilometre, and its corridor is nine blocks of
+   * streets, which are filed once a corridor and not once a view.
+   */
+  readonly cells: ReadonlyMap<string, Readonly<Record<CorridorLayer, readonly Shape[]>>>;
+  /** The route's pieces. */
+  readonly route: ReadonlyMap<string, readonly Shape[]>;
 }
 
 /** A cell, by its column (east) and row (south). */
@@ -314,22 +325,34 @@ function routeShapes(origin: CorridorOrigin, profile: RouteProfile): readonly Sh
   return shapes;
 }
 
-/**
- * The corridor and the route, filed by cell. Built once per ride: the corridor
- * and the route are both fixed when the ride starts.
- */
-export function streetMapIndex(corridor: WorldCorridor, profile: RouteProfile): StreetMapIndex {
-  const cells = new Map<string, Record<Layer, Shape[]>>();
-  const file = (layer: Layer, shape: Shape | undefined): void => {
+/** The key of the cell a shape is filed under: the one holding the middle of its bounds. */
+function cellOf(shape: Shape): string {
+  const { column, row } = streetMapCell({
+    east: (shape.left + shape.right) / 2,
+    south: (shape.top + shape.bottom) / 2,
+  });
+  return cellKey(column, row);
+}
+
+/** Each corridor's shapes, filed once. @see StreetMapIndex.cells */
+const corridorCells = new WeakMap<
+  WorldCorridor,
+  ReadonlyMap<string, Readonly<Record<CorridorLayer, readonly Shape[]>>>
+>();
+
+/** The corridor's covered land, water, streets and paths, filed by cell: once a corridor. */
+function cellsOf(
+  corridor: WorldCorridor,
+): ReadonlyMap<string, Readonly<Record<CorridorLayer, readonly Shape[]>>> {
+  const known = corridorCells.get(corridor);
+  if (known !== undefined) return known;
+  const cells = new Map<string, Record<CorridorLayer, Shape[]>>();
+  const file = (layer: CorridorLayer, shape: Shape | undefined): void => {
     if (shape === undefined) return;
-    const { column, row } = streetMapCell({
-      east: (shape.left + shape.right) / 2,
-      south: (shape.top + shape.bottom) / 2,
-    });
-    const key = cellKey(column, row);
+    const key = cellOf(shape);
     let cell = cells.get(key);
     if (cell === undefined) {
-      cell = { land: [], water: [], streets: [], paths: [], route: [] };
+      cell = { land: [], water: [], streets: [], paths: [] };
       cells.set(key, cell);
     }
     cell[layer].push(shape);
@@ -352,8 +375,27 @@ export function streetMapIndex(corridor: WorldCorridor, profile: RouteProfile): 
   }
   for (const street of corridor.streets) file('streets', shapeOf(street.line, false));
   for (const path of corridor.paths) file('paths', shapeOf(path.line, false));
-  for (const shape of routeShapes(corridor.origin, profile)) file('route', shape);
-  return { cells };
+  corridorCells.set(corridor, cells);
+  return cells;
+}
+
+/**
+ * The corridor and the route, filed by cell. On a route ride both are fixed
+ * when the ride starts, and this is built once. On an open-world ride (#3106)
+ * the corridor is the streets the ride holds and the route is the view of the
+ * road, each replaced as the ride goes: the corridor's shapes are filed once a
+ * corridor ({@link StreetMapIndex.cells}), and only the route's — a view is
+ * some 3 km of road — once a view.
+ */
+export function streetMapIndex(corridor: WorldCorridor, profile: RouteProfile): StreetMapIndex {
+  const route = new Map<string, Shape[]>();
+  for (const shape of routeShapes(corridor.origin, profile)) {
+    const key = cellOf(shape);
+    const cell = route.get(key);
+    if (cell === undefined) route.set(key, [shape]);
+    else cell.push(shape);
+  }
+  return { cells: cellsOf(corridor), route };
 }
 
 /** A value on a grid of `step`. Never `-0`. */
@@ -459,6 +501,8 @@ function clippedRing(shape: Shape, region: StreetMapRegion, into: string[]): voi
   into.push(subpath(ring, true));
 }
 
+const NO_SHAPES: readonly Shape[] = [];
+
 /** The cells either side of a cell that can hold a shape reaching into a region. */
 const CELL_REACH = Math.ceil(SHAPE_REACH_METRES / STREET_MAP_CELL_METRES);
 
@@ -476,10 +520,13 @@ export function streetMapLayers(index: StreetMapIndex, region: StreetMapRegion):
   const last = streetMapCell({ east: right, south: bottom });
   for (let column = first.column - CELL_REACH; column <= last.column + CELL_REACH; column += 1) {
     for (let row = first.row - CELL_REACH; row <= last.row + CELL_REACH; row += 1) {
-      const cell = index.cells.get(cellKey(column, row));
-      if (cell === undefined) continue;
+      const key = cellKey(column, row);
+      const cell = index.cells.get(key);
+      const route = index.route.get(key);
+      if (cell === undefined && route === undefined) continue;
       for (const layer of LAYERS) {
-        for (const shape of cell[layer]) {
+        const shapes = layer === 'route' ? route : cell?.[layer];
+        for (const shape of shapes ?? NO_SHAPES) {
           const off =
             shape.right < region.left ||
             shape.left > right ||

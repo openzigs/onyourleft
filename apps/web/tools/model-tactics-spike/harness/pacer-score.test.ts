@@ -66,13 +66,14 @@ const step = (change: Partial<PacerStep> = {}): PacerStep => {
     ground: ground(),
     outcome: 'applied',
     ridden: 'hold',
+    reason: 'rider-level',
     line: 'none',
     ...change,
   };
 };
 
 describe('the scores of a ride', () => {
-  it('counts the applied decisions that rode what the gap called for', () => {
+  it('counts every decision the device rode against what the gap called for, whatever its answer', () => {
     const score = scorePacerRide({
       steps: [
         step(),
@@ -80,19 +81,24 @@ describe('the scores of a ride', () => {
         step({
           ground: ground({ riderPlace: 'behind', gapTrend: 'rider-losing' }),
           ridden: 'ease',
+          reason: 'rider-behind',
         }),
-        // Not applied: neither for nor against.
-        step({ outcome: 'late', ridden: undefined }),
-        step({ outcome: 'invalid', ridden: undefined }),
-        step({ outcome: 'failed', ridden: undefined }),
-        step({ outcome: 'refused', ridden: undefined }),
+        // The answer was no good, and the device's decision was ridden all the same.
+        step({ outcome: 'late' }),
+        step({ outcome: 'invalid', ridden: 'lift' }),
+        step({ outcome: 'failed' }),
+        step({ outcome: 'refused' }),
+        // #2864: a decision that asked for no line is scored for what was ridden, and is no answer.
+        step({ outcome: 'unasked', ridden: 'lift' }),
+        step({ outcome: 'unasked' }),
       ],
       calls: [],
     });
     expect(score).toMatchObject({
+      decisions: 9,
       answers: 7,
       applied: 3,
-      intentsCalledFor: 2,
+      intentsCalledFor: 6,
       lateAnswers: 1,
       invalidAnswers: 1,
       failedAnswers: 2,
@@ -106,34 +112,38 @@ describe('the scores of a ride', () => {
         step({ ground: ahead, ridden: 'ease' }),
         step({ ground: ahead, ridden: 'hold' }),
         step({ ground: ground({ riderPlace: 'behind' }), ridden: 'ease' }),
-        step({ ground: ahead, outcome: 'late', ridden: undefined }),
+        // Ridden whatever became of the answer.
+        step({ ground: ahead, outcome: 'late', ridden: 'ease' }),
       ],
       calls: [],
     });
-    expect(score.easedWithRiderAhead).toBe(1);
+    expect(score.easedWithRiderAhead).toBe(2);
   });
 
-  it('counts the lines shown, the distinct ones and the repeats, case and marks aside', () => {
-    const shown = (text: string): PacerStep => step({ line: 'shown', shown: text });
+  it('counts the lines written, the distinct ones and the repeats, case and marks aside', () => {
+    const shown = (text: string): PacerStep => step({ line: 'shown', said: text });
     const score = scorePacerRide({
       steps: [
         shown('Nice and steady.'),
         shown('nice and steady!'),
-        shown('Nice  and steady'),
+        // Hidden by the device as a repeat: the model still said it.
+        step({ line: 'repeat', said: 'Nice  and steady' }),
         shown('Spin a lighter gear.'),
-        step({ line: 'voided', outcome: 'invalid', ridden: undefined }),
-        step({ line: 'voided', outcome: 'invalid', ridden: undefined }),
-        step({ line: 'hidden' }),
+        step({ line: 'voided', outcome: 'invalid' }),
+        step({ line: 'voided', outcome: 'invalid' }),
+        step({ line: 'against', said: 'Easing off for you.' }),
         step({ line: 'none' }),
       ],
       calls: [],
     });
     expect(score).toMatchObject({
-      linesShown: 4,
+      linesShown: 3,
+      linesWritten: 4,
       distinctLines: 2,
       repeatedLines: 2,
+      linesHiddenRepeat: 1,
+      linesHiddenAgainst: 1,
       linesVoided: 2,
-      linesHidden: 1,
     });
   });
 
@@ -155,6 +165,7 @@ describe('the scores of a ride', () => {
 describe('the pass mark for the ride', () => {
   /** A score at the mark exactly. */
   const AT_THE_MARK: PacerScore = {
+    decisions: 20,
     answers: 20,
     applied: 20,
     lateAnswers: 0,
@@ -162,11 +173,13 @@ describe('the pass mark for the ride', () => {
     failedAnswers: 0,
     intentsCalledFor: 16,
     easedWithRiderAhead: 0,
-    linesShown: 10,
+    linesShown: 9,
+    linesWritten: 10,
     distinctLines: 8,
     repeatedLines: 2,
+    linesHiddenRepeat: 1,
+    linesHiddenAgainst: 1,
     linesVoided: 1,
-    linesHidden: 1,
     answerMs: { median: 0, p90: 0, most: 0 },
     promptTokens: { median: 0, p90: 0, most: 0 },
     outputTokens: { median: 0, p90: 0, most: 0 },
@@ -190,15 +203,23 @@ describe('the pass mark for the ride', () => {
       { mark: 'distinctLineShare', scored: 0.7, asked: 0.8 },
     ],
     ['voidedLineShare', { linesVoided: 2 }, { mark: 'voidedLineShare', scored: 0.15, asked: 0.1 }],
-    ['voidedLineShare', { linesHidden: 2 }, { mark: 'voidedLineShare', scored: 0.15, asked: 0.1 }],
+    [
+      'voidedLineShare',
+      { linesHiddenAgainst: 2 },
+      { mark: 'voidedLineShare', scored: 0.15, asked: 0.1 },
+    ],
     [
       'appliedShare',
-      { applied: 17, intentsCalledFor: 17, invalidAnswers: 3 },
+      { applied: 17, invalidAnswers: 3 },
       { mark: 'appliedShare', scored: 0.85, asked: 0.9 },
     ],
     ['lateAnswers', { lateAnswers: 1 }, { mark: 'lateAnswers', scored: 1, asked: 0 }],
   ] as const)('fails a ride under the mark on %s', (_, change, shortfall) => {
     expect(pacerShortfalls({ ...AT_THE_MARK, ...change })).toContainEqual(shortfall);
+  });
+
+  it('does not count a repeat the device hid against the voided share: the distinct share has it', () => {
+    expect(pacerShortfalls({ ...AT_THE_MARK, linesHiddenRepeat: 10 })).toEqual([]);
   });
 
   it('fails a ride that got no answer at all on every share', () => {
@@ -208,10 +229,12 @@ describe('the pass mark for the ride', () => {
       applied: 0,
       intentsCalledFor: 0,
       linesShown: 0,
+      linesWritten: 0,
       distinctLines: 0,
       repeatedLines: 0,
+      linesHiddenRepeat: 0,
+      linesHiddenAgainst: 0,
       linesVoided: 0,
-      linesHidden: 0,
     };
     expect(pacerShortfalls(silent).map((short) => short.mark)).toEqual([
       'intentShare',

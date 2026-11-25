@@ -80,6 +80,7 @@ import {
   metres,
   metresPerSecond,
   MODEL_PACER_LAPSE_S,
+  pacerAsRidden,
   seconds,
   watts,
   type BotPacerPlan,
@@ -550,8 +551,17 @@ export class GameSimulation {
     | { readonly direction: PacerDirection; readonly from: number; readonly until: number }
     | undefined;
 
+  /**
+   * The road the rider's grade and headwind are read from, and the ride
+   * distance of its distance zero — #2982. {@link SimulationSetup.profile} at
+   * origin 0 on every ride but an open-world one, which hands on each new view
+   * of its rolling route through {@link followRoad}.
+   */
+  #road: { readonly profile: RouteProfile; readonly origin: number };
+
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
+    this.#road = { profile: setup.profile, origin: 0 };
     this.#course = botCourseFor(setup);
     const start: RideState =
       setup.startMetres === undefined
@@ -581,11 +591,41 @@ export class GameSimulation {
   }
 
   /**
+   * Read the rider's grade and headwind from `profile` from the next step on,
+   * at ride distance minus `origin` — #2982, an open-world ride's rolling
+   * route (`open-world/road.ts`). The odometer, the clocks and everything the
+   * rider has ridden stay as they are: only where the road is read from moves.
+   *
+   * ⚠️ **The one exception to "everything the simulation needs that does not
+   * change during a ride"** ({@link SimulationSetup}), and a narrow one. The
+   * road a rolling route hands on agrees with the last one at every distance
+   * the rider has reached (ADR 0087 D-4.1), so the hill under them does not
+   * change by it; a U-turn changes the road ahead, which is the road.
+   *
+   * @throws {Error} on a ride with a pacer: the bot's course is built once from
+   * the first road, and a pacer on a road that moved under it would ride
+   * somewhere else. An open-world ride has no pacer (`GameView` §`begin`).
+   */
+  followRoad(profile: RouteProfile, origin: number): void {
+    if (this.#course !== undefined) {
+      throw new Error('a ride with a pacer cannot follow a road that changes');
+    }
+    this.#road = { profile, origin };
+  }
+
+  /** The grade at ride distance `distance`, on the road followed. @see followRoad */
+  #gradeAt(distance: number): GradePercent {
+    return gradeAtDistance(this.#road.profile, metres(distance - this.#road.origin));
+  }
+
+  /**
    * Put an AI pacer's decision in force — #2712, ADR 0072 D-5: from the
    * first fixed step whose seconds ridden ({@link GameState.ridden}) are at
    * or past `fromSeconds`, until a newer decision replaces it or
    * {@link MODEL_PACER_LAPSE_S} passes — `@onyourleft/domain`
-   * §`pacerDirectionAt`'s rule, so the ride's stored log replays it.
+   * §`pacerDirectionAt`'s rule, so the ride's stored log replays it. Inside
+   * the first 30 s it is ridden up the start ramp, and past them with its surges (#2835, §`pacerAsRidden`),
+   * by the same function the replay reads.
    *
    * ⚠️ **Moves the pacer and nothing else.** The rider's physics, the grade
    * and every trainer write are read off the rider's own odometer; the pacer
@@ -775,7 +815,7 @@ export class GameSimulation {
       // Re-read per step rather than once per call: over a long stall the rider
       // crosses real terrain, and holding one grade for 200 steps would flatten
       // a hill they actually climbed.
-      const grade = gradeAtDistance(this.#setup.profile, ride.distance);
+      const grade = this.#gradeAt(ride.distance);
       ride = advance(
         ride,
         {
@@ -867,7 +907,7 @@ export class GameSimulation {
       // An exact multiple of the step, so this cannot drift from the step count.
       elapsed: seconds(this.#stepsCredited * SIMULATION_STEP_SECONDS),
       ridden: seconds(this.#stepsRun * SIMULATION_STEP_SECONDS),
-      grade: gradeAtDistance(this.#setup.profile, ride.distance),
+      grade: this.#gradeAt(ride.distance),
       input,
       ...(bot === undefined ? {} : { bot }),
       // ⚠️ At the distance the ride ENDED this call on, which is the same
@@ -937,7 +977,7 @@ export class GameSimulation {
     if (wind === undefined) {
       return undefined;
     }
-    return headwindOnRoute(this.#setup.profile, distance, wind);
+    return headwindOnRoute(this.#road.profile, distance - this.#road.origin, wind);
   }
 
   /** The AI pacer's direction in force at `riddenSeconds`, or `undefined`. @see directPacer */
@@ -948,7 +988,8 @@ export class GameSimulation {
       this.#direction = undefined;
       return undefined;
     }
-    return held.direction;
+    // #2835: a gentle start and its surges, as a function of the seconds ridden and the decision.
+    return pacerAsRidden(held.direction, riddenSeconds);
   }
 
   /**

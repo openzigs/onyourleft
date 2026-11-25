@@ -55,8 +55,10 @@
  * {@link describeStreetGraphRefusal} names the constraint and its limit and
  * never a coordinate, a tile id or a block id (ADR 0004 D).
  *
- * Pure: no platform API, no clock, no worker. The web app runs it in a worker
- * of its own.
+ * Pure: no platform API, no clock, no worker. The web app builds it in a
+ * worker (`apps/web/src/game/open-world/graph-build.ts`, #2990), adding the
+ * tiles of the blocks read round the rider and removing those left behind, and
+ * hands the page only what each change did to it.
  */
 
 import { tileBox } from './cover';
@@ -169,6 +171,11 @@ export interface StreetGraphEdge {
   readonly metres: number;
   /** `x0, z0, …` from `from`'s position to `to`'s, in local metres. */
   readonly line: Float32Array;
+  /**
+   * #3052, ADR 0096: the street's mapped name, when the tiles were decoded
+   * with names (`decodeTile`'s `streetNames`) and the street carries one.
+   */
+  readonly name?: string;
 }
 
 /**
@@ -296,6 +303,7 @@ export class StreetGraph {
         isLink: edge.street.isLink,
         metres: edge.metres,
         line: edge.line,
+        ...(edge.street.name === undefined ? {} : { name: edge.street.name }),
       });
     });
     const seamEnds = built.seamEnds.map((seam) => {

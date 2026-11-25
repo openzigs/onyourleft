@@ -10,7 +10,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { distanceBetween } from '../geodesy';
-import { altitudeMetres } from '../quantities';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+} from '../quantities';
 
 import { elevationAt, gradeAt, positionAt, routeProfile, type RouteProfile } from './profile';
 import {
@@ -22,6 +27,7 @@ import {
   waysOn,
   type RollingEdge,
   type RollingJunction,
+  type RollingStreetGraph,
 } from './rolling';
 import { graphOf, gridGraph, placeAt, roughGround, streetThrough } from './rolling-testing';
 
@@ -208,6 +214,83 @@ describe('a junction choice swaps the tail past the junction', () => {
     expect(route.junctionsAfter(rider).find((j) => j.distance === junction.distance)?.taken).toBe(
       chosen.id,
     );
+  });
+
+  it('hands out the route a choice would give without taking it, and is left as it was — #3051', () => {
+    const { route } = eastAlongRow3();
+    // Past the first trim, and not on a sample: the road held starts at 530 m.
+    const rider = 1_534;
+    route.advance(rider);
+    const { junction, other } = firstJunctionWithAnotherWay(route, rider);
+    const before = route.view();
+    const held = {
+      origin: route.origin,
+      end: route.end,
+      legs: route.legs,
+      junctions: route.junctionsAfter(rider),
+    };
+
+    const took = route.taking(junction.distance, other.edge.id);
+    if (took === undefined) throw new Error('no route');
+    const taking = took.view();
+
+    // Nothing of the route moved: the same view object, legs, ends and junctions.
+    expect(route.view()).toBe(before);
+    expect(route.origin).toBe(held.origin);
+    expect(route.end).toBe(held.end);
+    expect(route.legs).toEqual(held.legs);
+    expect(route.junctionsAfter(rider)).toEqual(held.junctions);
+    // And a route that goes on from there goes on as one never asked does.
+    const { route: unasked } = eastAlongRow3();
+    unasked.advance(rider);
+    route.advance(rider + 700);
+    unasked.advance(rider + 700);
+    expect(route.view()).toEqual(unasked.view());
+    expect(route.legs).toEqual(unasked.legs);
+
+    // The view is the one the choice gives, sample for sample, as far as it reaches.
+    const { route: chosen } = eastAlongRow3();
+    chosen.advance(rider);
+    expect(chosen.choose(junction.distance, other.edge.id, rider)).toBe('swapped');
+    const swapped = chosen.view();
+    expect(taking).not.toBe(before);
+    expect(taking.positions.length).toBeGreaterThanOrEqual(swapped.positions.length - 1);
+    const count = Math.min(taking.positions.length, swapped.positions.length);
+    expect(taking.positions.slice(0, count)).toEqual(swapped.positions.slice(0, count));
+    // The grade's window runs 70 m past a sample, so the last of a shorter view are provisional.
+    expect(taking.elevations.slice(0, count - 2)).toEqual(swapped.elevations.slice(0, count - 2));
+    expect(taking.grades.slice(0, count - 7)).toEqual(swapped.grades.slice(0, count - 7));
+    // It leaves the road the route takes at the junction, and not before it.
+    const split = Math.floor((junction.distance - held.origin) / 10);
+    expect(taking.positions.slice(0, split + 1)).toEqual(before.positions.slice(0, split + 1));
+    expect(taking.positions[split + 2]).not.toEqual(before.positions[split + 2]);
+    // The other route is one of its own: the same origin and U-turns, the
+    // way taken at the junction, and its own junctions on from there.
+    expect(took.origin).toBe(held.origin);
+    expect(took.uTurns).toBe(route.uTurns);
+    expect(took.junctionsAfter(rider).find((j) => j.distance === junction.distance)?.taken).toBe(
+      other.edge.id,
+    );
+    expect(took.legs.map((leg) => leg.edge.id)).toEqual(chosen.legs.map((leg) => leg.edge.id));
+    // And riding IT on changes nothing of the route it was taken from.
+    const mine = route.view();
+    took.advance(rider + 1_500);
+    took.uTurn(rider + 1_500);
+    expect(route.view()).toBe(mine);
+    expect(route.legs).toEqual(unasked.legs);
+  });
+
+  it('hands out no route for a junction that is not on the route, or a way that is not one of its ways on — #3051', () => {
+    const { route } = eastAlongRow3();
+    const { junction, other } = firstJunctionWithAnotherWay(route, 0);
+    const before = route.view();
+    expect(route.taking(junction.distance + 1, other.edge.id)).toBeUndefined();
+    expect(route.taking(junction.distance, 'no-such-street')).toBeUndefined();
+    expect(route.view()).toBe(before);
+    // The way already taken is a way on: its route's road is this route's own.
+    const own = route.taking(junction.distance, junction.taken)?.view();
+    if (own === undefined) throw new Error('no route');
+    expect(own.positions.slice(0, -1)).toEqual(before.positions.slice(0, own.positions.length - 1));
   });
 
   it('swaps between ways of different lengths with no grade the rider was sent changing', () => {
@@ -423,6 +506,54 @@ describe('a U-turn mid-street', () => {
   });
 });
 
+describe('the next junction alone — #2898', () => {
+  it('is the first of every junction after the rider, at every distance, through a choice and a U-turn', () => {
+    const { route } = eastAlongRow3();
+    const check = (from: number, to: number): void => {
+      for (let rider = from; rider <= to; rider += 7) {
+        expect(route.nextJunctionAfter(rider), `at ${rider}`).toEqual(
+          route.junctionsAfter(rider)[0],
+        );
+      }
+    };
+    check(-20, 1_500);
+    // A junction's exact distance is not after it.
+    const first = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(route.nextJunctionAfter(first.distance)).toEqual(
+      route.junctionsAfter(first.distance)[0],
+    );
+    expect(route.nextJunctionAfter(first.distance)?.distance).toBeGreaterThan(first.distance);
+    const next = route.junctionsAfter(700)[0] as RollingJunction;
+    const other = next.ways.find((way) => way.edge.id !== next.taken)?.edge.id as string;
+    expect(route.choose(next.distance, other, 700)).toBe('swapped');
+    check(700, 2_400);
+    route.advance(1_300);
+    route.uTurn(1_300);
+    check(1_300, 3_000);
+    for (const rider of [Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]) {
+      expect(route.nextJunctionAfter(rider)).toEqual(route.junctionsAfter(rider)[0]);
+    }
+  });
+
+  it('works out the ways on for one junction, not for every one in the 2 km ahead', () => {
+    const { graph } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+    let asked = 0;
+    const counted = {
+      edgesFrom: (node: string) => {
+        asked += 1;
+        return graph.edgesFrom(node);
+      },
+    };
+    const route = new RollingRoute(counted, edgeFrom(graph, '0,3', 'h0,3'));
+    route.advance(300);
+    expect(route.junctionsAfter(300).length).toBeGreaterThan(5);
+    asked = 0;
+    expect(route.nextJunctionAfter(300)).toBeDefined();
+    // Every node on this grid is a junction, so the first leg past the rider ends at one.
+    expect(asked).toBe(1);
+  });
+});
+
 describe('a rider distance that is not a finite number', () => {
   const notFinite = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
 
@@ -443,6 +574,127 @@ describe('a rider distance that is not a finite number', () => {
     // And the route still rides on from where it was.
     route.advance(1_000);
     expect(route.end - 1_000).toBeGreaterThanOrEqual(ROLLING_AHEAD_METRES);
+  });
+});
+
+describe('the edge cases the review of #2962 found — #2982', () => {
+  const ground = (east: number) => 100 + east * 0.04;
+  const long: RollingEdge = {
+    id: 'long',
+    from: 'w',
+    to: 'e',
+    points: streetThrough(
+      [
+        [0, 0],
+        [1_500, 0],
+        [3_000, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+
+  it('reads a rider far past the road held as a reach past its end, so one call samples twice its reach at most', () => {
+    const { route } = eastAlongRow3();
+    const end = route.end;
+    route.advance(1e9);
+    // Twice the reach past the old end, and the samples bounded as ever.
+    expect(route.end).toBeLessThanOrEqual(end + 2 * ROLLING_AHEAD_METRES + 10);
+    expect(route.end).toBeGreaterThanOrEqual(end + 2 * ROLLING_AHEAD_METRES);
+    expect(route.view().positions.length).toBeLessThanOrEqual(ROLLING_MOST_SAMPLES);
+    // And the next call goes on from there.
+    route.advance(1e9);
+    expect(route.end).toBeGreaterThanOrEqual(end + 4 * ROLLING_AHEAD_METRES);
+  });
+
+  it('turns nothing round behind the origin or past the end, and throws nothing', () => {
+    const route = new RollingRoute(graphOf([long]), long);
+    route.advance(1_800);
+    expect(route.origin).toBeGreaterThan(0);
+    const view = route.view();
+    const legs = route.legs;
+    for (const rider of [route.origin - 50, route.end + 50]) {
+      expect(() => {
+        route.uTurn(rider);
+      }).not.toThrow();
+      expect(route.view()).toBe(view);
+      expect(route.legs).toEqual(legs);
+    }
+    // And a caller counting U-turns is told of none.
+    expect(route.uTurns).toBe(0);
+  });
+
+  it('turns the rider back the way they were going on a second U-turn within one sample', () => {
+    const route = new RollingRoute(graphOf([long]), long);
+    route.advance(253);
+    const before = route.view();
+    route.uTurn(253);
+    route.uTurn(255);
+    expect(route.uTurns).toBe(2);
+    const view = route.view();
+    // Up to the turn, nothing moved; past it the rider rides on east, as before both.
+    for (const at of [0, 250, 260, 300, 700, 1_400]) {
+      expect(distanceBetween(readAt(view, route.origin, at).position, placeAt(at, 0))).toBeLessThan(
+        0.01,
+      );
+      expect(readAt(view, route.origin, at).grade).toBeCloseTo(
+        readAt(before, route.origin, at).grade,
+        6,
+      );
+    }
+  });
+
+  it('turns back along the street ridden in on, at a sample where one street meets the next', () => {
+    // A street exactly 200 m long, ridden north into a node on the equator,
+    // where one way goes east and one west: the node is a sample, held by the
+    // street ridden in on and by the way taken after it. The latitude is found
+    // by stepping an ulp at a time until the street is 200 m to the bit.
+    const at = (latitude: number, longitude: number) => ({
+      position: geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude)),
+      elevation: altitudeMetres(0),
+    });
+    const node = at(0, 0);
+    const guess = -200 / ((6_371_008.8 * Math.PI) / 180);
+    let south = guess;
+    for (let step = -400; step <= 400; step += 1) {
+      const latitude = guess * (1 + step * Number.EPSILON);
+      if ((distanceBetween(at(latitude, 0).position, node.position) as number) === 200) {
+        south = latitude;
+        break;
+      }
+    }
+    const ridden: RollingEdge = {
+      id: 'in',
+      from: 's',
+      to: 'm',
+      points: [at(south, 0), node],
+      roadClass: 1,
+    };
+    const east: RollingEdge = {
+      id: 'e',
+      from: 'm',
+      to: 'x',
+      points: [node, at(0, 0.03)],
+      roadClass: 1,
+    };
+    const west: RollingEdge = {
+      id: 'w',
+      from: 'm',
+      to: 'y',
+      points: [node, at(0, -0.03)],
+      roadClass: 1,
+    };
+    const route = new RollingRoute(graphOf([ridden, east, west]), ridden);
+    expect(route.legs[0]?.end).toBe(200);
+    route.uTurn(195);
+    const view = route.view();
+    // Back south down the street ridden in on, never on along the other way west.
+    for (const back of [10, 100, 190]) {
+      expect(readAt(view, route.origin, 200 + back).position.latitude).toBeLessThan(0);
+      expect(Math.abs(readAt(view, route.origin, 200 + back).position.longitude)).toBeLessThan(
+        1e-9,
+      );
+    }
   });
 });
 
@@ -500,5 +752,269 @@ describe('a start street that is not one', () => {
       expect(error).toMatchObject({ code: 'no-distance' });
       expect(String((error as Error).message)).not.toMatch(/40\.|105\.|-105/);
     }
+  });
+});
+
+describe('a dead end that the graph later goes on past — #2990', () => {
+  const ground = (east: number) => 100 + east * 0.04;
+  // A street east from 0 to 800 m, whose far end is the edge of the map held.
+  const first: RollingEdge = {
+    id: 'first',
+    from: 'start',
+    to: 'edge',
+    points: streetThrough(
+      [
+        [0, 0],
+        [800, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+  // The street on from there, once the next block is read.
+  const onward: RollingEdge = {
+    id: 'onward',
+    from: 'edge',
+    to: 'far',
+    points: streetThrough(
+      [
+        [800, 0],
+        [4_000, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+
+  /** A graph whose streets may be added to after the route reads it. */
+  function growing(): { graph: RollingStreetGraph; add: (edge: RollingEdge) => void } {
+    const edges: RollingEdge[] = [first];
+    return {
+      graph: { edgesFrom: (node) => graphOf(edges).edgesFrom(node) },
+      add: (edge) => {
+        edges.push(edge);
+      },
+    };
+  }
+
+  it('takes the way on past a turn-round once the graph has one, changing nothing the rider can have been sent', () => {
+    const { graph, add } = growing();
+    const route = new RollingRoute(graph, first);
+    expect(route.legs[1]?.kind).toBe('turn-round');
+    const rider = 300;
+    route.advance(rider);
+    const before = route.view();
+    add(onward);
+    expect(route.reopen(rider)).toBe(true);
+    const legs = route.legs;
+    expect(legs[1]?.kind).toBe('default');
+    expect(legs[1]?.edge.id).toBe('onward');
+    const view = route.view();
+    expect(view).not.toBe(before);
+    // Ridden on east past the old end, not back west: 1 km past it is 1.8 km
+    // from the start.
+    const end = legs[0]?.end as number;
+    const past = readAt(view, route.origin, end + 1_000).position;
+    expect(distanceBetween(placeAt(0, 0), past)).toBeCloseTo(end + 1_000, 0);
+    // Nothing up to 100 m short of the old end moved, and no grade a rider at
+    // 300 m can have been sent (it reads 80 m ahead) changed.
+    for (const at of samplesIn(0, end - 100)) {
+      expect(readAt(view, route.origin, at).position).toEqual(
+        readAt(before, route.origin, at).position,
+      );
+    }
+    for (const at of samplesIn(0, rider + 80)) {
+      expect(readAt(view, route.origin, at).grade).toBe(readAt(before, route.origin, at).grade);
+    }
+    // Nothing more to take.
+    expect(route.reopen(rider)).toBe(false);
+  });
+
+  it('rides a turn-round within the lock as it is', () => {
+    const { graph, add } = growing();
+    const route = new RollingRoute(graph, first);
+    const end = route.legs[0]?.end as number;
+    const rider = end - JUNCTION_LOCK_METRES;
+    route.advance(rider);
+    const before = route.view();
+    add(onward);
+    expect(route.reopen(Number.NaN)).toBe(false);
+    expect(route.view()).toBe(before);
+    // The turn-round 100 m ahead stays: the rider turns round there and rides
+    // back to the start, a dead end, and back again. The street on is taken
+    // the next time the route reaches the old end, a lap of 1.6 km later.
+    route.reopen(rider);
+    const legs = route.legs;
+    expect(legs[1]?.kind).toBe('turn-round');
+    expect(legs[2]?.kind).toBe('turn-round');
+    expect(legs[3]?.kind).toBe('default');
+    expect(legs[3]?.edge.id).toBe('onward');
+    for (const at of samplesIn(0, end + 700)) {
+      expect(readAt(route.view(), route.origin, at).position).toEqual(
+        readAt(before, route.origin, at).position,
+      );
+    }
+  });
+
+  it('changes nothing at a dead end that still is one', () => {
+    const { graph } = growing();
+    const route = new RollingRoute(graph, first);
+    const before = route.view();
+    expect(route.reopen(0)).toBe(false);
+    expect(route.view()).toBe(before);
+  });
+});
+
+describe("a loop's two ways — #2990", () => {
+  const ground = () => 100;
+  const stem: RollingEdge = {
+    id: 'stem',
+    from: 's',
+    to: 'n',
+    points: streetThrough(
+      [
+        [0, -300],
+        [0, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+  const ring = streetThrough(
+    [
+      [0, 0],
+      [200, 100],
+      [0, 200],
+      [-200, 100],
+      [0, 0],
+    ],
+    ground,
+  );
+  // As the open-world session orients a loop: two ways, two ids, one street.
+  const clockwise: RollingEdge = {
+    id: 'ring',
+    street: 'ring',
+    from: 'n',
+    to: 'n',
+    points: ring,
+    roadClass: 1,
+  };
+  const anticlockwise: RollingEdge = {
+    id: 'ring:reverse',
+    street: 'ring',
+    from: 'n',
+    to: 'n',
+    points: [...ring].reverse(),
+    roadClass: 1,
+  };
+  const graph: RollingStreetGraph = {
+    edgesFrom: (node) =>
+      node === 'n'
+        ? [
+            { ...stem, from: 'n', to: 's', points: [...stem.points].reverse() },
+            clockwise,
+            anticlockwise,
+          ]
+        : node === 's'
+          ? [stem]
+          : [],
+  };
+
+  it('offers both ways round by two ids, and a choice by either takes that way', () => {
+    const route = new RollingRoute(graph, stem);
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(junction.ways.map((way) => way.edge.id).sort()).toEqual(['ring', 'ring:reverse']);
+    for (const [id, east] of [
+      ['ring', 1],
+      ['ring:reverse', -1],
+    ] as const) {
+      expect(['swapped', 'unchanged']).toContain(route.choose(junction.distance, id, 0));
+      const at = readAt(route.view(), route.origin, junction.distance + 150).position;
+      // 150 m round the ring the rider is east of the stem one way, west the other.
+      expect(Math.sign(at.longitude - placeAt(0, 0).longitude)).toBe(east);
+    }
+  });
+
+  it('offers neither way round from the ring itself: both are the way back', () => {
+    const { ways } = waysOn(clockwise, graph.edgesFrom('n'));
+    expect(ways.map((way) => way.edge.id)).toEqual(['stem']);
+  });
+
+  it('keeps the street on a way it turns round, so the way back from there is still the ring', () => {
+    // Up the stem and once round the ring, then a U-turn on the ring: ridden
+    // back to the node, neither way round is a way on from it.
+    const route = new RollingRoute(graph, stem);
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    const rider = junction.distance + 100;
+    route.advance(rider);
+    route.uTurn(rider);
+    const legs = route.legs;
+    const uTurn = legs.findIndex((leg) => leg.kind === 'u-turn');
+    expect(legs[uTurn]?.edge.street).toBe('ring');
+    expect(legs[uTurn + 1]?.edge.id).toBe('stem');
+  });
+});
+
+describe('a U-turn just past a junction: the road back undoes the turn — #3129, ADR 0088', () => {
+  /** East along row 3, right... north at the first junction (180 m), and turned round `past` metres on. */
+  function turnedNorthThenRound(past: number) {
+    const { route } = eastAlongRow3();
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(junction.distance).toBeCloseTo(180, 0);
+    expect(route.choose(junction.distance, 'v1,3', 50)).toBe('swapped');
+    const rider = junction.distance + past;
+    route.advance(rider);
+    route.uTurn(rider);
+    const back = route.junctionsAfter(rider)[0] as RollingJunction;
+    return { route, rider, back };
+  }
+
+  it('takes, as its default, the way back onto the street ridden in on, within the lock', () => {
+    const { route, back } = turnedNorthThenRound(60);
+    // Ridden back to the junction from 60 m past it.
+    expect(back.distance).toBeCloseTo(300, 0);
+    expect(back.defaultWay).toBe('h0,3');
+    expect(back.taken).toBe('h0,3');
+    // Read through the view the game reads: past the junction, west along row 3.
+    const view = route.view();
+    for (const on of [20, 60, 150]) {
+      expect(
+        distanceBetween(
+          readAt(view, route.origin, back.distance + on).position,
+          placeAt(180 - on, ROWS[3] as number),
+        ),
+      ).toBeLessThan(1);
+    }
+    // Set by the U-turn itself: the junction is inside the lock, so no press made it.
+    expect(back.distance - 240).toBeLessThanOrEqual(JUNCTION_LOCK_METRES);
+    expect(route.choose(back.distance, 'v1,2', 240)).toBe('locked');
+  });
+
+  it('still takes it with the turn 90 m past the junction, which is still inside the lock', () => {
+    const { route, rider, back } = turnedNorthThenRound(90);
+    expect(back.defaultWay).toBe('h0,3');
+    expect(back.taken).toBe('h0,3');
+    // The turn is on the next sample, and the junction is no further from it than the lock.
+    expect(route.choose(back.distance, 'v1,2', rider)).toBe('locked');
+  });
+
+  it('keeps D-1.4’s default for a U-turn further past the junction than the lock', () => {
+    const { back } = turnedNorthThenRound(JUNCTION_LOCK_METRES + 10);
+    // Straight on, south across row 3: the smallest change of bearing.
+    expect(back.defaultWay).toBe('v1,2');
+    expect(back.taken).toBe('v1,2');
+    // And the street turned off from is still offered both ways, for a press to take.
+    expect(back.ways.map((way) => way.edge.id).sort()).toEqual(['h0,3', 'h1,3', 'v1,2']);
+  });
+
+  it('keeps D-1.4’s default for a U-turn on the street ridden from the start, with no junction behind', () => {
+    const { graph, route } = eastAlongRow3();
+    route.advance(60);
+    route.uTurn(60);
+    const [start, back] = route.legs;
+    const wanted = waysOn(back?.edge as RollingEdge, graph.edgesFrom('0,3')).defaultWay;
+    expect(start?.kind).toBe('start');
+    expect(route.legs[2]?.kind).toBe('default');
+    expect(route.legs[2]?.edge.id).toBe(wanted?.edge.id);
   });
 });

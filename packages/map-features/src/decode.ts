@@ -29,12 +29,16 @@ import {
   KEY_HEIGHT,
   KEY_IS_BRIDGE,
   KEY_IS_LINK,
+  KEY_NAME,
   KEY_IS_TUNNEL,
   KEY_KIND,
   KEY_KIND_DETAIL,
   KEY_MIN_HEIGHT,
   KEY_ONEWAY,
   KEY_POPULATION_RANK,
+  KEY_SPORT,
+  PITCH_KIND,
+  PITCH_SPORTS,
   LAYER_GEOMETRY_TYPES,
   LAYER_KEPT_GEOMETRIES,
   MAX_EXTENT,
@@ -51,23 +55,32 @@ import {
   OTHER_STREET_KIND_DETAILS,
   PLACE_KIND_DETAILS,
   PLACE_KINDS,
+  POI_CLASS_OF_KIND,
   READ_LAYERS,
+  RAIL_KIND,
+  RAIL_KIND_DETAILS,
   STREET_KINDS,
+  STREET_NAME_MAX_BYTES,
+  STREET_NAME_MAX_CHARS,
   WATER_LINE_KINDS,
   GEOMETRY_LINE,
   type BuildingFieldRule,
   type ReadLayer,
 } from './schema';
+import { matchPoisToBuildings, type PoiPoint } from './poi-match';
 import type {
   BuildingFeature,
   BuildingFields,
   CorridorFrame,
   DecodedStreetFeature,
   DecodedTile,
+  DecodeOptions,
   DecodeRefusal,
   LandUseFeature,
   PathFeature,
+  PitchSport,
   PlaceFeature,
+  RailFeature,
   Ring,
   StreetAccess,
   StreetGrade,
@@ -107,10 +120,20 @@ import type {
  * (ADR 0091 D-2), `oneway`, `access` and `is_link` too, each compared with
  * `schema.ts`' lists and kept on a street as a constant of the decoder's own;
  * a value the lists do not name is the field's default, counted in
- * `roadValuesDefaulted`, and never refuses a tile or drops a street.
+ * `roadValuesDefaulted`, and never refuses a tile or drops a street. Since
+ * #3052 (ADR 0096), and only when the caller passes `streetNames: true`, a
+ * street's `name` too: strict UTF-8, bounded, cleaned of every control and
+ * bidirectional character, and kept on the street alone.
  *
  * `places` is read up to `limits.maxPlacesPerTile` points and no further: the
  * decoder stops there rather than refusing the tile.
+ *
+ * `pois` (#2975, ADR 0054's entry of 2026-11-21) is looked up for `kind`
+ * alone — never a name, a brand, `kind_detail` or an id — and a point whose
+ * kind `schema.ts` §`POI_CLASS_OF_KIND` names is matched to the footprint it
+ * falls in (`poi-match.ts`), up to `limits.maxPoisPerTile` points and no
+ * further. The points themselves are not returned: a footprint's `poi` is all
+ * that is kept of one.
  *
  * The frame is the game's (`projection.ts`), and the output is `Float32Array`:
  * float32 spacing is about 4 mm at 50 km from the origin and about 3 cm at a few
@@ -122,6 +145,7 @@ export function decodeTile(
   tile: TileId,
   origin: CorridorFrame,
   limits: DecodeLimits = DEFAULT_DECODE_LIMITS,
+  options: DecodeOptions = {},
 ): DecodedTile | DecodeRefusal {
   if (
     tile.z !== 15 ||
@@ -141,7 +165,7 @@ export function decodeTile(
   }
   const state: DecodeState = { scratch: new Int32Array(256), layer: null, tileVertices: 0 };
   try {
-    return decodeChecked(bytes, tile, origin, limits, state);
+    return decodeChecked(bytes, tile, origin, limits, state, options.streetNames === true);
   } catch (error) {
     if (error instanceof Refused) return error.refusal;
     if (error instanceof Malformed) return { reason: 'malformed', layer: state.layer };
@@ -187,12 +211,16 @@ interface FramedLayer {
     isBridge: number;
     isTunnel: number;
     populationRank: number;
+    /** #2688: `sport`'s key index, in `landuse` only; `-1` for none. */
+    sport: number;
     /** #1789: the key index of each building field, in `BUILDING_FIELD_NAMES` order; `-1` for none. */
     fields: Int32Array;
     /** #2892: the road fields' key indices, matched in `roads` alone; `-1` for none. */
     oneway: number;
     access: number;
     isLink: number;
+    /** #3052: `name`'s key index, in `roads` and only when names were asked for; `-1` for none. */
+    name: number;
   };
   /** Decoded values by index, filled as features ask for them. */
   readonly identifiers: Map<number, string | null>;
@@ -203,6 +231,8 @@ interface FramedLayer {
   readonly fieldValues: Map<number, string | number | null>;
   /** #2892: road field values, keyed `index · ROAD_SLOTS + slot`. */
   readonly roadValues: Map<number, RoadReading>;
+  /** #3052: street names by value index. */
+  readonly names: Map<number, string | null>;
 }
 
 /** The road fields' slots (#2892), for {@link FramedLayer.roadValues}' key. */
@@ -230,6 +260,7 @@ function decodeChecked(
   origin: CorridorFrame,
   limits: DecodeLimits,
   state: DecodeState,
+  streetNames: boolean,
 ): DecodedTile | DecodeRefusal {
   // 1. Frame the tile: the layers, by name, with no layer's body decoded.
   const reader = new ProtoReader(bytes, 0, bytes.length);
@@ -256,13 +287,13 @@ function decodeChecked(
   if (!sawEarth && !found.has('water')) return { reason: 'wrong-schema' };
 
   // 2. Frame every read layer and count its features: the feature limit is
-  // held for all five before any feature of any of them is decoded.
+  // held for all six before any feature of any of them is decoded.
   const framed: FramedLayer[] = [];
   for (const name of READ_LAYERS) {
     const range = found.get(name);
     if (range === undefined) continue;
     state.layer = name;
-    framed.push(frameLayer(bytes, name, range.start, range.end, limits));
+    framed.push(frameLayer(bytes, name, range.start, range.end, limits, streetNames));
   }
 
   // 3. Count every read layer's vertices, before any feature is decoded or
@@ -279,6 +310,8 @@ function decodeChecked(
   const streets: DecodedStreetFeature[] = [];
   const places: PlaceFeature[] = [];
   const waterLines: WaterLineFeature[] = [];
+  const rails: RailFeature[] = [];
+  const pois: PoiPoint[] = [];
   const counts = { roadValuesDefaulted: 0 };
   for (const layer of framed) {
     state.layer = layer.name;
@@ -287,6 +320,8 @@ function decodeChecked(
       // ADR 0055 D-2.5: the decoder stops at the bound, and the rest of the
       // layer is never decoded.
       if (layer.name === 'places' && places.length >= limits.maxPlacesPerTile) break;
+      // #2975: and at its own bound for POIs, never refusing the tile.
+      if (layer.name === 'pois' && pois.length >= limits.maxPoisPerTile) break;
       decodeFeature(
         bytes,
         layer,
@@ -295,7 +330,7 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets, places, waterLines },
+        { landUse, buildings, paths, streets, places, waterLines, rails, pois },
         counts,
       );
     }
@@ -304,11 +339,12 @@ function decodeChecked(
   return {
     tile,
     landUse,
-    buildings,
+    buildings: matchPoisToBuildings(buildings, pois, limits.maxPoiMatchWork),
     paths,
     streets,
     places,
     waterLines,
+    rails,
     roadValuesDefaulted: counts.roadValuesDefaulted,
   };
 }
@@ -342,6 +378,7 @@ function frameLayer(
   start: number,
   end: number,
   limits: DecodeLimits,
+  streetNames = false,
 ): FramedLayer {
   // First pass: count, so nothing is allocated for a layer over its limit.
   let featureCount = 0;
@@ -391,16 +428,22 @@ function frameLayer(
     isBridge: -1,
     isTunnel: -1,
     populationRank: -1,
+    sport: -1,
     fields: new Int32Array(FIELD_SLOTS).fill(-1),
     oneway: -1,
     access: -1,
     isLink: -1,
+    name: -1,
   };
   // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
   // other key of a place - a height, a flag, its name - has a value decoded.
   const isPlaces = name === 'places';
+  // #2975: in `pois`, only `kind` is ever matched - not even `kind_detail`.
+  const isPois = name === 'pois';
   // #1789: the building fields are matched in `buildings` and nowhere else.
   const isBuildings = name === 'buildings';
+  // #2688: a pitch's sport is matched in `landuse` and nowhere else.
+  const isLandUse = name === 'landuse';
   // #2892: the road fields are matched in `roads` and nowhere else.
   const isRoads = name === 'roads';
   let f = 0;
@@ -420,7 +463,9 @@ function frameLayer(
         values[v++] = range.end;
       } else {
         if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND)) keys.kind = k;
-        else if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND_DETAIL))
+        else if (isPois) {
+          // Nothing else of a POI is looked up.
+        } else if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND_DETAIL))
           keys.kindDetail = k;
         else if (isPlaces) {
           if (bytesEqualAscii(bytes, range.start, range.end, KEY_POPULATION_RANK))
@@ -429,10 +474,16 @@ function frameLayer(
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
-        else if (isRoads) {
+        else if (isLandUse) {
+          if (bytesEqualAscii(bytes, range.start, range.end, KEY_SPORT)) keys.sport = k;
+        } else if (isRoads) {
           if (bytesEqualAscii(bytes, range.start, range.end, KEY_ONEWAY)) keys.oneway = k;
           else if (bytesEqualAscii(bytes, range.start, range.end, KEY_ACCESS)) keys.access = k;
           else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_LINK)) keys.isLink = k;
+          // #3052, ADR 0096: a street's name, and only when the caller asked.
+          else if (streetNames && bytesEqualAscii(bytes, range.start, range.end, KEY_NAME)) {
+            keys.name = k;
+          }
         } else if (isBuildings) {
           for (let slot = 0; slot < FIELD_SLOTS; slot++) {
             const field = BUILDING_FIELD_NAMES[slot] as keyof typeof BUILDING_FIELD_RULES;
@@ -460,6 +511,7 @@ function frameLayer(
     ranks: new Map(),
     fieldValues: new Map(),
     roadValues: new Map(),
+    names: new Map(),
   };
 }
 
@@ -517,13 +569,16 @@ interface Sinks {
   readonly streets: DecodedStreetFeature[];
   readonly places: PlaceFeature[];
   readonly waterLines: WaterLineFeature[];
+  readonly rails: RailFeature[];
+  readonly pois: PoiPoint[];
 }
 
 /**
  * Which sink a `roads` feature goes to (#1565): a footway first - #1551's
- * set, unchanged - then a street, else none, and its geometry is never read.
+ * set, unchanged - then a street, then (#2660) a railway kept as track, else
+ * none, and its geometry is never read.
  */
-function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | null {
+function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | 'rails' | null {
   if (kind === FOOTWAY_KIND || (FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
     return 'paths';
   }
@@ -533,6 +588,9 @@ function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' 
     (OTHER_STREET_KIND_DETAILS as readonly string[]).includes(kindDetail)
   ) {
     return 'streets';
+  }
+  if (kind === RAIL_KIND && (RAIL_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
+    return 'rails';
   }
   return null;
 }
@@ -583,8 +641,18 @@ function decodeFeature(
     if (point !== null) sinks.places.push({ ...place, x: point.x, z: point.z });
     return;
   }
+  if (layer.name === 'pois') {
+    // #2975: a kind the classes do not name drops the point unread.
+    const poi = attributes.kind === null ? undefined : POI_CLASS_OF_KIND.get(attributes.kind);
+    if (poi === undefined) return;
+    if (geometry === null) throw new Malformed();
+    const point = decodePoint(bytes, geometry, layer, project);
+    if (point !== null) sinks.pois.push({ poi, x: point.x, z: point.z });
+    return;
+  }
   const kind = attributes.kind;
-  // #2659: a water line is a river, a stream or a canal, or it is not read.
+  // #2659, #2974: a water line is a river, a stream, a canal, a ditch or a
+  // drain, or it is not read.
   const waterLine = layer.name === 'water' && type === GEOMETRY_LINE;
   if (waterLine && !(WATER_LINE_KINDS as readonly (string | null)[]).includes(kind)) return;
   if (kind === null && layer.name !== 'water') return;
@@ -608,11 +676,23 @@ function decodeFeature(
         sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
       }
       return;
-    case 'landuse':
+    case 'landuse': {
+      // #2688: a pitch keeps its sport, where it is one the world draws.
+      const sport =
+        kind === PITCH_KIND &&
+        (PITCH_SPORTS as readonly (string | null)[]).includes(attributes.sport)
+          ? (attributes.sport as PitchSport)
+          : undefined;
       for (const rings of parts as Ring[][]) {
-        sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
+        sinks.landUse.push({
+          layer: layer.name,
+          kind: kind ?? '',
+          rings,
+          ...(sport === undefined ? {} : { sport }),
+        });
       }
       return;
+    }
     case 'buildings':
       for (const rings of parts as Ring[][]) {
         sinks.buildings.push({
@@ -631,7 +711,13 @@ function decodeFeature(
       }
       for (const line of parts as Float32Array[]) {
         if (road === 'paths') sinks.paths.push({ kind: kind as string, kindDetail, line });
-        else
+        else if (road === 'rails') {
+          sinks.rails.push({
+            kindDetail: kindDetail as RailFeature['kindDetail'],
+            grade: gradeOf(attributes),
+            line,
+          });
+        } else
           sinks.streets.push({
             kind: kind as string,
             kindDetail,
@@ -640,6 +726,7 @@ function decodeFeature(
             access: attributes.access,
             isLink: attributes.isLink,
             line,
+            ...(attributes.name === null ? {} : { name: attributes.name }),
           });
       }
       return;
@@ -654,6 +741,8 @@ interface Attributes {
   isBridge: boolean;
   isTunnel: boolean;
   populationRank: number | null;
+  /** #2688: a `landuse` feature's `sport`, as an identifier; `null` for none or another shape. */
+  sport: string | null;
   /** #1789: each building field's value, in `BUILDING_FIELD_NAMES` order; `null` for none. */
   fields: (string | number | null)[];
   /** #2892: the road fields, each its default unless the tile carried a value the lists name. */
@@ -662,6 +751,8 @@ interface Attributes {
   isLink: boolean;
   /** #2892: how many of the three were present and not recognised. */
   roadDefaulted: number;
+  /** #3052: a street's name, when asked for and well formed; `null` otherwise. */
+  name: string | null;
 }
 
 /**
@@ -717,9 +808,11 @@ function readTags(
     isBridge: false,
     isTunnel: false,
     populationRank: null,
+    sport: null,
     fields: new Array<string | number | null>(FIELD_SLOTS).fill(null),
     ...NO_ROAD_FIELDS,
     roadDefaulted: 0,
+    name: null,
   };
   if (tags === null) return out;
   // #2892: whether each road field's last value was unrecognised. A key the
@@ -742,7 +835,8 @@ function readTags(
     else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
     else if (key === layer.keys.populationRank) {
       out.populationRank = cachedRank(bytes, layer, value);
-    } else if (key === layer.keys.oneway) {
+    } else if (key === layer.keys.sport) out.sport = cachedIdentifier(bytes, layer, value);
+    else if (key === layer.keys.oneway) {
       const reading = cachedRoadValue(bytes, layer, ROAD_SLOT_ONEWAY, value);
       out.oneway = reading.value as StreetOneway;
       onewayDefaulted = !reading.recognised;
@@ -754,6 +848,8 @@ function readTags(
       const reading = cachedRoadValue(bytes, layer, ROAD_SLOT_IS_LINK, value);
       out.isLink = reading.value as boolean;
       isLinkDefaulted = !reading.recognised;
+    } else if (key === layer.keys.name) {
+      out.name = cachedName(bytes, layer, value);
     } else {
       const slot = layer.keys.fields.indexOf(key);
       if (slot >= 0) out.fields[slot] = cachedField(bytes, layer, slot, value);
@@ -972,6 +1068,123 @@ function cachedIdentifier(bytes: Uint8Array, layer: FramedLayer, index: number):
     layer.identifiers.set(index, value);
   }
   return value;
+}
+
+function cachedName(bytes: Uint8Array, layer: FramedLayer, index: number): string | null {
+  let value = layer.names.get(index);
+  if (value === undefined) {
+    value = nameValue(bytes, layer, index);
+    layer.names.set(index, value);
+  }
+  return value;
+}
+
+/**
+ * `bytes[start, end)` as strict UTF-8, or `null` where it is not: an overlong
+ * form, a surrogate, a code point past U+10FFFF or a cut sequence is no name,
+ * never U+FFFD in the world. By hand, because this package names no platform
+ * (`TextDecoder` is the DOM's and Node's, not the language's).
+ */
+function strictUtf8(bytes: Uint8Array, start: number, end: number): string | null {
+  let text = '';
+  let at = start;
+  while (at < end) {
+    const first = bytes[at] as number;
+    let need: number;
+    let point: number;
+    let least: number;
+    if (first < 0x80) {
+      text += String.fromCharCode(first);
+      at += 1;
+      continue;
+    } else if (first >= 0xc2 && first <= 0xdf) {
+      need = 1;
+      point = first & 0x1f;
+      least = 0x80;
+    } else if (first >= 0xe0 && first <= 0xef) {
+      need = 2;
+      point = first & 0x0f;
+      least = 0x800;
+    } else if (first >= 0xf0 && first <= 0xf4) {
+      need = 3;
+      point = first & 0x07;
+      least = 0x10000;
+    } else {
+      return null;
+    }
+    if (at + need >= end) return null;
+    for (let next = 1; next <= need; next += 1) {
+      const byte = bytes[at + next];
+      if (byte === undefined || at + next >= end || (byte & 0xc0) !== 0x80) return null;
+      point = (point << 6) | (byte & 0x3f);
+    }
+    if (point < least || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) return null;
+    text += String.fromCodePoint(point);
+    at += need + 1;
+  }
+  return text;
+}
+
+/**
+ * A character a street's painted name never carries: a C0 or C1 control,
+ * a bidirectional embedding, override or isolate, or a zero-width or
+ * line/paragraph separator — what could reorder, hide or break the text
+ * drawn beside it (#3052's hostile-tile row). Tab and newline are dropped
+ * with the rest, so a name is one line.
+ */
+function unshown(point: number): boolean {
+  return (
+    point <= 0x1f ||
+    (point >= 0x7f && point <= 0x9f) ||
+    (point >= 0x200b && point <= 0x200f) ||
+    (point >= 0x2028 && point <= 0x202e) ||
+    (point >= 0x2060 && point <= 0x206f) ||
+    point === 0xfeff
+  );
+}
+
+/**
+ * A string value as a street's name (#3052, ADR 0096), else `null`: strict
+ * UTF-8 of at most `STREET_NAME_MAX_BYTES` bytes, with every
+ * {@link unshown} character dropped, runs of space made one, trimmed, and
+ * cut to `STREET_NAME_MAX_CHARS` characters at the last whole word. A value
+ * that is not a string, too long to read, malformed, or empty after that
+ * is no name.
+ */
+function nameValue(bytes: Uint8Array, layer: FramedLayer, index: number): string | null {
+  const reader = new ProtoReader(
+    bytes,
+    layer.values[index * 2] as number,
+    layer.values[index * 2 + 1] as number,
+  );
+  let result: string | null = null;
+  while (!reader.atEnd()) {
+    const tag = reader.uint32();
+    if (tag >>> 3 === 1 && (tag & 7) === WIRE_BYTES) {
+      const range = reader.bytes();
+      result = streetName(bytes, range.start, range.end);
+    } else {
+      reader.skip(tag & 7);
+      result = null;
+    }
+  }
+  return result;
+}
+
+function streetName(bytes: Uint8Array, start: number, end: number): string | null {
+  if (end - start < 1 || end - start > STREET_NAME_MAX_BYTES) return null;
+  const text = strictUtf8(bytes, start, end);
+  if (text === null) return null;
+  const shown = Array.from(text)
+    .filter((character) => !unshown(character.codePointAt(0) as number))
+    .join('');
+  const clean = shown.replace(/\s+/gu, ' ').trim();
+  const characters = Array.from(clean);
+  if (characters.length === 0) return null;
+  if (characters.length <= STREET_NAME_MAX_CHARS) return clean;
+  const cut = characters.slice(0, STREET_NAME_MAX_CHARS).join('');
+  const space = cut.lastIndexOf(' ');
+  return (space > 0 ? cut.slice(0, space) : cut).trim();
 }
 
 function cachedHeight(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {

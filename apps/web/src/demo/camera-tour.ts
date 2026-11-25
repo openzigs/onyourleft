@@ -170,6 +170,12 @@ export const DEMO_TOURS: Readonly<Record<DemoPresetId, readonly TourShot[]>> = {
     { kind: 'behind', seconds: 10, into: 'blend' },
     { kind: 'roadside', seconds: 8, into: 'cut' },
   ],
+  // #3074: a short scene on the climb: behind, the roadside, then overhead.
+  hill: [
+    { kind: 'behind', seconds: 12, into: 'cut' },
+    { kind: 'roadside', seconds: 8, into: 'cut' },
+    { kind: 'overhead', seconds: 10, into: 'blend' },
+  ],
 };
 
 /** The longest a planned ride is looked ahead, so a preset that never ends still plans in bounded time. */

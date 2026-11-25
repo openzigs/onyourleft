@@ -451,3 +451,25 @@ describe('the sheet holds the box and its margin, and nothing further — #2380'
     expect(pointsOf(drawn.streets)).toContainEqual([0, -200]);
   });
 });
+
+describe('a corridor whose route is replaced as the ride goes — #3106', () => {
+  it('files the corridor’s shapes once a corridor, and only the route once a route', () => {
+    const corridor = northCorridor();
+    // An open-world ride's route is a view of the road, replaced at every
+    // choice: two routes over one corridor.
+    const first = streetMapIndex(corridor, northRoute());
+    const second = streetMapIndex(corridor, northRoute(true));
+    expect(second.cells).toBe(first.cells);
+    expect(second.route).not.toBe(first.route);
+    // Another corridor — a block read or let go — is filed again.
+    expect(streetMapIndex({ ...corridor }, northRoute()).cells).not.toBe(first.cells);
+    // And what is drawn is each route's own, on the same streets.
+    const region = streetMapRegion(streetMapCentre(corridor.origin, northRoute(), 100));
+    const one = streetMapLayers(first, region);
+    const other = streetMapLayers(second, region);
+    expect(other.streets).toBe(one.streets);
+    expect(one.streets).not.toBe('');
+    expect(one.route).not.toBe('');
+    expect(other.route).not.toBe(one.route);
+  });
+});

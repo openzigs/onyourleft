@@ -37,8 +37,9 @@
 
 import type { Billboard } from './billboards';
 import type { PlacedStand } from './gantry';
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
+import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
@@ -50,6 +51,7 @@ import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
 import type { Season } from './season';
 import type { SideRoad } from './cross-streets';
+import type { StreetNamesInView } from './street-names';
 import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
@@ -141,11 +143,20 @@ export interface RidingInputs {
 
 /** A crash being drawn on a rider — #2493. @see RiderMarker.crash */
 export interface RiderCrashLook {
-  /** Seconds since the crash, by the frames the loop ran. */
+  /**
+   * Where in the crash clip the body is, in the clip's own seconds
+   * (`delivery/crash-look.ts` §`crashClipSeconds`): the time since the crash
+   * until the rider starts back up, and the clip's rise played across the
+   * drawn one from there.
+   */
   readonly seconds: number;
   /** Which way they fall: the rider's right (`1`) or left (`-1`). */
   readonly side: 1 | -1;
-  /** How far into the crash pose they are: 0 on the bike, 1 on the ground. */
+  /**
+   * How far the BODY is blended toward the clip's pose: 0 the ride's, 1 the
+   * clip's (`delivery/crash-look.ts` §`crashBodyShare`). ⚠️ Not the roll's
+   * share, which {@link RiderMarker.lean} already carries.
+   */
   readonly share: number;
 }
 
@@ -332,6 +343,17 @@ export interface RiderMarker {
    */
   readonly followed?: boolean | undefined;
   /**
+   * Which body this rider is drawn as — #2839: the rider's own choice
+   * (Settings), a room's word for another rider, or a simulated rider's seeded
+   * one (`rider-body.ts`). Absent draws the default
+   * (`rider-body.ts` §`riderBodyFor`), which is every rider before #2839.
+   *
+   * ⚠️ **One of two words, and drawing only**: a renderer maps it through
+   * `riderBodyFor`, so nothing else selects a model, and it changes no
+   * distance, speed or draft. `scene.test.ts` §"#2839" reads it off the frame.
+   */
+  readonly body?: RiderBody | undefined;
+  /**
    * How this rider's lap-race hit effect looks on this frame — #1902, only
    * while an item's slow-down runs on them (`lap-race/in-view.ts`
    * §`hitLook`). Carried on the marker so the effect is drawn exactly where
@@ -470,6 +492,16 @@ export interface SceneFrame {
    */
   readonly streets: readonly VillageStreet[];
   /**
+   * The corridor's mapped footways in view — #2972 (`footway-surfaces.ts`):
+   * each footway, cycleway, park path and flight of steps a ribbon on the
+   * ground, off the carriageway, the side roads, the water and a village's
+   * pavements (#1620), and a zebra where a mapped crossing crosses the road;
+   * the same objects every frame while the same are in reach, drawn by one
+   * mesh in the realistic world (`three-renderer.ts` §`FootwayBelt`). Empty
+   * with no corridor, which only the realistic world is given (ADR 0054 D-6).
+   */
+  readonly footways: readonly FootwayPiece[];
+  /**
    * The people in view — #1541 (`people.ts`): on the village streets'
    * pavements and front paths and the corridor's mapped footways, never on
    * the carriageway; the nearest as bodies (`three-renderer.ts`
@@ -507,6 +539,13 @@ export interface SceneFrame {
    * world, ADR 0054 D-6).
    */
   readonly mappedBuildings?: MappedBuildingsInView;
+  /**
+   * #3052, ADR 0096: an open-world ride's street names in view, each letter
+   * a quad on its street's surface (`street-names.ts` §`streetNamesInView`).
+   * Drawn in ONE call from one glyph atlas (`three-renderer.ts`
+   * §`StreetNameBelt`); absent on every ride that names no street.
+   */
+  readonly streetNames?: StreetNamesInView | undefined;
   /**
    * A Delivery round's parcels in flight, the markers on the houses still on
    * the round, and its obstacles — #1814 (`delivery/in-view.ts`

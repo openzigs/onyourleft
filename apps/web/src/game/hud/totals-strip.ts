@@ -15,7 +15,9 @@
  *   as a dash for a figure it can never have. The route is chosen before the
  *   ride and held for it, so the field never appears or vanishes mid-ride.
  * - *Route* is the profile's own `totalDistance`, the length the route picker
- *   states, in the rider's distance unit.
+ *   states, in the rider's distance unit — and a dash on an open-world ride
+ *   (#2990, `fields.ts` §`HudInput.openEnded`), whose profile is only the
+ *   view of the road held, as *To go* is.
  * - *To go* and *Climbed* are the HUD's own readings of those names
  *   (`fields.ts` §`hudReadings`), picked out by key as the focus readout picks
  *   its readings (`focus-readout.ts`), so the strip and the tiers cannot
@@ -68,7 +70,14 @@ export function totalsStripReadings(
     ...(lap === undefined
       ? []
       : [{ key: 'totals-lap', label: 'Lap', value: String(lap), unit: '', stale: false }]),
-    { key: 'totals-route', label: 'Route', value: route.value, unit: route.unit, stale: false },
+    {
+      key: 'totals-route',
+      label: 'Route',
+      // #2990: an open-world ride's profile is a view of the road held, not a route.
+      value: input.openEnded === true ? NO_READING : route.value,
+      unit: route.unit,
+      stale: false,
+    },
     ...own('remaining', 'totals-remaining'),
     speed === undefined
       ? {

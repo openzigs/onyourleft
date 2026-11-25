@@ -72,6 +72,7 @@ import {
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_PARK_DRESSING_TRIANGLES,
+  REALISTIC_PARK_FIELD_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
@@ -110,6 +111,7 @@ import { REALISTIC_LADDER } from './quality';
 import {
   FURNITURE_CAPACITY,
   PARK_DRESSING_TRIANGLES,
+  PARK_FIELD_TRIANGLES,
   FurnitureBelt,
   MappedBuildingBelt,
   realisticBicycleTriangles,
@@ -622,10 +624,15 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         gantries +
         lamps +
         remote +
-        PARK_DRESSING_TRIANGLES,
+        PARK_DRESSING_TRIANGLES +
+        PARK_FIELD_TRIANGLES,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
-    expect(remote + PARK_DRESSING_TRIANGLES).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
+    expect(remote + PARK_DRESSING_TRIANGLES + PARK_FIELD_TRIANGLES).toBeLessThanOrEqual(
+      REALISTIC_REMOTE_TRIANGLES,
+    );
     expect(PARK_DRESSING_TRIANGLES).toBe(REALISTIC_PARK_DRESSING_TRIANGLES);
+    // #2688: and the pitches and playgrounds after them in the same belt, in their own term.
+    expect(PARK_FIELD_TRIANGLES).toBe(REALISTIC_PARK_FIELD_TRIANGLES);
     // Non-vacuity: the stylised term is real, and the room's whole K drawn
     // stylised would NOT fit — which is why the rule stops at 24.
     expect(stylised).toBeGreaterThan(1_000);

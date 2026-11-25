@@ -1,0 +1,47 @@
+{
+  "kind": "pacer",
+  "promptVersion": "pacer-6",
+  "model": "gemma4:12b",
+  "measuredAt": "2026-11-19T11:33:36Z",
+  "passed": true,
+  "passMark": {
+    "leastIntentShare": 0.8,
+    "mostEasedWithRiderAhead": 0,
+    "leastDistinctLineShare": 0.8,
+    "mostVoidedLineShare": 0.1,
+    "leastAppliedShare": 0.9,
+    "mostLateAnswers": 0
+  },
+  "shortfalls": [],
+  "score": {
+    "answers": 60,
+    "applied": 59,
+    "lateAnswers": 0,
+    "invalidAnswers": 1,
+    "failedAnswers": 0,
+    "intentsCalledFor": 60,
+    "easedWithRiderAhead": 0,
+    "linesShown": 58,
+    "linesWritten": 59,
+    "distinctLines": 57,
+    "repeatedLines": 2,
+    "linesHiddenRepeat": 1,
+    "linesHiddenAgainst": 0,
+    "linesVoided": 1,
+    "answerMs": {
+      "median": 3234,
+      "p90": 3761,
+      "most": 4416
+    },
+    "promptTokens": {
+      "median": 1848,
+      "p90": 1872,
+      "most": 1886
+    },
+    "outputTokens": {
+      "median": 25,
+      "p90": 27,
+      "most": 28
+    }
+  }
+}

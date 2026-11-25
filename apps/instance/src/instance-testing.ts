@@ -15,6 +15,7 @@ import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
+import type { InstanceRouting } from './routing/routing.ts';
 import type { Operate } from './operate/operate.ts';
 import type { Sync } from './sync/sync.ts';
 import { createServer } from 'node:net';
@@ -72,6 +73,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
     analysisEnv: {},
     pictures: { kind: 'off', code: 'not-set', reason: 'A test instance has no picture model.' },
+    routing: { kind: 'off', code: 'not-set', reason: 'A test instance has no routing engine.' },
     name: null,
     legal: NO_LEGAL_SETTINGS,
     terms: null,
@@ -106,6 +108,8 @@ export async function startTestInstance(
     /** Model-chosen bot tactics (#2709). */
     tactics?: Tactics;
     sidePose?: SidePose;
+    /** The route planner's routing (#2008), made over the instance's own log sink. */
+    routing?: (log: LogSink) => InstanceRouting;
     /** Published segments and their boards (#68). */
     segments?: Segments;
     /** The owner's Operate area (#2602). */
@@ -141,6 +145,7 @@ export async function startTestInstance(
     ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
     ...(options.tactics === undefined ? {} : { tactics: options.tactics }),
     ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
+    ...(options.routing === undefined ? {} : { routing: options.routing(log) }),
     ...(options.segments === undefined ? {} : { segments: options.segments }),
     ...(options.operate === undefined ? {} : { operate: options.operate }),
     ...(options.admin === undefined ? {} : { admin: options.admin }),

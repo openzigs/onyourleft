@@ -2256,7 +2256,7 @@
     "/v1/analysis/pacer/decide": {
       "post": {
         "operationId": "decidePacer",
-        "summary": "One decision for your AI pacer (#2712, ADR 0072): `input` is the ride as it stands, exactly `@onyourleft/domain`’s `ModelPacerInput` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (`ahead`, `level` or `behind`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left); no coordinate, no name — at most 2 048 characters. Answers `plan` (`rolling`, `even` or `climber`), `intent` (`hold`, `lift` or `ease`) and `say`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or \"\". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (`POST /v1/analysis/tactics/start` and `end`), the same rate limit and the same model call, with no tools and no reasoning. `tactics_invalid` when the model’s answer was not such a decision, its line did not pass, or its line said the opposite of its intent, `tactics_failed` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.",
+        "summary": "One line from your AI pacer (#2712, ADR 0072; #2835, ADR 0083): `input` is the ride as it stands, exactly `@onyourleft/domain`’s `ModelPacerInput` — the pacer’s W/kg, what it is doing (its intent, by how many percent, and the seconds held), why (`reason`, one of a closed list your device chose it by) and whether the ride has just started, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (`ahead`, `level` or `behind`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left), and since #2835 the gap in seconds, how long you have been where you are, and how the gap, your power, cadence and heart rate have drifted, as numbers; no coordinate, no name — at most 2 048 characters. A state without `reason` (a device from before #2835) is `validation_failed`. Answers `say` and nothing else: one line of feedback of at most 80 characters with no number but a cadence or power target, no metric name and no health wording, or \"\". **No power, ever, and no plan or intent**: your device decides what the pacer does before it asks, so no answer moves the pacer, and nothing of it reaches a trainer. The same consent as AI bots, the same model slot (`POST /v1/analysis/tactics/start` and `end`), the same rate limit and the same model call, with no tools and no reasoning. `tactics_invalid` when the model’s answer was not such a line or its line did not pass, `tactics_failed` when it gave none in time; either costs a line and nothing else.",
         "security": [
           {
             "session": []
@@ -2290,31 +2290,13 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "The AI pacer’s plan and intent from their closed lists, and its line of feedback: at most 80 characters, screened, or \"\" for none. No other field, and never a power.",
+                  "description": "The AI pacer’s line of feedback: at most 80 characters, screened, or \"\" for none. No other field: never a power, and since #2835 no plan and no intent, which your device decides.",
                   "properties": {
-                    "plan": {
-                      "type": "string",
-                      "enum": [
-                        "rolling",
-                        "even",
-                        "climber"
-                      ]
-                    },
-                    "intent": {
-                      "type": "string",
-                      "enum": [
-                        "hold",
-                        "lift",
-                        "ease"
-                      ]
-                    },
                     "say": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "plan",
-                    "intent",
                     "say"
                   ],
                   "additionalProperties": false
@@ -2365,6 +2347,73 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/pacer/warm": {
+      "post": {
+        "operationId": "warmPacer",
+        "summary": "You turned the AI pacer on (#2835, ADR 0083 D-4): a call of the pacer’s own shape about a fixed ride, with nothing of yours in it, goes out to load the model and have it read the pacer’s words, so the first line of your ride is not a cold load. Answers 202 at once; `warming` is false when a warm-up of yours is already out. **It takes no model slot**: write-ups do not wait for it and nobody’s race is refused for it. `local_unavailable` and `tactics_consent_required` before anything is sent. Counted with your decisions against `rate_limited`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warming": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "warming"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `local_unavailable`, `tactics_consent_required`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
           },
           "503": {
             "$ref": "#/components/responses/unavailable"
@@ -11561,6 +11610,325 @@
         }
       }
     },
+    "/v1/routing/heights": {
+      "post": {
+        "operationId": "heightsAlongLine",
+        "summary": "The heights along a line (#2008). `shape` is a list of 2 to 15000 `{ latitude, longitude }` points in degrees, already laid out `interval` metres apart, and `interval` that spacing. Answers `samples`, one per point, as [metres along, metres high] pairs with point k at k × `interval`, high `null` where the terrain data has a hole, and `source`, the elevation dataset and its grid in metres, for a route to record. **Nothing is kept.** Reached only sealed, on every instance. `routing_off`, `routing_failed` and `rate_limited` as for a route.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "interval": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "shape",
+                  "interval"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "resolutionMetres": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "resolutionMetres"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "samples": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "samples"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/routing_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `routing_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/routing/route": {
+      "post": {
+        "operationId": "routeBetweenWaypoints",
+        "summary": "Roads between your waypoints, by bicycle (#2008). `waypoints` is a list of 2 to 25 `{ latitude, longitude }` points in degrees; `preferences` names a `bicycle` (road, hybrid, city, cross, mountain), `hills` (avoid, neutral, seek) and `surface` (paved-only, prefer-paved, any). Answers one leg per adjacent pair: its shape as [latitude, longitude] pairs, its length in metres, and its surface (paved, unpaved, or unknown when the map does not say). **Nothing is kept**: not the waypoints, the shape or the answer, in a table, a file or a log. Reached only sealed, on every instance: one that holds no keys answers `sealed_required`. `routing_off` when the operator has set up no routing engine; `no_route` when no road joins two waypoints; `unpaved_endpoint` when `paved-only` strands a waypoint on a bad surface; `routing_failed` when the engine gave no usable answer; `rate_limited` past your allowance a minute.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "waypoints": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "preferences": {
+                    "type": "object",
+                    "properties": {
+                      "bicycle": {
+                        "type": "string",
+                        "enum": [
+                          "road",
+                          "hybrid",
+                          "city",
+                          "cross",
+                          "mountain"
+                        ]
+                      },
+                      "hills": {
+                        "type": "string",
+                        "enum": [
+                          "avoid",
+                          "neutral",
+                          "seek"
+                        ]
+                      },
+                      "surface": {
+                        "type": "string",
+                        "enum": [
+                          "paved-only",
+                          "prefer-paved",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "bicycle",
+                      "hills",
+                      "surface"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "waypoints",
+                  "preferences"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "legs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "shape": {
+                            "type": "array",
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "distanceMetres": {
+                            "type": "number"
+                          },
+                          "surface": {
+                            "type": "string",
+                            "enum": [
+                              "paved",
+                              "unpaved",
+                              "unknown"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "shape",
+                          "distanceMetres",
+                          "surface"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "legs"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "422": {
+            "description": "One of `no_route`, `unpaved_endpoint`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/routing_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `routing_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sealed": {
       "post": {
         "operationId": "sealedRequest",
@@ -13852,15 +14220,19 @@
                   "record_not_your_key",
                   "record_key_revoked",
                   "model_without_pictures",
+                  "no_route",
+                  "unpaved_endpoint",
                   "rate_limited",
                   "too_many",
                   "internal",
                   "picture_model_failed",
                   "tactics_invalid",
                   "tactics_failed",
+                  "routing_failed",
                   "unavailable",
                   "analysis_off",
-                  "pictures_off"
+                  "pictures_off",
+                  "routing_off"
                 ]
               },
               "message": {
@@ -14420,6 +14792,26 @@
           }
         }
       },
+      "no_route": {
+        "description": "`no_route` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "unpaved_endpoint": {
+        "description": "`unpaved_endpoint` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
         "content": {
@@ -14480,6 +14872,16 @@
           }
         }
       },
+      "routing_failed": {
+        "description": "`routing_failed` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "unavailable": {
         "description": "`unavailable` (503), in the one error shape.",
         "content": {
@@ -14502,6 +14904,16 @@
       },
       "pictures_off": {
         "description": "`pictures_off` (503), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "routing_off": {
+        "description": "`routing_off` (503), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

@@ -24,6 +24,32 @@
  * without a round and holds the trainer's writes equal, which is the half of
  * DL5 no import walk can see.
  *
+ * ## A crash stops the DRAWN rider, on a second distance (#3021, ADR 0094)
+ *
+ * The ride distance (`DeliveryRideStep.along`, the simulation's odometer) is
+ * the only distance the grade is read at, and nothing here changes it. The
+ * round holds {@link DeliveryRide.crashOffset} beside it, clamped to
+ * `[-CRASH_OFFSET_BOUND_METRES, 0]`, and reads the drawn distance,
+ * {@link DeliveryRide.along} = ride distance + offset, for everything it does:
+ * its throws, misses, obstacles, hazard warnings, {@link nextHouse} and its
+ * end. `GameView` draws the rider, and points the camera, there too
+ * ({@link drawnRiderDistance}).
+ *
+ * - **The stop** (D-3): for {@link CRASH_STOP_SECONDS} from a counted crash,
+ *   each step takes what the ride covered off the offset, so the drawn rider
+ *   holds where they crashed. If the offset reaches the bound the stop ends
+ *   there and the drawn rider moves with the ride. While down no throw is
+ *   taken and no contact counts; a parcel already in the air still lands.
+ * - **The payout** (D-4): after the stop the drawn rider moves faster than the
+ *   ride by {@link CRASH_PAYOUT_SHARE} of its speed, never past
+ *   `obstacles.ts` §`AVOIDABLE_FASTEST_METRES_PER_SECOND` and never slower
+ *   than the ride, until the offset is back to nought.
+ *
+ * ⚠️ The offset never flows the other way: nothing here writes the ride
+ * distance, and nothing that feeds the simulation reads
+ * {@link DeliveryRide.along} (D-2.4). A stop is drawn; the legs feel the road
+ * at the ride distance.
+ *
  * ## The steps that ran, and only those
  *
  * `obstacles.ts` warns that a rolling obstacle still crosses a rider whose
@@ -142,11 +168,13 @@ import type { MappedBuildings } from '../mapped-buildings';
 import type { CorridorOrigin } from '../terrain';
 
 import { readDeliveryAssist } from './assist-preference';
+import { CRASH_SECONDS } from './crash-look';
 import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
 import { LOW_LIGHT_REVEAL_METRES } from './in-view';
 import { readLevelProgress, withLevelFinished, writeLevelProgress } from './level-progress';
 import type { LevelRound } from './levels/level-file';
 import {
+  AVOIDABLE_FASTEST_METRES_PER_SECOND,
   clearOfParkedCars,
   levelObstacleMix,
   placeObstacles,
@@ -191,6 +219,44 @@ import {
   type ThrowWindow,
 } from './throw';
 
+/**
+ * How long a crash stops the drawn rider, in seconds — ADR 0094 D-3.1: the
+ * crash's drawn length, `crash-look.ts` §`CRASH_SECONDS` (**1.8 s**), so the
+ * rider is held for as long as they are drawn down and getting back up.
+ */
+export const CRASH_STOP_SECONDS = CRASH_SECONDS;
+
+/** The stop in the game's ticks: **36**. */
+const CRASH_STOP_TICKS = Math.round(CRASH_STOP_SECONDS / DELIVERY_TICK_SECONDS);
+
+/**
+ * How far the drawn rider may fall behind the ride, metres — ADR 0094 D-2.5's
+ * rule, not a free number: the fastest avoidable speed times the stop,
+ * rounded up to the next 5 m. 12 × 1.8 = 21.6, so **25 m**.
+ */
+export const CRASH_OFFSET_BOUND_METRES =
+  Math.ceil((AVOIDABLE_FASTEST_METRES_PER_SECOND * CRASH_STOP_SECONDS) / 5) * 5;
+
+/**
+ * How much faster than the ride the drawn rider moves while the banked
+ * distance is paid out — ADR 0094 D-4.1: **25 %** of the ride's speed, so a
+ * payout below 9.6 m/s takes `CRASH_STOP_SECONDS / 0.25`, 7.2 s.
+ */
+export const CRASH_PAYOUT_SHARE = 0.25;
+
+/**
+ * The speed the drawn rider moves at, for a ride speed `speed`, while an
+ * offset is being paid out — ADR 0094 D-4.3: `max(v, min((1 + P) v, 12 m/s))`,
+ * never slower than the ride and never faster than every hazard is proved
+ * avoidable at.
+ */
+export function payoutSpeed(speed: number): number {
+  return Math.max(
+    speed,
+    Math.min((1 + CRASH_PAYOUT_SHARE) * speed, AVOIDABLE_FASTEST_METRES_PER_SECOND),
+  );
+}
+
 /** A Delivery round being ridden, in memory for the ride only. */
 export interface DeliveryRide {
   /** The week the round is ridden in: its `day` is the round's day. */
@@ -218,8 +284,27 @@ export interface DeliveryRide {
   readonly throwWindow: ThrowWindow;
   /** Where the rider has steered across the road (#1820), stepped on every step that ran. */
   readonly steer: SteerState;
-  /** The rider's distance after the last step that ran, metres. */
+  /**
+   * Where the rider is DRAWN after the last step that ran, metres: the ride
+   * distance plus {@link crashOffset} (#3021, ADR 0094 D-2.3). Everything the
+   * round decides reads this, never the odometer.
+   */
   readonly along: number;
+  /**
+   * The ride distance after the last step that ran, metres: the simulation's
+   * own odometer, as {@link DeliveryRideStep.along} handed it. Read only to
+   * share the next frame's distance between its steps.
+   */
+  readonly rideAlong: number;
+  /**
+   * How far the drawn rider is behind the ride, metres: in
+   * `[-CRASH_OFFSET_BOUND_METRES, 0]`, nought but after a crash (ADR 0094 D-2.2).
+   */
+  readonly crashOffset: number;
+  /** {@link crashOffset} one step before the last, which the drawing blends from. */
+  readonly crashOffsetBefore: number;
+  /** Steps left of a crash's stop: nought while the rider is up (ADR 0094 D-3). */
+  readonly stopTicks: number;
   /** The round's end, once every house is settled or the ride has ended it. */
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
@@ -295,6 +380,13 @@ export interface DeliveryRideStart {
           readonly id: string;
         })
     | undefined;
+  /**
+   * #3153: the round's seed, set by capture mode alone (`capture-scene.ts`,
+   * which only the capture tool's build reads), so a scene picks the same
+   * houses and obstacles twice. Absent — every rider's round — it is drawn
+   * at the press.
+   */
+  readonly seed?: number | undefined;
 }
 
 /**
@@ -307,7 +399,7 @@ export interface DeliveryRideStart {
 export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | undefined {
   const week = readDeliveryProgress(input.storage);
   const assist = readDeliveryAssist(input.storage);
-  const seed = drawRoundSeed();
+  const seed = input.seed ?? drawRoundSeed();
   const pick = pickRoundTargets(
     {
       buildings: input.buildings,
@@ -361,6 +453,10 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     throwWindow: input.level?.throwWindow ?? DEFAULT_THROW_WINDOW,
     steer: startSteer(input.lineOffset),
     along: input.riderDistance,
+    rideAlong: input.riderDistance,
+    crashOffset: 0,
+    crashOffsetBefore: 0,
+    stopTicks: 0,
     outcome: undefined,
     onLevel: input.level !== undefined,
     noDeliveryTargets: pick.noDelivery,
@@ -389,7 +485,11 @@ function throwTargetOf(target: DeliveryTarget): ThrowTarget {
 export interface DeliveryRideStep {
   /** How many simulation steps ran on this frame: `SimulationTick.steps`. Nought steps nothing. */
   readonly ticks: number;
-  /** The rider's distance after them, metres: the simulation's own odometer. */
+  /**
+   * The ride distance after them, metres: the simulation's own odometer. The
+   * round draws the rider at it plus {@link DeliveryRide.crashOffset}, and
+   * hands nothing back to it (ADR 0094 D-2.4).
+   */
   readonly along: number;
   /** The rider's speed after them, metres a second, which a parcel thrown now carries. */
   readonly speed: number;
@@ -400,7 +500,7 @@ export interface DeliveryRideStep {
 /** What one frame's steps did. */
 export interface DeliveryRideStepped {
   readonly ride: DeliveryRide;
-  /** Crashes counted on these steps; nought once the round is over. */
+  /** Crashes counted on these steps; nought once the round is over, and while the rider is down. */
   readonly crashes: number;
   /** The throw asked for was taken: `false` when none was, or the cool-down refused it. */
   readonly thrown: boolean;
@@ -443,23 +543,43 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   }
   if (ticks === 0) return { ride, crashes: 0, thrown: false, noDeliveries: 0 };
   const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
-  const from = ride.along;
+  const from = ride.rideAlong;
   // Never backwards: a room's correction does not run on a Delivery ride
   // (DL9), and a distance that went back would sweep no road.
   const to = Math.max(from, step.along);
-  let { round, throws, obstacleState, outcome, steer } = ride;
+  let { round, throws, obstacleState, outcome, steer, crashOffset, crashOffsetBefore, stopTicks } =
+    ride;
   const changes = [...ride.changes];
   let crashes = 0;
   let noDeliveries = 0;
   let thrown = false;
-  let before = from;
+  let rideBefore = from;
+  let before = ride.along;
   for (let tick = 1; tick <= ticks; tick += 1) {
-    const at = from + ((to - from) * tick) / ticks;
+    const rideAt = from + ((to - from) * tick) / ticks;
+    const covered = rideAt - rideBefore;
+    rideBefore = rideAt;
+    // #3021, ADR 0094: the drawn rider, held while down and paid out after.
+    const down = stopTicks > 0;
+    const paying = !down && crashOffset < 0;
+    crashOffsetBefore = crashOffset;
+    if (down) {
+      // D-3.1, D-3.2: held, until the bound is reached, which ends the stop.
+      crashOffset = Math.max(-CRASH_OFFSET_BOUND_METRES, crashOffset - covered);
+      stopTicks = crashOffset <= -CRASH_OFFSET_BOUND_METRES ? 0 : stopTicks - 1;
+    } else if (paying) {
+      // D-4.1, D-4.3: faster than the ride by P, never past the fastest avoidable speed.
+      const drawnMove = payoutSpeed(covered / DELIVERY_TICK_SECONDS) * DELIVERY_TICK_SECONDS;
+      crashOffset = Math.min(0, crashOffset + drawnMove - covered);
+    }
+    const at = rideAt + crashOffset;
     const thrownNow = stepThrows(throws, {
-      rider: { along: before, speed: step.speed },
+      // A parcel carries the speed the rider is drawn at.
+      rider: { along: before, speed: paying ? payoutSpeed(step.speed) : step.speed },
       targets: ride.throwTargets,
       round,
-      ...(tick === 1 && step.throwTo !== undefined ? { throwTo: step.throwTo } : {}),
+      // D-3.3: no throw is taken while the rider is down.
+      ...(tick === 1 && step.throwTo !== undefined && !down ? { throwTo: step.throwTo } : {}),
       widerWindows: ride.widerWindows,
       noDelivery: ride.throwNoDelivery,
       window: ride.throwWindow,
@@ -502,8 +622,13 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
         if (ride.noDeliveryCosts) changes.push({ scoreDelta: NO_DELIVERY_SCORE_DELTA });
       }
     }
-    changes.push(...obstaclesNow.crashes);
-    crashes += obstaclesNow.crashes.length;
+    // D-3.3: a contact while the rider is down costs nothing. A crash counted
+    // starts a stop from the offset as it stands (D-4.4).
+    if (!down && obstaclesNow.crashes.length > 0) {
+      changes.push(...obstaclesNow.crashes);
+      crashes += obstaclesNow.crashes.length;
+      stopTicks = CRASH_STOP_TICKS;
+    }
     round = recordMisses(thrownNow.round, throws, ride.throwTargets, at, ride.throwWindow, scale);
     if (roundTally(round).expecting === 0) outcome = endRound(ride.week, round);
   }
@@ -516,13 +641,35 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       changes,
       score: roundScore(changes),
       steer,
-      along: to,
+      along: to + crashOffset,
+      rideAlong: to,
+      crashOffset,
+      crashOffsetBefore,
+      stopTicks,
       outcome,
     },
     crashes,
     thrown,
     noDeliveries,
   };
+}
+
+/**
+ * Where to draw a round's rider, from where the simulation's blend draws the
+ * ride (`simulation.ts` §`drawnAt`) and the same `blend`: 0 the step before
+ * the newest, 1 the newest — #3021, ADR 0094 D-6.1. The offset is blended
+ * between the same two steps, so a held rider is drawn still rather than
+ * creeping on and jumping back at each step. The camera follows this.
+ */
+export function drawnRiderDistance(
+  ride: Pick<DeliveryRide, 'crashOffset' | 'crashOffsetBefore'>,
+  rideDistance: number,
+  blend: number,
+): number {
+  const share = Math.min(1, Math.max(0, blend));
+  return (
+    rideDistance + ride.crashOffsetBefore + (ride.crashOffset - ride.crashOffsetBefore) * share
+  );
 }
 
 /**

@@ -109,6 +109,10 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   at 1K and raise {@link REALISTIC_BUILD_BYTES} rather than take them to
  *   `structure`'s 512. A town's wall fills more of the screen than a
  *   farmstead's, for longer, and is seen from the road at a few metres.
+ * - `people` 1024 — the owner's request of 2026-11-18: the one atlas every
+ *   person wears (`realistic-assets.ts` §`REALISTIC_PEOPLE`), a row of tiles
+ *   a person, the face and each garment 256 px. A person is drawn from 4 m
+ *   and more, where a face is under a hundred pixels tall.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -123,6 +127,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   bicycle: 256,
   rider: 1024,
   town: 1024,
+  people: 1024,
 } as const;
 
 /**
@@ -593,12 +598,14 @@ export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
  * §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`), so this car's share of
  * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}' 3 644 of room on the frame of
  * twenty that measured 201 356 is 182 an instance over the stylised car's
- * 1 268. Kenney's sedan was 1 376 (`tools/realistic/sources.ts`
- * §`DELIVERY_CAR_SOURCE`); since its PR met #2512's and #2518's pieces on
- * the same frame (204 514 with the stylised car), its wheels are 120 each,
- * not 166, and it is 1 192, so the frame still fits. ONE level of detail: a
- * second would be more triangles in the roster every instance submits, never
- * fewer.
+ * 1 268. Kenney's sedan was 1 376; since its PR met #2512's and #2518's
+ * pieces on the same frame (204 514 with the stylised car), its wheels were
+ * 120 each, not 166, and it was 1 192, so the frame still fit. Since #2847
+ * (ADR 0085) the three PSX cars, all three together, are 1 222
+ * (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`): every instance
+ * submits every body, so this ceiling holds the three as it held the one.
+ * ONE level of detail: a second would be more triangles in the roster every
+ * instance submits, never fewer.
  *
  * @test-facing held by `delivery-car.test.ts`, which reads the committed GLB
  * back; the product builds the roster and does not read this number
@@ -1049,10 +1056,17 @@ export const REALISTIC_REMOTE_STYLISED_RIDERS = 24;
  * added with #616's counter and holds it here, and its control — every remote
  * rider drawn — must not fit.
  *
+ * **64 726** since #2688 (maintainer decision of 2026-11-21, recorded on #2950
+ * and #2845): #2845's heavier rider and bike and #2688's 800 park-field
+ * triangles together came to 64 720, 494 over 64 226. Both were in combo build
+ * `4439ea908`, and the owner's tablet ride on it on 2026-11-21 held 60 fps
+ * (median frame 16.6 ms), so this was raised by the overage rounded up to the
+ * next 100 rather than either look being trimmed.
+ *
  * @test-facing held by `realistic-budget.test.ts` §"#783" and
  * `game.browser.spec.ts` §"#783"
  */
-export const REALISTIC_REMOTE_TRIANGLES = 64_226;
+export const REALISTIC_REMOTE_TRIANGLES = 64_726;
 
 /**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
@@ -1094,6 +1108,26 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * cases) and `park-dressing-belt.test.ts` (the belt as built)
  */
 export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
+
+/**
+ * The most triangles a frame's pitches and playgrounds may add — #2688:
+ * **800**, `park-fields.ts` §`PARK_FIELD_CAPACITY` (80) boxes — a pitch's
+ * lines, goals, net, hoops or backstop and a playground's structures — at the
+ * park belt's box of 10 triangles, drawn in the same call after the golf and
+ * cemetery pieces. The realistic world's alone, so counted INSIDE
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame.
+ *
+ * ⚠️ **Its own term, because {@link REALISTIC_PARK_DRESSING_TRIANGLES} was
+ * spent at its capacity.** With a room's remote riders in it, the golf and
+ * cemetery pieces left 882 triangles of {@link REALISTIC_REMOTE_TRIANGLES};
+ * this is what fits in them, measured by `realistic-budget.test.ts` (1 280
+ * did not: 398 over). No budget above is raised. The tablet's reading is the
+ * owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, both
+ * cases) and `park-dressing-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,
@@ -1205,7 +1239,9 @@ export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
 /**
  * The most triangles the people may add to a realistic frame — #1541:
  * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
- * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;
+ * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call —
+ * since the owner's request of 2026-11-18 three different MODELS in that one
+ * call, each instance submitting the largest's triangles, 1 800 at most;
  * the impostors beyond add two triangles each, at most 64, in one more.
  *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, and NOT by that
@@ -1214,12 +1250,13 @@ export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
  * row, within this issue's stated budget" — and validation 0002 Part AJ is
  * the tablet's measurement of whether the frame has room for it. If it has
  * not, `quality.ts` §`QualitySettings.people` goes to 0 on the top rung until
- * it has. Their animation texture is 1 MiB at most, made at load and in no
- * committed file (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`), and
- * `realistic-budget.test.ts` adds it to the texture estimate.
+ * it has. Their animation and slot textures are 1 MiB at most together, made
+ * at load and in no committed file (`people-body.ts`
+ * §`PERSON_ANIMATION_MAX_BYTES`), and `realistic-budget.test.ts` adds it to
+ * the texture estimate beside their committed atlas.
  *
- * @test-facing held by `people-body.test.ts`, which cuts the committed body
- * sixteen times inside it, and by `game.browser.spec.ts` §"#1541"
+ * @test-facing held by `people-body.test.ts`, which reads the committed
+ * model's bodies inside it, and by `game.browser.spec.ts` §"#1541"
  */
 export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
@@ -1512,11 +1549,46 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * As for #1548, the APK carries the same bytes more, and a browser's first
  * download does not move: the files are outside the precache.
  *
+ * ## Raised to 47 MiB for the people's models — the owner's request of 2026-11-18
+ *
+ * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).**
+ * ⚠️ **This rise is the pull request's own and waits on the owner's
+ * confirmation**: asked for "a real model for the pedestrian", the owner
+ * named no figure. Measured on the committed files: the set with its
+ * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
+ * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
+ * (242 536 and 148 509), so it is **48 548 115**, 734 957 under the new one.
+ * Since PR #2844's polish they are 243 932 and 126 304 — **370 236**, 20 809
+ * fewer: an atlas with no dye in its trousers and no outline round a garment's
+ * pieces is a smaller one — so the set is 48 527 306, 755 766 under.
+ * The model ships without normals and the atlas at 1024 px, which is as
+ * small as three dressed people were made; the APK carries the same bytes
+ * more, and a browser's first download does not move.
+ *
+ * ## The female rider, inside the same 47 MiB — #2839
+ *
+ * #2839 (the owner's request of 2026-11-18) asks for a second rider body
+ * through the pipeline and for its download cost to be stated; this is the
+ * statement. Its branch raised this ceiling from 46 MiB to 47 MiB on its own,
+ * from the same 48 157 070 bytes as the people's models above, and the two
+ * rises met at the same figure. Measured on the committed files: the female
+ * rider's one file (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`) adds
+ * **427 668** and the closed hands 404 more in `rider.glb`, and with
+ * everything else since, the set with its transcoder is **49 051 685**,
+ * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
+ * three — which is what keeps the cost to one GLB rather than 1.5 MB.
+ *
+ * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
+ * and this one has not been ruled on**: the issue asks for the body and its
+ * stated cost, not for a figure. As before, the APK carries the same bytes
+ * more, and a browser's first download does not move: the file is outside
+ * the precache, and a ride fetches it only when it draws a female rider.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 46 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
@@ -1576,7 +1648,10 @@ export function environmentMapBytes(skyWidth: number): number {
  * pinned Chromium, the Mac and tablet Mali GPUs all report), so the next
  * feature has room without packing again. A `mat4` is four slots, anything
  * else one. `three-renderer.ts` §`DELIVERY_PIECE_ATTRIBUTE` says how the belt's
- * obstacles fit: 13 slots with Kenney's car, 10 without.
+ * obstacles fit: 14 slots with the realistic cars, 11 without (as
+ * `delivery-car.test.ts` counts them). #2847's atlas coordinate and body
+ * ride in components of attributes already bound, so the cars' three bodies
+ * and their picture take no slot of their own.
  *
  * @test-facing `delivery-car.test.ts` and `delivery.browser.spec.ts` hold the
  * belt's programs to it; the product does not read it

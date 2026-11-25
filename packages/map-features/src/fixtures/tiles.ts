@@ -73,8 +73,9 @@ export const EARTH: LayerSpec = {
 };
 
 /**
- * A layer that is never read (`pois`: it carries names), and a `places` point
- * that carries no `kind_detail` or `population_rank`, so it is dropped (#1632).
+ * A `pois` point of a kind no class names (a park), so it is dropped unread
+ * (#2975), and a `places` point that carries no `kind_detail` or
+ * `population_rank`, so it is dropped (#1632).
  */
 const UNREAD_NAMED_LAYERS: readonly LayerSpec[] = [
   {
@@ -265,7 +266,7 @@ export function sidewalkTile(): Uint8Array {
 export const STREET_FIXTURE_ROADS: readonly {
   readonly kind: string;
   readonly kindDetail?: string;
-  readonly sink: 'streets' | 'paths' | null;
+  readonly sink: 'streets' | 'paths' | 'rails' | null;
   /** `is_bridge` and `is_tunnel`, where the feature carries them, and the grade a street gets. */
   readonly isBridge?: boolean;
   readonly isTunnel?: boolean;
@@ -325,13 +326,51 @@ export const STREET_FIXTURE_ROADS: readonly {
       [4000, 2900],
     ],
   },
+  // #2660: a railway kept as track, and the details that are not.
   {
     kind: 'rail',
     kindDetail: 'rail',
-    sink: null,
+    sink: 'rails',
     line: [
       [100, 3300],
       [4000, 3300],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'light_rail',
+    sink: 'rails',
+    isBridge: true,
+    grade: 'bridge',
+    line: [
+      [100, 3350],
+      [4000, 3350],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'subway',
+    sink: null,
+    line: [
+      [100, 3400],
+      [4000, 3400],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'tram',
+    sink: null,
+    line: [
+      [100, 3450],
+      [4000, 3450],
+    ],
+  },
+  {
+    kind: 'rail',
+    sink: null,
+    line: [
+      [100, 3500],
+      [4000, 3500],
     ],
   },
   {
@@ -791,7 +830,7 @@ export const WATER_LINE_FIXTURE_LINES: readonly {
 ];
 
 /** The kinds of {@link WATER_LINE_FIXTURE_LINES} the decoder keeps, in order. */
-export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
 
 /** {@link WATER_LINE_FIXTURE_LINES} as one `water` layer, beside a lake polygon. */
 export function waterLinesTile(): Uint8Array {
@@ -816,8 +855,200 @@ export function waterLinesTile(): Uint8Array {
   ]);
 }
 
-/** The ten named fixtures, for the walks that run over all of them. */
+/**
+ * #2688's pitches: each `landuse` polygon's `kind`, the `sport` it carries,
+ * and the sport the decoder keeps — `null` for none.
+ */
+export const PITCH_FIXTURE_POLYGONS: readonly {
+  readonly kind: string;
+  readonly sport: string | undefined;
+  readonly kept: string | null;
+}[] = [
+  { kind: 'pitch', sport: 'soccer', kept: 'soccer' },
+  { kind: 'pitch', sport: 'baseball', kept: 'baseball' },
+  { kind: 'pitch', sport: 'tennis', kept: 'tennis' },
+  // Several sports joined, which is not a kind's shape: no sport.
+  { kind: 'pitch', sport: 'soccer;basketball', kept: null },
+  // A sport the world draws nothing for: no sport.
+  { kind: 'pitch', sport: 'curling', kept: null },
+  { kind: 'pitch', sport: undefined, kept: null },
+  // A sport on what is not a pitch is never kept.
+  { kind: 'park', sport: 'soccer', kept: null },
+  { kind: 'playground', sport: undefined, kept: null },
+];
+
+/** {@link PITCH_FIXTURE_POLYGONS} as one `landuse` layer, every feature carrying a name and an id. */
+export function pitchesTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'landuse',
+      features: PITCH_FIXTURE_POLYGONS.map((pitch, index) => ({
+        id: POISON.id + index,
+        type: 3,
+        tags: {
+          ...poisonTags,
+          kind: pitch.kind,
+          ...(pitch.sport === undefined ? {} : { sport: pitch.sport }),
+        },
+        geometry: polygon([outerRing(regularPolygon(400 + index * 450, 2000, 180, 4))]),
+      })),
+    },
+  ]);
+}
+
+/**
+ * The value every POI in {@link poisTile} carries under `name`, `brand`,
+ * `kind_detail` and `wikidata` (#2975). Shaped as a Protomaps identifier, as
+ * {@link PLACE_SENTINEL} is, so that a decoder that looked any of them up
+ * would carry it into its result.
+ */
+export const POI_SENTINEL = 'zz_sentinel_brand';
+
+/**
+ * The footprints of {@link poisTile}, in tile pixels, and the class each is
+ * to decode with (#2975). At this tile's latitude a pixel is about 0.23 m, so
+ * a shop's 3 m reach is about 13 pixels and a fuel station's 30 m about 129.
+ * Made up; nothing here is a real shop.
+ */
+export const POI_FIXTURE_BUILDINGS: readonly {
+  readonly name: string;
+  readonly kind: 'building' | 'building_part';
+  readonly rings: readonly (readonly [number, number])[][];
+  readonly poi: 'shop' | 'cafe' | 'fuel' | undefined;
+}[] = [
+  {
+    name: 'a bakery inside',
+    kind: 'building',
+    rings: [rectangle(400, 400, 500, 480)],
+    poi: 'shop',
+  },
+  {
+    name: 'a clothes shop and a restaurant inside: the café wins',
+    kind: 'building',
+    rings: [rectangle(700, 400, 800, 480)],
+    poi: 'cafe',
+  },
+  {
+    name: 'a fuel forecourt 80 px (19 m) south of it',
+    kind: 'building',
+    rings: [rectangle(1000, 400, 1060, 440)],
+    poi: 'fuel',
+  },
+  {
+    name: 'a tree and a `constructor` inside: neither is a class',
+    kind: 'building',
+    rings: [rectangle(1300, 400, 1400, 480)],
+    poi: undefined,
+  },
+  {
+    name: 'a bakery 60 px (14 m) south: past a shop’s reach',
+    kind: 'building',
+    rings: [rectangle(1600, 400, 1700, 480)],
+    poi: undefined,
+  },
+  {
+    name: 'a café 8 px (1.9 m) south: within its reach',
+    kind: 'building',
+    rings: [rectangle(1900, 400, 2000, 480)],
+    poi: 'cafe',
+  },
+  {
+    name: 'a bakery in its courtyard, 100 px from every wall',
+    kind: 'building',
+    rings: [rectangle(400, 1000, 800, 1400), rectangle(500, 1100, 700, 1300)],
+    poi: undefined,
+  },
+  {
+    name: 'a bookshop inside, and inside its part',
+    kind: 'building',
+    rings: [rectangle(1000, 1000, 1100, 1100)],
+    poi: 'shop',
+  },
+  {
+    name: 'the part: never given one',
+    kind: 'building_part',
+    rings: [rectangle(1020, 1020, 1080, 1080)],
+    poi: undefined,
+  },
+  {
+    name: 'a café polygon and a café multipoint over it: neither is a point',
+    kind: 'building',
+    rings: [rectangle(1300, 1000, 1400, 1100)],
+    poi: undefined,
+  },
+];
+
+/** The POIs of {@link poisTile}: a kind, and a point, a multipoint or a polygon in tile pixels. */
+const POI_FIXTURE_POINTS: readonly {
+  readonly kind: string;
+  readonly type: 1 | 3;
+  readonly geometry: number[];
+}[] = [
+  { kind: 'bakery', type: 1, geometry: points([[450, 440]]) },
+  { kind: 'clothes', type: 1, geometry: points([[720, 420]]) },
+  { kind: 'restaurant', type: 1, geometry: points([[760, 440]]) },
+  { kind: 'fuel', type: 1, geometry: points([[1030, 520]]) },
+  { kind: 'tree', type: 1, geometry: points([[1320, 420]]) },
+  { kind: 'constructor', type: 1, geometry: points([[1350, 440]]) },
+  { kind: 'bakery', type: 1, geometry: points([[1650, 540]]) },
+  { kind: 'cafe', type: 1, geometry: points([[1950, 488]]) },
+  { kind: 'bakery', type: 1, geometry: points([[600, 1200]]) },
+  { kind: 'books', type: 1, geometry: points([[1050, 1050]]) },
+  { kind: 'cafe', type: 3, geometry: polygon([outerRing(rectangle(1310, 1010, 1390, 1090))]) },
+  {
+    kind: 'cafe',
+    type: 1,
+    geometry: points([
+      [1330, 1030],
+      [1370, 1070],
+    ]),
+  },
+];
+
+/**
+ * #2975: {@link POI_FIXTURE_BUILDINGS} and a `pois` layer — written ahead of
+ * `buildings`, so a match cannot lean on the tile's layer order — whose every
+ * point also carries {@link POI_SENTINEL} as its name, brand, `kind_detail`
+ * and `wikidata`, the `pmap:*` fields, a `min_zoom` and an id, none of which
+ * the decoder may read.
+ */
+export function poisTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'pois',
+      features: POI_FIXTURE_POINTS.map((poi, index) => ({
+        id: POISON.id + index,
+        type: poi.type,
+        tags: {
+          ...poisonTags,
+          name: POI_SENTINEL,
+          brand: POI_SENTINEL,
+          kind_detail: POI_SENTINEL,
+          wikidata: POI_SENTINEL,
+          min_zoom: 16,
+          kind: poi.kind,
+        },
+        geometry: poi.geometry,
+      })),
+    },
+    {
+      name: 'buildings',
+      features: POI_FIXTURE_BUILDINGS.map((building) => ({
+        type: 3,
+        tags: { ...poisonTags, kind: building.kind, height: 6 },
+        geometry: polygon(
+          building.rings.map((ring, index) => (index === 0 ? outerRing(ring) : holeRing(ring))),
+        ),
+      })),
+    },
+  ]);
+}
+
+/** The twelve named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
+  pitches: pitchesTile,
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
   lake: lakeTile,
@@ -828,4 +1059,5 @@ export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   buildingFields: buildingFieldsTile,
   waterLines: waterLinesTile,
   roadFields: roadFieldsTile,
+  pois: poisTile,
 };

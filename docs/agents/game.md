@@ -828,7 +828,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         crash-look.ts`' times): `RealisticRiderBelt` blends
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
-                        and the stylised world keeps #2475's roll alone.
+                        and the stylised world keeps #2475's roll, which now
+                        carries the bicycle's rebound too
+                        (`crashRebound`, through `crashedRoll`).
+                        ⚠️ **That share is the BODY's, not the roll's**
+                        (`crashBodyShare`: wholly the clip's from its
+                        `thrown` moment until half way back up; by the
+                        roll's share the rider fell through the top tube),
+                        the clip is played on its OWN times
+                        (`crashClipSeconds`: made on a 0.3 s rise, drawn
+                        across 0.6 s, so `CRASH_SECONDS` is 1.8 and the file
+                        is not re-made), and the bicycle lands with a
+                        rebound (`crashRebound`) that reduced motion never
+                        draws.
+                        ⚠️ **Since #2839 the HANDS ARE CLOSED round the
+                        hoods** (every body, and the pack's rider): step 9
+                        bends MakeHuman's own finger bones in the rest pose
+                        AFTER the bakes (the maps are unchanged), turns the
+                        forearm palm-down (`GRIP_ROLL`), then carries each
+                        hand back to the open hand's middle, because the
+                        belt puts that middle on the grip and at the hoods
+                        the arm cannot reach further. The body mesh's
+                        `extras.fingertips` names each fingertip's vertex;
+                        `realistic-textures.test.ts` holds them to the hood
+                        through the belt. `rider_female.glb` adds MakeHuman's
+                        breast and shape targets (`FIGURE_TARGETS`) and her
+                        HAIR, a ponytail and a band under the rim in the
+                        helmet's mesh (`rider-gear.test.ts`).
                         #2505: write a lying moment with `on_road`, not in the
                         bicycle's `x`/`y`, and name its `elbows`/`knees`; the
                         test reads the drawn body 3 cm clear of every part of
@@ -1110,6 +1136,44 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `OYL-REALISTIC` line and readout;
                         `realistic-lap-race.browser.spec.ts` holds it
                         (required, not nightly: the stylised world)
+    src/game/open-world/open-world-cannot-reach-trainer.test.ts
+                        ADR 0088 D-5.2 (#2897): the same walk and forbidden
+                        set over the open-world ride's roots, every non-test
+                        module under `game/open-world/` and
+                        `packages/domain/src/route/rolling.ts`, with D-5.2's
+                        three plantings (`gradient.ts`, a seam module, a
+                        trainer-control writer) each a red case; since
+                        #2898 also the HUD's junction prompt
+                        (`hud/JunctionChoicePrompt.tsx`, its words in
+                        `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
+                        which hands it a pad's turns), named as roots, with
+                        the prompt importing `gradient.ts` a red case
+    src/game/open-world/turn-limits.ts
+                        where an open-world ride offers NO turn, on purpose
+                        (#3124), and the words the open-world start screen's
+                        help says it in (`shell/routes.ts`, drafts for the
+                        owner). Each limit is an accepted ADR decision:
+                        service ways, i.e. driveways, car parks and alleys
+                        (ADR 0091 D-3, D-9 Q2); `access` `no`/`private` and
+                        motorways (D-3); footways, cycleways, paths, tracks
+                        (D-3, D-9 Q1); a street mapped to stop more than 3 m
+                        short of the road (D-4, `T_SNAP_METRES`); and a
+                        junction whose choice is final (100 m before it,
+                        ADR 0088 D-1.5, ADR 0087 D-6.2) before it was ever
+                        prompted, whose pop-up says "Too close to the last
+                        junction to choose". Since #3129 (ADR 0088's
+                        amendments of 2026-11-24) the pop-up offers the
+                        first junction not yet final within 250 m while the
+                        next is final, titled "At the 2nd junction"
+                        (`junction-choice.ts` §`promptedJunction`), and a
+                        U-turn within 100 m past a junction takes the street
+                        came along as its default (`RollingRoute.uTurn`), so
+                        a dense town and a quick U-turn are offered. A one-way
+                        street is offered BOTH ways (ADR 0091 D-5): not a
+                        limit. `junction-limits.test.tsx` rides each through
+                        the real game screen and holds its words in the help.
+                        ⚠️ A new reason a junction offers no turn goes in this
+                        list and that test, or it is a defect
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
@@ -1205,14 +1269,39 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
                         measured 201 356) by the same nightly spec.
-                        ⚠️ **Since #2540 the realistic world's parked car is
-                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
-                        `tools/realistic/blender/process_vehicle.py`), its
-                        wheels and indicators apart and posed per instance in
-                        the same call (`withDeliveryCarPose`, from
-                        `port.ts` §`DeliveryCarMotion`), its roster
-                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
-                        frame 203 998; the stylised world keeps its own car
+                        ⚠️ **Since #2847 (ADR 0085) the realistic world's
+                        parked cars are three of GGBotNet's CC0 PSX Style
+                        Cars** — a saloon, a hatchback and a station wagon
+                        (`public/realistic/cars.glb` and one atlas,
+                        `cars_atlas_256.ktx2`, from
+                        `tools/realistic/blender/process_vehicle.py`; #2540's
+                        Kenney sedan until then), their wheels and indicators
+                        apart and posed per instance in the same call
+                        (`withDeliveryCarPose`, from `port.ts`
+                        §`DeliveryCarMotion`). A car's body is chosen by its
+                        place on the round (`deliveryCarBody`), and every
+                        instance submits all three bodies and collapses two:
+                        the roster `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`
+                        (1 640), the frame 203 263. The atlas's alpha says
+                        which texels wear the instance's paint, and its
+                        coordinate and the body ride in attributes already
+                        bound (14 slots, `DELIVERY_MOST_VERTEX_ATTRIBUTES`);
+                        the stylised world keeps its own car.
+                        ⚠️ **A car pulling out DRIVES out**, and a reviewer
+                        who remembers it crossing sideways at 1.5 m/s is
+                        reading the old file (the owner, on the tablet: it
+                        "just slid sideways onto the road"):
+                        `delivery/obstacles.ts` §`carPullingOut` runs it 8 m
+                        up the road as it comes 2 m across, in 3.2 s, turned
+                        at most 20.6°; what meets the rider is the drawn
+                        car itself, turned (§`obstacleFootprint`, an exact
+                        separating-axis test), and the hold-clear and the
+                        camera read the same rectangle; it stops with its
+                        wheels straight; and `in-view.ts` hands the view
+                        its `DeliveryCarMotion`, which nothing produced
+                        before, so the wheels never rolled. Its indicator is
+                        lit steadily under reduced motion
+                        (`DeliveryDrawInput.steadyIndicators`)
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
@@ -1591,7 +1680,54 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ⚠️ Its drawn water can still lie over the map's land,
                         so since #2728 `onOpenWater` (the drawn water, not the
                         mask's) drops a mapped footprint over it and draws
-                        nobody on it
+                        nobody on it. Since #2974 a water line of any kind
+                        that runs BESIDE the road is a channel (a `Lake` with
+                        `channel` set, `CHANNEL_SHAPES` by kind, its water
+                        following the road), laid on the frame's drawn ground
+                        where the columns cannot cut it; a ditch or drain is
+                        never bridged (`BRIDGED_WATER_LINE_KINDS`).
+                        ⚠️ Since #3105, on an OPEN-WORLD view only, the
+                        map's water under the road and on both sides of it
+                        is one crossing as wide as that water
+                        (`waterUnderRoad`, `Crossing.halfWidth`): its bed,
+                        banks, surface, deck, abutments and approaches lie
+                        `crossingWiden` further out, and a deck is at most
+                        `BRIDGE_MAX_PIECES` pieces. A route's crossings are
+                        its water lines' alone, as before
+    src/game/mapped-spans.ts
+                        the mapped bridges and tunnels an open-world ride is
+                        on (#3105): the stretches of the view along a street
+                        graded `bridge` or `tunnel` (`riddenSpans`, by
+                        geometry from `WorldCorridor.streets`, parallel to
+                        the road within 30° so an overpass is not the road's
+                        own) carry the stream bridges' parapets for the whole
+                        span and a concrete portal at each tunnel mouth; a
+                        side street's bridge gets a parapet along each edge
+                        (`sideDeckParts`). ⚠️ All in `BridgeBelt`'s 128
+                        boxes, no mesh or draw call of its own; the deck is
+                        the road at the road's level (flat until #2899), so a
+                        trainer's grade there is the route's. Open-world
+                        views only (`scene.ts` asks where the profile is
+                        anchored)
+    src/game/open-world/water-mask.ts
+                        an open-world ride's real water as the land mask the
+                        scene reads water from (#3105), from the planned
+                        tiles' `water` cells and the water lines through each
+                        tile, each read once (`tile-plan.ts` §`TileWater`). ⚠️ **Water and
+                        its wetland only**: every other class reads
+                        `unknown`, so no placement rule changes; `covered`
+                        is true only within 200 m of real water
+                        (`REAL_WATER_BUFFER_METRES`), which is what drops an
+                        invented stream or lake beside it; no mask at all
+                        where no tile holds water, and the same object until
+                        a tile that holds water is planned or let go
+                        (`WaterMaskKeeper`). `session.ts` hands it to the
+                        road (`OpenWorldRoad.water`) and `GameView` to the
+                        scene as `landClass`; `real-water.test.ts` rides it
+    src/game/mapped-pools.ts
+                        the map's swimming pools and fountains (#2974), round
+                        the camera, as lighter water and a stone coping in the
+                        water's one mesh, marked by shore weight; no draw call
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
@@ -1674,7 +1810,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
                         a mapped park (not a protected area's boundary,
-                        #2657) is still dropped (`insidePark`).
+                        #2657) is still dropped (`insidePark`). ⚠️ **Since
+                        #2696 (proposed) a yard is not a park here**: a
+                        footprint touching a `garden`, `grass`,
+                        `village_green` or `allotments` (`land-class.ts`
+                        §`YARD_KINDS`) is kept; rule 2 drops it only where a
+                        park that is not a yard is within half a mask cell
+                        (§`parkProperNear`).
+                        Since #2976 `grassland` and `heath` are `farmland`, as
+                        `meadow` is: open pasture where the procedural world
+                        drew before, and a building mapped there is kept;
+                        inside a protected area (#2657) each reads as the
+                        area, below it (`OPEN_GROUND_KINDS`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
@@ -1712,7 +1859,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`REALISTIC_PARK_DRESSING_TRIANGLES`. A green is kept
                         off the road and off every stand of trees
                         (`scatter.ts` §`golfStandAt`). `SceneFrame.parkDressing`;
-                        lever `-park-dressing`, page `town=parks`
+                        lever `-park-dressing`, page `town=parks`.
+                        ⚠️ **Since #2688 a pitch and a playground too**
+                        (`park-fields.ts`): a pitch's lines (flat boxes, not a
+                        decal, cut where the ground folds, §`laidAlongTheGround`) and its goals, net, hoops or backstop by its
+                        mapped `sport` (`LandUseFeature.sport`), and a
+                        playground's swing frame, slide and climbing frame,
+                        after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`
+                        (80) nearest first, in their own term
+                        §`REALISTIC_PARK_FIELD_TRIANGLES`; page `town=fields`
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
@@ -1856,6 +2011,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tertiary street commercial, drawn as a mapped shop;
                         no parking half (`-inferred-commercial`,
                         `town=untagged` at 400–700 m);
+                        since #2975 one the map's POIs make a shop or a café
+                        (untyped, a shop, a warehouse or flats; never a
+                        house, an outbuilding or a civic block) commercial,
+                        a café's awning always, and an untyped one a fuel
+                        POI is matched to, ≤ 1 500 m², an open canopy
+                        (`FUEL_CANOPY`: a white slab with a band of colour,
+                        on a column at each pump island, `FUEL_ISLAND`,
+                        over a concrete forecourt out to the road,
+                        `FUEL_FORECOURT`, which is its plan's `driveway`;
+                        slab and columns in `wall` and `roof`, so it has a
+                        far level; its paints `paintTown` leaves)
+                        (`-map-pois`, `town=pois`);
                         since #1792 a mapped `building:material` and, on a
                         pitched roof, `roof:material` on the belt's own
                         surfaces (`MAPPED_WALL_SURFACES`,
@@ -1869,11 +2036,52 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`mappedPaintEntry`, linear RGB over the list's
                         ground), which `paintTown` never moves
                         (`-mapped-paint`, `town=painted`);
+                        since #2848 a paved apron before a commercial
+                        footprint's front, laid by `shop-aprons.ts` (below)
+                        once every plan is made (`layAprons`), in the plan's
+                        `apron` role and outline (`-shop-aprons`,
+                        `town=commercial`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
                         corridor): a procedural lot keeps clear of every kept one
+    src/game/shop-aprons.ts
+                        the paved apron before a mapped shop (#2848, the
+                        owner's ruling of 2026-11-18): for a kept footprint
+                        `building-archetypes.ts` reads as commercial, from
+                        its front wall to the kerb's line (0.1 m outside the
+                        carriageway, as a driveway; in a city centre the back
+                        of #1637's pavement, `streets.ts` §`cityPavementOn`),
+                        only where the kerb is nowhere over 12 m from the
+                        wall and no mapped footway comes within 2 m of that
+                        ground (`APRON`). Columns ≤ 3.6 m along the wall,
+                        each laid whole or not at all — never on a mapped
+                        street but the route's own (`ApronObstacles`, by
+                        `cross-streets.ts`' tolerance and angle), water or
+                        its bank, a park, a wood or bare ground, another
+                        footprint, a porch or a driveway — and the longest
+                        unbroken run is the apron. ⚠️ **Cut
+                        on the lines the ground bends on** (`landform.ts`
+                        §`TERRAIN_COLUMN_OFFSETS`), every vertex 5 cm over
+                        the ground: cut evenly every 2 m instead it stood
+                        up to 9 cm off its lift over the verge's foot.
+                        Plan-time only: the
+                        `apron` role wears the walls' group and the shader
+                        paints it (`CLAD_PAVING`, the driveway's), so no
+                        call, texture or byte; near level only; counted in
+                        the plan's ≤ 640 triangles (an apron that would pass
+                        that is not laid) and so in
+                        `MAPPED_BUILDING_TRIANGLES`. Its outline
+                        (`FootprintPlan.apron`) is cleared as a driveway's
+                        is: no tree, hedge or lot on it. ⚠️ The planner's
+                        `ringsMeet` counts two edges on one line as meeting
+                        wherever they are, so a column's ground is asked
+                        about 5 cm inside its own edges (`columnRing`).
+                        ⚠️ A tile is untrusted: the footways' and streets'
+                        grids take 2 000 000 cell entries a corridor, and
+                        past that no apron is laid at all
+                        (`ApronObstacles.overflowed`)
     src/game/mapped-landmarks.ts
                         the mapped landmarks drawn as themselves (#1794): a
                         church's fit (`churchFits`), its steep nave's
@@ -1903,7 +2111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+                        the tint is a VERTEX attribute, and there is no ground blob (#620).
+                        ⚠️ **One belt a world since #3119**: an open-world
+                        ride's every plan is another set, handed to the belt
+                        it has (`MappedBuildingBelt.rebind`,
+                        `mappedBeltFor`) and refilled in its buffers; a new
+                        belt allocated and uploaded ~10 MB inside the frame
     src/game/house-models.ts
                         which mapped plans are drawn as a house MODEL (#1585):
                         GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
@@ -2038,7 +2251,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
-                        (`people.ts`). No crossing is either
+                        (`people.ts`). No crossing is either. It still
+                        draws nothing: since #2972 `footway-surfaces.ts` does
+    src/game/footway-surfaces.ts
+                        the mapped footways DRAWN (#2972, the owner's ruling
+                        of 2026-11-15) — `footwayNetwork`'s lines as ribbons
+                        on the ground by kind (paved footway, cycleway, park
+                        path, steps in treads), and a zebra wherever a mapped
+                        `crossing` crosses the drawn road. ⚠️ A ribbon is kept
+                        off the carriageway by its own half-width, off the
+                        mapped side roads (`people.ts` §`besideSideRoads`), off
+                        mapped water, and off a drawn village pavement
+                        (#1620's rule, `people.ts` §`onPavement`). Chunked,
+                        grounded the first time a chunk is in reach, ≤
+                        `FOOTWAY_FRAME_TRIANGLES` within `FOOTWAY_DRAW_METRES`
+                        of the camera, nearest first; `SceneFrame.footways`,
+                        drawn in ONE call by `three-renderer.ts`
+                        §`FootwayBelt`, realistic world only, on the ground as
+                        the side roads are. Lever `-footways`, page
+                        `town=footways`
     src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
                         Poly Haven's `trashbag` beside some bins and one
                         `old_tyre` laid flat by a lamp post, placed from the
@@ -2082,17 +2313,37 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `GameView` asks for. `peopleOnTheRoad` is the browser
                         gate's control. `gait.ts` is the parametric walk and
                         run (the owner's ruling of 2026-10-24: no animation
-                        source); `people-body.ts` cuts the rider's MakeHuman
-                        body to ≤ 2 000 triangles at load and sizes the
-                        animation texture (≤ 1 MiB); `three-renderer.ts`
-                        §`PeopleBelt` bakes and draws them, realistic top rung
-                        only (`QualitySettings.people`), in two calls.
+                        source). ⚠️ Since the owner's request of 2026-11-18
+                        the bodies are MODELS: `public/realistic/people.glb`
+                        and `people_atlas_1024.ktx2`, three people in
+                        MakeHuman's own CC0 clothes
+                        (`tools/realistic/blender/process_people.py`, ADR
+                        0026's amendment of that date), each ≤ 2 000
+                        triangles, the atlas a SHARE of each part's colour
+                        that a person's seeded colours multiply. Still ONE
+                        call for all three: the geometry is numbered corners,
+                        looked up per instance's body in a slot texture
+                        (`people-body.ts`, which also lays out the animation
+                        texture, ≤ 1 MiB with the slots);
+                        `three-renderer.ts` §`PeopleBelt` bakes and draws
+                        them, realistic top rung only
+                        (`QualitySettings.people`), in two calls.
                         `levers=-people` on the owner's page is the tablet's
                         cost pair (validation 0002 Part AJ). ⚠️ The bodies'
                         geometry carries a `normal` attribute the shader never
                         reads: without one, three compiles a standard material
                         FLAT_SHADED and every triangle is lit as a facet
-                        (the owner's look of PR #1615)
+                        (the owner's look of PR #1615). ⚠️ A skin TONE is not
+                        an albedo (PR #2844): both people materials give a
+                        region its colour through `PEOPLE_COLOUR_GLSL`, the
+                        skin's through `people-body.ts` §`skinAlbedo` —
+                        handed to the light as it stood, a face in the sun
+                        was bleached pale by the tone map. The atlas's skin
+                        is divided by its photograph's MEDIAN, its trousers
+                        keep no dye, a skirt has no thigh under it and the
+                        fingers are curled in the rest mesh — all in
+                        `process_people.py`; `gait.ts` §`LimbAngles.carry`
+                        turns a runner's arm in
     src/game/scenery-cyclists.ts
                         other cyclists on the road (#2722) — oncoming, slower
                         (caught) and faster (overtaking), a few a ride, more on
@@ -2109,8 +2360,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `sceneryCyclists` (a free ride or a workout) AND the
                         rung draws people, never beside a pacer, ghost, room,
                         race or Delivery round. Drawn as instances: the
-                        people's body seated by `RealisticRiderBelt`
-                        §`ridingPose` and baked into the people's texture
+                        people's FIRST body (the rider's own build, so the
+                        rider's skeleton fits it) seated by
+                        `RealisticRiderBelt` §`ridingPose` and baked into
+                        the people's texture
                         (`people-body.ts` §`RIDE_PHASES`), on the riders'
                         bicycle meshes — no call of their own beside people
     src/game/cross-streets.ts
@@ -2129,7 +2382,119 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier.
+                        ⚠️ **Since #2695 an unpaved way** wherever a mapped
+                        `track` or `bridleway` (`WorldCorridor.paths`) leaves
+                        the route (§`mappedTracks`): gravel or earth, 3 m or
+                        2 m wide, no give-way line, joined as a side road is,
+                        in the same mesh under the same frame bound
+    src/game/nearby-streets.ts
+                        nearby streets (#2973) — the mapped `ground` streets
+                        off the route drawn out to the fog (400 m): a street
+                        that never touches the route with its edge off the
+                        verge, a cross street run on from 23.5 m off the road
+                        (where every stub is still whole, and above it), the
+                        driveways and parking aisles at the service width,
+                        stopping short of a footprint; none on water or an
+                        overpass's road. ⚠️ **Side roads, not a belt of their
+                        own**: `scene.ts` appends the pieces in view to the
+                        frame's `sideRoads`, so `SideRoadBelt` draws them in the
+                        road's material in its ONE call and every clearance
+                        keeps the scenery and the people off them. At most 256
+                        pieces of 32 triangles a frame, chosen again every 40 m.
+                        A footprint on one is dropped `on-street`
+                        (`footprint-buildings.ts` rule 3b). `streetRibbon` names
+                        no route: #2903's open world draws with it.
+                        Lever `-nearby-streets`, page `town=streets`.
+                        ⚠️ **Since #3106 only the streets near the road are
+                        read**: this file and `cross-streets.ts`
+                        §`mappedJunctions` skip every segment off the road's
+                        neighbourhood (`road-grid.ts` §`roadNeighbourhood`:
+                        72 m for a junction's arm, 440 m for a street in
+                        sight) and count none of it against
+                        §`STREET_MAX_METRES`. An open-world ride holds nine
+                        blocks in the order they were read; where they held
+                        more street than the 400 km bound it was spent on
+                        blocks a kilometre off, and the blocks ahead of the
+                        rider had no stub and no street. And a
+                        **fork** — a street leaving the route at under 30°,
+                        which has no stub — is drawn from the verge, not from
+                        the 23.5 m hand-over a stub covers.
+                        ⚠️ **Since #3107 an open-world ride reads them a
+                        slice a frame**: `NearbyStreetScan` here and
+                        `cross-streets.ts` §`JunctionScan`, one of each a ride
+                        (`open-world/road.ts` §`streetScans`, handed to the
+                        scene as `SceneInput.streetScans`), read at most 1 000
+                        units of street a call and hand on the last whole
+                        reading until the new one is whole — the junctions
+                        carried onto the new view by how far its start moved.
+                        A piece or a junction found again is the same object,
+                        so the side road built on it and the renderer's mesh
+                        are kept. Read whole, every change of the road's view
+                        or of the blocks held read every street inside one
+                        frame. A route ride's are read whole, once, as before.
+                        A reading's grid of segments (`onNearbyStreet`) is
+                        built when a planner of buildings first asks for it.
+                        ⚠️ **Since #3119 the scenery along the ways out is
+                        placed a few ways a frame** (`scatter.ts`
+                        §`WaysOutPlacing`, `StreetScans.ways`): at most
+                        `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
+                        first, all on the ride's first frame; a junction in a
+                        dense town hands on ~20 at once. The way roads below
+                        still read every way handed on.
+                        ⚠️ Since #3105 an open-world ride draws a side
+                        street's BRIDGE too, as a deck at the road's level
+                        across the water a ground street stops at
+                        (`deckGround`, `SideRoad.deck`); a route ride still
+                        leaves every bridge to `overpasses.ts`.
+    src/game/way-roads.ts
+                        way roads (#3106) — every way out of an open-world
+                        junction (`SceneInput.waysOut`, the views the rolling
+                        route would hand out, which is what the junction
+                        prompt offers) drawn as road from its junction to the
+                        view's reach, wherever neither the road nor a side
+                        road of the frame already covers it: a fork's mouth, a
+                        street mapped on a bridge from the junction, a way too
+                        short for a stub. Nothing where the streets' own
+                        drawing is whole. Side roads, so the one mesh draws
+                        them and the scenery is kept off them; worked out
+                        again when the ways, the side roads or the reach in
+                        40 m steps change; at most 1 024 stations a frame.
+                        Off with the `-nearby-streets` lever.
+                        ⚠️ **Since #3123 also the road turned off**: once
+                        the rider passes a junction where the route left
+                        the road it came along (`open-world/road.ts`
+                        §`turnedOff`, `SceneInput.turnedOff`), that road on
+                        past the junction and back from it, 400 m each way,
+                        read right after the next junction's ways. The road
+                        covers it only where the frame draws the road (from
+                        60 m behind the rider, in 40 m steps): the road back
+                        is the route still, which nothing else draws
+    src/game/junction-surface.ts
+                        junction surfaces (#3133) — a junction an open-world
+                        ride turns through (the way taken turns 30° or more,
+                        chosen or the default: `open-world/road.ts`
+                        §`junctionsTurned`, `SceneInput.junctionsTurned`)
+                        drawn as the streets meeting there and not as one
+                        road bending: every arm to its own width (the route's
+                        7 m, a way not taken at its street's class) from the
+                        graph's node to its mouth, the square where they
+                        overlap, and each corner rounded to 6 m (less at a
+                        narrow angle; straight along the top of a T). One
+                        side road a junction, a fan of about 36 triangles, at
+                        the road's level lifted as a nearby street is, kept
+                        from 400 m behind the rider to the view's reach.
+                        ⚠️ **The road's lines stop at the mouth**: between the
+                        mouths of the way in and the way taken `terrain.ts`
+                        §`roadCorridor` (`unpainted`) paints no edge line and
+                        no centre-line mark. A junction ridden straight
+                        through is unchanged
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m
@@ -2268,6 +2633,43 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PreviewControl`): a power and a 1–8× speed-up, ridden
                         on a NEW screen `GameView` mounts with none of those
                         ports; ending it mounts an ordinary picker again.
+    src/game/capture-scene.ts
+                        capture mode (#3152): `#/game?capture=<scene>` is a
+                        simulated ride whose power, cadence and heart rate
+                        follow a scene's script, with no simulated mark on the
+                        HUD, for `tools/capture/`'s frame-stepped 1080p60
+                        render of the real app. The same absent ports as the
+                        simulated rider; `capture-wiring.test.tsx` holds the
+                        stepped clock. Read only in a `--mode capture` build;
+                        `tools/capture/capture-stays-out.ts` fails a product
+                        build that carries a scene (found by the id mark
+                        `oyl-capture-scene:`, #3153). #3153's scenes: Delivery
+                        on a built-in level, a lap race on a built-in circuit,
+                        a workout and the pacer — a seed only a scene sets,
+                        scripted presses (`CaptureCues`), an event log the
+                        tool writes beside the video (`CaptureLog`), and an
+                        in-memory store (`captureStorage`) so no rider data is
+                        read or written. `capture-modes-wiring.test.tsx`.
+                        `docs/demo-video.md` §"Capture mode"
+    src/game/capture-recording.ts
+                        a capture ride's Moving, Elapsed, ride-so-far and
+                        Calories, folded in memory by `recording/totals.ts`
+                        §`rideTotals` from the readings it rode, never stored;
+                        and its laps over a course's line (#3153)
+    src/game/capture-free-ride.ts
+                        a free-ride capture (#3154): the command's start, read
+                        from `start=` in a capture build only, and the
+                        placeholder street names a capture shows every street
+                        by — handed to the open-world session's one source of
+                        names (`session.ts` §`renamedStreets`,
+                        `ride.ts` §`OpenWorldSessionExtras`), so the road's
+                        painted names and the junction prompt both read them.
+                        `capture-free-ride-wiring.test.tsx`
+    src/game/capture-workout.ts
+                        a capture's workout (#3153): the Ride screen's built-in
+                        address, tailored and expanded as a rider's is, held at
+                        its ERG target on the ride's clock and drawn by
+                        `WorkoutStrip`. Writes to nothing
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists
