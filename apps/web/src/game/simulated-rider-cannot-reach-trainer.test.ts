@@ -18,6 +18,15 @@ describe('the simulated rider cannot reach the trainer-command seam (#1992)', ()
     );
   });
 
+  it('nor do capture mode’s script and recorder figures — #3152', () => {
+    expect(
+      seamViolations(
+        ['apps/web/src/game/capture-scene.ts', 'apps/web/src/game/capture-recording.ts'],
+        forbiddenInTheTree(),
+      ),
+    ).toEqual([]);
+  });
+
   it('is a walk that can fail: a planted import of the gradient writer is caught', () => {
     const entry = 'apps/web/src/game/simulated-rider.ts';
     const found = seamViolations(

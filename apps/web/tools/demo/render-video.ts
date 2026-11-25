@@ -120,13 +120,13 @@ export interface RenderResult {
   readonly notice: string | undefined;
 }
 
-interface Encoder {
+export interface Encoder {
   write(frame: Buffer): Promise<void>;
   end(): Promise<void>;
 }
 
-/** Start `ffmpeg` reading PNG frames from its standard input. */
-function startEncoder(ffmpeg: string, args: readonly string[]): Encoder {
+/** Start `ffmpeg` reading PNG frames from its standard input. Also the capture's (#3152). */
+export function startEncoder(ffmpeg: string, args: readonly string[]): Encoder {
   const child = spawn(ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => {
@@ -154,8 +154,8 @@ function startEncoder(ffmpeg: string, args: readonly string[]): Encoder {
   };
 }
 
-/** The encoders this `ffmpeg` has. */
-function encoders(ffmpeg: string): string {
+/** The encoders this `ffmpeg` has. Also the capture's (#3152). */
+export function encoders(ffmpeg: string): string {
   const listed = spawnSync(ffmpeg, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
   if (listed.error !== undefined || listed.status !== 0) {
     throw new Error(

@@ -879,6 +879,46 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await rig.done();
   });
 
+  /**
+   * #3152: capture mode is a simulated ride with a script — the same ports
+   * absent, so a capture writes nothing to the machine and starts no
+   * recording, in a room's shell or in none, though its readings move and its
+   * HUD carries no simulated mark. The two controls below are its controls too.
+   */
+  it('from a capture scene: writes nothing, records nothing, saves nothing and joins no room — #3152', async () => {
+    const rig = await onTheBench();
+    await openTheGame(rig, '#/game?capture=route-hud');
+    await clickThrough(buttonStarting('Ride '));
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(10);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    for (let index = 0; index < 10; index += 1) await settle();
+
+    expect(rig.written).toEqual([]);
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.room.tickets).toEqual([]);
+    expect(rig.room.sockets).toEqual([]);
+    mounted?.unmount();
+    mounted = undefined;
+
+    // And in no room, where the press of Ride is what records a game ride (#2381).
+    await openTheGame(rig, '#/game?capture=route-hud', false);
+    await clickThrough(buttonStarting('Ride '));
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(10);
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.written).toEqual([]);
+    await rig.done();
+  });
+
   it('records in no room on the same bench with the switch off — the control (#2381)', async () => {
     const rig = await onTheBench();
     await openTheGame(rig, '#/game', false);

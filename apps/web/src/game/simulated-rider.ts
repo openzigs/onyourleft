@@ -41,6 +41,7 @@
 
 import { watts } from '@onyourleft/domain';
 
+import type { CaptureScene } from './capture-scene';
 import type { GameSensors } from './sensors';
 
 /** The highest power the query accepts, in watts. Beyond it the mode is off. */
@@ -64,6 +65,12 @@ export interface SimulatedRider {
   readonly speedup: number;
   /** Where on the route the ride starts, in odometer metres; absent is the start line. */
   readonly startMetres: number | undefined;
+  /**
+   * The capture scene this ride is scripted by — #3152, `capture-scene.ts`:
+   * its readings in place of {@link watts}, and the HUD a rider sees. Absent
+   * on the address switch's ride and the picker's preview.
+   */
+  readonly capture?: CaptureScene | undefined;
 }
 
 /** The query of a `#/…?…` fragment, or `undefined` with none. */
@@ -111,7 +118,8 @@ export function simulatedRiderFromHash(hash: string): SimulatedRider | undefined
 export function simulatedRiderKey(rider: SimulatedRider | undefined): string {
   return rider === undefined
     ? 'ride'
-    : `simulated:${String(rider.watts)}:${String(rider.speedup)}:${String(rider.startMetres)}`;
+    : `simulated:${String(rider.watts)}:${String(rider.speedup)}:${String(rider.startMetres)}` +
+        (rider.capture === undefined ? '' : `:capture:${rider.capture.id}`);
 }
 
 /** What the game reads each frame while the simulated rider is on. */

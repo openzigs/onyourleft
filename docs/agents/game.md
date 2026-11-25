@@ -2633,6 +2633,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PreviewControl`): a power and a 1–8× speed-up, ridden
                         on a NEW screen `GameView` mounts with none of those
                         ports; ending it mounts an ordinary picker again.
+    src/game/capture-scene.ts
+                        capture mode (#3152): `#/game?capture=<scene>` is a
+                        simulated ride whose power, cadence and heart rate
+                        follow a scene's script, with no simulated mark on the
+                        HUD, for `tools/capture/`'s frame-stepped 1080p60
+                        render of the real app. The same absent ports as the
+                        simulated rider; `capture-wiring.test.tsx` holds the
+                        stepped clock. `docs/demo-video.md` §"Capture mode"
+    src/game/capture-recording.ts
+                        a capture ride's Moving, Elapsed, ride-so-far and
+                        Calories, folded in memory by `recording/totals.ts`
+                        §`rideTotals` from the readings it rode, never stored
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

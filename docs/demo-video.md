@@ -103,3 +103,69 @@ A pull request that changes the video tooling or the demo code the render drives
 (`apps/web/src/demo/`, `apps/web/tools/demo/`, the demo's entry page and build config, and the gate
 files the render imports; the workflow's `paths` list them) runs the checks only. Every other pull
 request runs nothing here.
+
+## Capture mode: the real app at 1080p60
+
+The demo build cannot host the game screen (`tools/demo/forbidden-modules.ts` keeps the trainer,
+the store and `net/` out of it), so the demo video's scenes (epic
+[#3151](https://github.com/openzigs/onyourleft/issues/3151)) are recorded from the **real app** in
+capture mode ([#3152](https://github.com/openzigs/onyourleft/issues/3152)).
+
+```sh
+pnpm --filter @onyourleft/web run capture -- --scene route-hud --seconds 20
+```
+
+This builds the app and writes `apps/web/capture/dist/route-hud-1920x1080-60fps.mp4`: H.264 High
+profile, yuv420p, 1920×1080, 60 fps, CRF 16, `+faststart`. The issue allowed CRF 16 or at least
+12 Mb/s; it is CRF 16, constant quality. The stylised world compresses well, so 20 s of `route-hud`
+came to about 4.9 Mb/s on a Mac. It needs `ffmpeg` with `libx264` on the `PATH` and the pinned
+Chromium, as the demo's render does. That run took four minutes for 1,200 frames.
+
+| Option | Values | Default |
+|---|---|---|
+| `--scene` | `route-hud` | `route-hud` |
+| `--seconds` | seconds of ride, positive; `seconds × fps` must be whole | `20` |
+| `--fps` | whole frames a second, 1 to 60 | `60` |
+| `--size` | `WIDTHxHEIGHT`, each even, at least 64 | `1920x1080` |
+| `--out` | a directory | `apps/web/capture/dist` |
+
+### How it works
+
+`tools/capture/render-capture.ts` opens the built app (`apps/web/dist`) in Chromium, answering
+every file from disk and refusing every other origin, as the demo's render does. Before the app's
+first script runs, `tools/capture/capture-clock.ts` replaces the page's `performance.now`, `Date`,
+`requestAnimationFrame` and timers. The capture then:
+
+1. imports a synthetic route through the Routes page's own form. It is eight invented kilometres
+   from 0° 0° under the placeholder name *Capture loop*, so no real street or place is on screen.
+   It also sets the rider's weight on the Settings page, so W/kg has one to read;
+2. opens `#/game?capture=<scene>`, holds the clocks at 10:30 UTC on a midsummer morning, and
+   presses *Ride*;
+3. runs animation frames at that one instant until the ride has drawn its world. None of these
+   frames is in the video, and no ride time passes during them. The timers keep real time until
+   the first step, because the renderer's warm-up waits for the GPU on a timer;
+4. for each frame, steps every clock by exactly `1000 / fps` ms, lets React commit, and screenshots
+   the page: the WebGL world and the full `HudPanel` over it. The PNGs go to `ffmpeg`, through the
+   demo's own encoder.
+
+So frame *n* is the ride at *n / fps* seconds, however long the machine takes to draw it. The
+capture stops if a step does not draw the world exactly once.
+
+### What `?capture=` is in the app
+
+`src/game/capture-scene.ts` holds the switch and the scenes. A capture ride is a simulated ride
+(`?simulate=`), built by `GameView.tsx` §`useSimulatedRide` with **no trainer port, no room, no
+rooms and no Delivery round**. It never writes to a trainer, records nothing and posts nothing, and
+it is as harmless in a release build as `?simulate=` is. It differs in three ways:
+
+- its power, cadence and heart rate follow the scene's script on the ride's clock, so the HUD shows
+  numbers where a simulated ride shows dashes;
+- the HUD carries no *Simulated ride* mark, because the video is the HUD a rider sees;
+- the recorder's figures (*Moving*, *Elapsed*, the ride so far and *Calories*) are folded in memory
+  from the same readings by `capture-recording.ts`, with the recorder's own `rideTotals`, and are
+  dropped with the screen.
+
+A rider never sees the switch: it is typed into the address, and the tablet app has none.
+`src/game/capture-wiring.test.tsx` proves the stepped clock, and `simulated-rider-wiring.test.tsx`
+proves that a capture reaches no trainer and starts no recording. The other scenes (Delivery, lap
+race, workouts, free ride and the instance) are #3153 to #3155.
