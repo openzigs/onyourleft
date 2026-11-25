@@ -9,7 +9,14 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { addWaypoint, emptyDraft, insertWaypoint, type RouteDraft } from './draft';
-import { draftGeometry, legMidpoint, mapWaypoints, nearestLeg } from './map-edit';
+import {
+  draftGeometry,
+  EMPTY_PLANNER_VIEW,
+  legMidpoint,
+  mapWaypoints,
+  nearestLeg,
+  viewAround,
+} from './map-edit';
 
 function at(latitude: number, longitude: number): GeographicPosition {
   return geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
@@ -127,5 +134,24 @@ describe('the keyboard’s insert — #2006', () => {
 
   it('is nowhere for a leg that does not exist', () => {
     expect(legMidpoint(drawn(A, B), 1)).toBeUndefined();
+  });
+});
+
+describe('the view a new route opens on — #3184', () => {
+  it('centres on the place, about 4.5 km tall and as wide on the ground', () => {
+    const place = geographicPosition(degreesLatitude(60), degreesLongitude(10));
+    const view = viewAround(place);
+    expect((view.north + view.south) / 2).toBeCloseTo(60, 9);
+    expect((view.east + view.west) / 2).toBeCloseTo(10, 9);
+    expect((view.north - view.south) * 111_320).toBeCloseTo(4_453, -1);
+    // At 60° a degree of longitude is half a degree of latitude on the ground.
+    expect(view.east - view.west).toBeCloseTo(2 * (view.north - view.south), 9);
+  });
+
+  it('is far smaller than the whole-country view', () => {
+    const view = viewAround(geographicPosition(degreesLatitude(39.74), degreesLongitude(-104.99)));
+    expect(view.north - view.south).toBeLessThan(
+      (EMPTY_PLANNER_VIEW.north - EMPTY_PLANNER_VIEW.south) / 100,
+    );
   });
 });

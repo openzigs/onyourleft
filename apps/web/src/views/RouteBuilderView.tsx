@@ -40,6 +40,7 @@ import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { useOnline } from '../map/online';
 import type { MapPointerHandlers, MapPort, MapView } from '../map/port';
+import type { TrackBounds } from '../map/track';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import {
   addWaypoint,
@@ -75,6 +76,7 @@ import {
   legMidpoint,
   mapWaypoints,
   nearestLeg,
+  viewAround,
 } from '../routing/map-edit';
 import {
   canCloseLoop,
@@ -137,6 +139,17 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * turned off the line is drawn on a plain background, offline too. ⚠️ A
  * reviewer who remembers this paragraph saying there is no tile archive is
  * reading the old file.
+ *
+ * ## Where a new route opens — #3184
+ *
+ * A new route's map opens around where the rider rides: the start of the
+ * newer of their newest saved route and newest ride with a recorded position,
+ * read from this device's store (`routing/riding-place.ts`). With neither, or
+ * a store that cannot be read, it opens on today's whole-country view. The
+ * map waits for that read — it fits its view once (`MapPanel.tsx`), so a view
+ * that arrived after it would be ignored — and a draft kept across a reload
+ * opens on its own line as before, with no read at all. The place is never
+ * sent, logged or said: it only decides what the map shows first.
  *
  * ## The routing engine — #2008
  *
@@ -216,6 +229,12 @@ export interface RouteBuilderViewProps {
   readonly routes?: RoutePort | undefined;
   /** The instant to stamp a save with. Injected so a test can assert what was written. */
   readonly now?: (() => number) | undefined;
+  /**
+   * Where the rider rides, from this device's store (#3184,
+   * `routing/riding-place.ts`): a new route's map opens around it. `undefined`
+   * where there is no store, and the map opens on the whole-country view.
+   */
+  readonly ridingPlace?: (() => Promise<GeographicPosition | undefined>) | undefined;
 }
 
 /** The map engine (#2006), loaded as `RoutesView` loads it. */
@@ -308,11 +327,20 @@ export function RouteBuilderView({
   preferences: tilePreferences,
   routes,
   now,
+  ridingPlace,
 }: RouteBuilderViewProps): JSX.Element {
   const keep = useRef<DraftStorage>(
     storage ?? browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
   );
   const [history, setHistory] = useState<DraftHistory>(() => newHistory(keep.current.read()));
+  /**
+   * The map's view before there is a line (#3184): `undefined` while the
+   * rider's place is being read. Read only for a new route — a kept draft
+   * opens on its own line — and only where there is a store to read.
+   */
+  const [startView, setStartView] = useState<TrackBounds | undefined>(() =>
+    ridingPlace === undefined || !isEmpty(history.present) ? EMPTY_PLANNER_VIEW : undefined,
+  );
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [preferences, setPreferences] = useState<RidingPreferences>(RIDING_DEFAULTS);
   const [elevationFor, setElevation] = useState<ElevationFor | undefined>(undefined);
@@ -424,6 +452,24 @@ export function RouteBuilderView({
       live = false;
     };
   }, [draft, heightSource, heightInterval, routedLegs]);
+
+  // Where the rider rides, read once for a new route (#3184). Any failure is
+  // today's view: the place is a convenience and its absence costs a pan.
+  useEffect(() => {
+    if (startView !== undefined || ridingPlace === undefined) return undefined;
+    let live = true;
+    ridingPlace().then(
+      (place) => {
+        if (live) setStartView(place === undefined ? EMPTY_PLANNER_VIEW : viewAround(place));
+      },
+      () => {
+        if (live) setStartView(EMPTY_PLANNER_VIEW);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [startView, ridingPlace]);
 
   // The map engine, fetched once (#2006): the loader is the module's `import()`.
   useEffect(() => {
@@ -658,7 +704,7 @@ export function RouteBuilderView({
 
           {map === undefined ? null : engine.kind === 'failed' ? (
             <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
-          ) : engine.kind === 'loading' ? (
+          ) : engine.kind === 'loading' || startView === undefined ? (
             <p className="oyl-muted">Loading the map…</p>
           ) : (
             <>
@@ -675,7 +721,7 @@ export function RouteBuilderView({
                 editing={{
                   waypoints: markers,
                   pointer,
-                  emptyView: EMPTY_PLANNER_VIEW,
+                  emptyView: startView,
                   onView,
                 }}
               />
