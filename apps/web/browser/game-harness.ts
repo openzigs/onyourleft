@@ -199,6 +199,7 @@ import {
   denseTownFixture,
   kerbsideFixture,
   landBeside,
+  MIXED_TOWN_EDGE_RUNG,
   mixedTownFixture,
   rectangleBeside,
 } from '../src/game/footprint-fixtures-testing';
@@ -6346,7 +6347,11 @@ function facadeTrimProbe(
 
 /** What {@link townEdgeProbe} publishes — #1586. */
 interface TownEdgeMeasurement {
-  /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
+  /**
+   * The procedural structures and billboards in the frame: the issue's frame
+   * fills the cap with them — since #3161 the cap of a rung of
+   * `MIXED_TOWN_EDGE_RUNG` structures, which the view draws the frame at.
+   */
   readonly structures: number;
   /** The mapped buildings the belt drew at the frame's refill. */
   readonly buildings: number;
@@ -6375,11 +6380,34 @@ const NO_TOWN_EDGE: TownEdgeMeasurement = {
  * here; ranked together by distance, the houses round the rider are. The
  * frame is the view's own: its scatter, through `updateMapped`. The control
  * of the old rule is `mapped-building-belt.test.ts` §"#1586", in Node.
+ *
+ * ⚠️ **Drawn on a rung of `MIXED_TOWN_EDGE_RUNG` structures, not the realistic
+ * rung's 36** — #3161. Since #3132 no procedural building stands on a mapped
+ * building's plot, and the frame carries 15 structures, so at 36 the cap is
+ * never full and the town would be drawn whatever the ranking did. The Node
+ * twin was moved to the same rung by #3132; this is the same frame, its plans
+ * without the shops' aprons as the twin's are (#2848), drawn at the same rung,
+ * and the view is put back on `top` after it.
  */
-function townEdgeProbe(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
+function townEdgeProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  top: QualitySettings,
+): TownEdgeMeasurement {
+  view.setQuality({ ...top, structureItems: MIXED_TOWN_EDGE_RUNG });
+  try {
+    return townEdgeAtTheRung(view);
+  } finally {
+    view.setQuality(top);
+  }
+}
+
+/** {@link townEdgeProbe}'s frame and reading, on a view already on the probe's rung. */
+function townEdgeAtTheRung(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
   const { profile, origin, corridor } = mixedTownFixture();
   const land = landClassMask(corridor);
-  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const plans = footprintPlans(corridor, land, profile, origin, undefined, undefined, {
+    shopAprons: false,
+  }).plans;
   const start = atStartLine(profile);
   const frame = sceneFrame({
     profile,
@@ -14030,7 +14058,7 @@ function townProbes(
   phaseEnds('town: a mapped window’s lintel — #1663');
 
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
-  const townEdge = townEdgeProbe(view);
+  const townEdge = townEdgeProbe(view, REALISTIC_LADDER[0] as QualitySettings);
   phaseEnds('town: a town’s edge — #1586');
 
   // #1550, on the same view: procedural lots in a mapped town with no footprints.

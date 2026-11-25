@@ -51,7 +51,8 @@
  * replaced; and no side street was drawn (#2903). The second describe below
  * rides the product's own session (`session.ts`, its reader, graph and
  * rolling route) over {@link OPEN_WORLD_GRID_STREETS}, a town of
- * crossroads, through three turns, and holds on the frames the renderer was
+ * crossroads, through three turns — one ride its cases share, a stretch each,
+ * since #3161 (@see GridRide) — and holds on the frames the renderer was
  * handed:
  *
  * - each corner ridden round with the same bounds as above;
@@ -310,10 +311,6 @@ beforeAll(async () => {
 });
 
 afterAll(endRide);
-
-beforeEach(freshRide);
-
-afterEach(endRide);
 
 async function pump(): Promise<void> {
   const next = pending.shift();
@@ -633,6 +630,9 @@ function expectRoundTheCorner(
 }
 
 describe('an open-world ride turns round the corner at a junction, frame by frame — #3051', () => {
+  beforeEach(freshRide);
+  afterEach(endRide);
+
   it('turns left: the drawn rider and the camera ride round the corner, with no jump', async () => {
     expectRoundTheCorner(turned(await rideTheTurn('ArrowLeft')), 'left');
   });
@@ -832,35 +832,49 @@ interface GridFrame {
 /**
  * The frames between the watched stretches of the grid ride, milliseconds
  * apart: **1000**. The simulation steps at its own rate whatever the frame's;
- * a long frame only draws less, and the earlier turns are pressed on them.
+ * a long frame only draws less.
  */
 const GRID_APPROACH_FRAME_MS = 1000;
 
-/** One junction of the ride, as the renderer was handed it. */
-interface RiddenJunction {
-  /** Its ride distance. */
-  readonly at: number;
-  readonly turn: (typeof GRID_TURNS)[number];
-  /** The last frame built before the press, and the first after it. */
-  readonly beforePress: GridFrame;
-  readonly afterPress: GridFrame;
-  /** The frames from {@link WATCH_FROM_METRES} before it to {@link WATCH_TO_METRES} past it. */
-  readonly round: readonly GridFrame[];
-  /** Every frame from the start to the end of {@link round}. */
-  readonly frames: readonly GridFrame[];
-}
+/** One of {@link GRID_TURNS}. */
+type GridTurn = (typeof GRID_TURNS)[number];
 
 /**
- * Rides the real game screen, over the real session on
- * {@link OPEN_WORLD_GRID_STREETS}, through {@link GRID_TURNS} as far as the
- * one at `watched`, pressing each turn's key {@link JUNCTION_METRES} −
- * {@link PRESS_AT_METRES} before it. Frames are drawn at {@link GRID_FPS}
- * for five metres either side of that junction's press and from
- * {@link WATCH_FROM_METRES} before it to {@link WATCH_TO_METRES} past it, and
- * {@link GRID_APPROACH_FRAME_MS} apart everywhere else, so each case fits a
- * test's time: each watches one junction.
+ * #3161: ONE ride of the real game screen, over the real session on
+ * {@link OPEN_WORLD_GRID_STREETS}, through {@link GRID_TURNS} in order, that
+ * the cases of the describe below share. Each case rides it on from where the
+ * case before it stopped, over one stretch of one junction — up to and through
+ * the press, up to 10 m short of the junction, and round the corner — and
+ * holds what that stretch drew. Until #3161 each case rode from the start to
+ * its own junction and watched all three stretches, and under coverage on CI
+ * all three cases ran past a test's 5 s.
+ *
+ * Frames are drawn at {@link GRID_FPS} for five metres either side of each
+ * press and from {@link WATCH_FROM_METRES} before each junction to
+ * {@link WATCH_TO_METRES} past it, and {@link GRID_APPROACH_FRAME_MS} apart
+ * everywhere else.
  */
-async function rideTheGridTo(watched: number): Promise<RiddenJunction> {
+interface GridRide {
+  /** Each turn's ride distance. */
+  readonly distances: readonly number[];
+  /** The stretches drawn at {@link GRID_FPS}. */
+  readonly stretches: readonly { readonly from: number; readonly to: number }[];
+  /** The frames of the junction being ridden, after the last frame of the one before it. */
+  frames: GridFrame[];
+  /** The frames of the junction being ridden before its press, and so the first after it. */
+  pressed: number;
+  /** The pairs of frames {@link expectSceneKept} has read at this junction, and the changes of view among them. */
+  pairs: number;
+  viewChanges: number;
+  /** How many stretches the cases have ridden: three a junction. */
+  ridden: number;
+}
+
+/** Where `turn`'s press is made: {@link JUNCTION_METRES} − {@link PRESS_AT_METRES} short of it. */
+const pressAtMetres = (junction: number): number => junction - (JUNCTION_METRES - PRESS_AT_METRES);
+
+/** Mounts the real game screen over the real session and starts the ride {@link GridRide} is. */
+async function startTheGridRide(): Promise<GridRide> {
   // jsdom's `Blob` has no `stream()`, which the fixture archive's gzip uses.
   vi.stubGlobal('Blob', NodeBlob);
   const source = countingSource(await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS));
@@ -880,54 +894,53 @@ async function rideTheGridTo(watched: number): Promise<RiddenJunction> {
     await Promise.resolve();
   });
   await settle();
-  const distances = gridTurnDistances().slice(0, watched + 1);
-  const at = distances[watched] as number;
-  const pressAt = (junction: number): number => junction - (JUNCTION_METRES - PRESS_AT_METRES);
-  const stretches = [
-    { from: pressAt(at) - 5, to: pressAt(at) + 5 },
-    {
-      from: at - (JUNCTION_METRES - WATCH_FROM_METRES),
-      to: at + (WATCH_TO_METRES - JUNCTION_METRES),
-    },
-  ];
-  const frames: GridFrame[] = [];
-  /** Draws one frame, at {@link GRID_FPS} inside a watched stretch or about to enter one. */
-  const ride = async (): Promise<void> => {
-    const here = odometer();
-    const fine = stretches.some(({ from, to }) => here >= from - 10 && here <= to);
-    frameMs = fine ? 1000 / GRID_FPS : GRID_APPROACH_FRAME_MS;
-    const before = drawn.length;
-    await pump();
-    for (const each of drawn.slice(before)) frames.push({ ...each, fine });
-  };
-  let pressed = 0;
-  for (const [index, junction] of distances.entries()) {
-    const turn = GRID_TURNS[index] as (typeof GRID_TURNS)[number];
-    for (let frame = 0; frame < 2_000 && odometer() < pressAt(junction); frame += 1) await ride();
-    // Inside the prompt, short of the lock, as a rider's press would be.
-    expect(odometer()).toBeLessThan(junction - 100);
-    pressed = frames.length;
-    await act(async () => {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: turn.key, code: turn.key, bubbles: true }),
-      );
-      await Promise.resolve();
-    });
-  }
-  const end = at + (WATCH_TO_METRES - JUNCTION_METRES);
-  for (let frame = 0; frame < 3_000 && odometer() < end; frame += 1) await ride();
-  expect(odometer()).toBeGreaterThanOrEqual(end);
-  const from = at - (JUNCTION_METRES - WATCH_FROM_METRES);
+  const distances = gridTurnDistances();
   return {
-    at,
-    turn: GRID_TURNS[watched] as (typeof GRID_TURNS)[number],
-    beforePress: frames[pressed - 1] as GridFrame,
-    afterPress: frames[pressed] as GridFrame,
-    round: frames
-      .slice(pressed)
-      .filter(({ input }) => (input.state.ride.distance as number) >= from),
-    frames,
+    distances,
+    stretches: distances.flatMap((at) => [
+      { from: pressAtMetres(at) - 5, to: pressAtMetres(at) + 5 },
+      {
+        from: at - (JUNCTION_METRES - WATCH_FROM_METRES),
+        to: at + (WATCH_TO_METRES - JUNCTION_METRES),
+      },
+    ]),
+    frames: [],
+    pressed: 0,
+    pairs: 0,
+    viewChanges: 0,
+    ridden: 0,
   };
+}
+
+/**
+ * Rides `ride` on until the odometer reads `to`, one frame at a time, at
+ * {@link GRID_FPS} inside a watched stretch or about to enter one. The frames
+ * are kept on the ride, and dropped from {@link drawn}: a ride through three
+ * junctions held every frame twice would hold hundreds of grounds.
+ */
+async function rideTheGridOn(ride: GridRide, to: number): Promise<void> {
+  for (let frame = 0; frame < 3_000 && odometer() < to; frame += 1) {
+    const here = odometer();
+    const fine = ride.stretches.some(({ from, to: end }) => here >= from - 10 && here <= end);
+    frameMs = fine ? 1000 / GRID_FPS : GRID_APPROACH_FRAME_MS;
+    await pump();
+    for (const each of drawn) ride.frames.push({ ...each, fine });
+    drawn.length = 0;
+    inputs.splice(0, inputs.length - 1);
+  }
+  expect(odometer()).toBeGreaterThanOrEqual(to);
+}
+
+/**
+ * The stretch the case riding `ride` next is: `turn` junctions in, the
+ * `stretch`th of its three. A case that finds the ride elsewhere says so,
+ * rather than read another stretch's frames: the case before it failed.
+ */
+function stretchOf(ride: GridRide | undefined, turn: number, stretch: number): GridRide {
+  if (ride?.ridden !== turn * 3 + stretch) {
+    throw new Error('the case before this one did not ride its stretch of the shared ride');
+  }
+  return ride;
 }
 
 /** `frames` as {@link Watched}, in the ride's one frame (#2902): no view moves it. */
@@ -1159,21 +1172,21 @@ function toSegments(
 }
 
 /**
- * The ways out of `junction` that `frame` does not draw: each as `way@metres`,
+ * The ways out of `turn`'s junction that `frame` does not draw: each as `way@metres`,
  * for every point {@link DRAWN_OUT_METRES} along a way the ride did not come
  * in by that neither the road nor any side road runs within
  * {@link DRAWN_WITHIN_METRES} of.
  */
-function undrawnWaysOut(junction: RiddenJunction, frame: GridFrame): string[] {
+function undrawnWaysOut(turn: GridTurn, frame: GridFrame): string[] {
   const origin = corridorOrigin(frame.input.profile);
-  const [column, row] = junction.turn.at;
+  const [column, row] = turn.at;
   const metresPerPixel =
     (distanceBetween(fixturePosition(column, row), fixturePosition(column + 1000, row)) as number) /
     1000;
   const centre = frame.frame.corridor.centre.flatMap((point) => [point.x, point.z]);
   const missing: string[] = [];
   for (const way of WAYS_OUT) {
-    if (way[0] === junction.turn.from[0] && way[1] === junction.turn.from[1]) continue;
+    if (way[0] === turn.from[0] && way[1] === turn.from[1]) continue;
     for (const metres of DRAWN_OUT_METRES) {
       const out = metres / metresPerPixel;
       const { x, z } = localGroundPosition(
@@ -1188,25 +1201,15 @@ function undrawnWaysOut(junction: RiddenJunction, frame: GridFrame): string[] {
   return missing;
 }
 
-/** What one junction's case holds, on the frames the renderer was handed. */
-function expectTheRuling(junction: RiddenJunction): void {
-  const side = junction.turn.key === 'ArrowLeft' ? 'left' : 'right';
-  // 1. Round the corner with no jump: every frame of the turn at the frame
-  // rate, so the measures read one frame's change.
-  expect(junction.round.every(({ fine }) => fine)).toBe(true);
-  expectRoundTheCorner(
-    turned(watchedOn(junction.round), GRID_FPS),
-    side,
-    CAMERA_MAXIMUM_YAW_RATE,
-    GRID_FPS,
-  );
-  // 2. No frame replaces the scene, through the press and the corner: near
-  // the rider on every frame, and past the junction at each change of view.
-  let pairs = 0;
-  let viewChanges = 0;
-  for (let index = 1; index < junction.frames.length; index += 1) {
-    const before = junction.frames[index - 1] as GridFrame;
-    const after = junction.frames[index] as GridFrame;
+/**
+ * Holds every pair of `frames` drawn one after the other at {@link GRID_FPS}
+ * to the scene kept, and counts them on `ride`: near the rider on every pair,
+ * and past the junction at each change of view.
+ */
+function expectSceneKept(ride: GridRide, frames: readonly GridFrame[]): void {
+  for (let index = 1; index < frames.length; index += 1) {
+    const before = frames[index - 1] as GridFrame;
+    const after = frames[index] as GridFrame;
     if (!before.fine || !after.fine) continue;
     // The quality governor reads the frame times, and the long frames
     // between the watched stretches read as a slow device: where it moved
@@ -1218,15 +1221,15 @@ function expectTheRuling(junction: RiddenJunction): void {
     ) {
       continue;
     }
-    pairs += 1;
+    ride.pairs += 1;
     const viewChanged = before.input.profile !== after.input.profile;
-    if (viewChanged) viewChanges += 1;
+    if (viewChanged) ride.viewChanges += 1;
     // The ground at every change of view, out to the far places then, and
     // near the rider on every tenth pair between.
     const change = sceneChange(
       before,
       after,
-      viewChanged ? 'far' : pairs % 10 === 0 ? 'near' : 'none',
+      viewChanged ? 'far' : ride.pairs % 10 === 0 ? 'near' : 'none',
     );
     const facts = `at ${String(after.input.state.ride.distance)} m: ${JSON.stringify(change)}`;
     if (change.scenery >= SCENERY_COUNTED) {
@@ -1248,40 +1251,119 @@ function expectTheRuling(junction: RiddenJunction): void {
     }
   }
   // Every frame of the ride was handed the ways out the route does not take.
-  expect(junction.frames.every(({ input }) => (input.waysOut?.length ?? 0) >= 2)).toBe(true);
+  expect(frames.every(({ input }) => (input.waysOut?.length ?? 0) >= 2)).toBe(true);
+}
 
-  expect(pairs).toBeGreaterThan(150);
+/**
+ * The press at `turn`, the first stretch of its junction: rides on to the
+ * press, makes it, rides 5 m on, and holds the scene kept through it and every
+ * way out drawn before it and after.
+ */
+async function expectThePress(ride: GridRide, turn: number): Promise<void> {
+  const at = ride.distances[turn] as number;
+  const { key } = GRID_TURNS[turn] as GridTurn;
+  // A new junction: its pairs are read from the last frame of the one before.
+  ride.frames = ride.frames.slice(-1);
+  ride.pairs = 0;
+  ride.viewChanges = 0;
+  await rideTheGridOn(ride, pressAtMetres(at));
+  // Inside the prompt, short of the lock, as a rider's press would be.
+  expect(odometer()).toBeLessThan(at - 100);
+  ride.pressed = ride.frames.length;
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true }));
+    await Promise.resolve();
+  });
+  await rideTheGridOn(ride, pressAtMetres(at) + 5);
+  ride.ridden += 1;
+  expectSceneKept(ride, ride.frames);
   // The press changed the view on a pair the measure read.
-  expect(viewChanges).toBeGreaterThanOrEqual(1);
-  // 3. Every way out drawn before the rider reaches it, before the press and after.
-  const short = junction.round.filter(
-    ({ input }) => (input.state.ride.distance as number) <= junction.at - 10,
-  );
+  expect(ride.viewChanges).toBeGreaterThanOrEqual(1);
+  // Every way out drawn before the rider reaches it, before the press and after.
   for (const [when, frame] of [
-    ['before the press', junction.beforePress],
-    ['after the press', junction.afterPress],
-    ['10 m short of it', short[short.length - 1] as GridFrame],
+    ['before the press', ride.frames[ride.pressed - 1] as GridFrame],
+    ['after the press', ride.frames[ride.pressed] as GridFrame],
   ] as const) {
-    expect(undrawnWaysOut(junction, frame), `${junction.turn.key} ${when}`).toStrictEqual([]);
+    expect(undrawnWaysOut(GRID_TURNS[turn] as GridTurn, frame), `${key} ${when}`).toStrictEqual([]);
   }
 }
 
+/**
+ * Up to `turn`'s junction, the second stretch: rides on to 10 m short of it,
+ * and holds the scene kept and every way out drawn there.
+ */
+async function expectUpToTheCorner(ride: GridRide, turn: number): Promise<void> {
+  const at = ride.distances[turn] as number;
+  const from = ride.frames.length;
+  await rideTheGridOn(ride, at - 10);
+  ride.ridden += 1;
+  // From the last frame the stretch before drew, so the pair between is read.
+  expectSceneKept(ride, ride.frames.slice(from - 1));
+  const short = ride.frames.filter(({ input }) => (input.state.ride.distance as number) <= at - 10);
+  const { key } = GRID_TURNS[turn] as GridTurn;
+  expect(
+    undrawnWaysOut(GRID_TURNS[turn] as GridTurn, short[short.length - 1] as GridFrame),
+    `${key} 10 m short of it`,
+  ).toStrictEqual([]);
+}
+
+/**
+ * Round `turn`'s corner, the last stretch: rides on to
+ * {@link WATCH_TO_METRES} past the junction, and holds every frame from
+ * {@link WATCH_FROM_METRES} before it to the corner's bounds, and the scene
+ * kept.
+ */
+async function expectRoundTheGridCorner(ride: GridRide, turn: number): Promise<void> {
+  const at = ride.distances[turn] as number;
+  const from = ride.frames.length;
+  await rideTheGridOn(ride, at + (WATCH_TO_METRES - JUNCTION_METRES));
+  ride.ridden += 1;
+  // Round the corner with no jump: every frame of the turn at the frame
+  // rate, so the measures read one frame's change.
+  const round = ride.frames
+    .slice(ride.pressed)
+    .filter(
+      ({ input }) =>
+        (input.state.ride.distance as number) >= at - (JUNCTION_METRES - WATCH_FROM_METRES),
+    );
+  expect(round.every(({ fine }) => fine)).toBe(true);
+  const side = (GRID_TURNS[turn] as GridTurn).key === 'ArrowLeft' ? 'left' : 'right';
+  expectRoundTheCorner(turned(watchedOn(round), GRID_FPS), side, CAMERA_MAXIMUM_YAW_RATE, GRID_FPS);
+  expectSceneKept(ride, ride.frames.slice(from - 1));
+  // The junction's three stretches read this many pairs between them.
+  expect(ride.pairs).toBeGreaterThan(150);
+}
+
 describe('the owner’s ruling of 2026-11-23: three turns through the real session — #3051', () => {
-  // Each case rides from the start, pressing the turns before its own on long
-  // frames, and watches its own junction: round the corner with no jump, no
-  // frame that replaces the scene, and every way out drawn before the rider
-  // reaches it, before the press and after.
-  it('turn 1, left off Main street: round the corner, the scene kept, every way out drawn', async () => {
-    expectTheRuling(await rideTheGridTo(0));
+  // One ride from the start through the three turns, pressing each one's key
+  // 110 m short of it (#3161: @see GridRide). Each turn is three cases, in
+  // order: the press, with the scene kept through it and every way out drawn
+  // before and after it; up to 10 m short of the junction, the scene kept and
+  // every way out drawn; and round the corner with no jump, the scene kept.
+  let ride: GridRide | undefined;
+  beforeAll(async () => {
+    freshRide();
+    ride = await startTheGridRide();
   });
+  afterAll(endRide);
 
-  it('turn 2, right: round the corner, the scene kept, every way out drawn', async () => {
-    expectTheRuling(await rideTheGridTo(1));
-  });
+  for (const [turn, name] of [
+    [0, 'turn 1, left off Main street'],
+    [1, 'turn 2, right'],
+    [2, 'turn 3, right again'],
+  ] as const) {
+    it(`${name}: pressed 110 m short, the scene kept through the press, every way out drawn`, async () => {
+      await expectThePress(stretchOf(ride, turn, 0), turn);
+    });
 
-  it('turn 3, right again: round the corner, the scene kept, every way out drawn', async () => {
-    expectTheRuling(await rideTheGridTo(2));
-  });
+    it(`${name}: up to the junction, the scene kept, every way out drawn 10 m short`, async () => {
+      await expectUpToTheCorner(stretchOf(ride, turn, 1), turn);
+    });
+
+    it(`${name}: round the corner with no jump, the scene kept`, async () => {
+      await expectRoundTheGridCorner(stretchOf(ride, turn, 2), turn);
+    });
+  }
 });
 
 // --- #3095: a village and its billboards past the junction, on the real game screen ---
@@ -1326,6 +1408,17 @@ function villageCrossroads(frame: SceneFrame): Plan[] {
 }
 
 /**
+ * The frames the lowland ride takes most of the way to its junction on,
+ * milliseconds apart: **3000** — #3161. Each frame builds every village along
+ * every way out in view, and on 1 s frames the ride to the seventh junction ran
+ * past a test's 5 s under coverage on CI. The simulation steps at its own
+ * rate whatever the frame's (`simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` is
+ * 10 s), so the ride reaches the press where and when it did: only fewer
+ * frames are drawn on the way.
+ */
+const LOWLAND_APPROACH_FRAME_MS = 3000;
+
+/**
  * Rides the real game screen over the lowland grid to 110 m short of the
  * junction at `column` along Main street, turns left there, and returns the
  * last frame before the press and the first of the view it gave, with the
@@ -1351,8 +1444,13 @@ async function rideTheLowlandTo(column: number, realistic = false, east = 0, bac
     await Promise.resolve();
   });
   await settle();
-  frameMs = 1000;
   const pressAt = junctionAt - back;
+  // #3161: the long way there on frames three times as long, which draw a
+  // third as many of its village-lined frames, then the last 45 m on 1 s
+  // frames as before, so the fine frames start where they did.
+  frameMs = LOWLAND_APPROACH_FRAME_MS;
+  for (let frame = 0; frame < 400 && odometer() < pressAt - 60; frame += 1) await pump();
+  frameMs = 1000;
   for (let frame = 0; frame < 400 && odometer() < pressAt - 15; frame += 1) await pump();
   frameMs = 1000 / 30;
   for (let frame = 0; frame < 400 && odometer() < pressAt; frame += 1) await pump();
@@ -1456,6 +1554,9 @@ const MOVED_IN_A_FRAME_METRES = 1;
 const PEOPLE_COMPARED_METRES = PEOPLE_FAR_METRES - 20;
 
 describe('#3095: a village and its billboards past the junction stay through the press, on the real game screen', () => {
+  beforeEach(freshRide);
+  afterEach(endRide);
+
   it('lays the village’s pavements and its crossroads past the fourth junction where they were', async () => {
     const ridden = await rideTheLowlandTo(4);
     for (const [what, read] of [
@@ -1480,6 +1581,9 @@ describe('#3095: a village and its billboards past the junction stay through the
 });
 
 describe('#3095: the people and the other cyclists past the junction stay through the press, on the real game screen in the realistic world', () => {
+  beforeEach(freshRide);
+  afterEach(endRide);
+
   // Both are drawn only on the realistic world's top rung (`scene.ts`
   // §`SceneInput.people`), which this ride loads and keeps.
   it('walks the village’s people past the sixth junction where they walked', async () => {
