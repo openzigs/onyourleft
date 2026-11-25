@@ -125,12 +125,38 @@ function published(): CaptureTarget['__oylCapture'] {
 
 let mounted: Mounted | undefined;
 
+/**
+ * The case that is running: aborted once it ends, so a case that timed out
+ * stops stepping its capture instead of riding on, in the background, into
+ * the next case's mount and globals. Checked after every await in a capture.
+ */
+let running = new AbortController();
+/**
+ * The captures the running case started, until each has stopped. A case that
+ * timed out leaves one inside `act()`; React would queue the next case's
+ * renders into that scope and never draw them, so `afterEach` waits for it.
+ */
+let inFlight: Promise<unknown>[] = [];
+
+/** Run `body` as one of the running case's captures, for `afterEach` to wait on. */
+function tracked<T>(body: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const run = body(running.signal);
+  inFlight.push(run.catch(() => undefined));
+  return run;
+}
+
+/** Stop here if the case this capture belongs to has ended. */
+function stillRunning(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('the case this capture belongs to has ended');
+}
+
 /** What a rider's device already holds: a week part-way through, and level 1 finished. */
 const WEEK = JSON.stringify({ day: 4, houses: 9, score: 11 });
 const LEVELS = JSON.stringify({ finished: ['morning-round'] });
 const NO_LEVELS = JSON.stringify({ finished: [] });
 
 beforeEach(() => {
+  running = new AbortController();
   asked = [];
   own = OWN;
   circuits = () => loadBuiltInCircuits();
@@ -140,7 +166,10 @@ beforeEach(() => {
   vi.stubEnv('MODE', CAPTURE_MODE);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  running.abort();
+  await Promise.all(inFlight);
+  inFlight = [];
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
@@ -168,11 +197,21 @@ function field(label: string): string | undefined {
  * fragment, hold the clock, press its route's *Ride*, run frames at the
  * instant of the press until one drew the world, then step. Every step must
  * run one animation frame and draw the world once, or the capture tool stops.
+ * `onFrame` returning `true` ends the capture at that frame.
  */
-async function capture(
+function capture(
   scene: string,
   steps: number,
-  onFrame?: (frame: number) => void,
+  onFrame?: (frame: number) => boolean | void,
+): Promise<readonly CaptureEvent[]> {
+  return tracked((signal) => captureFor(signal, scene, steps, onFrame));
+}
+
+async function captureFor(
+  signal: AbortSignal,
+  scene: string,
+  steps: number,
+  onFrame?: (frame: number) => boolean | void,
 ): Promise<readonly CaptureEvent[]> {
   const on = stage();
   globalThis.location.hash = captureHash(scene);
@@ -188,6 +227,7 @@ async function capture(
   for (let tries = 0; tries < 40; tries += 1) {
     if (rideButton(ride) !== undefined) break;
     await settle();
+    stillRunning(signal);
   }
   expect(rideButton(ride), ride).toBeDefined();
   on.clock.hold();
@@ -202,6 +242,7 @@ async function capture(
       await Promise.resolve();
     });
     await settle();
+    stillRunning(signal);
   }
   expect(published()?.drawn).toBe(1);
   for (let frame = 1; frame <= steps; frame += 1) {
@@ -212,8 +253,9 @@ async function capture(
       await Promise.resolve();
     });
     await settle();
+    stillRunning(signal);
     expect([ran, (published()?.drawn ?? 0) - before]).toEqual([1, 1]);
-    onFrame?.(frame);
+    if (onFrame?.(frame) === true) break;
   }
   return published()?.events ?? [];
 }
@@ -251,10 +293,17 @@ describe('a Delivery scene — #3153', () => {
 
   it('reads none of the rider’s week or levels, and writes none (no rider data in a capture)', async () => {
     // The rider's device is on day 4 of a week and has finished no level; the
-    // round is ridden to its end, where a round writes both.
+    // round is ridden to its end, where a round writes both. Its last house is
+    // settled some 260 frames in: the capture stops a few frames after the HUD
+    // reads none left, rather than riding on to a fixed count.
     localStorage.setItem(LEVEL_PROGRESS_STORAGE_KEY, NO_LEVELS);
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
-    const events = await capture('delivery', 1500);
+    let ended: number | undefined;
+    const events = await capture('delivery', 400, (frame) => {
+      if (ended === undefined && /^0\sleft/u.test(field('Houses') ?? '')) ended = frame;
+      return ended !== undefined && frame >= ended + 8;
+    });
+    expect(ended, 'the round reached its end').toBeDefined();
     expect(events.filter((event) => event.kind === 'score').length).toBeGreaterThan(0);
     // Not the rider's week, nor their levels: written to none of them. (The
     // frame-time report is not rider data, and is not this test's.)
@@ -384,7 +433,16 @@ describe('every other ride draws its own seed — #3153', () => {
   });
 
   /** Open `hash`, press `ride`, and run `steps` frames on the stand-in clock. */
-  async function ride(hash: string, name: string, steps: number): Promise<void> {
+  function ride(hash: string, name: string, steps: number): Promise<void> {
+    return tracked((signal) => rideFor(signal, hash, name, steps));
+  }
+
+  async function rideFor(
+    signal: AbortSignal,
+    hash: string,
+    name: string,
+    steps: number,
+  ): Promise<void> {
     const on = stage();
     globalThis.location.hash = hash;
     mounted = await mount(
@@ -395,7 +453,10 @@ describe('every other ride draws its own seed — #3153', () => {
         riderMass={kilograms(72)}
       />,
     );
-    for (let tries = 0; tries < 40 && rideButton(name) === undefined; tries += 1) await settle();
+    for (let tries = 0; tries < 40 && rideButton(name) === undefined; tries += 1) {
+      await settle();
+      stillRunning(signal);
+    }
     on.clock.hold();
     await act(async () => {
       rideButton(name)?.click();
@@ -408,6 +469,7 @@ describe('every other ride draws its own seed — #3153', () => {
         await Promise.resolve();
       });
       await settle();
+      stillRunning(signal);
     }
   }
 
