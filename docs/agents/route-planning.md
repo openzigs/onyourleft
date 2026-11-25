@@ -38,9 +38,21 @@ named-option → costing table and was run against a real one-state build. The c
 the engine: `apps/web/src/instance/routing-port.ts` is a `RoutingProvider` that asks the instance,
 sealed, through the one #777 module, and refuses on the device any leg or line touching a privacy
 zone (a `departing` boundary in `privacy/boundaries.test.ts`). `main.tsx` hands the planner that
-provider only when the device is connected to an instance it can seal to; otherwise there is none,
-and legs are straight lines. Still not done: #70's *"the same suite against two engines"* (OSRM, #3137),
-and an in-browser engine for a rider with no instance (#2734).
+provider only when the device is connected to an instance it can seal to. Still not done: #70's
+*"the same suite against two engines"* (OSRM, #3137).
+
+⚠️ **And in the app, since #2734, when no instance routes a leg** ([ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)).
+`apps/web/src/routing/tiers.ts` picks the engine per leg: the instance when it answers, else
+Valhalla compiled to WebAssembly (`valhalla-browser` 0.2.1) on the build's graph
+(`routing/browser-graph.ts`), else none and a straight line. `routing/valhalla-browser-provider.ts`
+is the **one** module under `src/` that reaches the SDK, by a dynamic `import()` only
+(`tools/valhalla/stays-out.test.ts`); it is a `departing` boundary, because the SDK's worker fetches
+the graph's 0.25° tiles from the tile host. A leg the engine cannot route here (off the graph, too
+large, too slow, not loadable, map tiles off) comes back as a `FreehandFallback` and the draft draws
+it straight with the reason on it (`draft.ts`). The SDK takes no hills or surface option and has no
+heights, so its legs' surface is `'unknown'` and the terrain archive measures them. Its contract is
+`routing/contract-testing.ts`: the scripted double passes it in Vitest, and the adapter passes it
+against the real SDK on a synthetic grid in `browser/routing.browser.spec.ts`.
 
 **What is real, and what the tests therefore prove.** The interface; the validation every engine's
 numbers must pass; the draft, its undo and its stale-leg accounting; the elevation profile and its

@@ -26,6 +26,22 @@ const TRANSCODER = Object.fromEntries(
   }),
 );
 
+/**
+ * #2734: the in-browser routing engine's WebAssembly, as the real build writes
+ * it: emitted for the SDK's own `new URL(…, import.meta.url)`, so its original
+ * file is the package's, and put under `routing/` by `tools/routing/runtime-assets.ts`.
+ */
+const ROUTING_RUNTIME = 'routing/valhalla-browser-CMUO9kvo.wasm';
+const ROUTING = {
+  [ROUTING_RUNTIME]: {
+    type: 'asset' as const,
+    fileName: ROUTING_RUNTIME,
+    originalFileNames: [
+      '/repo/node_modules/.pnpm/valhalla-browser@0.2.1/node_modules/valhalla-browser/dist/valhalla-browser.wasm',
+    ],
+  },
+};
+
 /** Where pnpm installs three, as Rolldown names a module id from it. */
 const THREE = '/repo/node_modules/.pnpm/three@0.185.1/node_modules/three/';
 /** The renderer chunk as the real build writes it — #618's review: it bundles KTX-Parse and zstddec. */
@@ -128,6 +144,7 @@ describe('a file the build copies out of a package is named in the notices — #
         [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
         ...TRANSCODER,
         ...RENDERER,
+        ...ROUTING,
         'assets/index-abc.js': { type: 'chunk', fileName: 'assets/index-abc.js', modules: {} },
       });
     }).not.toThrow();
@@ -144,6 +161,7 @@ describe('a file the build copies out of a package is named in the notices — #
         [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
         ...withoutWasm,
         ...RENDERER,
+        ...ROUTING,
       });
     }).toThrow(/realistic\/basis\/basis_transcoder\.wasm is in .* and the build did not write it/);
   });
@@ -154,6 +172,7 @@ describe('a file the build copies out of a package is named in the notices — #
         [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
         ...TRANSCODER,
         ...RENDERER,
+        ...ROUTING,
         'assets/basis_transcoder-abc.wasm': {
           type: 'asset',
           fileName: 'assets/basis_transcoder-abc.wasm',
@@ -165,8 +184,18 @@ describe('a file the build copies out of a package is named in the notices — #
 
   it('fails the build when a named file is no longer written', () => {
     expect(() => {
-      runPlugin({ ...TRANSCODER, ...RENDERER });
+      runPlugin({ ...TRANSCODER, ...RENDERER, ...ROUTING });
     }).toThrow(/pose\/vision_wasm_module_internal\.wasm is in .* and the build did not write it/);
+  });
+
+  it('names the routing engine’s WebAssembly, and fails a build that no longer writes it — #2734', () => {
+    expect(() => {
+      runPlugin({
+        [POSE_RUNTIME]: { type: 'asset', fileName: POSE_RUNTIME, originalFileNames: [] },
+        ...TRANSCODER,
+        ...RENDERER,
+      });
+    }).toThrow(/routing\/valhalla-browser-CMUO9kvo\.wasm is in .* and the build did not write it/);
   });
 });
 

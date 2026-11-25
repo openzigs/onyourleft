@@ -124,6 +124,7 @@ import { describe, expect, it } from 'vitest';
 
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
 import { readTerrainConfig } from '../terrain/config';
+import { readRoutingGraphConfig } from '../routing/browser-graph';
 import { stripComments } from '../units/no-inline-units';
 import { ERASE_ACCOUNT_TEXT } from '../views/erase-account-text';
 import { CHANGE_NAME_TEXT } from '../views/instance-name-text';
@@ -2080,5 +2081,71 @@ describe('the terrain archive is disclosed — #2013', () => {
     );
     expect(builder).toMatch(/const config = browserTerrainConfig\(\);/);
     expect(builder).toMatch(/mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\)/);
+  });
+});
+
+/**
+ * **The in-browser routing graph is disclosed — #2734.**
+ *
+ * With no instance routing a leg, the route planner's engine runs on the
+ * device and its worker fetches the routing graph's tiles from the tile host.
+ * Those requests are made inside a dependency (`valhalla-browser`), which the
+ * scan above cannot see, so what holds them is: the default is on the host the
+ * policy and the Play answer name (below), and `browser/routing.browser.spec.ts`
+ * watches the real worker ask no host but the graph's.
+ */
+describe('the in-browser routing graph is disclosed — #2734', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const basemap = readBasemapConfig({});
+  const graph = readRoutingGraphConfig({});
+
+  it('has a default, on the one host the basemap’s default is on', () => {
+    expect(graph).toBeDefined();
+    expect(basemap).toBeDefined();
+    expect(new URL(graph!.manifestUrl).origin).toBe(basemapOrigin(basemap!));
+  });
+
+  it('is described in the policy: what is asked for, how coarse it is, and how to turn it off', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving, 'the policy does not describe the routing graph read').toContain(
+      'requests the squares of a routing map the leg crosses from tiles.openzigs.com',
+    );
+    expect(leaving).toContain('about 28 by 22 km');
+    expect(leaving).toContain('the name of each file says which square it is');
+    expect(leaving).toContain('your waypoints and the line stay on your device');
+    expect(leaving).toContain('with map tiles off the app requests no routing map');
+    expect(normalised(policySection(policy, 'The short version'))).toContain(
+      'the squares of a routing map the line crosses',
+    );
+  });
+
+  it('is named in the Location row’s `why`, file names and all', () => {
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'following roads on a drawn route requests the squares of a routing map the route crosses from the same host',
+    );
+    expect(why).toContain('whose names say which square');
+    expect(why).toContain(
+      'except for the routing map, whose file names say which square of it was read',
+    );
+  });
+
+  it('is started by a module that holds no URL of its own, built in main.tsx from the configuration', () => {
+    const read = (path: string): string =>
+      stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));
+    expect(read(join('routing', 'valhalla-browser-provider.ts'))).not.toMatch(/['"`]https?:/);
+    const main = read('main.tsx');
+    const builder = main.slice(
+      main.indexOf('function buildRouting('),
+      main.indexOf('function buildGhostPort('),
+    );
+    expect(builder).toMatch(/const graph = browserRoutingGraphConfig\(\);/);
+    expect(builder).toMatch(/readMapTilesChoice\(deviceStorage\(\)\)/);
   });
 });

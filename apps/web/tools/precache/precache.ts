@@ -98,6 +98,8 @@ export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [
   /^sw\.js$/,
   /^realistic\//,
   /^pose\//,
+  // #2734: the in-browser routing engine, fetched on the first routed leg (`tools/routing/runtime-assets.ts`).
+  /^routing\//,
 ];
 
 function included(name: string): boolean {

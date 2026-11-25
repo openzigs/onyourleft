@@ -11,9 +11,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addWaypoint,
+  adoptAnswers,
   clear,
   deleteWaypoint,
   draftDistance,
+  FreehandFallback,
   emptyDraft,
   insertWaypoint,
   isEmpty,
@@ -313,6 +315,31 @@ describe('a leg that could not be routed', () => {
     expect(draftDistance(settled)).toBe(1_000);
   });
 
+  it('draws a leg the engine falls back on as a straight freehand leg that keeps the reason, and asks again when the rider says so (#2734)', async () => {
+    const { draft, provider } = await routed(3);
+    provider.failNextRoute(new FreehandFallback('This leg is outside the road map.'));
+    const settled = await resolveDraft(draft, [1], provider, RIDING_DEFAULTS);
+    const leg = settled.legs[1];
+    expect(leg?.mode).toBe('freehand');
+    expect(leg?.state).toBe('routed');
+    expect(leg?.shape).toStrictEqual([draft.waypoints[1]?.position, draft.waypoints[2]?.position]);
+    expect(leg?.distance).toBeGreaterThan(0);
+    expect(leg?.surface).toBe('unknown');
+    expect(leg?.failure).toStrictEqual({
+      message: 'This leg is outside the road map.',
+      retryable: true,
+    });
+    // Nothing is left unresolved: the route can be saved as it stands.
+    expect(unresolvedLegs(settled)).toStrictEqual([]);
+    expect(settled.legs[0]?.mode).toBe('snapped');
+    // "Follow roads" on it makes it stale, and the next answer clears the mark.
+    const again = setLegMode(settled, 1, 'snapped');
+    expect(again.stale).toStrictEqual([1]);
+    const back = await resolveDraft(again.draft, again.stale, provider, RIDING_DEFAULTS);
+    expect(back.legs[1]?.mode).toBe('snapped');
+    expect(back.legs[1]?.failure).toBeUndefined();
+  });
+
   it('recovers when the leg is routed again', async () => {
     const { draft, provider } = await routed(2);
     provider.failNextRoute(new RoutingError('unavailable', 'the engine is down'));
@@ -320,5 +347,52 @@ describe('a leg that could not be routed', () => {
     const up = await resolveDraft(down, [0], provider, RIDING_DEFAULTS);
     expect(up.legs[0]?.state).toBe('routed');
     expect(up.legs[0]?.failure).toBeUndefined();
+  });
+});
+
+describe('an answer that arrives after the next edit (#2734)', () => {
+  const place = (latitude: number) =>
+    geographicPosition(degreesLatitude(latitude), degreesLongitude(0.05));
+
+  it('is kept for the leg the newer draft still waits for, and the newer edit is kept too', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    // The rider places a third waypoint before the first leg's answer is back.
+    const next = addWaypoint(first.draft, place(0.07), 'snapped');
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    const adopted = adoptAnswers(next.draft, first.draft, answered, first.stale);
+    expect(adopted.waypoints).toBe(next.draft.waypoints);
+    expect(adopted.legs[0]?.state).toBe('routed');
+    expect(adopted.legs[0]).toBe(answered.legs[0]);
+    // The new leg is the newer edit's to ask about.
+    expect(adopted.legs[1]?.state).toBe('pending');
+  });
+
+  it('is dropped where the newer draft moved either end, and the draft is returned as it was', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    const moved = moveWaypoint(first.draft, first.draft.waypoints[1]!.id, place(0.065));
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(adoptAnswers(moved.draft, first.draft, answered, first.stale)).toBe(moved.draft);
+  });
+
+  it('is dropped for a leg the rider has since drawn freehand', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    const freehand = setLegMode(first.draft, 0, 'freehand');
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(adoptAnswers(freehand.draft, first.draft, answered, first.stale)).toBe(freehand.draft);
   });
 });

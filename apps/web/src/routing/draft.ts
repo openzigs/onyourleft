@@ -80,7 +80,8 @@ export interface DraftLeg {
   readonly distance: Metres;
   readonly surface: SurfaceKind;
   /**
-   * Why this leg has no geometry, in words a rider can act on.
+   * Why this leg has no geometry, in words a rider can act on. On a freehand
+   * leg, why the engine drew it straight instead ({@link FreehandFallback}).
    *
    * ⚠️ **On the leg rather than on the draft.** #71: *"a routing failure
    * between two waypoints (no path, engine down) is shown on **that leg**, with
@@ -88,6 +89,30 @@ export interface DraftLeg {
    * field would make the whole route look broken because one leg is.
    */
   readonly failure: LegFailure | undefined;
+}
+
+/**
+ * Raised by an engine that cannot route a leg **right now, on this device**,
+ * where a straight line is the honest answer rather than a broken leg (#2734).
+ *
+ * The in-browser engine (`valhalla-browser-provider.ts`) raises it when the
+ * leg is outside its graph, too large for its memory, too slow, or when the
+ * graph could not be loaded at all (offline, map tiles off). {@link resolveDraft}
+ * then draws the leg **freehand**, a straight line whose length is a lower
+ * bound, and keeps this message on it as its {@link DraftLeg.failure}: the leg
+ * is marked stale, and "Follow roads" on it asks again.
+ *
+ * ⚠️ A no-route answer is NOT this. A graph that holds both ends and finds no
+ * path between them has said something about the waypoints, and the rider
+ * moves one: that stays an ordinary failed leg.
+ *
+ * Always `'unavailable'`, so always retryable.
+ */
+export class FreehandFallback extends RoutingError {
+  constructor(message: string) {
+    super('unavailable', message);
+    this.name = 'FreehandFallback';
+  }
 }
 
 export interface LegFailure {
@@ -342,7 +367,8 @@ export function setLegMode(draft: RouteDraft, legIndex: number, mode: LegMode): 
  *
  * ⚠️ **Never throws.** A `RoutingError` becomes a {@link LegFailure} on its own
  * leg, because the rest of the route is still editable and a rejection here
- * would take the whole draft down with one bad leg.
+ * would take the whole draft down with one bad leg. A {@link FreehandFallback}
+ * becomes a freehand leg that keeps the failure as its mark (#2734).
  */
 export async function resolveDraft(
   draft: RouteDraft,
@@ -368,10 +394,71 @@ export async function resolveDraft(
           ? { ...existing, state: 'failed', failure: NO_LEG_RETURNED }
           : { ...existing, state: 'routed', ...geometryOf(routed), failure: undefined };
     } catch (error) {
-      legs[index] = { ...existing, ...NO_GEOMETRY, state: 'failed', failure: failureFrom(error) };
+      legs[index] =
+        error instanceof FreehandFallback
+          ? { ...legFor('freehand', from, to), failure: failureFrom(error) }
+          : { ...existing, ...NO_GEOMETRY, state: 'failed', failure: failureFrom(error) };
     }
   }
   return { ...draft, legs };
+}
+
+/**
+ * Keep an engine's answers that arrive after the rider has edited again.
+ *
+ * {@link resolveDraft} answers for the draft it was asked about. If the rider
+ * placed another waypoint meanwhile, the screen's draft is a newer one, and
+ * replacing it with the answer would undo the edit. Dropping the answer, which
+ * the planner did before #2734, left the leg it was for "being routed" for
+ * good: nothing asks again for a leg that is not stale in the newer edit. A
+ * slow engine (the in-browser one starts in hundreds of milliseconds on a
+ * desktop and in seconds on a tablet) made that the common case.
+ *
+ * So each answered leg is carried into `current` where `current` still has
+ * the same leg waiting: between the same two waypoints, at the same places,
+ * snapped and pending. Anything else in `current` is left as it is, and
+ * `current` itself is returned when nothing was carried.
+ */
+export function adoptAnswers(
+  current: RouteDraft,
+  asked: RouteDraft,
+  answered: RouteDraft,
+  stale: readonly number[],
+): RouteDraft {
+  let legs: DraftLeg[] | undefined;
+  for (const index of stale) {
+    const from = asked.waypoints[index];
+    const to = asked.waypoints[index + 1];
+    const answer = answered.legs[index];
+    if (
+      from === undefined ||
+      to === undefined ||
+      answer === undefined ||
+      answer.state === 'pending'
+    ) {
+      continue;
+    }
+    const at = current.waypoints.findIndex((waypoint) => waypoint.id === from.id);
+    const next = current.waypoints[at + 1];
+    const waiting = current.legs[at];
+    if (
+      at === -1 ||
+      next?.id !== to.id ||
+      !samePlace(current.waypoints[at]!.position, from.position) ||
+      !samePlace(next.position, to.position) ||
+      waiting?.mode !== 'snapped' ||
+      waiting.state !== 'pending'
+    ) {
+      continue;
+    }
+    legs ??= [...current.legs];
+    legs[at] = answer;
+  }
+  return legs === undefined ? current : { ...current, legs };
+}
+
+function samePlace(a: GeographicPosition, b: GeographicPosition): boolean {
+  return a.latitude === b.latitude && a.longitude === b.longitude;
 }
 
 const NO_LEG_RETURNED: LegFailure = {

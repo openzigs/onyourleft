@@ -15,7 +15,7 @@ is the fonts this app's source repository commits and the app serves.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (74 packages)
+Part 1 — in the app (75 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.3 — MIT
@@ -90,6 +90,7 @@ Part 1 — in the app (74 packages)
   uqr 0.1.3 — MIT
   use-callback-ref 1.3.3 — MIT
   use-sidecar 1.1.3 — MIT
+  valhalla-browser 0.2.1 — MIT
 
 Part 2 — in the Android app only (50 libraries)
   androidx.activity:activity:1.11.0 — Apache-2.0
@@ -153,6 +154,7 @@ Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.1.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
   realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
   realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+  routing/valhalla-browser-CMUO9kvo.wasm — from valhalla-browser 0.2.1 (apps/web/src/routing/valhalla-browser-provider.ts: the SDK names its WebAssembly with new URL(..., import.meta.url), so the bundler emits it, and apps/web/tools/routing/runtime-assets.ts puts it under routing/ (#2734)); it is Valhalla and the libraries compiled with it into valhalla-browser's WebAssembly valhalla-browser 0.2.1, Valhalla 3.8.3, vendored there — MIT AND BSL-1.0 AND BSD-3-Clause AND BSD-2-Clause AND Zlib AND (MIT OR NCSA) AND Apache-2.0 WITH LLVM-exception, with the IANA time-zone data in the public domain
 
   Bundled into the app's own code, out of a package that vendors them:
   examples/jsm/libs/ktx-parse.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is KTX-Parse 1.1.0, vendored there — MIT

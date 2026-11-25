@@ -43,6 +43,7 @@ import type { MapPointerHandlers, MapPort, MapView } from '../map/port';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import {
   addWaypoint,
+  adoptAnswers,
   clear,
   deleteWaypoint,
   draftDistance,
@@ -56,6 +57,7 @@ import {
   type LegMode,
   type RouteDraft,
 } from '../routing/draft';
+import { heightIntervalOf } from '../routing/tiers';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
 import type { RouteHeights } from '../terrain/heights';
@@ -356,9 +358,12 @@ export function RouteBuilderView({
         return;
       }
       void resolveDraft(edit.draft, edit.stale, provider, preferences).then((resolved) => {
-        setHistory((current) =>
-          current.present === edit.draft ? settle(current, resolved) : current,
-        );
+        setHistory((current) => {
+          if (current.present === edit.draft) return settle(current, resolved);
+          // #2734: the rider edited again meanwhile; keep the answers the newer draft still waits for.
+          const adopted = adoptAnswers(current.present, edit.draft, resolved, edit.stale);
+          return adopted === current.present ? current : settle(current, adopted);
+        });
       });
     },
     [provider, preferences],
@@ -397,7 +402,8 @@ export function RouteBuilderView({
   const routedLegs = draft.legs.filter((leg) => leg.state === 'routed').length;
   // #2013: with no engine, the terrain archive answers, at its own spacing.
   const heightSource = provider ?? heights;
-  const heightInterval = provider === undefined ? heights?.interval : undefined;
+  // #2734: with no instance the tiers ask the terrain archive, at its own spacing.
+  const heightInterval = provider === undefined ? heights?.interval : heightIntervalOf(provider);
   useEffect(() => {
     if (heightSource === undefined || routedLegs === 0) {
       setElevation(undefined);
@@ -780,10 +786,20 @@ export function RouteBuilderView({
                     >{`${String(index + 1)} to ${String(index + 2)}`}</th>
                     <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
                     <td>{surfaceWord(leg.surface)}</td>
-                    <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
+                    <td
+                      className={
+                        leg.state === 'routed' && leg.failure === undefined
+                          ? 'tw:whitespace-nowrap'
+                          : undefined
+                      }
+                    >
                       {leg.state === 'routed'
                         ? measurementText(formatDistance(leg.distance, units))
                         : (leg.failure?.message ?? 'Being routed')}
+                      {/* #2734: a leg the engine drew straight says why beside its length. */}
+                      {leg.state === 'routed' && leg.failure !== undefined
+                        ? ` ${leg.failure.message}`
+                        : ''}
                       {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
                     </td>
                     <td>
