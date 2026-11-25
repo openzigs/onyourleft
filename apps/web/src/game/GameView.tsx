@@ -163,6 +163,13 @@ import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } f
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
+import { CaptureRecording } from './capture-recording';
+import {
+  CaptureSensors,
+  captureRider,
+  captureSceneFromHash,
+  publishCaptureFrame,
+} from './capture-scene';
 import {
   simulatedClock,
   simulatedRideSentences,
@@ -386,6 +393,7 @@ import {
 } from './hud/hud-layout-preference';
 import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
+  elevationAt,
   ghostDistanceAt,
   gradePercent,
   metres,
@@ -1281,7 +1289,9 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [preview, setPreview] = useState<PreviewAsked | undefined>(undefined);
   // The route a preview rode, chosen again on the picker it returns to.
   const [returnTo, setReturnTo] = useState<string | undefined>(undefined);
-  const fromHash = simulatedRiderFromHash(globalThis.location.hash);
+  const fromHash =
+    simulatedRiderFromHash(globalThis.location.hash) ??
+    capturedRiderFromHash(globalThis.location.hash);
   const simulated = preview?.rider ?? fromHash;
   const onPreview = useCallback((asked: PreviewAsked) => {
     setReturnTo(asked.routeId);
@@ -1317,6 +1327,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   );
 }
 
+/** #3152: the capture scene's rider, when the fragment names a scene. @see captureSceneFromHash */
+function capturedRiderFromHash(hash: string): SimulatedRider | undefined {
+  const scene = captureSceneFromHash(hash);
+  return scene === undefined ? undefined : captureRider(scene);
+}
+
 /** What the picker's *Preview without a trainer* asked for — PR #2113. */
 interface PreviewAsked {
   readonly rider: SimulatedRider;
@@ -1348,13 +1364,8 @@ function performanceNow(): number {
 function useSimulatedRide(
   given: GameViewProps,
   simulated: SimulatedRider | undefined,
+  capture: CaptureSensors | undefined,
 ): GameViewProps {
-  const givenPort = given.port;
-  const port = useMemo((): GamePort | undefined => {
-    if (simulated === undefined || givenPort === undefined) return givenPort;
-    const sensors = simulatedSensors(simulated);
-    return { ...givenPort, readSensors: () => sensors };
-  }, [givenPort, simulated]);
   const givenNow = given.now;
   const now = useMemo(
     () =>
@@ -1363,6 +1374,17 @@ function useSimulatedRide(
         : simulatedClock(givenNow ?? performanceNow, simulated.speedup),
     [givenNow, simulated],
   );
+  const givenPort = given.port;
+  const port = useMemo((): GamePort | undefined => {
+    if (simulated === undefined || givenPort === undefined) return givenPort;
+    // #3152: a capture's readings follow its script on the ride's own clock.
+    if (capture !== undefined) {
+      const read = now ?? performanceNow;
+      return { ...givenPort, readSensors: () => capture.read(read()) };
+    }
+    const sensors = simulatedSensors(simulated);
+    return { ...givenPort, readSensors: () => sensors };
+  }, [givenPort, simulated, capture, now]);
   if (simulated === undefined) return given;
   return {
     ...given,
@@ -1403,7 +1425,11 @@ function GameScreen({
 }): JSX.Element {
   // #1992: held for this screen's life — the key above makes a new screen of a new choice.
   const [simulated] = useState(asked);
-  const props = useSimulatedRide(given, simulated);
+  // #3152: a capture's scripted sensors, held for the screen as the rider is.
+  const [captureSensors] = useState(() =>
+    simulated?.capture === undefined ? undefined : new CaptureSensors(simulated.capture),
+  );
+  const props = useSimulatedRide(given, simulated, captureSensors);
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
   // the control that shows the refusal and the button the refusal blocks.
@@ -1625,6 +1651,19 @@ function GameScreen({
   const [state, setState] = useState<GameState | undefined>(undefined);
   /** #2078: the ring of the last ten minutes, one per game ride, and what it last held. */
   const recentTraceRef = useRef<RecentTrace>(createRecentTrace());
+  /**
+   * #3152: a capture ride's recorder figures, kept in memory — one per ride,
+   * and `undefined` on every other ride. @see CaptureRecording
+   */
+  const captureRecordingRef = useRef<CaptureRecording | undefined>(undefined);
+  /**
+   * What the HUD shows of {@link captureRecordingRef}, copied out whenever it
+   * takes a second, so the HUD re-renders on state rather than reading a ref
+   * during render (PR #3160's review). `undefined` on every other ride.
+   */
+  const [captureFigures, setCaptureFigures] = useState<
+    { readonly seconds: number; readonly totals: RideTotals } | undefined
+  >(undefined);
   /**
    * #2420: the HUD's 3 s power, fed by the loop after the simulation took the
    * raw reading. Read by the HUD and the announcer, and by nothing else. A new
@@ -3118,6 +3157,13 @@ function GameScreen({
       // the height it will be and nothing moves when the first second lands.
       recentTraceRef.current = createRecentTrace();
       setRecentTrace({ samples: [], written: 0 });
+      // #3152: a capture's script and its figures start with the ride.
+      if (captureSensors !== undefined) {
+        captureSensors.start((props.now ?? performanceNow)());
+        const recording = new CaptureRecording();
+        captureRecordingRef.current = recording;
+        setCaptureFigures({ seconds: recording.seconds, totals: recording.totals() });
+      }
       // #1312: the rider is on the line of this course, so a lap begins here
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
@@ -3466,6 +3512,7 @@ function GameScreen({
       props.lapRace,
       soundsOut,
       simulated,
+      captureSensors,
       level,
     ],
   );
@@ -3601,6 +3648,8 @@ function GameScreen({
     // lane change turns and leans the bicycle rather than sliding it.
     let steeredSway = 0;
     let steeredSwayAt: number | undefined;
+    // #3152: the frames of this ride that drew the world, for the capture tool.
+    let captureDrawn = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -3965,6 +4014,18 @@ function GameScreen({
               : undefined,
         });
         setRecentTrace({ samples: trace.read(), written: trace.written });
+        // #3152: and a capture's recorder figures, from the same second.
+        const capture = captureRecordingRef.current;
+        if (capture !== undefined) {
+          capture.sample(traceSecond, {
+            watts: sensors.rider.live ? sensors.rider.power : 0,
+            cadence: sensors.cadence.live ? sensors.cadence.value : undefined,
+            heartRate: sensors.heartRate.live ? sensors.heartRate.value : undefined,
+            speed: simulation.state.ride.speed,
+            altitude: elevationAt(road.profile, onRoad.ride.distance),
+          });
+          setCaptureFigures({ seconds: capture.seconds, totals: capture.totals() });
+        }
       }
       if (paced.draw) {
         setState(simulation.state);
@@ -4805,6 +4866,16 @@ function GameScreen({
               : rounded;
         if (prepared) {
           view.render(frame);
+          // #3152: told to the capture tool, which steps the next frame only
+          // once this one has drawn the world.
+          if (captureRecordingRef.current !== undefined) {
+            captureDrawn += 1;
+            publishCaptureFrame({
+              drawn: captureDrawn,
+              distance: simulation.state.ride.distance,
+              elapsed: simulation.state.elapsed,
+            });
+          }
           // #783: the other riders' names over the frame just drawn — DOM,
           // so no draw call and no triangle in either world. Only a room ride
           // carries one, and only with a world to lay them over; any other
@@ -5527,15 +5598,16 @@ function GameScreen({
         // #1111: the RECORDER's moving time — never the simulation's
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
-        movingSeconds={movingSeconds}
+        // #3152: a capture ride's, kept in memory, since it records nothing.
+        movingSeconds={captureFigures?.seconds ?? movingSeconds}
         // #2072: and the elapsed time, the recorder's again — pauses included.
-        elapsedSeconds={elapsedSeconds}
+        elapsedSeconds={captureFigures?.seconds ?? elapsedSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
-        lapSeconds={lapSeconds}
+        lapSeconds={captureFigures?.seconds ?? lapSeconds}
         // #2080: and every lap it has stated, for the lap splits panel.
         laps={rideLaps}
         // #2076: the ride so far, the recorder's again. @see useRideTotals
-        rideTotals={rideTotals}
+        rideTotals={captureFigures?.totals ?? rideTotals}
         // #2078: the last ten minutes, written once a second by the loop.
         recent={recentTrace}
         // #2079: the rider's panels and text size.
@@ -5749,7 +5821,12 @@ function GameScreen({
         // §`sideCameraLostNotice`.
         sideCamera={sideCameraOnHud(sideCamera)}
         // #1992: a simulated ride says so on the stage, for every frame of it.
-        simulated={simulated === undefined ? undefined : simulatedRideSentences(simulated)}
+        // #3152: a capture shows the HUD a rider sees, so it carries no mark.
+        simulated={
+          simulated === undefined || simulated.capture !== undefined
+            ? undefined
+            : simulatedRideSentences(simulated)
+        }
         // #1552, ADR 0054 D-3.6: the OpenStreetMap credit, for the WHOLE ride
         // whose world was given a corridor at the start — never per frame,
         // because the notice is for the work, not for what is in view. Keyed

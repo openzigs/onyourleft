@@ -46,6 +46,7 @@ import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 
 import type { CueOutput } from './audio-port';
+import { CAPTURE_MODE } from './capture-scene';
 import { CUES_STORAGE_KEY, writeCuePreference } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { deviceStorage } from './hud/announce-preference';
@@ -189,6 +190,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   globalThis.location.hash = '';
   globalThis.localStorage.removeItem(CUES_STORAGE_KEY);
 });
@@ -872,6 +874,48 @@ describe('nothing from a simulated ride is kept or shared — the whole path (#1
     await preview(String(POWER), 8);
     await rideFor(rig, 30);
     expect(screen()?.querySelector('.oyl-hud__simulated')).not.toBeNull();
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.written).toEqual([]);
+    await rig.done();
+  });
+
+  /**
+   * #3152: capture mode is a simulated ride with a script — the same ports
+   * absent, so a capture writes nothing to the machine and starts no
+   * recording, in a room's shell or in none, though its readings move and its
+   * HUD carries no simulated mark. The two controls below are its controls too.
+   */
+  it('from a capture scene: writes nothing, records nothing, saves nothing and joins no room — #3152', async () => {
+    // The capture tool's build (`vite build --mode capture`): the only one that reads the switch.
+    vi.stubEnv('MODE', CAPTURE_MODE);
+    const rig = await onTheBench();
+    await openTheGame(rig, '#/game?capture=route-hud');
+    await clickThrough(buttonStarting('Ride '));
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(10);
+    expect(screen()?.querySelector('.oyl-hud__simulated')).toBeNull();
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    for (let index = 0; index < 10; index += 1) await settle();
+
+    expect(rig.written).toEqual([]);
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+    expect(await rig.sessions()).toEqual([]);
+    expect(rig.savedIds).toEqual([]);
+    expect(rig.room.tickets).toEqual([]);
+    expect(rig.room.sockets).toEqual([]);
+    mounted?.unmount();
+    mounted = undefined;
+
+    // And in no room, where the press of Ride is what records a game ride (#2381).
+    await openTheGame(rig, '#/game?capture=route-hud', false);
+    await clickThrough(buttonStarting('Ride '));
+    await rideFor(rig, 30);
+    expect(lastOdometer() ?? 0).toBeGreaterThan(10);
     expect(rig.controller.getSnapshot().phase).toBe('idle');
     expect(await rig.sessions()).toEqual([]);
     expect(rig.savedIds).toEqual([]);
