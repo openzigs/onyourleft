@@ -125,7 +125,9 @@ import {
   realisticStructureGeometry,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
+  breathesTheAir,
   fadesRiders,
+  isConstructedMaterial,
   realisticRemoteSplit,
   STYLISED_RIDER_SLOTS,
   gpuFinished,
@@ -2910,6 +2912,75 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       ['bot', 4, true],
     ]);
     expect(paced.stylised).toEqual([]);
+  });
+
+  describe('a realistic lap race draws none of its bots unlit — #3176', () => {
+    const racer = (z: number): RiderMarker => ({ ...riderAt({ z }, {}, 0, 'bot'), racer: true });
+    /** The rider and five racing bots just ahead, as the demo's lap race starts. */
+    const raced = [riderAt(), ...[3, 5, 7, 9, 11].map(racer)];
+    const meshesOf = (belt: RiderBelt) => Object.values(belt.meshes);
+    const typeOf = (mesh: { readonly material: unknown }): string =>
+      (mesh.material as { readonly type: string }).type;
+
+    it('wears the realistic world’s environment-lit material on every rider the stylised belt draws there', () => {
+      const split = realisticRemoteSplit(raced);
+      // Not vacuous: five bots near the rider is more than the realistic bodies.
+      expect(split.stylised).toHaveLength(5 - REALISTIC_REMOTE_RIDERS);
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      belt.place(split.stylised);
+      expect(belt.meshes.bodies.count).toBe(split.stylised.length);
+      for (const mesh of meshesOf(belt)) {
+        const material = mesh.material as unknown as Parameters<typeof isConstructedMaterial>[0];
+        // A Lambert material is lit by the lamps alone, and the realistic world's
+        // ambient lamp is off: every face turned from the sun drew black.
+        expect(material.type).toBe('MeshStandardMaterial');
+        expect(isConstructedMaterial(material)).toBe(true);
+        expect(breathesTheAir(material)).toBe(true);
+        expect(fadesRiders(material)).toBe(true);
+      }
+      belt.dispose();
+    });
+
+    it('keeps the kit, the steer, the fade and the air in that material’s shader', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      const shader = {
+        vertexShader:
+          '#include <common>\n#include <fog_pars_vertex>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_vertex>\n}',
+        fragmentShader:
+          '#include <common>\n#include <fog_pars_fragment>\nvoid main() {\n#include <clipping_planes_fragment>\n#include <fog_fragment>\n}',
+        uniforms: {},
+      };
+      (belt.material as unknown as { onBeforeCompile: (s: typeof shader) => void }).onBeforeCompile(
+        shader,
+      );
+      // #623's kit per rider, which the pacer's orange is.
+      expect(shader.vertexShader).toContain('attribute vec3 oylKitJersey;');
+      // #2494's steer and #2596's fade.
+      expect(shader.vertexShader).toContain('oylTurned(objectNormal');
+      expect(shader.fragmentShader).toContain('vOylRiderFade');
+      // #622's air, as every realistic material that fogs breathes it.
+      expect(shader.fragmentShader).toContain('oylFogTable');
+      belt.dispose();
+    });
+
+    it('goes back to the stylised pair in the stylised world, and keeps the flat rung flat in both', () => {
+      const belt = new RiderBelt();
+      belt.setWorld('realistic');
+      belt.setWorld('stylised');
+      for (const mesh of meshesOf(belt)) expect(typeOf(mesh)).toBe('MeshLambertMaterial');
+      for (const world of ['stylised', 'realistic'] as const) {
+        belt.setWorld(world);
+        belt.setShading('flat');
+        for (const mesh of meshesOf(belt)) expect(typeOf(mesh)).toBe('MeshBasicMaterial');
+        belt.setShading('lit');
+      }
+      // The rung's shading is held across a change of world, and the world across a rung's.
+      belt.setWorld('realistic');
+      expect(typeOf(belt.meshes.limbs)).toBe('MeshStandardMaterial');
+      belt.dispose();
+    });
   });
 
   it('carries a colour on every vertex, which is what keeps it one material', () => {

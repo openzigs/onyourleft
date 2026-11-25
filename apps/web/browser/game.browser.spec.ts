@@ -75,6 +75,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_GANTRY_TRIANGLES,
+  REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_SCENERY_CYCLIST_TRIANGLES,
   REALISTIC_WOODED_DRAW_CALLS,
@@ -3736,6 +3737,23 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
         `realistic frame (${String(room.without)} without); every one drawn would add ` +
         `${String(room.withoutTheRule - room.without)}, against ${String(REALISTIC_REMOTE_TRIANGLES)}`,
     );
+  });
+
+  test('draws none of a lap race’s five bots near the rider unlit — #3176', async ({
+    harnessRun,
+  }) => {
+    const { lapRaceLight: light } = await realistic(harnessRun);
+    console.log(
+      `#3176: ${String(light.racers)} racing bots, ${String(light.stylisedMeshes)} meshes past the ` +
+        `realistic bodies; meshes on a Lambert material ${String(light.unlitWith)} with the race, ` +
+        `${String(light.unlitWithout)} without`,
+    );
+    expect(light.measured).toBe(true);
+    // Not vacuous: more bots than wear the realistic body, so the stylised belt draws the rest.
+    expect(light.racers).toBeGreaterThan(REALISTIC_REMOTE_RIDERS);
+    expect(light.stylisedMeshes).toBeGreaterThan(0);
+    // The realistic world has no ambient lamp, so a Lambert rider drew black where the sun is not.
+    expect(light.unlitWith).toBe(light.unlitWithout);
   });
 
   /**
