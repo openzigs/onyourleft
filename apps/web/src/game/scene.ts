@@ -2204,6 +2204,110 @@ export function cameraPose(
   eyeLateralMetres: number = lateralMetres,
   path?: DrawnLine,
 ): CameraPose {
+  const pose = roadPose(corridor, atDistance, lateralMetres, eyeLateralMetres, path);
+  // #3122: through a one-point U-turn the camera pivots on the rider instead.
+  const share = path === undefined ? 0 : uTurnPivotShare(path, atDistance);
+  if (!(share > 0) || path === undefined) return pose;
+  const rider = chaseRider(corridor, atDistance, lateralMetres, path);
+  return pivotedOnRider(pose, rider, share);
+}
+
+/**
+ * How much of the way the chase camera is pivoted on the drawn rider at
+ * `atDistance`, nought to one — #3122: one through a recorded one-point
+ * U-turn (`drawn-line.ts` §`uTurns`), eased in over
+ * {@link U_TURN_CAMERA_METRES}' `easedIn` before the road the camera looks at
+ * reaches the U-turn, and handed back over its `handedBack` once the road
+ * behind the rider is straight again. Nought on a line with none.
+ *
+ * The U-turn is found where `drawn-line.ts` §`drawnLineAt` draws it, on the
+ * route position the odometer wraps to, so on a loop it pivots on every lap
+ * and not only the first.
+ */
+function uTurnPivotShare(path: DrawnLine, atDistance: number): number {
+  const { profile } = path;
+  const resolution: number = profile.resolution;
+  const { easedIn, handedBack } = U_TURN_CAMERA_METRES;
+  let most = 0;
+  for (const sample of path.uTurns) {
+    const turning = sample * resolution;
+    const from = profile.loop ? distanceOnRoute(profile, atDistance) : atDistance;
+    // The U-turn is ridden from one sample before the turning point to one
+    // after it (`drawn-line.ts` §`uTurned`).
+    const begins = turning - resolution - CAMERA_TARGET_AHEAD_METRES;
+    const ends = turning + resolution + CAMERA_TARGET_AHEAD_METRES;
+    const into = smoothstep01((from - (begins - easedIn)) / easedIn);
+    const out = 1 - smoothstep01((from - ends) / handedBack);
+    most = Math.max(most, Math.min(into, out));
+  }
+  return most;
+}
+
+/**
+ * Over how much road the chase camera is brought onto the rider before a
+ * one-point U-turn, and handed back after it, in metres: **10** and **15** —
+ * #3122. @see uTurnPivotShare
+ *
+ * ⚠️ **What the pivot is for.** Through a recorded U-turn the frame's own pose
+ * (`roadPose`) is the wrong camera twice over. Its eye stands on the drawn
+ * path {@link CAMERA_BEHIND_METRES} back (#2422), which round a turn a few
+ * metres across is on the other leg, BESIDE the rider; and it looks at the
+ * nearest road ten metres up the route (#1994), which comes back past the
+ * rider, so it looks across the road. On the synthetic 174° coast turnaround
+ * (`turnaround-coast.test.ts`) the eye was 1.2 m behind the rider and 1.9 m
+ * to the side, and stepped 0.3 m in one frame at 30 km/h: the owner's "camera
+ * beside the rider, low, looking sideways". Pivoted on the rider, along the
+ * rider's own heading, `camera.ts` §`turnedPose` swings the eye round behind
+ * them at the damped rate, {@link CAMERA_BEHIND_METRES} back, and the rider's
+ * heading turns no faster than that rate (#3045). 10 m is about a second at
+ * 30 km/h; 15 m is #3066's hand-back after a pressed U-turn. Not measured
+ * optima.
+ */
+const U_TURN_CAMERA_METRES = { easedIn: 10, handedBack: 15 } as const;
+
+/** A smoothstep of `value`, clamped to nought and one. */
+function smoothstep01(value: number): number {
+  const t = Math.min(1, Math.max(0, value));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * `pose` moved `share` of the way to the camera that pivots on the drawn
+ * `rider` and looking the way they ride — #3122. How far it looks is the
+ * frame's own, which `GameView` damps (`camera.ts` §`dampedLookAhead`), at the
+ * rider's own height: along the rider's heading at the tip of a U-turn there
+ * is no road to read one off. @see U_TURN_CAMERA_METRES
+ */
+function pivotedOnRider(
+  pose: CameraPose,
+  rider: ReturnType<typeof chaseRider>,
+  share: number,
+): CameraPose {
+  const keep = 1 - share;
+  const headingX = pose.headingX * keep + rider.tangent.headingX * share;
+  const headingZ = pose.headingZ * keep + rider.tangent.headingZ * share;
+  const length = Math.hypot(headingX, headingZ);
+  const look =
+    length > 1e-6 ? { headingX: headingX / length, headingZ: headingZ / length } : rider.tangent;
+  return {
+    x: pose.x * keep + rider.x * share,
+    y: pose.y,
+    z: pose.z * keep + rider.z * share,
+    ...look,
+    targetAheadMetres: pose.targetAheadMetres,
+    eyeRoadY: pose.eyeRoadY * keep + rider.y * share,
+    targetRoadY: pose.targetRoadY * keep + rider.y * share,
+  };
+}
+
+/** {@link cameraPose} as it is everywhere but round a one-point U-turn. */
+function roadPose(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+  eyeLateralMetres: number,
+  path?: DrawnLine,
+): CameraPose {
   const rider = chaseRider(corridor, atDistance, lateralMetres, path);
   const { tangent } = rider;
   // #2396: the eye stands behind the rider, or across the road from there

@@ -455,7 +455,12 @@ import {
   type LandClass,
   type LandClassMask,
 } from './land-class';
-import { ROAD_CLEARANCE_METRES, TERRAIN_COLUMN_OFFSETS, terrainHeightAt } from './landform';
+import {
+  ROAD_CLEARANCE_METRES,
+  TERRAIN_COLUMN_OFFSETS,
+  ridesARoadTwice,
+  terrainHeightAt,
+} from './landform';
 import { inWater, onOpenWater, waterways } from './waterways';
 import {
   CHURCH,
@@ -509,7 +514,13 @@ import {
 } from './settlements';
 import { CITY_PAVEMENT_WIDTH_METRES, cityPavementOn, KERB_LATERAL_METRES } from './streets';
 import { slotHash, uniformFrom } from './seeded';
-import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import {
+  drawnRoadFrame,
+  RETRACE_OVERLAP_METRES,
+  RETRACE_RATIO,
+  ROAD_WIDTH_METRES,
+  type CorridorOrigin,
+} from './terrain';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -5223,6 +5234,62 @@ const GROUND_REACHES = [32, 64, 128, 256, 512, 1_024, 2_560] as const;
 /** Scratch: the road segments near the footprint being planned. */
 const nearSegments: number[] = [];
 
+/** Scratch: {@link groundOfAnotherPass}'s segments, and where it found one. */
+const otherSegments: number[] = [];
+const otherPass: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+const otherFound: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+
+/**
+ * Where `(x, z)` is beside another pass of the road than `own`'s, into
+ * `into` — #3140: the nearest point of `segments` more than
+ * `terrain.ts` §`RETRACE_RATIO` times its reach along the route from `own`,
+ * and no more than `terrain.ts` §`RETRACE_OVERLAP_METRES` further off than
+ * `own`. `false`, and `into` untouched, where there is none.
+ *
+ * ⚠️ **Why a footprint reads it.** A recorded way out and way back along one
+ * road carry their own elevations, and each frame draws the ground beside the
+ * road at the height of the pass the rider is on. Planned on its nearest pass
+ * alone, a house beside the way back on `turnaround-coast.test.ts`' coast
+ * turnaround (+2.7 % out, −0.5 % back) stood 5.3 m over the ground drawn
+ * under it on the way out — the owner's floating house of 2026-11-24.
+ * Planned on both — its foot under the lower, its floor over the higher — it
+ * stands on either; and where the two differ by more than
+ * {@link FOOTPRINT_MAX_GROUND_RANGE_METRES} it is `too-steep`, as on any
+ * ground that varies that much under it, rather than drawn on a plinth.
+ *
+ * ⚠️ **Not by drawing the later pass at the earlier's heights.** #3140's
+ * first commit did, and #3127's review found the rider then saw a road
+ * drawn level, or falling, where they climbed (12 m off the recorded heights
+ * on an out-and-back 6 m over, 48 m on a stacked switchback). Held to within
+ * 1 % of the felt grade, the two passes were still metres apart, and the
+ * coast fixture's sea, levelled from the drawn way back, lay 7 m under the
+ * road at the turn, a bank steeper than 2 in 1 (#3103's step test, 0.21 to
+ * 0.29 m over). So each pass keeps its own heights.
+ */
+function groundOfAnotherPass(
+  road: DrawnRoadPoints,
+  segments: readonly number[],
+  x: number,
+  z: number,
+  own: BesideTheRoad,
+  into: BesideTheRoad,
+): boolean {
+  const reach = own.distance + RETRACE_OVERLAP_METRES;
+  otherSegments.length = 0;
+  for (const segment of segments) {
+    const along = Math.min(road.total, (segment + 0.5) * road.step);
+    if (Math.abs(along - own.along) > RETRACE_RATIO * reach + road.step) {
+      otherSegments.push(segment);
+    }
+  }
+  if (!nearestOnRoadSegments(road, otherSegments, x, z, otherFound)) return false;
+  if (otherFound.distance > reach) return false;
+  into.along = otherFound.along;
+  into.lateral = otherFound.lateral;
+  into.distance = otherFound.distance;
+  return true;
+}
+
 /** Scratch: the road segments near a front porch being placed — #1589. */
 const porchSegments: number[] = [];
 
@@ -6694,16 +6761,25 @@ function measureFootprint(
   if (!found) return 'too-steep';
   // #1633: the stretch of route the centroid is beside, before `beside` is reused.
   const urbanClass = urban?.classAt(beside.along) ?? 'unknown';
-  const groundAt = (x: number, z: number): number => {
+  // #3140: and, on a route that rides a road twice, the ground of the other
+  // pass beside the same point, which is the ground drawn there while the
+  // rider is on that pass (@see groundOfAnotherPass).
+  const twice = ridesARoadTwice(profile);
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  const groundAt = (x: number, z: number): void => {
     nearestOnRoadSegments(road, nearSegments, x, z, beside);
-    return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+    const own = terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+    lowest = Math.min(lowest, own);
+    highest = Math.max(highest, own);
+    if (!twice || !groundOfAnotherPass(road, nearSegments, x, z, beside, otherPass)) return;
+    const theirs = terrainHeightAt(profile, origin, seed, otherPass.along, otherPass.lateral, land);
+    lowest = Math.min(lowest, theirs);
+    highest = Math.max(highest, theirs);
   };
-  let lowest = groundAt(centroid.x, centroid.z);
-  let highest = lowest;
+  groundAt(centroid.x, centroid.z);
   for (let i = 0; i + 1 < drawn.length; i += 2) {
-    const height = groundAt(drawn[i] as number, drawn[i + 1] as number);
-    lowest = Math.min(lowest, height);
-    highest = Math.max(highest, height);
+    groundAt(drawn[i] as number, drawn[i + 1] as number);
   }
   if (highest - lowest > FOOTPRINT_MAX_GROUND_RANGE_METRES) return 'too-steep';
   // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are

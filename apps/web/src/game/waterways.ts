@@ -1946,7 +1946,13 @@ export function waterSurface(
       const past = surfacePastShore(lake);
       for (let row = 0; row < centre.length; row += 1) {
         const point = centre[row] as CorridorPoint;
-        const shoreAt = lakeShore(lake, profile, point.distance);
+        // #3103: and none beside a pass whose road is not drawn (`terrain.ts`
+        // §`retracedRows`): the road there is the nearer pass's, and so is
+        // the water. A recorded way back need not be at the way out's height,
+        // and its lake, level under ITS lowest road, stood 0.8 m over the
+        // drawn road of a way out climbing to the turn.
+        const shoreAt =
+          corridor.retraced[row] === 1 ? undefined : lakeShore(lake, profile, point.distance);
         if (shoreAt === undefined) {
           strip(base);
           base = vertexCount;
