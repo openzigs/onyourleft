@@ -15,6 +15,7 @@ import {
   CALORIES_KEY,
   CLOCK_KEY,
   CRASHED_TEXT,
+  LANDED_TEXT,
   DELIVERY_HOUSES_KEY,
   DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
@@ -1592,6 +1593,25 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(detail(true)).toBe(CRASHED_TEXT);
     expect(CRASHED_TEXT).toBe('Crashed');
     expect(detail(false)).toBe('Day 3 of 7');
+    expect(detail(undefined)).toBe('Day 3 of 7');
+  });
+
+  it('says under the score what the latest parcel did and the points it earned, “Crashed” winning, and the day again after — #2577', () => {
+    const detail = (landed: DeliveryHud['landed'], crashed?: boolean): string | undefined =>
+      hudReadings({ ...base, delivery: { ...delivery, landed, crashed } }).find(
+        (each) => each.key === DELIVERY_SCORE_KEY,
+      )?.detail;
+    expect(LANDED_TEXT).toEqual({
+      delivered: 'Delivered',
+      missed: 'Missed',
+      'no-delivery': 'Wrong house',
+    });
+    expect(detail({ kind: 'delivered', points: 1 })).toBe('Delivered +1');
+    expect(detail({ kind: 'missed', points: 0 })).toBe('Missed');
+    // A minus sign, not a hyphen.
+    expect(detail({ kind: 'no-delivery', points: -1 })).toBe('Wrong house \u22121');
+    expect(detail({ kind: 'no-delivery', points: 0 })).toBe('Wrong house');
+    expect(detail({ kind: 'delivered', points: 1 }, true)).toBe(CRASHED_TEXT);
     expect(detail(undefined)).toBe('Day 3 of 7');
   });
 

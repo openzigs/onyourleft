@@ -673,6 +673,60 @@ describe('Delivery’s belt — #1814', () => {
     belt.dispose();
   });
 
+  it('draws a parcel’s landing as a flat glowing ring for a hit and a flat cross for a miss, in the markers’ one mesh — #2577', () => {
+    const belt = new DeliveryBelt('stylised');
+    const geometry = belt.meshOf('markers').geometry;
+    const position = geometry.getAttribute('position');
+    const glow = geometry.getAttribute('oylGlow');
+    const kinds = geometry.getAttribute('oylPiece');
+    const colour = geometry.getAttribute('color');
+    /** Kind `kind`'s vertices: how far each lies from the middle, its height, glow and green share. */
+    const verticesOf = (kind: number) => {
+      const found: { from: number; arm: number; y: number; glows: boolean; green: number }[] = [];
+      for (let at = 0; at < position.count; at += 1) {
+        if (kinds.getX(at) !== kind) continue;
+        const degrees = (Math.atan2(position.getZ(at), position.getX(at)) * 180) / Math.PI;
+        found.push({
+          from: Math.hypot(position.getX(at), position.getZ(at)),
+          // How far it is turned off the nearest diagonal, degrees.
+          arm: Math.abs((((degrees % 90) + 90) % 90) - 45),
+          y: position.getY(at),
+          glows: glow.getX(at) === 1,
+          green: colour.getY(at) - Math.max(colour.getX(at), colour.getZ(at)),
+        });
+      }
+      return found;
+    };
+    const hit = verticesOf(3);
+    const miss = verticesOf(4);
+    expect(hit.length).toBeGreaterThan(0);
+    expect(miss.length).toBeGreaterThan(0);
+    // Both lie flat on the ground, glowing, under a doorstep marker's ring height.
+    for (const each of [...hit, ...miss]) {
+      expect(each.glows).toBe(true);
+      expect(each.y).toBeGreaterThan(0);
+      expect(each.y).toBeLessThan(0.1);
+    }
+    // A ring: every vertex of a hit's mark is off its middle, by its band, all the way round.
+    expect(Math.min(...hit.map((each) => each.from))).toBeGreaterThan(0.3);
+    expect(Math.max(...hit.map((each) => each.arm))).toBeGreaterThan(30);
+    // A cross: every vertex of a miss's mark lies on one of its two diagonal bars.
+    expect(Math.max(...miss.map((each) => each.arm))).toBeLessThan(10);
+    // The hit's green, the miss's not: and shape apart as well, above.
+    expect(hit.every((each) => each.green > 0)).toBe(true);
+    expect(miss.every((each) => each.green < 0)).toBe(true);
+    belt.update({
+      parcels: [],
+      markers: [
+        { x: 0, y: 0, z: 5, yaw: 0, kind: 'delivered' },
+        { x: 0, y: 0, z: 10, yaw: 0, kind: 'missed' },
+      ],
+      obstacles: [],
+    });
+    expect(belt.drawn('markers').map((each) => each.kind)).toEqual(['delivered', 'missed']);
+    belt.dispose();
+  });
+
   it('draws a far house marker larger by its distance from the eye, its foot still on the step, and a near one at its true size — #2453', () => {
     // The numbers are written here, not read from three-renderer.ts, so changing them there fails this.
     expect(MARKER_TRUE_SIZE_WITHIN_METRES).toBe(20);
@@ -1255,7 +1309,7 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     const geometry = belt.meshOf('markers').geometry;
     const position = geometry.getAttribute('position');
     const kinds = geometry.getAttribute('oylPiece');
-    const perKind = [0, 0, 0];
+    const perKind = [0, 0, 0, 0, 0];
     for (let at = 0; at < position.count; at += 1) {
       const kind = kinds.getX(at);
       perKind[kind] = (perKind[kind] ?? 0) + 1;
@@ -1265,8 +1319,10 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     // ring (32). PR #2518's trim, as the owner's ruling of 2026-11-13 left it,
     // leaves out only the mailbox's post's top, inside its box, and draws each
     // half-round end of its roof in 3 triangles, not three's fan of 4 (−4).
-    expect(perKind.map((each) => each / 3)).toEqual([44, 80, 56]);
-    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(180);
+    // #2577: and a landing's two marks, a hit's flat ring (24) and a miss's flat cross (4):
+    // 28 more an instance, 560 on the nightly frame of twenty markers.
+    expect(perKind.map((each) => each / 3)).toEqual([44, 80, 56, 24, 4]);
+    expect(DELIVERY_MARKER_TRIANGLES).toBeLessThanOrEqual(208);
     belt.dispose();
   });
 

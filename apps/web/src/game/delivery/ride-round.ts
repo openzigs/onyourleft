@@ -100,6 +100,14 @@
  * them. The week's score is `round.ts` §`endRound`'s, deliveries only, and a
  * crash never reaches it.
  *
+ * ## Where a parcel came down, and what it earned (#2577)
+ *
+ * Each step's landings are kept for {@link LANDING_SHOWN_SECONDS} of the throw
+ * clock as {@link DeliveryRide.landed}, each with the points it moved the
+ * score by, so the frame can mark the house hit or the spot missed, the HUD
+ * can say it under the score, and `GameView` can play its sound. A drawing
+ * and a word: nothing the round decides reads them.
+ *
  * ## When the round ends
  *
  * Once no house on the round is expecting a parcel the round is over, and
@@ -179,6 +187,7 @@ import {
   levelObstacleMix,
   placeObstacles,
   roundScore,
+  scoreAfter,
   startObstacles,
   stepObstacles,
   type Obstacle,
@@ -213,11 +222,62 @@ import {
   NO_PARCELS,
   stepThrows,
   throwSideFor,
+  type Landing,
   type ThrowSide,
   type ThrowState,
   type ThrowTarget,
   type ThrowWindow,
 } from './throw';
+
+/**
+ * How long a parcel's landing is shown, seconds — #2577: **1.5**. The mark at
+ * the house (or where the parcel came down) and the Score field's word under
+ * the score stand this long after the landing, on the ride's own ticks. This
+ * project's own number, for the owner's approval in #2577's pull request.
+ */
+export const LANDING_SHOWN_SECONDS = 1.5;
+
+/** {@link LANDING_SHOWN_SECONDS} in the game's ticks: **30**. */
+export const LANDING_SHOWN_TICKS = Math.round(LANDING_SHOWN_SECONDS / DELIVERY_TICK_SECONDS);
+
+/**
+ * A parcel that came down, as the rider is shown it — #2577: the owner, on
+ * the tablet, *"I cant tell when I throw a package if it actually gets to the
+ * house. Is there a reward for hitting it."* A hit is a delivery; a miss is a
+ * parcel no house caught; a no-delivery is one a house that must not get a
+ * parcel caught (#2365). Held in memory for {@link LANDING_SHOWN_SECONDS}, for
+ * the drawing, the HUD and the sound, and never stored (DL11).
+ */
+export interface ParcelLanded {
+  readonly kind: 'delivered' | 'missed' | 'no-delivery';
+  /** The throw clock's tick it came down on (`throw.ts` §`ThrowState.tick`). */
+  readonly tick: number;
+  /**
+   * What it did to the round's score, as the score moved: `+1` for a
+   * delivery, the no-delivery's cost (nought with the assist's no fail on, or
+   * with the score already at nought), nought for a miss and for anything
+   * after the round's end.
+   */
+  readonly points: number;
+  /** Where it came down, metres along the route and from the road's centre, and to which side. */
+  readonly along: number;
+  readonly across: number;
+  readonly side: ThrowSide;
+  /**
+   * The house that caught it: its round position for a delivery, its place in
+   * {@link DeliveryRide.noDeliveryTargets} for a no-delivery. Absent for a miss.
+   */
+  readonly house?: number;
+}
+
+/**
+ * The sound for the parcels that came down on one frame (#2577): the hit's if
+ * any of them was a delivery, else the miss's, and none for no landing.
+ */
+export function landingCue(landed: readonly ParcelLanded[]): 'delivered' | 'missed' | undefined {
+  if (landed.length === 0) return undefined;
+  return landed.some((each) => each.kind === 'delivered') ? 'delivered' : 'missed';
+}
 
 /**
  * How long a crash stops the drawn rider, in seconds — ADR 0094 D-3.1: the
@@ -273,6 +333,12 @@ export interface DeliveryRide {
   readonly changes: readonly ScoreChange[];
   /** The round's score with every crash in it, never below nought: `roundScore` of {@link changes}. */
   readonly score: number;
+  /**
+   * The parcels that came down in the last {@link LANDING_SHOWN_SECONDS} of
+   * the throw clock, oldest first (#2577): what the frame marks at the house
+   * and the Score field says. A few at most: the throw's cool-down is 0.5 s.
+   */
+  readonly landed: readonly ParcelLanded[];
   /** The assist's wider windows (#1813), for the throw and for the misses. */
   readonly widerWindows: boolean;
   /**
@@ -448,6 +514,7 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     obstacleState: startObstacles(obstacles),
     changes: [],
     score: 0,
+    landed: [],
     widerWindows: assist.widerWindows,
     // #2931: a level's own window; a rider's own route keeps the throw's.
     throwWindow: input.level?.throwWindow ?? DEFAULT_THROW_WINDOW,
@@ -506,6 +573,8 @@ export interface DeliveryRideStepped {
   readonly thrown: boolean;
   /** Parcels a house that must not get one caught on these steps (#2365); nought once the round is over. */
   readonly noDeliveries: number;
+  /** Every parcel that came down on these steps, in the order it did (#2577), after the round's end too. */
+  readonly landed: readonly ParcelLanded[];
 }
 
 /** Every house whose window has closed behind the rider with no parcel still able to reach it, missed. */
@@ -541,7 +610,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   if (!Number.isInteger(ticks) || ticks < 0) {
     throw new RangeError('a Delivery ride step runs a whole number of ticks, 0 or more');
   }
-  if (ticks === 0) return { ride, crashes: 0, thrown: false, noDeliveries: 0 };
+  if (ticks === 0) return { ride, crashes: 0, thrown: false, noDeliveries: 0, landed: [] };
   const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
   const from = ride.rideAlong;
   // Never backwards: a room's correction does not run on a Delivery ride
@@ -550,6 +619,9 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   let { round, throws, obstacleState, outcome, steer, crashOffset, crashOffsetBefore, stopTicks } =
     ride;
   const changes = [...ride.changes];
+  // #2577: the score as it moves change by change, so each landing says what it earned.
+  let score = ride.score;
+  const landedNow: ParcelLanded[] = [];
   let crashes = 0;
   let noDeliveries = 0;
   let thrown = false;
@@ -613,18 +685,29 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     // #2362: a parked car hit is drawn as a crash, the rider beside it, never through it.
     steer = clearOfParkedCars(ride.obstacles, obstacleState, { along: at, ...steer }) ?? steer;
     before = at;
-    if (outcome !== undefined) continue;
     for (const landing of thrownNow.landings) {
-      if (landing.kind === 'delivery') changes.push('delivery');
-      // #2365: a parcel at a house that must not get one costs, and never pays.
-      if (landing.kind === 'no-delivery') {
-        noDeliveries += 1;
-        if (ride.noDeliveryCosts) changes.push({ scoreDelta: NO_DELIVERY_SCORE_DELTA });
+      const scoreBefore = score;
+      if (outcome === undefined) {
+        let change: ScoreChange | undefined;
+        if (landing.kind === 'delivery') change = 'delivery';
+        // #2365: a parcel at a house that must not get one costs, and never pays.
+        if (landing.kind === 'no-delivery') {
+          noDeliveries += 1;
+          if (ride.noDeliveryCosts) change = { scoreDelta: NO_DELIVERY_SCORE_DELTA };
+        }
+        if (change !== undefined) {
+          changes.push(change);
+          score = scoreAfter(score, change);
+        }
       }
+      // #2577: every landing is shown, the round over or not; only what it earned is the round's.
+      landedNow.push(landedOf(landing, score - scoreBefore));
     }
+    if (outcome !== undefined) continue;
     // D-3.3: a contact while the rider is down costs nothing. A crash counted
     // starts a stop from the offset as it stands (D-4.4).
     if (!down && obstaclesNow.crashes.length > 0) {
+      for (const crash of obstaclesNow.crashes) score = scoreAfter(score, crash);
       changes.push(...obstaclesNow.crashes);
       crashes += obstaclesNow.crashes.length;
       stopTicks = CRASH_STOP_TICKS;
@@ -640,6 +723,10 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       obstacleState,
       changes,
       score: roundScore(changes),
+      // #2577: what came down in the last LANDING_SHOWN_TICKS of the throw clock.
+      landed: [...ride.landed, ...landedNow].filter(
+        (landed) => throws.tick - landed.tick < LANDING_SHOWN_TICKS,
+      ),
       steer,
       along: to + crashOffset,
       rideAlong: to,
@@ -651,7 +738,26 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     crashes,
     thrown,
     noDeliveries,
+    landed: landedNow,
   };
+}
+
+/** A throw's landing as the rider is shown it, with what it earned (#2577). */
+function landedOf(landing: Landing, points: number): ParcelLanded {
+  const at = {
+    tick: landing.tick,
+    along: landing.along,
+    across: landing.across,
+    side: landing.side,
+  };
+  switch (landing.kind) {
+    case 'delivery':
+      return { kind: 'delivered', points, house: landing.position, ...at };
+    case 'no-delivery':
+      return { kind: 'no-delivery', points, house: landing.house, ...at };
+    case 'wasted':
+      return { kind: 'missed', points: 0, ...at };
+  }
 }
 
 /**

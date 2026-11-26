@@ -1302,6 +1302,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         before, so the wheels never rolled. Its indicator is
                         lit steadily under reduced motion
                         (`DeliveryDrawInput.steadyIndicators`)
+                        Since #2577 a parcel's landing is SHOWN for 1.5 s
+                        (`ride-round.ts` §`DeliveryRide.landed`, with the
+                        points it moved the score by): a `delivered` ring on
+                        the house, a `missed` cross where it fell (two marker
+                        kinds, 28 triangles an instance, no draw call), the
+                        Score field's word under the score, its sentence,
+                        and a `delivered` or `missed` sound
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and

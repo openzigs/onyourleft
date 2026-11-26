@@ -321,6 +321,7 @@ import {
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
+  landingCue,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -385,6 +386,7 @@ import {
   NO_ROUND_LABEL,
   NOTHING_OWED,
   oweCrash,
+  oweLanded,
   oweObstacleAhead,
   oweNoRound,
   oweSkipHouse,
@@ -4699,6 +4701,13 @@ function GameScreen({
         }
         let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
         for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        // #2577: each parcel that came down, said with what it earned, and
+        // heard: one sound a frame, a hit's over a miss's. Its sentence is owed
+        // on the same step and the Score field shows it, so the sound is never
+        // the only carrier (`audio-cues.ts`).
+        for (const landed of stepped.landed) owed = oweLanded(owed, landed);
+        const landingSound = landingCue(stepped.landed);
+        if (landingSound !== undefined) cuesRef.current?.cue(landingSound);
         // #2454: and drawn — the rider goes down where they are and gets back
         // up. A drawing only: nothing here is read by the simulation above.
         if (stepped.crashes > 0) {
@@ -5106,6 +5115,8 @@ function GameScreen({
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                   // A car's indicator is lit steadily, not flashing, under reduced motion.
                   steadyIndicators: reducedMotionRef.current,
+                  // #2577: where each parcel came down lately, a hit or a miss.
+                  landed: round.landed,
                 }),
               };
         // #1902, #1906: a lap race's pick-ups and puddles, on the frame's own corridor.
@@ -5969,6 +5980,8 @@ function GameScreen({
                 score: deliveryRef.current.score,
                 // #2454: "Crashed" on the HUD while a crash is drawn.
                 crashed: crashShownRef.current !== undefined,
+                // #2577: what the latest parcel did, while it is shown.
+                landed: deliveryRef.current.landed.at(-1),
                 // #2453: where the next house is, so the rider knows where to throw.
                 next: nextHouse(deliveryRef.current),
               },
