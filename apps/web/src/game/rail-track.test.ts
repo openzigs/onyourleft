@@ -12,8 +12,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { elevationAt, metres } from '@onyourleft/domain';
-import type { RailFeature, StreetGrade } from '@onyourleft/map-features';
+import { elevationAt, metres, seconds } from '@onyourleft/domain';
+import type { RailFeature, StreetFeature, StreetGrade } from '@onyourleft/map-features';
 
 import {
   BALLAST,
@@ -68,6 +68,7 @@ import {
   RAIL_TRACK_PIECES_PER_FRAME,
   REALISTIC_RAIL_TRACK_TRIANGLES,
 } from './realistic-budget';
+import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES } from './people';
 import { nearestOnDrawnRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -944,5 +945,96 @@ describe('the scenery keeps off the track — #3253', () => {
     // The control: with no railway, the same frame stands things there.
     expect(onIt(frameAt(from + 100, corridorOf([]))).length).toBeGreaterThan(0);
     expect(onIt(withTrack)).toEqual([]);
+  });
+});
+
+/** How far `(x, z)` is inside the edge of the nearest of `roads`: positive on one. */
+function intoRoads(roads: readonly SideRoad[], x: number, z: number): number {
+  let deepest = Number.NEGATIVE_INFINITY;
+  for (const road of roads) {
+    const s = road.segments;
+    for (let segment = 0; segment * 4 + 3 < s.length; segment += 1) {
+      const ax = s[segment * 4] as number;
+      const az = s[segment * 4 + 1] as number;
+      const dx = (s[segment * 4 + 2] as number) - ax;
+      const dz = (s[segment * 4 + 3] as number) - az;
+      const span = dx * dx + dz * dz;
+      const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+      const off = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+      deepest = Math.max(deepest, (road.halfWidths[segment] as number) - off);
+    }
+  }
+  return deepest;
+}
+
+describe('the people keep off the track with a street in view — #1619, #3253', () => {
+  function setup() {
+    const from = dryStretch(400, 90, 4_200);
+    const sidewalk = ringBeside(
+      ROLLING,
+      ORIGIN,
+      Array.from({ length: 101 }, (_, step): [number, number] => [from - 100 + step * 4, 6]),
+    );
+    const street: StreetFeature = {
+      kind: 'minor_road',
+      kindDetail: 'residential',
+      grade: 'ground',
+      line: ringBeside(ROLLING, ORIGIN, [
+        [from - 150, 90],
+        [from + 250, 90],
+      ]),
+    };
+    const crossing = rail([
+      [from + 98, -60],
+      [from + 102, 60],
+    ]);
+    const corridor = (streets: readonly StreetFeature[]): WorldCorridor => ({
+      ...corridorOf([crossing]),
+      paths: [{ kind: 'path', kindDetail: 'sidewalk', line: sidewalk }],
+      streets,
+    });
+    const onTrack = (streets: readonly StreetFeature[]): { seen: number; on: number } => {
+      const start = atStartLine(ROLLING);
+      let seen = 0;
+      let on = 0;
+      let track: readonly SideRoad[] = [];
+      for (let second = 0; second < 600; second += 4) {
+        const frame = sceneFrame({
+          profile: ROLLING,
+          origin: ORIGIN,
+          state: {
+            ...start,
+            ride: { ...start.ride, distance: metres(from + 100) },
+            elapsed: seconds(second),
+            ridden: seconds(second),
+          },
+          people: PEOPLE_NEAR_MAX,
+          worldCorridor: corridor(streets),
+        });
+        track = trackOf(frame);
+        for (const person of frame.people?.near ?? []) {
+          seen += 1;
+          if (intoRoads(track, person.x, person.z) > -PERSON_HALF_WIDTH_METRES) on += 1;
+        }
+      }
+      expect(track.length).toBeGreaterThan(0);
+      return { seen, on };
+    };
+    return { onTrack, street };
+  }
+
+  // Two cases over the same frames, as #1688 did: together they passed the
+  // 5 s timeout under coverage.
+  it('puts nobody on a line crossing a mapped sidewalk at grade', () => {
+    const result = setup().onTrack([]);
+    expect(result.seen).toBeGreaterThan(0);
+    expect(result.on).toBe(0);
+  });
+
+  it('and nobody on it with a street in view either, the track being in the people’s side roads', () => {
+    const { onTrack, street } = setup();
+    const result = onTrack([street]);
+    expect(result.seen).toBeGreaterThan(0);
+    expect(result.on).toBe(0);
   });
 });

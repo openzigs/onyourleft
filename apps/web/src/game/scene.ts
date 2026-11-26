@@ -1095,7 +1095,13 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
       seed,
       nearby.length === 0
         ? sideRoads
-        : [...crossSideRoads, ...crossings.roads, ...withinPeopleReach(nearby, camera)],
+        : [
+            ...crossSideRoads,
+            ...crossings.roads,
+            // #1619, #3253: the track keeps people off it with a street in view too.
+            ...railway,
+            ...withinPeopleReach(nearby, camera),
+          ],
       ground,
     ),
     // #2722: and the other cyclists on the road, kept clear of the rider.
