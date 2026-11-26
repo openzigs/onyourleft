@@ -108,7 +108,8 @@
     grid-area: offer;
   }
 
-  .oyl-demo__offer-sentence {
+  .oyl-demo__offer-sentence,
+  .oyl-demo__video-lead {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -118,6 +119,11 @@
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
+  }
+
+  /* What is left of the link's text, "demo on YouTube", starts a clause. */
+  .oyl-demo__video-link::first-letter {
+    text-transform: uppercase;
   }
 
   .oyl-game--riding.oyl-demo__stage {

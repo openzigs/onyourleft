@@ -51,8 +51,11 @@ export function DemoSourceOffer() {
           Licence (AGPL-3.0-or-later)
         </a>{' '}
         · <a href={DEMO_NOTICES_PATH}>Third-party notices</a> ·{' '}
-        <a href={DEMO_VIDEO_URL} target="_blank" rel="noreferrer">
-          Watch the two-minute demo on YouTube
+        {/* #3225: in a small frame `demo.css` leaves "Watch the two-minute" to a
+            screen reader, as it does the sentence above, so the link costs the
+            stage no line; the name is whole either way. */}
+        <a className="oyl-demo__video-link" href={DEMO_VIDEO_URL} target="_blank" rel="noreferrer">
+          <span className="oyl-demo__video-lead">Watch the two-minute </span>demo on YouTube
         </a>
       </p>
     </footer>
