@@ -176,6 +176,7 @@
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
 import type { ObstacleSetting } from './assist-preference';
+import { CRASH_LEAN_RADIANS } from './crash-look';
 import type { LevelRound } from './levels/level-file';
 import { LANE_OFFSETS_METRES } from './steer';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
@@ -1151,6 +1152,101 @@ export function clearOfParkedCars(
     };
   });
   return moved;
+}
+
+/**
+ * A rider a crash is drawing down, as an oncoming rider steers round them —
+ * #3077: where they are drawn along the road and across it, and the side
+ * they fell to (`crash-look.ts` §`CrashSide`, `1` the rider's right).
+ */
+export interface HeldRider {
+  readonly along: number;
+  readonly lateral: number;
+  readonly fallenTo: 1 | -1;
+  /** How long the crash has been drawn, seconds, on `GameView`'s crash clock. */
+  readonly seconds: number;
+}
+
+/**
+ * How much room an oncoming rider leaves a rider lying on the road, side to
+ * side, metres — #3077: **0.5**, between the held rider's half width and the
+ * oncoming rider's. This project's own number, a drawing only.
+ */
+export const ONCOMING_PASSING_GAP_METRES = 0.5;
+
+/**
+ * How far along the road an oncoming rider takes to steer out round a held
+ * rider, and back in after them, metres — #3077: **4**, 0.8 s at
+ * {@link ONCOMING_RIDER_METRES_PER_SECOND}, so the swerve is drawn and not a
+ * jump. This project's own number, a drawing only.
+ */
+export const ONCOMING_SWERVE_METRES = 4;
+
+/**
+ * How tall the bicycle that falls is, metres — #3077: **1**, so lying at
+ * `CRASH_LEAN_RADIANS` it covers this times the lean's sine to the side they
+ * fell to. This project's own number, a drawing only.
+ */
+export const ONCOMING_FALLEN_BICYCLE_METRES = 1;
+
+/**
+ * How long an oncoming rider already level with the rider when the crash
+ * starts takes to steer clear, seconds — #3077: **0.25**. The rider it crashed
+ * into is level with them by the very contact, so its swerve is eased in over
+ * this from the crash, not cut to in a frame. This project's own number, a
+ * drawing only.
+ */
+export const ONCOMING_SWERVE_SECONDS = 0.25;
+
+/**
+ * Where `obstacle` is DRAWN across the road `seconds` after it was set going,
+ * metres right of the centre line — #3077, ADR 0094 D-3.3: an oncoming rider
+ * steers round a rider a crash holds (`held`), on the side away from the one
+ * they fell to, which is the road's middle (`crash-look.ts` §`crashSideFor`),
+ * so it is never drawn passing through them. It eases out over
+ * {@link ONCOMING_SWERVE_METRES} before it is level with them, is
+ * {@link ONCOMING_PASSING_GAP_METRES} clear of them while level, and eases
+ * back after; one level with them as the crash starts eases out over
+ * {@link ONCOMING_SWERVE_SECONDS}. Every other obstacle, an oncoming rider already clear of them,
+ * and any obstacle with nobody held, is where {@link obstacleAcross} puts it.
+ *
+ * **A drawing only**, as {@link clearOfParkedCars} is: {@link stepObstacles}
+ * meets the obstacle at {@link obstacleAcross}, and no contact is counted
+ * while the rider is down (`ride-round.ts`, D-3.3) anyway.
+ */
+export function drawnObstacleAcross(
+  obstacle: Obstacle,
+  seconds: number,
+  held: HeldRider | undefined,
+): number {
+  const across = obstacleAcross(obstacle, seconds);
+  if (held === undefined || obstacle.kind !== 'oncoming-rider') return across;
+  const { halfLength, halfWidth } = OBSTACLE_KINDS[obstacle.kind];
+  const along = obstacleAlong(obstacle, seconds);
+  // How far apart along the road the two are: nought while they are level.
+  const apart = Math.max(
+    0,
+    held.along - RIDER_BEHIND_METRES - (along + halfLength),
+    along - halfLength - (held.along + RIDER_AHEAD_METRES),
+  );
+  if (apart >= ONCOMING_SWERVE_METRES) return across;
+  const passes = -held.fallenTo;
+  const clear =
+    held.lateral + passes * (RIDER_HALF_WIDTH_METRES + halfWidth + ONCOMING_PASSING_GAP_METRES);
+  // Already clear on the passing side: it rides on where it is.
+  if ((across - clear) * passes >= 0) return across;
+  // Or already clear on the side they fell to, past what the fallen bicycle
+  // covers: it was never going through them, so it is not pulled across.
+  const fallenClear =
+    held.lateral +
+    held.fallenTo * (ONCOMING_FALLEN_BICYCLE_METRES * Math.sin(CRASH_LEAN_RADIANS) + halfWidth);
+  if ((across - fallenClear) * held.fallenTo >= 0) return across;
+  // Eased in by distance as it comes up to them and by time from the crash.
+  const share =
+    (1 - apart / ONCOMING_SWERVE_METRES) *
+    Math.min(1, Math.max(0, held.seconds) / ONCOMING_SWERVE_SECONDS);
+  // Smoothstep: no jump as the swerve starts or as it ends.
+  return across + (clear - across) * share * share * (3 - 2 * share);
 }
 
 /** One change to the round's score, in the order it happened: a delivery, a point on, or a crash. */

@@ -81,6 +81,12 @@ import { parseLevelFile, type LevelFile } from './delivery/levels/level-file';
 import {
   AVOIDABLE_FASTEST_METRES_PER_SECOND,
   MOVING_HAZARD_KINDS,
+  OBSTACLE_KINDS,
+  ONCOMING_PASSING_GAP_METRES,
+  ONCOMING_SWERVE_SECONDS,
+  RIDER_AHEAD_METRES,
+  RIDER_BEHIND_METRES,
+  RIDER_HALF_WIDTH_METRES,
   type ObstacleKind,
 } from './delivery/obstacles';
 import { levelCorridor, levelRoute } from './delivery/levels/levels';
@@ -3089,6 +3095,56 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     expect(steady.every((piece) => piece.car?.indicator !== undefined)).toBe(true);
     expect(steady.every((piece) => piece.car?.indicatorSeconds === undefined)).toBe(true);
     expect(Math.max(...steady.map((piece) => piece.car?.travelledMetres ?? 0))).toBeCloseTo(8, 6);
+  });
+
+  // Ridden only to the crash and through its stop, as the cases above.
+  it('hands the view an oncoming rider steering round the rider a crash into it holds, never through them — #3077, ADR 0094 D-3.3', async () => {
+    const { seed, frame } = crashingRide(
+      MOVING_LEVEL,
+      'oncoming-rider',
+      EARLY_CRASH_SEEDS['oncoming-rider'] ?? 1,
+    );
+    const drawn: SceneFrame[] = [];
+    await rideLevel(
+      'normal',
+      MOVING_LEVEL,
+      seed,
+      frame + 12,
+      FRAME_MS,
+      new Map(),
+      undefined,
+      drawn,
+    );
+    // Every frame drawn with the rider down past the swerve's first
+    // ONCOMING_SWERVE_SECONDS (the rider they crashed into is level with them
+    // by the contact): how far apart each oncoming rider is drawn from them
+    // across the road, on the frames it is level with them along it.
+    const { halfLength, halfWidth } = OBSTACLE_KINDS['oncoming-rider'];
+    const acrossWhileLevel: number[] = [];
+    for (const each of drawn) {
+      const rider = each.markers.find((marker) => marker.kind === 'rider');
+      if (rider?.crash === undefined || rider.crash.seconds < ONCOMING_SWERVE_SECONDS) continue;
+      for (const piece of each.delivery?.obstacles ?? []) {
+        if (piece.kind !== 'oncoming-rider') continue;
+        // The road's heading where it is drawn: it faces back down the road.
+        const roadX = Math.sin(piece.yaw);
+        const roadZ = Math.cos(piece.yaw);
+        const dx = piece.x - rider.x;
+        const dz = piece.z - rider.z;
+        const along = Math.abs(dx * roadX + dz * roadZ);
+        if (along >= halfLength + (RIDER_AHEAD_METRES + RIDER_BEHIND_METRES) / 2) continue;
+        acrossWhileLevel.push(Math.abs(dx * roadZ - dz * roadX));
+      }
+    }
+    // Non-vacuity: the rider was drawn down with the rider they crashed into level with them.
+    expect(acrossWhileLevel.length).toBeGreaterThan(0);
+    // Never drawn through them: the two half widths and the gap apart, less
+    // what the drawing's blend of a step can move either.
+    for (const across of acrossWhileLevel) {
+      expect(across).toBeGreaterThan(
+        RIDER_HALF_WIDTH_METRES + halfWidth + ONCOMING_PASSING_GAP_METRES - 0.1,
+      );
+    }
   });
 
   // #1688's ruling: cheaper, never a longer timeout. Both rides are the

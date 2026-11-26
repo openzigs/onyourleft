@@ -25,6 +25,11 @@
  *   (`obstacles.ts` §`carPullingOut`): turned along its path, with the
  *   motion the realistic world poses its wheels, body and indicator from
  *   (`port.ts` §`DeliveryCarMotion`), which nothing handed the view before.
+ * - **An oncoming rider steers round a rider lying on the road** (#3077,
+ *   ADR 0094 D-3.3): while a crash draws the rider down
+ *   ({@link DeliveryDrawInput.held}), one that reaches them is drawn passing
+ *   them on the road's middle side (`obstacles.ts` §`drawnObstacleAcross`),
+ *   never through them. A drawing only, as the stop itself is.
  *
  * And only what stands on the frame's corridor: a piece whose distance along
  * the route is outside the corridor's span is not drawn, rather than drawn
@@ -87,8 +92,9 @@ import type { CorridorPoint, RoadCorridor } from '../terrain';
 
 import {
   carPullingOut,
-  obstacleAcross,
+  drawnObstacleAcross,
   obstacleAlong,
+  type HeldRider,
   type Obstacle,
   type ObstacleState,
 } from './obstacles';
@@ -157,6 +163,12 @@ export interface DeliveryDrawInput {
    * (`port.ts` §`DeliveryCarMotion.indicatorSeconds`). Flashing unless given.
    */
   readonly steadyIndicators?: boolean;
+  /**
+   * #3077, ADR 0094 D-3.3: the rider while a crash draws them down, where
+   * they are drawn and the side they fell to, for an oncoming rider to steer
+   * round (`obstacles.ts` §`drawnObstacleAcross`). Nobody is held unless given.
+   */
+  readonly held?: HeldRider | undefined;
 }
 
 /** A place on the corridor, and which way the road runs there. */
@@ -296,7 +308,8 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
       return;
     }
     obstacles.push({
-      ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
+      // #3077: an oncoming rider steers round a rider lying on the road.
+      ...placed(at, drawnObstacleAcross(obstacle, seconds, input.held), 0, obstacleTurn(obstacle)),
       kind: obstacle.kind,
       index,
     });
