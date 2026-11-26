@@ -340,6 +340,8 @@ interface Run {
   readonly asked: Asked;
   /** What the ride controller was handed for the recording. */
   readonly records: readonly PacerDecisionRecord[];
+  /** #2727: every game-ride number those records were handed with. */
+  readonly gameRides: readonly number[];
   /** Whether the HUD showed the pacer's line, labelled, on some frame. */
   readonly lineShown: boolean;
   /** What the chooser said before the rider agreed. */
@@ -376,11 +378,13 @@ async function rideWith(
     openTrainer: simulatedOpenTrainer(bench, { written }),
   });
   const records: PacerDecisionRecord[] = [];
+  const gameRides = new Set<number>();
   const kept = own.notePacerDecision.bind(own);
   const watched: RideController = {
     ...own,
     notePacerDecision: (record, ride) => {
       records.push(record);
+      gameRides.add(ride.gameRide);
       kept(record, ride);
     },
   };
@@ -475,6 +479,7 @@ async function rideWith(
     pacerDistance,
     asked,
     records,
+    gameRides: [...gameRides],
     lineShown,
     consentText,
     pacerPower,
@@ -705,6 +710,19 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(directed.release.map((write) => write.bytes)).toEqual(
       plain.release.map((write) => write.bytes),
     );
+  });
+
+  it('hands each directed ride a number of its own, the same on all its records, across views — #2727', async () => {
+    const first = await ridden(true, 'simulation');
+    const second = await ridden(true, 'erg');
+    // One number per ride, on every record it logged…
+    expect(first.records.length).toBeGreaterThan(0);
+    expect(second.records.length).toBeGreaterThan(0);
+    expect(first.gameRides).toHaveLength(1);
+    expect(second.gameRides).toHaveLength(1);
+    // …and another ride's is another number, though each was ridden in a
+    // view of its own: a view opened again does not count from nought.
+    expect(second.gameRides[0]).not.toBe(first.gameRides[0]);
   });
 
   describe('never in a lap race (ADR 0072 D-1.2)', () => {
