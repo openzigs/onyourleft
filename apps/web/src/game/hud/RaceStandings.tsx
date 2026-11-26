@@ -18,11 +18,14 @@
  * `browser/ride-room.browser.spec.ts` §"#1347" measures it clear of the rider and
  * of every panel at the three tablet viewports. On a phone it stays in the
  * document for a screen reader, and the rider has *Follow* and its one gap.
+ * Since #2286 a room's race in a laptop's window 40 to 47 rem tall draws it
+ * COMPACT: the summary, the leader and the lines either side of the rider's
+ * own (`theme.css` §"A ROOM RACE'S STANDINGS IN A LAPTOP'S WINDOW").
  */
 
 import { useRef, type JSX, type ReactNode } from 'react';
 
-import { STANDINGS_TEXT, type RaceStandingsView } from '../room-ride';
+import { STANDINGS_TEXT, type RaceStandingsView, type StandingsLine } from '../room-ride';
 import { useOwnLineInView } from './standings-follow';
 import { useStandingsRoom } from './standings-room';
 
@@ -34,7 +37,7 @@ export function RaceStandings(props: {
   /** The control that swaps this panel with a loop's lap splits — #2080, `LapSplits.tsx`. */
   readonly swap?: ReactNode;
 }): JSX.Element {
-  const { lines, place, of, note } = props.standings;
+  const { lines, place, of, note, leader } = props.standings;
   // #2599: the list as tall as the room above the actions panel holds, and
   // scrolling under a finger where that is short of every line, opening on
   // the rider's own line (`standings-room.ts`, `standings-follow.ts`).
@@ -87,35 +90,62 @@ export function RaceStandings(props: {
           : {})}
       >
         <ol className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
+          {/*
+            #2286: the leader, where the window does not start at the front —
+            drawn only in a laptop's compact standings (`theme.css` §"A ROOM
+            RACE'S STANDINGS IN A LAPTOP'S WINDOW") and `display: none`
+            everywhere else, so a tablet's list, and a screen reader's, is the
+            window as it was.
+          */}
+          {(leader === undefined ? [] : [leader]).map((line) => (
+            <StandingsItem key={`leader-${String(line.riderId)}`} line={line} leaderOnly />
+          ))}
           {lines.map((line) => (
-            <li
-              key={line.riderId}
-              className={
-                line.you
-                  ? 'oyl-hud__standings-line oyl-hud__standings-line--you'
-                  : 'oyl-hud__standings-line'
-              }
-              aria-current={line.you ? 'true' : undefined}
-              value={line.place}
-            >
-              {/*
-              The spaces between the parts are the words' own: a screen
-              reader reads a line as one run of text, and "1Ann−8 s" is not
-              a line anybody could follow. The grid drops them visually.
-            */}
-              <span className="oyl-hud__standings-place">{line.place}</span>{' '}
-              <span className="oyl-hud__standings-who">{line.who}</span>{' '}
-              <span className="oyl-hud__standings-gap">{line.gap}</span>{' '}
-              <span className="oyl-hud__standings-figure">
-                {line.figure}
-                {line.flagged ? (
-                  <span className="oyl-hud__standings-flag"> {STANDINGS_TEXT.flagged}</span>
-                ) : null}
-              </span>
-            </li>
+            <StandingsItem key={line.riderId} line={line} />
           ))}
         </ol>
       </div>
     </section>
+  );
+}
+
+/**
+ * One line of the standings. Marked `--you` for the rider's own and
+ * `--leader` for first place (#2286), which a laptop's compact standings
+ * draw; `--leader-only` for the leader's line set before a window that does
+ * not reach the front.
+ */
+function StandingsItem(props: {
+  readonly line: StandingsLine;
+  readonly leaderOnly?: boolean;
+}): JSX.Element {
+  const { line } = props;
+  const classes = [
+    'oyl-hud__standings-line',
+    ...(line.you ? ['oyl-hud__standings-line--you'] : []),
+    ...(line.place === 1 ? ['oyl-hud__standings-line--leader'] : []),
+    ...(props.leaderOnly === true ? ['oyl-hud__standings-line--leader-only'] : []),
+  ];
+  return (
+    <li
+      className={classes.join(' ')}
+      aria-current={line.you ? 'true' : undefined}
+      value={line.place}
+    >
+      {/*
+        The spaces between the parts are the words' own: a screen reader reads
+        a line as one run of text, and "1Ann−8 s" is not a line anybody could
+        follow. The grid drops them visually.
+      */}
+      <span className="oyl-hud__standings-place">{line.place}</span>{' '}
+      <span className="oyl-hud__standings-who">{line.who}</span>{' '}
+      <span className="oyl-hud__standings-gap">{line.gap}</span>{' '}
+      <span className="oyl-hud__standings-figure">
+        {line.figure}
+        {line.flagged ? (
+          <span className="oyl-hud__standings-flag"> {STANDINGS_TEXT.flagged}</span>
+        ) : null}
+      </span>
+    </li>
   );
 }
