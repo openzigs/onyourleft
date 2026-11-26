@@ -1455,7 +1455,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
 
   it('starts every round level with the ride, and a ride with no crash stays level (D-2)', () => {
     const ride = road();
-    expect(ride).toMatchObject({ crashOffset: 0, crashOffsetBefore: 0, stopTicks: 0 });
+    expect(ride).toMatchObject({ crashOffset: 0, crashOffsetBefore: 0, stopSeconds: 0 });
     const ridden = rideTo(ride, 200).ride;
     expect(ridden.crashOffset).toBe(0);
     expect(ridden.along).toBe(ridden.rideAlong);
@@ -1463,7 +1463,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
 
   it('holds the drawn rider where they crashed for CRASH_STOP_SECONDS, the ride distance handed on untouched (D-2.4, D-3.1)', () => {
     const crashed = toCrash(binAhead(road(), 20));
-    expect(crashed.stopTicks).toBe(STOP_TICKS);
+    expect(crashed.stopSeconds).toBe(CRASH_STOP_SECONDS);
     const held = crashed.along;
     let now = crashed;
     for (let each = 1; each <= STOP_TICKS; each += 1) {
@@ -1477,7 +1477,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
       const paused = stepDeliveryRide(now, { ticks: 0, along: now.rideAlong + 50, speed: SPEED });
       expect(paused.ride).toBe(now);
     }
-    expect(now.stopTicks).toBe(0);
+    expect(now.stopSeconds).toBe(0);
     expect(now.crashOffset).toBeCloseTo(-SPEED * CRASH_STOP_SECONDS, 9);
     // Back on: the next step moves the drawn rider.
     expect(tick(now).ride.along).toBeGreaterThan(held + 0.1);
@@ -1487,7 +1487,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     const fast = 16;
     let now = toCrash(binAhead(road(), 40), fast);
     let ticks = 0;
-    while (now.stopTicks > 0) {
+    while (now.stopSeconds > 0) {
       now = tick(now, fast).ride;
       ticks += 1;
       expect(now.crashOffset).toBeGreaterThanOrEqual(-CRASH_OFFSET_BOUND_METRES);
@@ -1540,14 +1540,14 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     const paying = ticksOn(toCrash(binAhead(road(), 20)), STOP_TICKS + 10);
     expect(paying.crashOffset).toBeLessThan(-10);
     const again = toCrash(binAhead(paying, 5));
-    expect(again.stopTicks).toBe(STOP_TICKS);
+    expect(again.stopSeconds).toBe(CRASH_STOP_SECONDS);
     const from = again.crashOffset;
     expect(from).toBeLessThan(-12);
     expect(tick(again).ride.crashOffset).toBeCloseTo(from - SPEED * DELIVERY_TICK_SECONDS, 9);
     // And the bound ends it: over 12 m banked and 14.4 m more is past 25.
     let ended = again;
     let ticks = 0;
-    while (ended.stopTicks > 0) {
+    while (ended.stopSeconds > 0) {
       ended = tick(ended).ride;
       ticks += 1;
     }
@@ -1561,7 +1561,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     expect(refused.thrown).toBe(false);
     expect(refused.ride.throws.inFlight).toEqual([]);
     const up = ticksOn(refused.ride, STOP_TICKS);
-    expect(up.stopTicks).toBe(0);
+    expect(up.stopSeconds).toBe(0);
     expect(tick(up, SPEED, 'left').thrown).toBe(true);
   });
 
@@ -1582,7 +1582,7 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     };
     const crashed = flight(withBin);
     const clear = flight(plain);
-    expect(crashed.stopTicks).toBeGreaterThan(0);
+    expect(crashed.stopSeconds).toBeGreaterThan(0);
     expect(crashed.changes.filter((each) => each !== 'delivery')).toHaveLength(1);
     expect(crashed.throws.inFlight).toEqual([]);
     expect(crashed.round).toEqual(clear.round);
@@ -1644,5 +1644,88 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     expect(drawnRiderDistance(ride, 100, 3)).toBe(96);
     expect(drawnRiderDistance(ride, 100, -1)).toBe(97);
     expect(drawnRiderDistance({ crashOffset: 0, crashOffsetBefore: 0 }, 100, 0.3)).toBe(100);
+  });
+
+  describe('the stop is spent on the crash clock, not by the steps a frame caught up on — #3076, D-3.4', () => {
+    /** One frame of `ticks` steps at SPEED whose crash clock reads `clockMs` after it. */
+    function frame(ride: DeliveryRide, ticks: number, clockMs: number): DeliveryRide {
+      return stepDeliveryRide(ride, {
+        ticks,
+        along: ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS * ticks,
+        speed: SPEED,
+        clockMs,
+      }).ride;
+    }
+
+    /** Down half a second into a stop, on a clock that ran a step every 50 ms. */
+    function halfASecondDown(): { readonly ride: DeliveryRide; readonly clockMs: number } {
+      let ride = toCrash(binAhead(road(), 20));
+      let clockMs = 10_000;
+      for (let each = 0; each < 10; each += 1) {
+        clockMs += 50;
+        ride = frame(ride, 1, clockMs);
+      }
+      return { ride, clockMs };
+    }
+
+    it('spends a step’s 50 ms of clock as a step, so a ride with no pause stops for the same 36 steps', () => {
+      let { ride, clockMs } = halfASecondDown();
+      expect(ride.stopSeconds).toBeCloseTo(CRASH_STOP_SECONDS - 0.5, 9);
+      let steps = 10;
+      while (ride.stopSeconds > 0) {
+        clockMs += 50;
+        ride = frame(ride, 1, clockMs);
+        steps += 1;
+      }
+      expect(steps).toBe(STOP_TICKS);
+    });
+
+    it('keeps a rider paused while down held through the resume frame’s burst, the ride distance moving on', () => {
+      const { ride: down, clockMs } = halfASecondDown();
+      const held = down.along;
+      // The resume frame: 20 steps the pause owed (1 s, 8 m), on one 50 ms frame
+      // of the clock; with the rest of the stop, 22.4 m behind, inside the bound.
+      const resumed = frame(down, 20, clockMs + 50);
+      expect(resumed.rideAlong).toBeCloseTo(down.rideAlong + 8, 9);
+      expect(resumed.along).toBeCloseTo(held, 9);
+      expect(resumed.stopSeconds).toBeCloseTo(CRASH_STOP_SECONDS - 0.55, 9);
+      // The control: the same burst counted in steps, as before #3076, spends the stop on it.
+      const counted = stepDeliveryRide(down, {
+        ticks: 40,
+        along: down.rideAlong + 16,
+        speed: SPEED,
+      }).ride;
+      expect(counted.stopSeconds).toBe(0);
+      expect(counted.along).toBeGreaterThan(held + 1);
+      // Still held for the rest of the crash on the clock, then up and riding on.
+      let now = resumed;
+      let at = clockMs + 50;
+      let steps = 0;
+      while (now.stopSeconds > 0) {
+        expect(now.along).toBeCloseTo(held, 9);
+        at += 50;
+        now = frame(now, 1, at);
+        steps += 1;
+      }
+      expect(steps).toBe(STOP_TICKS - 11);
+      expect(frame(now, 1, at + 50).along).toBeGreaterThan(held + 0.1);
+    });
+
+    it('counts the clock of frames that ran no step into the next step that does', () => {
+      const { ride: down, clockMs } = halfASecondDown();
+      // Two frames with no step (GameView steps nothing on them), then one step 150 ms on.
+      const on = frame(down, 1, clockMs + 150);
+      expect(on.stopSeconds).toBeCloseTo(CRASH_STOP_SECONDS - 0.65, 9);
+    });
+
+    it('ends the stop at the bound when the burst carries the offset past it (D-3.2)', () => {
+      const { ride: down, clockMs } = halfASecondDown();
+      // 4 m behind, and 53 steps at 0.4 m is 21.2 m more: past the 25 m bound
+      // on the last of them, whatever the clock says.
+      expect(down.crashOffset).toBeCloseTo(-4, 9);
+      const resumed = frame(down, 53, clockMs + 50);
+      expect(resumed.crashOffset).toBe(-CRASH_OFFSET_BOUND_METRES);
+      expect(resumed.stopSeconds).toBe(0);
+    });
   });
 });

@@ -40,6 +40,12 @@
  *   holds where they crashed. If the offset reaches the bound the stop ends
  *   there and the drawn rider moves with the ride. While down no throw is
  *   taken and no contact counts; a parcel already in the air still lands.
+ *   The stop's seconds are the crash clock's (#3076,
+ *   {@link DeliveryRideStep.clockMs}), the clock the crash is drawn on, not
+ *   a count of steps: the frame after a pause runs every step the pause owed
+ *   (`simulation.ts` §`advanceTo`), and counted in steps those spent the stop
+ *   while the rider was still drawn lying. That burst goes to the offset
+ *   instead, up to the bound, which ends the stop as any other step does.
  * - **The payout** (D-4): after the stop the drawn rider moves faster than the
  *   ride by {@link CRASH_PAYOUT_SHARE} of its speed, never past
  *   `obstacles.ts` §`AVOIDABLE_FASTEST_METRES_PER_SECOND` and never slower
@@ -226,8 +232,12 @@ import {
  */
 export const CRASH_STOP_SECONDS = CRASH_SECONDS;
 
-/** The stop in the game's ticks: **36**. */
-const CRASH_STOP_TICKS = Math.round(CRASH_STOP_SECONDS / DELIVERY_TICK_SECONDS);
+/**
+ * What is left of a stop below which it is over, seconds: a stop is spent a
+ * share of a frame at a time, so 1.8 s less 36 ticks of 0.05 s is a rounding
+ * error from nought, not a 37th tick down.
+ */
+const STOP_SPENT_SECONDS = 1e-9;
 
 /**
  * How far the drawn rider may fall behind the ride, metres — ADR 0094 D-2.5's
@@ -303,8 +313,19 @@ export interface DeliveryRide {
   readonly crashOffset: number;
   /** {@link crashOffset} one step before the last, which the drawing blends from. */
   readonly crashOffsetBefore: number;
-  /** Steps left of a crash's stop: nought while the rider is up (ADR 0094 D-3). */
-  readonly stopTicks: number;
+  /**
+   * Seconds left of a crash's stop, on the crash's own clock (#3076): nought
+   * while the rider is up (ADR 0094 D-3). Spent by the time the loop ran,
+   * {@link DeliveryRideStep.clockMs}, never by how many steps a frame caught
+   * up on, so a resume burst after a pause while down spends none of it.
+   */
+  readonly stopSeconds: number;
+  /**
+   * The crash clock at the last step that ran, ms ({@link DeliveryRideStep.clockMs}),
+   * which the next step's time is counted from; `undefined` before the first
+   * step, or when the caller hands no clock.
+   */
+  readonly clockMs: number | undefined;
   /** The round's end, once every house is settled or the ride has ended it. */
   readonly outcome: RoundOutcome | undefined;
   /** A built-in level's round (#2362): its end is never kept as the week's (ADR 0065 D-9.3). */
@@ -456,7 +477,8 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     rideAlong: input.riderDistance,
     crashOffset: 0,
     crashOffsetBefore: 0,
-    stopTicks: 0,
+    stopSeconds: 0,
+    clockMs: undefined,
     outcome: undefined,
     onLevel: input.level !== undefined,
     noDeliveryTargets: pick.noDelivery,
@@ -495,6 +517,15 @@ export interface DeliveryRideStep {
   readonly speed: number;
   /** A throw the rider asked for since the last step, already resolved to a side. */
   readonly throwTo?: ThrowSide | undefined;
+  /**
+   * #3076: `GameView`'s crash clock after this frame, ms — the frames the loop
+   * ran and nothing else (`GameView.tsx` §`crashClockRef`), the clock the
+   * crash is drawn on. A stop is spent by what it moved since the last step
+   * that ran, shared between this frame's steps. Absent, each step spends
+   * {@link DELIVERY_TICK_SECONDS}, which is the same on every frame but a
+   * catch-up burst.
+   */
+  readonly clockMs?: number | undefined;
 }
 
 /** What one frame's steps did. */
@@ -547,8 +578,22 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
   // Never backwards: a room's correction does not run on a Delivery ride
   // (DL9), and a distance that went back would sweep no road.
   const to = Math.max(from, step.along);
-  let { round, throws, obstacleState, outcome, steer, crashOffset, crashOffsetBefore, stopTicks } =
-    ride;
+  let {
+    round,
+    throws,
+    obstacleState,
+    outcome,
+    steer,
+    crashOffset,
+    crashOffsetBefore,
+    stopSeconds,
+  } = ride;
+  // #3076: the stop is spent on the crash's clock, so the steps a frame owed
+  // since a pause, all run on the resume frame, spend only that frame's time.
+  const spent =
+    step.clockMs === undefined || ride.clockMs === undefined
+      ? DELIVERY_TICK_SECONDS
+      : Math.max(0, step.clockMs - ride.clockMs) / 1000 / ticks;
   const changes = [...ride.changes];
   let crashes = 0;
   let noDeliveries = 0;
@@ -560,13 +605,15 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     const covered = rideAt - rideBefore;
     rideBefore = rideAt;
     // #3021, ADR 0094: the drawn rider, held while down and paid out after.
-    const down = stopTicks > 0;
+    const down = stopSeconds > 0;
     const paying = !down && crashOffset < 0;
     crashOffsetBefore = crashOffset;
     if (down) {
       // D-3.1, D-3.2: held, until the bound is reached, which ends the stop.
       crashOffset = Math.max(-CRASH_OFFSET_BOUND_METRES, crashOffset - covered);
-      stopTicks = crashOffset <= -CRASH_OFFSET_BOUND_METRES ? 0 : stopTicks - 1;
+      const left = stopSeconds - spent;
+      stopSeconds =
+        crashOffset <= -CRASH_OFFSET_BOUND_METRES || left <= STOP_SPENT_SECONDS ? 0 : left;
     } else if (paying) {
       // D-4.1, D-4.3: faster than the ride by P, never past the fastest avoidable speed.
       const drawnMove = payoutSpeed(covered / DELIVERY_TICK_SECONDS) * DELIVERY_TICK_SECONDS;
@@ -627,7 +674,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     if (!down && obstaclesNow.crashes.length > 0) {
       changes.push(...obstaclesNow.crashes);
       crashes += obstaclesNow.crashes.length;
-      stopTicks = CRASH_STOP_TICKS;
+      stopSeconds = CRASH_STOP_SECONDS;
     }
     round = recordMisses(thrownNow.round, throws, ride.throwTargets, at, ride.throwWindow, scale);
     if (roundTally(round).expecting === 0) outcome = endRound(ride.week, round);
@@ -645,7 +692,8 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       rideAlong: to,
       crashOffset,
       crashOffsetBefore,
-      stopTicks,
+      stopSeconds,
+      clockMs: step.clockMs,
       outcome,
     },
     crashes,
