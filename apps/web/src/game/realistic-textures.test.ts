@@ -142,6 +142,7 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
+import { GROWN_SPECIES, growTree } from './grown-trees';
 import {
   accessorValues,
   chainLinkFacts,
@@ -3697,10 +3698,35 @@ describe('the generated trees, loaded and drawn through the product’s own path
       if (belt === undefined) throw new Error('no world is loaded');
       // One shape a model the set names, in its variant order — read off the
       // belt a view would build, so a set that loaded the other's files is seen.
+      // #3252: and, after them, each species grown in code whose host the set
+      // loaded — none where that tree is a scan.
+      const loadedNames = new Set(
+        REALISTIC_VEGETATION_KINDS.flatMap((kind) => expected[kind].map((model) => model.name)),
+      );
       for (const kind of REALISTIC_VEGETATION_KINDS) {
-        expect(belt.levelsOf(kind).full, `${String(set)} ${kind}`).toHaveLength(
-          expected[kind].length,
+        const grown = GROWN_SPECIES.filter(
+          (species) => species.kind === kind && loadedNames.has(species.host),
         );
+        const full = belt.levelsOf(kind).full as unknown as readonly (readonly DrawnMesh[])[];
+        expect(full, `${String(set)} ${kind}`).toHaveLength(expected[kind].length + grown.length);
+        // Each grown species through the product's own load: one draw a
+        // level, and exactly the triangles its numbers make.
+        grown.forEach((species, at) => {
+          const meshes = full[expected[kind].length + at] ?? [];
+          expect(meshes, species.id).toHaveLength(1);
+          expect((meshes[0]?.geometry.index?.count ?? 0) / 3, species.id).toBe(
+            growTree(species).full.triangles,
+          );
+        });
+      }
+      if (set === undefined || set === 'generated') {
+        expect(belt.levelsOf('tree-broadleaf').full).toHaveLength(7);
+        expect(belt.levelsOf('tree-conifer').full).toHaveLength(3);
+        expect(belt.levelsOf('shrub').full).toHaveLength(4);
+      }
+      if (set === 'scanned') {
+        expect(belt.levelsOf('tree-broadleaf').full).toHaveLength(2);
+        expect(belt.levelsOf('shrub').full).toHaveLength(2);
       }
       // And the triangles drawn are the committed files', variant by variant
       // — the broadleaves', and since #1294 the conifers', which differ
@@ -3737,7 +3763,23 @@ describe('the generated trees, loaded and drawn through the product’s own path
         readonly impostor: readonly (DrawnMesh | undefined)[];
       };
       const variants = generated.length;
-      expect(levels.full).toHaveLength(variants);
+      // #3252: the committed trees first, then the species grown in code.
+      const grown = GROWN_SPECIES.filter((species) => species.kind === kind);
+      expect(levels.full).toHaveLength(variants + grown.length);
+      grown.forEach((species, at) => {
+        const full = levels.full[variants + at] ?? [];
+        const middle = levels.middle[variants + at] ?? [];
+        // One call a level, the middle level in the full level's material,
+        // and NO impostor mesh of its own: its far band is its host's.
+        expect(full, species.id).toHaveLength(1);
+        expect(middle, species.id).toHaveLength(1);
+        expect(middle[0]?.material, species.id).toBe(full[0]?.material);
+        expect(levels.impostor[variants + at], species.id).toBeUndefined();
+        expect(renderer.materialLayers(full[0]?.material as never), species.id).toBe(2);
+        expect((middle[0]?.geometry.index?.count ?? 0) / 3, species.id).toBe(
+          growTree(species).middle?.triangles,
+        );
+      });
       generated.forEach((model, variant) => {
         const full = levels.full[variant] ?? [];
         const middle = levels.middle[variant] ?? [];
@@ -3934,7 +3976,9 @@ describe('the generated trees, loaded and drawn through the product’s own path
     }[];
     // One pre-pass for every fir mesh at the full and the middle level — two
     // shapes, two levels — and none for a broadleaf.
-    expect(firs).toHaveLength(2 * REALISTIC_CONIFERS.generated.length);
+    // (#3252: and the spruce grown in code, which is a conifer too.)
+    const grownConifers = GROWN_SPECIES.filter((species) => species.kind === 'tree-conifer');
+    expect(firs).toHaveLength(2 * (REALISTIC_CONIFERS.generated.length + grownConifers.length));
     expect(prepasses).toHaveLength(firs.length);
     prepasses.forEach((each, at) => expect(each.full).toBe(firs[at]));
     for (const broadleaf of meshesOf('tree-broadleaf')) expect(broadleaf.children).toEqual([]);

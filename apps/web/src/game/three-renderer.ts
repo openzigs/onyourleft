@@ -670,6 +670,17 @@ import {
   TINT_CODEC_ZERO,
   type TintBound,
 } from './instance-tint';
+import { GROWN_SPECIES, growTree, type GrownMesh, type GrownSpecies } from './grown-trees';
+import {
+  ageScale,
+  fenceShapeOf,
+  instanceBuild,
+  PLAN_SLOTS,
+  rockSeat,
+  SCENERY_SETTINGS,
+  slotTable,
+  type ScenerySetting,
+} from './scenery-plan';
 import {
   bandFade,
   highBound,
@@ -7196,6 +7207,20 @@ export interface RealisticShape {
    * levels are one part wearing one merged material. @see mergeShapeMaterials
    */
   readonly middle?: { readonly parts: readonly RealisticPart[]; readonly triangles: number };
+  /**
+   * How tall the full level stands, in the model's own units — #3252: what a
+   * tree grown in code sizes its host's impostor by. Absent on a shape whose
+   * file records none.
+   */
+  readonly height?: number;
+  /**
+   * A tree GROWN in code (`grown-trees.ts`) has no impostor of its own — #3252:
+   * beyond its middle level it is drawn as its host's, in the host's own
+   * instanced mesh, `scale` times the size its own levels are drawn at, which
+   * makes the host's picture as tall as this tree. So it adds no far draw
+   * call, no texture and no instance buffer. @see grownShapeOf
+   */
+  readonly far?: { readonly host: string; readonly scale: number };
 }
 
 /** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
@@ -8060,6 +8085,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       if (outcome.status === 'rejected') throw outcome.reason;
     }
     const vegetation = new Map<RealisticVegetationKind, readonly RealisticShape[]>();
+    // #3252: each committed tree before its materials are merged, by name.
+    const hosts = new Map<string, RealisticShape>();
     for (const each of shapes) {
       const prepared: RealisticShape[] = [];
       for (const one of each.models) {
@@ -8074,6 +8101,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         const levelled =
           middleScene === undefined ? near : prepareMiddleLevel(near, middleScene, one.name);
         loaded.shapes[loaded.shapes.length - 1] = levelled;
+        hosts.set(one.name, levelled);
         // #639: one material a level, so one draw call a level — unless this
         // is the browser gate loading its control. @see setRealisticMaterialsMerged
         const shape = realisticMaterialsMerged ? mergeShapeMaterials(levelled, one.name) : levelled;
@@ -8083,6 +8111,19 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
+    }
+    // #3252: the species grown in code, each dressed as the committed tree
+    // that hosts it and added to its kind's shapes, after the committed ones.
+    // None where the trees are the scans, which host nothing.
+    for (const species of GROWN_SPECIES) {
+      const host = hosts.get(species.host);
+      const grown = host === undefined ? undefined : grownShapeOf(species, host);
+      if (grown === undefined) continue;
+      loaded.shapes.push(grown);
+      const shape = realisticMaterialsMerged ? mergeShapeMaterials(grown, species.id) : grown;
+      loaded.shapes[loaded.shapes.length - 1] = shape;
+      withFoliageSwayOf(shape);
+      vegetation.set(species.kind, [...(vegetation.get(species.kind) ?? []), shape]);
     }
     const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
       await Promise.all([sky, road.colour, road.normal, ground.colour, ground.normal, rider]);
@@ -8744,7 +8785,106 @@ export function prepareRealisticShape(
           material: impostorMaterial(impostorStrip, extras, impostorNormals),
           ...(impostorNormals === undefined ? {} : { normals: impostorNormals }),
         };
-  return { name, parts, extent, triangles, ...(impostor === undefined ? {} : { impostor }) };
+  return {
+    name,
+    parts,
+    extent,
+    triangles,
+    ...(height > 0 ? { height } : {}),
+    ...(impostor === undefined ? {} : { impostor }),
+  };
+}
+
+/**
+ * The names a committed generated tree's two materials carry —
+ * `tools/realistic/generated-trees.ts` §`GENERATED_MATERIALS`, which nothing
+ * under `src/` may import. `grown-shapes.test.ts` reads them off the
+ * committed files, so a pipeline that renamed one is a red test.
+ */
+export const GROWN_HOST_MATERIALS = { bark: 'bark', leaves: 'leaves' } as const;
+
+/** A grown level's wood or leaves as a geometry: its arrays, as they are. */
+function grownGeometry(mesh: GrownMesh): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
+  geometry.setAttribute('color', new BufferAttribute(mesh.colours, 3));
+  geometry.setIndex(new BufferAttribute(mesh.indices, 1));
+  return geometry;
+}
+
+/** A material of this file's own that reads the maps `host` reads, cut where it is cut. */
+function materialWearing(host: MeshStandardMaterial): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: host.color.clone(),
+      map: host.map,
+      normalMap: host.normalMap,
+      normalScale: host.normalScale.clone(),
+      // A grown level always carries its crown's shade. @see grown-trees.ts
+      vertexColors: true,
+      roughness: REALISTIC_ROUGHNESS,
+      metalness: 0,
+      side: DoubleSide,
+      alphaTest: host.alphaTest,
+      transparent: false,
+    }),
+  );
+  material.name = host.name;
+  withTextureLodBias(material);
+  withAtmosphere(material);
+  return material;
+}
+
+/**
+ * A tree or a bush grown in code, as a shape to instance — #3252,
+ * `grown-trees.ts`: {@link growTree}'s wood and leaf cards, dressed in the
+ * bark and the leaf card of `host`, a committed generated tree as
+ * {@link prepareRealisticShape} and {@link prepareMiddleLevel} left it and
+ * BEFORE {@link mergeShapeMaterials} merged it. Its materials are its own,
+ * over the host's own maps, so it adds no texture and no image; a tree's
+ * middle level is grown from the same skeleton, and its far band is the
+ * host's impostor ({@link RealisticShape.far}).
+ *
+ * `undefined` when `host` is not such a tree — a scan, or a test's fixture
+ * with other materials — and then the species is not drawn and
+ * `scenery-plan.ts` §`slotTable` leaves every setting that names it to the
+ * shapes there are.
+ */
+export function grownShapeOf(
+  species: GrownSpecies,
+  host: RealisticShape,
+): RealisticShape | undefined {
+  const wears = (name: string): MeshStandardMaterial | undefined =>
+    host.parts.find((part) => part.material.name === name)?.material;
+  const bark = wears(GROWN_HOST_MATERIALS.bark);
+  const leaves = wears(GROWN_HOST_MATERIALS.leaves);
+  if (bark === undefined || leaves === undefined) return undefined;
+  if (bark.map === null || bark.normalMap === null) return undefined;
+  if (leaves.map === null || leaves.normalMap === null) return undefined;
+  const grown = growTree(species);
+  const materials = { bark: materialWearing(bark), leaves: materialWearing(leaves) };
+  const partsOf = (level: { readonly bark: GrownMesh; readonly leaves: GrownMesh }) => [
+    { geometry: grownGeometry(level.bark), material: materials.bark },
+    { geometry: grownGeometry(level.leaves), material: materials.leaves },
+  ];
+  const tree = species.kind !== 'shrub';
+  const far =
+    tree && host.impostor !== undefined && host.height !== undefined
+      ? { host: host.name, scale: grown.heightMetres / host.height }
+      : undefined;
+  return {
+    name: species.id,
+    parts: partsOf(grown.full),
+    extent: Math.max(grown.heightMetres, grown.widthMetres),
+    triangles: grown.full.triangles,
+    height: grown.heightMetres,
+    ...(tree && grown.middle !== undefined
+      ? { middle: { parts: partsOf(grown.middle), triangles: grown.middle.triangles } }
+      : {}),
+    ...(far === undefined ? {} : { far }),
+  };
 }
 
 /**
@@ -16278,6 +16418,12 @@ export class RealisticVegetationBelt {
   #drawn = 0;
   /** The item being placed's packed tint — #621. @see packedInstanceTint */
   #tint = 0;
+  /** #3252: the item being placed's build, its seat if it is a rock, and its far band's matrix. */
+  readonly #build = { height: 1, girth: 1 };
+  readonly #seat = { sink: 0, tilt: 0, azimuth: 0 };
+  readonly #tiltAxis = new Vector3();
+  readonly #tilt = new Quaternion();
+  readonly #farMatrix = new Matrix4();
   /**
    * The items this frame drew as MESHES — each tree at its full or middle
    * level, and each shrub and rock — as the ground blobs' casters (#620).
@@ -16333,6 +16479,33 @@ export class RealisticVegetationBelt {
           if (shape.impostor !== undefined) withAutumn(shape.impostor.material);
         }
       }
+      const far = shapes.map((shape) =>
+        shape.impostor === undefined
+          ? undefined
+          : drawnInOrder(
+              keeps(
+                instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+                SCATTER_INSTANCE_CAPACITY,
+              ),
+              'impostor',
+            ),
+      );
+      // #3252: a tree grown in code is drawn, far off, as its host's impostor
+      // in the host's own mesh. @see RealisticShape.far
+      const farScale = shapes.map((shape, index) => {
+        const host =
+          shape.far === undefined ? -1 : shapes.findIndex((each) => each.name === shape.far?.host);
+        if (shape.far === undefined || host < 0) return 1;
+        far[index] = far[host];
+        return shape.far.scale;
+      });
+      // #3252: which shape each variant slot is, in each setting.
+      const names = shapes.map((shape) => shape.name);
+      const tables = new Map<ScenerySetting, readonly number[]>();
+      for (const setting of SCENERY_SETTINGS) {
+        const table = slotTable(kind, setting, names);
+        if (table !== undefined) tables.set(setting, table);
+      }
       this.#kinds.push({
         kind,
         tree,
@@ -16352,17 +16525,9 @@ export class RealisticVegetationBelt {
               )
             : undefined,
         ),
-        far: shapes.map((shape) =>
-          shape.impostor === undefined
-            ? undefined
-            : drawnInOrder(
-                keeps(
-                  instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
-                  SCATTER_INSTANCE_CAPACITY,
-                ),
-                'impostor',
-              ),
-        ),
+        far,
+        farScale,
+        tables,
         ranking: tree ? this.#trees : ranking(nearCap),
         tint: kind === 'rock' ? 'masonry' : 'foliage',
         fit: sceneryFitMetres(kind),
@@ -16433,7 +16598,8 @@ export class RealisticVegetationBelt {
     return this.#kinds.flatMap((each) => [
       ...each.near.flat(),
       ...each.middle.flatMap((meshes) => meshes ?? []),
-      ...each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+      // Each once: a grown tree's far mesh is its host's. @see RealisticShape.far
+      ...new Set(each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined)),
     ]);
   }
 
@@ -16451,7 +16617,15 @@ export class RealisticVegetationBelt {
     readonly impostor: readonly (InstancedMesh | undefined)[];
   } {
     const each = this.#kinds.find((slot) => slot.kind === kind);
-    return { full: each?.near ?? [], middle: each?.middle ?? [], impostor: each?.far ?? [] };
+    return {
+      full: each?.near ?? [],
+      middle: each?.middle ?? [],
+      // A shape's OWN impostor: a tree grown in code has none, and is drawn
+      // in its host's (#3252, `RealisticShape.far`), which is the host's entry.
+      impostor: (each?.far ?? []).map((mesh, shape) =>
+        each?.shapes[shape]?.far === undefined ? mesh : undefined,
+      ),
+    };
   }
 
   addTo(scene: Scene): void {
@@ -16600,10 +16774,10 @@ export class RealisticVegetationBelt {
         if (keep <= 0) continue;
       }
       if (each.tree && each.shapes.length > 0 && visibleOnly) {
-        const variant = variantOf(item.variant, each.shapes.length);
+        const variant = shapeIndexOf(each, item);
         const shape = each.shapes[variant] as RealisticShape;
         const reach = each.reach[variant];
-        const size = (each.fit * item.scale) / shape.extent;
+        const size = drawnSize(each, item, shape);
         const radius = (reach?.across ?? 0) * size;
         if (!treeCanBeSeen(item, pose, radius, (reach?.up ?? 0) * size)) continue;
       }
@@ -16642,14 +16816,31 @@ export class RealisticVegetationBelt {
       // #545: a tree faded to nothing near the camera is not drawn at all.
       const keep = this.#keep[index] ?? 1;
       if (keep <= 0) continue;
-      const variant = variantOf(item.variant, each.shapes.length);
+      const variant = shapeIndexOf(each, item);
       const shape = each.shapes[variant] as RealisticShape;
       const rank = rankOf(each.ranking, index);
-      const size = (each.fit * item.scale) / shape.extent;
+      const size = drawnSize(each, item, shape);
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
-      this.#scale.setScalar(size);
+      // #3252: each instance its own build, a little taller or stouter than the next.
+      const build = instanceBuild(item.setting, item.x, item.z, this.#build);
+      this.#scale.set(size * build.girth, size * build.height, size * build.girth);
+      if (each.kind === 'rock') {
+        // #3252: a rock sits IN the ground, sunk and tipped, and not on it.
+        const seat = rockSeat(item.x, item.z, this.#seat);
+        this.#position.y -=
+          seat.sink * (each.footprint[variant]?.height ?? 0) * size * build.height;
+        this.#tiltAxis.set(Math.cos(seat.azimuth), 0, Math.sin(seat.azimuth));
+        this.#quaternion.premultiply(this.#tilt.setFromAxisAngle(this.#tiltAxis, seat.tilt));
+      }
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      // #3252: a grown tree's far band, its host's picture at this tree's height.
+      const farScale = each.farScale[variant] ?? 1;
+      if (farScale === 1) this.#farMatrix.copy(this.#matrix);
+      else {
+        this.#scale.multiplyScalar(farScale);
+        this.#farMatrix.compose(this.#position, this.#quaternion, this.#scale);
+      }
       // #621: one tint for every level the item is drawn at this frame.
       this.#tint = packedInstanceTint(item.x, item.z, realisticTints[each.tint]);
       let drawn = false;
@@ -16680,14 +16871,14 @@ export class RealisticVegetationBelt {
         if (high < 1) drawn = this.#put(each.near[variant], high * keep, keep);
         asMesh = drawn;
         if (middle === undefined) {
-          if (high > 0) drawn = this.#putOne(impostor, 0, high * keep) || drawn;
+          if (high > 0) drawn = this.#putOne(impostor, 0, high * keep, this.#farMatrix) || drawn;
         } else {
           if (high > low) {
             const middleDrawn = this.#put(middle, low * keep, high * keep);
             asMesh = asMesh || middleDrawn;
             drawn = middleDrawn || drawn;
           }
-          if (low > 0) drawn = this.#putOne(impostor, 0, low * keep) || drawn;
+          if (low > 0) drawn = this.#putOne(impostor, 0, low * keep, this.#farMatrix) || drawn;
         }
       }
       if (drawn) this.#drawn += 1;
@@ -16750,11 +16941,16 @@ export class RealisticVegetationBelt {
   }
 
   /** This frame's matrix into one mesh, keeping `[from, to)`, if it has room. */
-  #putOne(mesh: InstancedMesh | undefined, from: number, to: number): boolean {
+  #putOne(
+    mesh: InstancedMesh | undefined,
+    from: number,
+    to: number,
+    matrix: Matrix4 = this.#matrix,
+  ): boolean {
     if (mesh === undefined) return false;
     const capacity = mesh.instanceMatrix.count;
     if (mesh.count >= capacity) return false;
-    mesh.setMatrixAt(mesh.count, this.#matrix);
+    mesh.setMatrixAt(mesh.count, matrix);
     if (mesh.instanceColor !== null) {
       const channels = mesh.instanceColor.array as Float32Array;
       writeInterval(channels, mesh.count, from, to);
@@ -16828,8 +17024,12 @@ interface VegetationSlot {
   readonly near: readonly (readonly InstancedMesh[])[];
   /** Per shape, one instanced mesh per middle part, for a tree with a middle level. */
   readonly middle: readonly (readonly InstancedMesh[] | undefined)[];
-  /** Per shape, its impostor, for a tree. */
+  /** Per shape, its impostor, for a tree — its host's, for a tree grown in code (#3252). */
   readonly far: readonly (InstancedMesh | undefined)[];
+  /** Per shape, what its far band is drawn at, of its own size. @see RealisticShape.far */
+  readonly farScale: readonly number[];
+  /** #3252: per setting, the shape each variant slot is drawn as. @see slotTable */
+  readonly tables: ReadonlyMap<ScenerySetting, readonly number[]>;
   /** Both tree kinds share one; a shrub's and a rock's are their own. */
   readonly ranking: Ranking;
   /** Which of #621's bounds its tints are drawn inside: a rock's is masonry's. */
@@ -16857,6 +17057,25 @@ function instanced(geometry: BufferGeometry, material: Material, capacity: numbe
 function variantOf(variant: number, shapes: number): number {
   const wanted = Number.isInteger(variant) ? variant : 0;
   return ((wanted % shapes) + shapes) % shapes;
+}
+
+/**
+ * Which of a kind's shapes an item is drawn as — #3252: its setting's table
+ * (`scenery-plan.ts` §`SCENERY_PLAN`), or, in a world that does not hold the
+ * shapes the table names, its variant folded into the shapes there are.
+ */
+function shapeIndexOf(each: VegetationSlot, item: ScatterItem): number {
+  const table = each.tables.get(item.setting ?? 'wild');
+  return table === undefined
+    ? variantOf(item.variant, each.shapes.length)
+    : (table[variantOf(item.variant, PLAN_SLOTS)] as number);
+}
+
+/** How big an item is drawn, in its shape's own units: its fit, its scale and its age. */
+function drawnSize(each: VegetationSlot, item: ScatterItem, shape: RealisticShape): number {
+  return (
+    (each.fit * item.scale * ageScale(item.setting, shape.name, item.x, item.z)) / shape.extent
+  );
 }
 
 /**
@@ -21291,8 +21510,109 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
     shade: 1,
     grounded: false,
     part: LOT_PART.other,
-    geometry: part.geometry(),
+    // #3252: the realistic wall is a drystone wall; the stylised one keeps its block.
+    geometry: kind === 'wall' ? stoneWallGeometry() : part.geometry(),
   }));
+}
+
+/** How many coping stones stand along a {@link stoneWallGeometry} piece: **13**. */
+export const STONE_WALL_COPES = 13;
+
+/**
+ * The realistic world's stone wall — #3252: a drystone wall where the field
+ * wall was a box. Its body is battered, 0.6 m at the foot and 0.42 m at the
+ * top, as a dry wall is built, and it carries a row of
+ * {@link STONE_WALL_COPES} coping stones set on edge, each its own width and
+ * height — tall and short in turn, the "cock and hen" of an upland wall — so
+ * its top is broken against the sky and not ruled. Built from numbers typed
+ * here; the stylised world keeps `BOUNDARY_STYLE`'s block.
+ *
+ * It keeps the block's footprint (`settlements.ts` §`STRUCTURE_FOOTPRINTS`,
+ * 0.6 m by 8 m) and its height — its tallest cope tops out under the block's
+ * 1.1 m, which `near-field.ts` clears a wall by — is set half a metre into
+ * the ground as every field boundary is, and is 168 triangles, under `realistic-budget.ts` §`REALISTIC_TRIANGLES`'
+ * `structure`.
+ */
+export function stoneWallGeometry(): BufferGeometry {
+  const body = new BoxGeometry(0.6, 1.34, BOUNDARY_PIECE_METRES).translate(0, 0.17, 0);
+  const corners = body.getAttribute('position');
+  for (let at = 0; at < corners.count; at += 1) {
+    if (corners.getY(at) > 0) corners.setX(at, corners.getX(at) * 0.7);
+  }
+  const span = BOUNDARY_PIECE_METRES / STONE_WALL_COPES;
+  const copes: BufferGeometry[] = [];
+  for (let cope = 0; cope < STONE_WALL_COPES; cope += 1) {
+    // Tall and short in turn, and no two alike: arithmetic, the same on every load.
+    const tall = cope % 2 === 0;
+    const wobble = 0.5 + 0.5 * Math.sin(cope * 2.4 + 0.7);
+    copes.push(
+      block(
+        0.36 + 0.08 * wobble,
+        (tall ? 0.2 : 0.12) + 0.04 * wobble,
+        span * (0.8 + 0.12 * wobble),
+        0.02 * Math.sin(cope * 1.7),
+        0.84,
+        -BOUNDARY_PIECE_METRES / 2 + (cope + 0.5) * span,
+      ),
+    );
+  }
+  return merged([body, ...copes]);
+}
+
+/**
+ * A close-board timber fence, one {@link BOUNDARY_PIECE_METRES} piece along
+ * `z` — #3252: three posts, a face of boards 1.65 m high on two arris rails,
+ * a gravel board at its foot and a capping rail. It wears the planks the
+ * field fence wears, and it is the fence of a garden or an allotment where
+ * the field's post-and-rail is a field's (`scenery-plan.ts` §`BOUNDARY_PLAN`).
+ */
+function timberFenceGeometry(): BufferGeometry {
+  const post = 0.1;
+  const end = BOUNDARY_PIECE_METRES / 2 - post / 2;
+  return merged([
+    ...[-end, 0, end].map((z) => block(post, 1.8 + 0.4, post, -0.05, -0.4, z)),
+    // The boards, then the rails behind them, the gravel board and the capping.
+    block(0.03, 1.65, BOUNDARY_PIECE_METRES, 0.02, 0.1),
+    block(0.05, 0.08, BOUNDARY_PIECE_METRES, -0.03, 0.4),
+    block(0.05, 0.08, BOUNDARY_PIECE_METRES, -0.03, 1.4),
+    block(0.04, 0.2, BOUNDARY_PIECE_METRES, 0.02, -0.1),
+    block(0.08, 0.04, BOUNDARY_PIECE_METRES, 0.01, 1.75),
+  ]);
+}
+
+/** How tall the noise barrier stands out of the ground, in metres: **3**. */
+export const NOISE_BARRIER_METRES = 3;
+
+/**
+ * A modern highway noise barrier, one {@link BOUNDARY_PIECE_METRES} piece
+ * along `z` — #3252: galvanised steel posts 4 m apart, and between each pair
+ * three stacked panels, the lower two concrete-grey absorbers and the top one
+ * a tinted band, under a capping rail. Each part with the colour it is
+ * drawn in, a colour a vertex, as the chain-link's frame is: it wears no
+ * photograph.
+ */
+function noiseBarrierParts(): readonly ShapePart[] {
+  const half = BOUNDARY_PIECE_METRES / 2;
+  const post = 0.2;
+  const bay = half - post;
+  const panel = (bottom: number, height: number): BufferGeometry =>
+    merged([-1, 1].map((side) => block(0.12, height, bay, 0, bottom, (side * half) / 2)));
+  const course = NOISE_BARRIER_METRES / 3;
+  return [
+    {
+      colour: 0x6a7175,
+      geometry: () =>
+        merged([
+          ...[-(half - post / 2), 0, half - post / 2].map((z) =>
+            block(post, NOISE_BARRIER_METRES + 0.6, post, 0, -0.5, z),
+          ),
+          block(0.16, 0.06, BOUNDARY_PIECE_METRES, 0, NOISE_BARRIER_METRES),
+        ]),
+    },
+    { colour: 0xa9a69d, geometry: () => panel(-0.5, 0.5 + course - 0.02) },
+    { colour: 0xb7b4ab, geometry: () => panel(course, course - 0.02) },
+    { colour: 0x7f9a8c, geometry: () => panel(2 * course, course - 0.02) },
+  ];
 }
 
 /**
@@ -21903,8 +22223,74 @@ export const CHAIN_LINK_SINK_METRES = 0.3;
  *
  * Exported for `realistic-roadside.test.ts`, which runs it.
  */
-export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE};
-if (abs(step(0.5, ${CHAIN_LINK_PART_ATTRIBUTE}) - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
+export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE} < 3.5 ? ${CHAIN_LINK_PART_ATTRIBUTE} : mod(${CHAIN_LINK_PART_ATTRIBUTE}, 4.0);
+float oylFenceOfPart = ${CHAIN_LINK_PART_ATTRIBUTE} < 0.5 ? 0.0 : (${CHAIN_LINK_PART_ATTRIBUTE} < 3.5 ? 1.0 : floor(${CHAIN_LINK_PART_ATTRIBUTE} * 0.25));
+if (abs(oylFenceOfPart - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
+
+/**
+ * The part every vertex of a BUILT fence carries in
+ * {@link CHAIN_LINK_PART_ATTRIBUTE} — #3252: four times its fence's number in
+ * `scenery-plan.ts` §`FENCE_SHAPES`, and how it is painted — nought, the
+ * planks' photograph, or one, its own vertex's colour, as the chain-link's
+ * frame is. So the timber fence is 8 and the noise barrier 13, and the
+ * chain-link's 1 and 2 (#1274) are what they were.
+ * {@link CHAIN_LINK_FOLD_GLSL} reads both halves.
+ */
+export const BUILT_FENCE_PARTS = { 'timber-fence': 8, 'noise-barrier': 13 } as const;
+
+/**
+ * `folded` with the built fences appended — #3252: the timber fence and the
+ * noise barrier, in the field fence's ONE instanced shape beside the
+ * chain-link ({@link chainLinkFenceGeometry}), each vertex marked with its
+ * part ({@link BUILT_FENCE_PARTS}). Each is taken through
+ * {@link projectedInMetres} as the field fence's own planks are, so every
+ * attribute the fence carries is the same size on all of them; the barrier's
+ * colour is then its own parts'. `folded` is released.
+ *
+ * What it costs is triangles: every realistic fence instance submits every
+ * shape, 459 in all, under the 580 of the heaviest structure that
+ * `realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`' term prices a slot at.
+ */
+export function withBuiltFences(folded: BufferGeometry): BufferGeometry {
+  const tile = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES.planks);
+  const timber = projectedInMetres(timberFenceGeometry(), tile, 1, false);
+  const barrier = noiseBarrierParts().map((part) => {
+    const projected = projectedInMetres(part.geometry(), tile, 1, false);
+    const colour = new Color(part.colour);
+    const colours = projected.getAttribute('color');
+    for (let at = 0; at < colours.count; at += 1) colours.setXYZ(at, colour.r, colour.g, colour.b);
+    return projected;
+  });
+  const built: readonly (readonly [BufferGeometry, number])[] = [
+    [timber, BUILT_FENCE_PARTS['timber-fence']],
+    ...barrier.map((each) => [each, BUILT_FENCE_PARTS['noise-barrier']] as const),
+  ];
+  const held = folded.getAttribute('position').count;
+  const vertices = built.reduce(
+    (sum, [geometry]) => sum + geometry.getAttribute('position').count,
+    held,
+  );
+  const geometry = new BufferGeometry();
+  for (const name of Object.keys(folded.attributes)) {
+    const source = folded.getAttribute(name);
+    const size = source.itemSize;
+    const out = new Float32Array(vertices * size);
+    out.set(source.array);
+    let first = held;
+    for (const [each, part] of built) {
+      const from = each.getAttribute(name) as BufferAttribute | undefined;
+      const count = each.getAttribute('position').count;
+      if (name === CHAIN_LINK_PART_ATTRIBUTE) out.fill(part, first, first + count);
+      else if (from !== undefined) out.set(from.array, first * size);
+      first += count;
+    }
+    geometry.setAttribute(name, new BufferAttribute(out, size));
+  }
+  for (const [each] of built) each.dispose();
+  folded.dispose();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
 
 /**
  * The wire's cut-out — #1274, two functions {@link withChainLink} declares in
@@ -22142,7 +22528,8 @@ export class RealisticStructureBelts {
         if (kind === 'fence' && chainLink !== undefined) {
           const folded = chainLinkFenceGeometry(shapes[0] as BufferGeometry, chainLink.geometry);
           (shapes[0] as BufferGeometry).dispose();
-          shapes[0] = folded;
+          // #3252: and the timber fence and the noise barrier, in the same draw.
+          shapes[0] = withBuiltFences(folded);
         }
         models.set(kind, shapes);
       }
@@ -22157,7 +22544,8 @@ export class RealisticStructureBelts {
                 kind: 'fence',
                 materials: chainLinkMaterials(surface, textures, chainLink.wire),
                 attribute: CHAIN_LINK_SHAPE_ATTRIBUTE,
-                shapeOf: (item: ScatterItem) => (item.chainLink === true ? 1 : 0),
+                // #3252: the field fence, the chain-link, the timber fence or the barrier.
+                shapeOf: fenceShapeOf,
               },
             }
           : {}),

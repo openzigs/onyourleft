@@ -37,16 +37,26 @@
  * chain-link model inside the field fence's own instanced draw
  * (`three-renderer.ts` §`RealisticStructureBelts`).
  *
+ * ## Two more fences of the same piece — #3252
+ *
+ * A close-board timber fence beside allotments and gardens
+ * ({@link timberFencePieces}), placed exactly as above, and a highway's noise
+ * barrier ({@link noiseBarrierPieces}), placed along the highway and not a
+ * ground's outline. Each is a `fence` marked {@link ScatterItem.boundary},
+ * budgeted and drawn as the chain-link is: `scenery-plan.ts` §`BOUNDARY_PLAN`
+ * says which setting gets which.
+ *
  * Pure, and names no rendering library. Built once a route, on first ask.
  */
 
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
-import type { LandUseFeature } from '@onyourleft/map-features';
+import type { LandUseFeature, StreetFeature } from '@onyourleft/map-features';
 
 import type { LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { nearestOnDrawnRoad } from './road-grid';
 import type { ScatterItem } from './scatter';
+import { boundaryFor, type BoundaryType } from './scenery-plan';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
 
@@ -66,6 +76,141 @@ export const CHAIN_LINK_ALONG_ROAD_COSINE = Math.cos(Math.PI / 6);
 export interface ChainLinkPiece {
   readonly item: ScatterItem;
   readonly along: number;
+}
+
+/**
+ * The `landuse` kinds a close-board TIMBER fence stands beside — #3252,
+ * `scenery-plan.ts` §`BOUNDARY_PLAN`'s `garden`: `allotments` and `garden`,
+ * the plots people fence with boards. Placed exactly as the chain-link is
+ * (the header's "Where along them"), each piece a `fence` marked
+ * {@link ScatterItem.boundary} `timber-fence`.
+ */
+export const TIMBER_FENCE_KINDS: ReadonlySet<string> = new Set(['allotments', 'garden']);
+
+/** The grounds a timber fence stands beside. @see TIMBER_FENCE_KINDS */
+export function timberFencedGrounds(landUse: readonly LandUseFeature[]): readonly LandUseFeature[] {
+  return landUse.filter(
+    (feature) => feature.layer === 'landuse' && TIMBER_FENCE_KINDS.has(feature.kind),
+  );
+}
+
+/** Every timber-fence piece beside `grounds`, placed as {@link chainLinkPieces} places its own. */
+export function timberFencePieces(
+  grounds: readonly LandUseFeature[],
+  route: ChainLinkRoute,
+): readonly ChainLinkPiece[] {
+  return outlinePieces(grounds, route, TIMBER);
+}
+
+/** How a piece says which fence it is. @see ScatterItem.chainLink, ScatterItem.boundary */
+type FenceMark = Pick<ScatterItem, 'chainLink' | 'boundary'>;
+
+/** How a `fence` item says it is a boundary of `type`; the field fence says nothing. */
+function fenceMarkOf(type: BoundaryType): FenceMark {
+  if (type === 'chain-link') return { chainLink: true };
+  return type === 'timber-fence' || type === 'noise-barrier' ? { boundary: type } : {};
+}
+
+// Which fence each ground gets is the plan's: `scenery-plan.ts` §`BOUNDARY_PLAN`.
+const CHAIN_LINK = fenceMarkOf(boundaryFor('works'));
+const TIMBER = fenceMarkOf(boundaryFor('garden'));
+const NOISE_BARRIER = fenceMarkOf(boundaryFor('highway'));
+
+/**
+ * Half the width a mapped highway is drawn at, in metres: **4.5** —
+ * `cross-streets.ts` §`SIDE_ROAD_WIDTHS`' `highway`, halved, which
+ * `chain-link.test.ts` holds this to.
+ */
+export const HIGHWAY_HALF_WIDTH_METRES = 4.5;
+
+/** How far off a highway's edge its noise barrier stands, in metres: **2**. */
+export const NOISE_BARRIER_VERGE_METRES = 2;
+
+/** How far from the road a highway's barrier is still placed, in metres: **80**. */
+export const NOISE_BARRIER_REACH_METRES = 80;
+
+/**
+ * How far behind a barrier, on the route's side, the land is read to decide
+ * whether it stands, in metres: **12** — the first gardens behind it.
+ */
+export const NOISE_BARRIER_BEHIND_METRES = 12;
+
+/**
+ * Every piece of highway NOISE BARRIER — #3252, `scenery-plan.ts`
+ * §`BOUNDARY_PLAN`'s `highway`: along a mapped `highway` at ground level,
+ * on the side the route is on, **where the land behind it is built-up** —
+ * which is what a noise barrier is built for, and why a motorway through
+ * fields has none.
+ *
+ * A highway's line is cut into pieces of {@link ChainLinkRoute.piece} as a
+ * ground's outline is. A piece stands {@link HIGHWAY_HALF_WIDTH_METRES} and
+ * {@link NOISE_BARRIER_VERGE_METRES} off the highway's centreline toward the
+ * route, where the route comes within {@link NOISE_BARRIER_REACH_METRES} of
+ * it and the land {@link NOISE_BARRIER_BEHIND_METRES} further toward the
+ * route is `built-up`. None stands where the route is on the highway or hard
+ * beside it — the barrier would be on the route's own verge — nor in water,
+ * nor in a city centre. Each is a `fence` marked
+ * {@link ScatterItem.boundary} `noise-barrier`, spending the structures'
+ * budget as every boundary does.
+ */
+export function noiseBarrierPieces(
+  streets: readonly StreetFeature[],
+  route: ChainLinkRoute,
+): readonly ChainLinkPiece[] {
+  const { profile, origin } = route;
+  const ways = waterways(profile, route.seed, route.land);
+  const off = HIGHWAY_HALF_WIDTH_METRES + NOISE_BARRIER_VERGE_METRES;
+  const pieces: ChainLinkPiece[] = [];
+  for (const street of streets) {
+    if (street.kind !== 'highway' || street.grade !== 'ground') continue;
+    const { line } = street;
+    for (let point = 0; point + 3 < line.length; point += 2) {
+      const ax = line[point] as number;
+      const az = line[point + 1] as number;
+      const length = Math.hypot((line[point + 2] as number) - ax, (line[point + 3] as number) - az);
+      const count = Math.round(length / route.piece);
+      if (count === 0) continue;
+      const dx = ((line[point + 2] as number) - ax) / length;
+      const dz = ((line[point + 3] as number) - az) / length;
+      for (let index = 0; index < count; index += 1) {
+        const t = ((index + 0.5) * length) / count;
+        const x = ax + dx * t;
+        const z = az + dz * t;
+        const near = nearestOnDrawnRoad(profile, origin, x, z, NOISE_BARRIER_REACH_METRES);
+        if (near === undefined || route.cityCentre(near.along)) continue;
+        const frame = drawnRoadFrame(profile, origin, near.along);
+        if (frame === undefined) continue;
+        // Square to the highway, toward the route: (dz, −dx) or its opposite.
+        const across = dz * (frame.x - x) - dx * (frame.z - z);
+        if (Math.abs(across) < off + route.roadside) continue;
+        const side = across < 0 ? -1 : 1;
+        const bx = x + dz * side * off;
+        const bz = z - dx * side * off;
+        const behind = NOISE_BARRIER_BEHIND_METRES;
+        if (route.land.classAt(bx + dz * side * behind, bz - dx * side * behind) !== 'built-up') {
+          continue;
+        }
+        const stands = nearestOnDrawnRoad(profile, origin, bx, bz, NOISE_BARRIER_REACH_METRES);
+        if (stands === undefined) continue;
+        const wrapped = distanceOnRoute(profile, stands.along);
+        if (inWater(ways, profile, wrapped, stands.lateral)) continue;
+        pieces.push({
+          item: {
+            kind: 'fence',
+            x: bx,
+            y: terrainHeightAt(profile, origin, route.seed, wrapped, stands.lateral, route.land),
+            z: bz,
+            rotation: Math.atan2(dx, dz),
+            scale: 1,
+            variant: 0,
+            ...NOISE_BARRIER,
+          },
+          along: stands.along,
+        });
+      }
+    }
+  }
+  return pieces;
 }
 
 /** The kinds the chain-link stands on, kept to those {@link CHAIN_LINK_KINDS} names. */
@@ -94,6 +239,15 @@ export function chainLinkPieces(
   grounds: readonly LandUseFeature[],
   route: ChainLinkRoute,
 ): readonly ChainLinkPiece[] {
+  return outlinePieces(grounds, route, CHAIN_LINK);
+}
+
+/** A fence's pieces along the outlines of `grounds`, each marked `mark`. @see the header */
+function outlinePieces(
+  grounds: readonly LandUseFeature[],
+  route: ChainLinkRoute,
+  mark: FenceMark,
+): readonly ChainLinkPiece[] {
   const ways = waterways(route.profile, route.seed, route.land);
   const pieces: ChainLinkPiece[] = [];
   for (const ground of grounds) {
@@ -113,7 +267,7 @@ export function chainLinkPieces(
       const dz = (bz - az) / length;
       for (let index = 0; index < count; index += 1) {
         const t = ((index + 0.5) * length) / count;
-        const placed = standing(route, ways, ax + dx * t, az + dz * t, dx, dz);
+        const placed = standing(route, ways, ax + dx * t, az + dz * t, dx, dz, mark);
         if (placed !== undefined) pieces.push(placed);
       }
     }
@@ -129,6 +283,7 @@ function standing(
   z: number,
   dx: number,
   dz: number,
+  mark: FenceMark,
 ): ChainLinkPiece | undefined {
   const { profile, origin } = route;
   const near = nearestOnDrawnRoad(profile, origin, x, z, CHAIN_LINK_REACH_METRES);
@@ -159,7 +314,7 @@ function standing(
       rotation: at.rotation,
       scale: 1,
       variant: 0,
-      chainLink: true,
+      ...mark,
     },
     along: near.along,
   };

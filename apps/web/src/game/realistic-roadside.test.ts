@@ -768,7 +768,8 @@ describe('the chain-link fence is drawn inside the field fence’s own draw — 
     const parts = Array.from(
       mesh.geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,
     );
-    expect(parts.filter((part) => part > 0)).toHaveLength(
+    // (Parts 1 and 2: since #3252 the same shape carries the built fences too.)
+    expect(parts.filter((part) => part === 1 || part === 2)).toHaveLength(
       (facts.frame.triangles + facts.wire.triangles) * 3,
     );
     // It shades as every belt does, with its own pair.

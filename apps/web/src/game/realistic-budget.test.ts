@@ -1386,6 +1386,18 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
           ? Math.min(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))
           : lightestPackedHouse();
       expect(lightestStylised, kind).toBeGreaterThan(0);
+      if (kind === 'wall') {
+        // #3252: the one structure the realistic world builds heavier than
+        // the stylised one — a drystone wall, battered and coped, where the
+        // stylised wall is a block of 12. What bounds it is the structure
+        // class, which the frame's structures term prices every slot at.
+        expect(lightestStylised).toBe(12);
+        expect(realisticStructureTriangles(kind)).toBe(168);
+        expect(realisticStructureTriangles(kind)).toBeLessThanOrEqual(
+          REALISTIC_TRIANGLES.structure,
+        );
+        continue;
+      }
       expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(
         packed === undefined
           ? Math.max(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))

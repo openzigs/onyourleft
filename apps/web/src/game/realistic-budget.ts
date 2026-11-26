@@ -333,6 +333,12 @@ export const REALISTIC_TRIANGLES: Readonly<
    * fence instance submits the field fence's 84 and these: 243, under the
    * 580 of the heaviest structure that {@link REALISTIC_STRUCTURE_ITEMS}'
    * term prices every structure slot at — the frame's sum does not move.
+   *
+   * ⚠️ **Since #3252 the same mesh carries two fences more**, built from
+   * numbers: a close-board timber fence (96 triangles) and a highway noise
+   * barrier (120), so every realistic fence instance submits 459 — still
+   * under the 580, and `scenery-shapes.test.ts` holds the folded mesh to
+   * `structure`. This figure is the chain-link's own and did not move.
    */
   'chain-link': 180,
 };
@@ -352,6 +358,40 @@ export const REALISTIC_TRIANGLES: Readonly<
  * frame sum in `realistic-budget.test.ts` read it too)
  */
 export const REALISTIC_BICYCLE_TRIANGLES = 12_000;
+
+/**
+ * The most triangles a tree or a bush GROWN in code may have, at each level —
+ * #3252, ADR 0099 D-4 item 1: a class of its own, with a test, in the pull
+ * request that adds it (`grown-trees.ts`, held by `grown-trees.test.ts`,
+ * which grows every species and counts).
+ *
+ * ⚠️ **Each figure is the heaviest COMMITTED generated tree of its kind,
+ * rounded up to the hundred, and not the class's ceiling** — a generated oak
+ * is 6 692 at full detail and 2 208 at its middle level, a generated fir
+ * 4 792 and 878 ({@link REALISTIC_TRIANGLES}, "measured"). So a grown tree
+ * standing in any of `tree-levels.ts`' slots is no heavier than the tree
+ * that could already stand there, the worst frame's vegetation is what it
+ * was, and {@link REALISTIC_FRAME_TRIANGLES} and
+ * {@link REALISTIC_REMOTE_TRIANGLES} are not asked for anything
+ * (ADR 0099 D-4 item 4). A bush is a quarter of {@link REALISTIC_TRIANGLES}'
+ * `shrub`, which the scanned shrubs fill.
+ *
+ * What a grown species costs beyond its triangles: no file, no texture and
+ * no byte of {@link REALISTIC_BUILD_BYTES} — it wears a committed tree's
+ * maps — and no far draw call, because its far band is its host's impostor
+ * in the host's own mesh. It costs the time to grow it when the world loads,
+ * about 40 ms for all six on a laptop, which nothing here bounds, and its
+ * geometry's bytes on the GPU.
+ *
+ * @test-facing held by `grown-trees.test.ts`, which grows every species and
+ * counts each level against it, and `scenery-shapes.test.ts`; the generator
+ * is handed each species' own numbers and never asks what the ceiling is
+ */
+export const REALISTIC_GROWN_TRIANGLES = {
+  'tree-broadleaf': { full: 6_700, middle: 2_300 },
+  'tree-conifer': { full: 4_800, middle: 900 },
+  shrub: { full: 1_650 },
+} as const;
 
 /**
  * How many SHRUBS and ROCKS are drawn as meshes in one frame — the nearest
