@@ -12,6 +12,15 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0099 is [ADR 0099](../adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)**,
+  taken by [#3250](https://github.com/openzigs/onyourleft/issues/3250) on 2026-11-26 for the model
+  sources #3251 to #3253 may use, the two licences, the credit and the budget a new model holds.
+  **Accepted** the same day on the owner's approval recorded on its pull request #3256. It
+  supersedes in part ADR 0049 D-10's In table, which gained one dated `## Amendments` pointer. ADR
+  0022 was not amended, because its D-1 was already superseded on 2026-09-21. It took 0099 because **0098 is claimed** by the open pull request
+  [#2966](https://github.com/openzigs/onyourleft/pull/2966), which adds an ADR numbered 0098 on
+  the ridden-block cache for #2891; the 0097 paragraph below said 0098 was free, and that was
+  stale. The next free number is **0100**.
   ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,
   taken by [#2734](https://github.com/openzigs/onyourleft/issues/2734) on 2026-11-24 for in-browser
   Valhalla as a routing tier when no instance routes a leg, **Accepted** the same day on the owner's
