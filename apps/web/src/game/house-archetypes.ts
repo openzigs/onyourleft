@@ -630,7 +630,7 @@ export const CONTEMPORARY_FEATURES: Readonly<Record<ContemporaryArchetype, Arche
 
 /** Whether a plan's house is a contemporary one. */
 export function isContemporary(archetype: PlanHouseArchetype): archetype is ContemporaryArchetype {
-  return archetype === 'contemporary-flat' || archetype === 'contemporary-low';
+  return (CONTEMPORARY_ARCHETYPES as readonly string[]).includes(archetype);
 }
 
 /**
