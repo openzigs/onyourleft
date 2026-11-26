@@ -203,6 +203,39 @@ describe('the road ridden and the road ahead — #2070', () => {
   });
 });
 
+describe('which half of the box the mark is in — #2416', () => {
+  /** What the compact tile's stylesheet reads to move its label. */
+  function half(): string | null {
+    return document.querySelector('.oyl-hud__plan')?.getAttribute('data-oyl-mark-half') ?? null;
+  }
+
+  it('says the bottom at the start of a route drawn north, and the top at its end', async () => {
+    const profile = straightRoute();
+    mounted = await mount(<PlanTrace profile={profile} distance={0} />);
+    // North up: the start is at the bottom of the box.
+    expect(markAt().y).toBeGreaterThan(50);
+    expect(half()).toBe('bottom');
+    mounted.unmount();
+
+    mounted = await mount(<PlanTrace profile={profile} distance={profile.totalDistance} />);
+    expect(markAt().y).toBeLessThan(50);
+    expect(half()).toBe('top');
+  });
+
+  it('changes where the mark crosses the middle, and not before', async () => {
+    const profile = straightRoute();
+    const total: number = profile.totalDistance;
+    mounted = await mount(<PlanTrace profile={profile} distance={total * 0.49} />);
+    expect(markAt().y).toBeGreaterThan(50);
+    expect(half()).toBe('bottom');
+    mounted.unmount();
+
+    mounted = await mount(<PlanTrace profile={profile} distance={total * 0.51} />);
+    expect(markAt().y).toBeLessThan(50);
+    expect(half()).toBe('top');
+  });
+});
+
 describe('what a screen reader is handed', () => {
   it('is the sentence, on an element with a role, not a pile of paths', async () => {
     const profile = straightRoute();
