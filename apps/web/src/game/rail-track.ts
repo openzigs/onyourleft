@@ -52,12 +52,14 @@
  * whatever heights the ride has: real ones, or the level fallback when none
  * could be read. It reads no height of its own from anywhere.
  *
- * ## Cost — no draw call, texture or material more
+ * ## Cost — no mesh, texture or material more
  *
  * Each piece in view is a `cross-streets.ts` §`SideRoad`, appended to the
  * frame's side roads (`scene.ts`), so `three-renderer.ts` §`SideRoadBelt`
  * draws all of it in the road's own material in its ONE draw call, and
- * `clearOfSideRoads` keeps the scenery off it. The village draw-call ceilings
+ * `clearOfSideRoads` keeps the scenery off it. ⚠️ That mesh is hidden on a
+ * frame with no side road, so track in view of a frame that had none makes
+ * the side roads' call where none was made: one, however much track. The village draw-call ceilings
  * are frozen (`realistic-budget.ts`), which is why the track wears vertex
  * colours and not a material of its own.
  *

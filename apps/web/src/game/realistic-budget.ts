@@ -1178,9 +1178,13 @@ export const RAIL_CROSSING_FURNITURE_TRIANGLES = 120;
  * (`rail-track.ts`) and is no model, so none of {@link REALISTIC_TRIANGLES}'
  * per-model ceilings is its.
  *
- * ⚠️ **No draw call and no ceiling above is raised.** The track is side roads:
- * `three-renderer.ts` §`SideRoadBelt` draws it in the road's material in the
- * call it already makes, with no texture. Like every side road, #2660's level
+ * ⚠️ **No ceiling above is raised, and no mesh, material or texture is
+ * added.** The track is side roads: `three-renderer.ts` §`SideRoadBelt` draws
+ * it in the road's material in its ONE call. ⚠️ That mesh is hidden on a
+ * frame with no side road in view, so a frame whose only side road is track
+ * makes that one call where it made none: measured in the pinned Chromium on
+ * `town=rail`, 33 to 34 calls beside the bridge, and 40 and 40 at a crossing,
+ * where #2660's arm already drew. Like every side road, #2660's level
  * crossings and #2973's nearby streets (8 192 a frame), it is **outside
  * {@link REALISTIC_FRAME_TRIANGLES}' worst frame**, which counts none of the
  * road's mesh; unlike a village side road it is drawn only where a corridor
