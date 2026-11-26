@@ -11,7 +11,8 @@
  * Each check throws a plain `Error` naming what broke, so a browser page can
  * run it and hand back the message. The points are the caller's: three
  * waypoints on roads, in order, close enough together that the double's fixed
- * leg length is not shorter than the straight line between them.
+ * leg length is not shorter than the straight line between them, and one
+ * inside the graph's coverage but far from any road it holds (#3179).
  *
  * No real place: the gate's points are on the grid off Null Island
  * (`tools/valhalla/synthetic-grid.ts`), and the Vitest run's are beside them.
@@ -33,6 +34,11 @@ export interface ContractInputs {
   readonly preferences: RidingPreferences;
   /** How far a leg's ends may sit from its waypoints: the engine's snapping. Metres. */
   readonly snapMetres: number;
+  /**
+   * A point inside the graph's coverage with no road for kilometres: where
+   * Valhalla moves a waypoint to the nearest road, however far (#3179).
+   */
+  readonly farFromRoads: GeographicPosition;
 }
 
 export interface ContractCheck {
@@ -98,6 +104,27 @@ export const ROUTING_CONTRACT: readonly ContractCheck[] = [
       check(
         distanceBetween(start, points[1]) <= snapMetres,
         'the second leg does not start at the middle waypoint',
+      );
+    },
+  },
+  {
+    name: 'never answers a leg to a waypoint far from any road with a line that does not reach it',
+    async run({ provider, points, preferences, snapMetres, farFromRoads }) {
+      let legs;
+      try {
+        legs = await provider.route({
+          waypoints: [{ position: points[0] }, { position: farFromRoads }],
+          preferences,
+        });
+      } catch (error) {
+        // Refusing the leg keeps the promise; any other throw does not.
+        check(error instanceof RoutingError, 'the far leg was refused without a RoutingError');
+        return;
+      }
+      const last = legs[0]?.shape.at(-1);
+      check(
+        last !== undefined && distanceBetween(last, farFromRoads) <= snapMetres,
+        'a leg to a waypoint far from any road was answered with a line that does not reach it',
       );
     },
   },

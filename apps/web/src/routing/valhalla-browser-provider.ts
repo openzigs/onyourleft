@@ -60,8 +60,11 @@
  * When the engine cannot route a leg here and now (outside the graph, too
  * large for its memory, too slow, the graph not loadable, map tiles off) it
  * raises a {@link FreehandFallback}, and the planner draws that leg freehand
- * with the reason on it. Only a graph that holds both ends and finds no path
- * between them answers `'no-route'`, which the rider fixes by moving a point.
+ * with the reason on it. So does a leg whose line does not reach its two
+ * waypoints: the engine snapped one to a road far away because the graph holds
+ * none near it (#3179, `reach.ts`). Only a graph that holds both ends and
+ * finds no path between them answers `'no-route'`, which the rider fixes by
+ * moving a point.
  *
  * ⚠️ **No message here names a coordinate or a place** (ADR 0004 D). Each is a
  * fixed sentence, and the SDK's own text, which can carry a tile URL, is never
@@ -81,6 +84,7 @@ import {
 
 import type { RoutingGraphConfig } from './browser-graph';
 import { FreehandFallback } from './draft';
+import { reachesItsWaypoints } from './reach';
 
 /** The SDK's largest decoded-tile budget, which spike 0035 needed for a 150 km route. */
 export const TILE_BUDGET_BYTES = 128 * 1024 * 1024;
@@ -98,6 +102,13 @@ export const LEG_TIMEOUT_MS = 90_000;
 /** Said when a leg runs outside the graph the app routes on. */
 export const OUTSIDE_GRAPH_TEXT =
   "This leg is outside the area the app's own road map covers, so it is drawn as a straight line.";
+
+/**
+ * Said when the engine's line does not reach a waypoint (#3179): it moved the
+ * waypoint to a road far away, because the graph has none near it.
+ */
+export const NO_ROAD_NEAR_TEXT =
+  "A waypoint of this leg is too far from any road on the app's own road map, so it is drawn as a straight line.";
 
 /** Said when the engine runs out of the memory it is given on this device. */
 export const TOO_LARGE_TEXT =
@@ -255,7 +266,10 @@ export function valhallaBrowserProvider(options: BrowserProviderOptions): Browse
       // Our own refusal of a closed planner's leg passes through; the SDK's is translated.
       throw error instanceof RoutingError ? error : refusal(error, leg);
     }
-    return legFrom(result, leg);
+    const routed = legFrom(result, leg);
+    // The SDK snaps a waypoint with no road near it to one far away (#3179, `reach.ts`).
+    if (!reachesItsWaypoints(routed, from, to)) throw new FreehandFallback(NO_ROAD_NEAR_TEXT);
+    return routed;
   };
 
   return {
