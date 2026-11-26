@@ -313,6 +313,6 @@ you keep your copyright.
 
 ## Relationship to other cycling apps
 
-This project is not affiliated with, endorsed by, or derived from any other cycling app or service.
-It does not use their APIs, code, assets or data, and it implements its features independently. You can bring
+This project is not affiliated with, endorsed by, or derived from Strava or Zwift. It does not use
+their APIs, code, assets or data, and it reimplements product concepts independently. You can bring
 your own history in via standard FIT, GPX and TCX file import.
