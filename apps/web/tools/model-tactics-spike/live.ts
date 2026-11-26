@@ -16,7 +16,9 @@
  * #2720's prompt under ADR 0073's rules is `--run 2720`. `race` takes
  * `--seed <n>` to ride one seed, for a quick look while tuning. A race writes
  * the rules it rode under into each log (`rules`); `compare` replays each log
- * under its own, and a log that names none under ADR 0071's.
+ * under its own, and a log that names none under ADR 0071's. A flag given
+ * with no value is refused with exit 2 (#2715, `options.ts`), so a forgotten
+ * `--run` name never writes over the first run's logs in `results/`.
  *
  * Ollama on the instance PC listens on 127.0.0.1 only and has no
  * authentication, so it is never exposed: each call runs `curl.exe` on that
@@ -26,7 +28,11 @@
  * `wallMs` and left out.
  *
  * `bench` writes `results/latency.json`, unloading the model first so that
- * its cold row is a cold load (#2708); `race` writes one decision log per
+ * its cold row is a cold load (#2708). ⚠️ That unload (`keep_alive: 0`)
+ * evicts `gemma4:12b`, **the model the instance writes its ride write-ups
+ * with**: run `bench` only when no write-up is running on the instance, or
+ * the write-up and the instance's next job pay a cold load (#2715). `race`
+ * and `compare` unload nothing. `race` writes one decision log per
  * seed, `results/<circuit>-<seed>.json`, which `replay.test.ts` replays,
  * with a SHA-256 of the live run's whole trace (#2708); `compare` rides each
  * field seeded and from its log, with no network, and writes
@@ -50,6 +56,7 @@ import { decisionRequest, MODEL_TACTICS_MODEL } from './ollama';
 import { modelInput } from './model-input';
 import { fieldNumbers } from './compare';
 import { parseModelDecision } from './decision';
+import { missingValue, option } from './options';
 import type { LoggedDecision } from './decision-log';
 import {
   fieldTrace,
@@ -362,15 +369,13 @@ async function compare(): Promise<void> {
   await writeFile(`${RESULTS}comparison.json`, `${JSON.stringify(fields, null, 2)}\n`);
 }
 
-/** `args` with the option `name` and its value taken out, and the value. */
-function option(args: readonly string[], name: string): [readonly string[], string | undefined] {
-  const at = args.indexOf(name);
-  if (at < 0) return [args, undefined];
-  return [[...args.slice(0, at), ...args.slice(at + 2)], args[at + 1]];
-}
-
 /** Run `bench`, `race flat` / `race hilly`, or `compare`. Returns the exit code. */
 export async function main(args: readonly string[]): Promise<number> {
+  const missing = missingValue(args, ['--host', '--run', '--seed']);
+  if (missing !== undefined) {
+    process.stderr.write(`${missing} takes a value\n`);
+    return 2;
+  }
   const [withoutHost, hostArg] = option(args, '--host');
   sshHost = hostArg;
   const [withoutRun, run] = option(withoutHost, '--run');
