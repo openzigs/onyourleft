@@ -17,6 +17,11 @@
  * purpose: the spec counts the map's paints while the label changes, and a
  * label that repainted the map would show it on every frame.
  *
+ * With `?text=large` or `?text=extra-large` (#2415) the HUD is drawn at that
+ * text size, as Settings → Ride HUD sets it; and with `?grade=-19.9` the
+ * gradient is held at that value rather than swinging, so the tile's label
+ * can be measured at its widest.
+ *
  * With `?ride=real` (#2419) every frame changes what a REAL ride changes and
  * a simulated one does not (`useSimulatedRide` passes no trainer and no live
  * sensors): power, heart rate and cadence, so their fields and the zone
@@ -70,6 +75,7 @@ import {
 } from '@onyourleft/domain';
 
 import { HudPanel } from '../src/game/hud/HudPanel';
+import { HUD_TEXT_SIZES } from '../src/game/hud/hud-layout-preference';
 import { denseTown, denseTownRoute } from '../src/game/hud/street-map-testing';
 import type { GameState } from '../src/game/simulation';
 import type { TraceSample } from '../src/game/hud/recent-trace';
@@ -146,7 +152,15 @@ const CORRIDOR = denseTown(HEADING);
 const STREET = PARAMS.get('map') !== 'outline';
 /** #2385: the compact route panel, and a gradient that swings (see the module note). */
 const COMPACT = PARAMS.get('route') === 'compact';
-const LAYOUT = { hidden: [], textSize: 'normal', route: COMPACT ? 'compact' : 'full' } as const;
+/** #2415: `?text=large` or `?text=extra-large`, the HUD's text size; normal otherwise. */
+const TEXT_SIZE = HUD_TEXT_SIZES.find((size) => size === PARAMS.get('text')) ?? 'normal';
+const LAYOUT = { hidden: [], textSize: TEXT_SIZE, route: COMPACT ? 'compact' : 'full' } as const;
+/**
+ * #2415: `?grade=-19.9`, one gradient held for the whole ride in place of the
+ * swing, so the tile's label can be measured at its widest ordinary value.
+ */
+const GRADE_ASKED = Number(PARAMS.get('grade') ?? Number.NaN);
+const FIXED_GRADE = Number.isFinite(GRADE_ASKED) ? GRADE_ASKED : undefined;
 /** #2419: what a real ride changes, changed on every frame (see the module note). */
 const REAL = PARAMS.get('ride') === 'real';
 /** Five kilometres in, so every field has something to say. */
@@ -164,7 +178,12 @@ function stateAt(distance: number, frame: number): GameState {
     ride: { speed: metresPerSecond(11.1), distance: metres(distance) },
     elapsed: seconds(450),
     ridden: seconds(450),
-    grade: COMPACT ? gradePercent(8 * Math.sin(distance / 40)) : gradeAt(PROFILE, metres(distance)),
+    grade:
+      FIXED_GRADE !== undefined
+        ? gradePercent(FIXED_GRADE)
+        : COMPACT
+          ? gradePercent(8 * Math.sin(distance / 40))
+          : gradeAt(PROFILE, metres(distance)),
     input: { power: watts(powerAt(frame)), live: true },
     headwindMetresPerSecond: 0,
   };
