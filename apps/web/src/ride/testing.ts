@@ -315,6 +315,7 @@ export function stubRideController(
     },
     noteSoloDraft: () => undefined,
     notePacerDecision: () => undefined,
+    notePosition: () => undefined,
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },

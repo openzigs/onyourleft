@@ -79,6 +79,7 @@ import {
   type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
+  type GeographicPosition,
   type ThresholdTest,
   type TimeInZones,
   type UnixSeconds,
@@ -1357,6 +1358,18 @@ export interface RideController {
    * frame's, so the recording's clock less those is the ride's start.
    */
   notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /**
+   * Where the rider is on an open-world ride's street — #3059, the owner's
+   * ruling of 2026-11-22 that an open-world ride saves its track. Recorded as
+   * the `latitude` and `longitude` channels on every frame, the recording
+   * keeping the last in each of its slots, and only while a ride is
+   * recording: the saved ride
+   * then has a position like any recorded track, private by default
+   * (`putActivity`, ADR 0004) and trimmed by the rider's zones wherever it is
+   * shared (`detail/load.ts` §`loadSharedTrack`). Paused, idle or stopped, it
+   * is ignored. Decides no write to the trainer.
+   */
+  notePosition(position: GeographicPosition): void;
   /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
@@ -4600,6 +4613,18 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : unixSeconds(Math.max(0, clock - record.arrivedAtS)));
       pacerRide = { ...ride, startedAt };
+    },
+
+    notePosition(position: GeographicPosition): void {
+      // Idle, paused or stopped, the recording engine refuses the reading itself.
+      if (recorder === undefined) return;
+      const at = now();
+      // Every frame goes in: the session keeps the last reading in each slot.
+      // A once-a-second throttle keyed on the wall-clock second left slots
+      // empty, because a slot starts at the ride's own fractional start, and
+      // an empty slot splits the track (#3059).
+      recorder.observeReading({ channel: 'latitude', value: position.latitude, at });
+      recorder.observeReading({ channel: 'longitude', value: position.longitude, at });
     },
 
     async recordForRoom(): Promise<boolean> {

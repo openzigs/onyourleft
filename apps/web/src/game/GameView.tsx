@@ -3976,6 +3976,10 @@ function GameScreen({
         slopesRef.current = slopesOf(followed.profile);
         setRideRoad(rideRoadRef.current);
       }
+      // #3059: where the rider is on the open-world street, to the recording
+      // under the ride, so the saved ride carries the streets ridden.
+      const ridden = following?.position;
+      if (ridden !== undefined) trainerPortRef.current?.rodeAt?.(ridden);
       const road = rideRoadRef.current;
       // The ride as a reader of `road.profile` reads it: its odometer at the
       // view's own distance. The simulation's own state is the ride's.
