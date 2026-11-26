@@ -1612,3 +1612,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the app. The claim is a sealed, sessionless request signed by the claiming device's key (D-8). The
   six-digit comparison code in ADR 0080 D-5 is not a fingerprint and pins nothing. This entry only
   points there. The body above is not edited. (#2780)
+- **2026-11-26** — **D-11's "only in the Android app" reads "only in the native apps", the iOS
+  and iPadOS app included** (the owner's ruling of 2026-11-26 on #1755). Sealed features are offered
+  in the iOS app as in the Android one, and for D-11's reason: its code ships inside the signed app
+  rather than from an edge that could serve other code. A web build is unchanged: offered from a
+  loopback address or an installed file, and from no website. `apps/web/src/instance/instance-pin.ts`
+  §`loadedFromShell` reads "native" as any Capacitor shell, and the platform split that keeps
+  Android's own plugins out of the iOS app (`support/capacitor.ts` §`shellKind`) does not apply to
+  it. The body above is not edited. (#1755)

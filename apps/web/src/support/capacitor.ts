@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Am I running inside the Android shell, or in a browser?
+ * Am I running inside a native shell (Android, or the iOS app since #1755), or in a browser?
  *
  * One question, asked in one place, because the answer decides which BLE
  * transport the client uses — Web Bluetooth in a browser, `apps/mobile`'s
@@ -72,6 +72,41 @@ export function shellPlatform(capacitor: CapacitorGlobal | undefined): string | 
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The two native shells this client knows how to wire — #1755.
+ *
+ * `android` is `apps/mobile`'s shell, with its own Java plugins registered in
+ * `MainActivity`; `ios` is the iOS and iPadOS app (#15), which has none of
+ * them.
+ */
+export type ShellKind = 'android' | 'ios';
+
+/**
+ * Which native shell this is, or `undefined` for a browser — #1755.
+ *
+ * ⚠️ **"Native" is not "Android".** {@link isNativeShell} is true in both
+ * shells, and two things must keep reading it that way: the BLE transport
+ * (the Capacitor adapter in any shell) and ADR 0047 D-11's sealed-build offer
+ * (`instance/instance-pin.ts` §`sealedBuildOffered`, which the owner ruled on
+ * 2026-11-26 covers the iOS app). This is the finer question, for what only
+ * one shell has: `RecordingService`, `SecureWindow`, `Autoplay`, `OtherPlayer`
+ * and the `MainActivity` hooks are Android's alone.
+ *
+ * ⚠️ **A native shell that names any other platform, or none, is
+ * `undefined`**, and so gets no Android plugin. That is the safe direction: a
+ * plugin that is missing degrades to the browser's fallback, where one that is
+ * wrongly assumed throws inside the bridge.
+ */
+export function shellKind(capacitor: CapacitorGlobal | undefined): ShellKind | undefined {
+  const platform = shellPlatform(capacitor);
+  return platform === 'android' || platform === 'ios' ? platform : undefined;
+}
+
+/** Whether this is the Android shell, the one with `apps/mobile`'s own plugins — #1755. */
+export function isAndroidShell(capacitor: CapacitorGlobal | undefined): boolean {
+  return shellKind(capacitor) === 'android';
 }
 
 /** Reads the real global. The one impure function here. */
