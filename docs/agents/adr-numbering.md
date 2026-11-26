@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0058 is [ADR 0058](../adr/0058-on-ios-the-camera-screens-detect-screen-capture-and-blank-the-picture.md)**,
+  taken by [#1752](https://github.com/openzigs/onyourleft/issues/1752) on 2026-11-26 for the iOS
+  counterpart of ADR 0044 D-12: the camera screens detect screen capture and blank the picture. It
+  is **Proposed**, waiting on the owner's approval of its rider wording. It took the number
+  reserved for it on #15 on 2026-10-27, which every entry below kept as claimed. **0057 stays
+  claimed** by [#1748](https://github.com/openzigs/onyourleft/issues/1748). ADR 0044 gained one
+  dated `## Amendments` pointer. The next free number is still the one the 0099 entry below states.
   ⚠️ **0099 is [ADR 0099](../adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)**,
   taken by [#3250](https://github.com/openzigs/onyourleft/issues/3250) on 2026-11-26 for the model
   sources #3251 to #3253 may use, the two licences, the credit and the budget a new model holds.
