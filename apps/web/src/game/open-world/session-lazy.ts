@@ -16,7 +16,10 @@
  * with the one request (ADR 0090 D-3), over the basemap `main.tsx` reads.
  */
 
+import type { AthleteId } from '@onyourleft/store';
+
 import type { BasemapConfig } from '../../map/basemap';
+import type { RiddenBlockStore } from '../../world-data/ridden-blocks';
 import type { TerrainConfig } from '../../terrain/config';
 import type { OpenWorldEntry } from './entry';
 import type {
@@ -39,6 +42,13 @@ interface LazyOpenWorldOptions {
    * `undefined` when none is, and the open-world road is then flat.
    */
   readonly terrain?: (() => TerrainConfig | undefined) | undefined;
+  /**
+   * #2891: the store and the athlete whose ridden blocks each ride reads and
+   * keeps, over the configured basemap's URL. `undefined` — no store or no
+   * athlete — and no ride keeps a block.
+   */
+  readonly riddenBlocks?:
+    { readonly store: RiddenBlockStore; readonly owner: AthleteId } | undefined;
 }
 
 /** What opens one session, once the modules are loaded. */
@@ -69,6 +79,15 @@ export function lazyOpenWorldSessions(
         archive: config === undefined ? undefined : source.corridorArchive(config),
         mapTilesOn: options.mapTilesOn,
         terrain: terrain === undefined ? undefined : heights.terrainArchive(terrain),
+        riddenBlocks:
+          options.riddenBlocks === undefined || config === undefined
+            ? undefined
+            : {
+                store: options.riddenBlocks.store,
+                owner: options.riddenBlocks.owner,
+                archiveUrl: config.archiveUrl,
+                now: () => new Date(),
+              },
       });
     };
   },

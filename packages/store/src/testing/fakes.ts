@@ -96,6 +96,7 @@ import type {
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -246,6 +247,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     putWorldCorridor: async (record) => real.putWorldCorridor(record),
     getWorldCorridor: async (owner, route) => real.getWorldCorridor(owner, route),
     deleteWorldCorridor: async (owner, route) => real.deleteWorldCorridor(owner, route),
+    putRiddenBlock: async (record) => real.putRiddenBlock(record),
+    getRiddenBlock: async (owner, block) => real.getRiddenBlock(owner, block),
+    markRiddenBlock: async (owner, block, riddenAt) => real.markRiddenBlock(owner, block, riddenAt),
   };
 }
 
@@ -378,6 +382,11 @@ export function memoryWriteStoreFactory(): StoreFactory {
         // to #1539, which reads the archive again on every ride.
         putWorldCorridor: (record: WorldCorridorRecord) => {
           memory.set(`world-corridor:${record.owner}:${record.routeId}`, record);
+          return Promise.resolve();
+        },
+        // #2891. Likewise a ridden block: the next open-world ride asks again.
+        putRiddenBlock: (record: RiddenBlockRecord) => {
+          memory.set(`ridden-block:${record.owner}:${String(record.block)}`, record);
           return Promise.resolve();
         },
       };

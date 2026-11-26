@@ -38,6 +38,17 @@
  * a block read, read again or dropped — so the open-world session can grow its
  * street graph as the ride goes, and drop what is behind.
  *
+ * **The ridden-block cache** (#2891, ADR 0090 D-6): every block is looked for
+ * in {@link AreaReaderOptions.cache} before it is asked for, and a block in it
+ * is never asked for again (D-6.7). A block is kept only once **every tile of
+ * it is read**: a block read in part is not kept, and is read again on the
+ * next ride. The cache holds a block's features and streets about the block's
+ * own corner ({@link blockFrame}), fixed to the grid like the block, so a
+ * block kept on one ride serves a ride that started anywhere: the reader
+ * converts it out of the ride's frame when it keeps it, and into the ride's
+ * frame when it hands it out ({@link reframer}). With map tiles off, a ride
+ * reads only what is kept (D-7.2).
+ *
  * ⚠️ **What is requested is a function of the rider's block alone** (R-1):
  * a position is turned into its block by {@link blockOf} and nothing else of
  * it is kept. The reader takes no privacy zone (R-3, the owner's Q2) and the
@@ -55,7 +66,10 @@
 
 import {
   columnAtLongitude,
+  localMetres,
+  METRES_PER_DEGREE_LATITUDE,
   rowAtLatitude,
+  tileBounds,
   TILES_AT_Z15,
   type CorridorFrame,
   type TileId,
@@ -63,8 +77,11 @@ import {
 
 import {
   corridorError,
+  describeCorridorFailure,
+  idleYield,
   joinCorridorFeatures,
   readCorridorTiles,
+  reframeCorridorFeatures,
   type ArchiveOpening,
   type CorridorArchive,
   type CorridorFeatures,
@@ -154,6 +171,65 @@ export function tilesOfBlock(block: BlockId): TileId[] {
 }
 
 /**
+ * The frame a block is kept in: its own north-west corner, fixed to the grid
+ * like the block (R-1). A block's features are the same whichever ride reads
+ * them, so the ridden-block cache (#2891) keeps them about this corner and
+ * hands them to a ride that started somewhere else.
+ */
+export function blockFrame(block: BlockId): CorridorFrame {
+  const corner = tileBounds({ z: 15, x: block.x * 2, y: block.y * 2 });
+  return { latitude: corner.north, longitude: corner.west };
+}
+
+/** The key a block is kept under (`RiddenBlockRecord.block`): `y × 2^14 + x`. */
+export function blockKey(block: BlockId): number {
+  return block.y * BLOCKS + block.x;
+}
+
+/**
+ * The local metres of `from` as the local metres of `to`: each point turned
+ * back into a position as `session.ts` §`positionAt` does (`localMetres`
+ * inverted, with the cosine of `from`'s own latitude), then into `to` by
+ * `localMetres` itself. ⚠️ **Never a plain shift**: a metre west of one frame
+ * is not a metre west of another at another latitude.
+ */
+export function reframer(from: CorridorFrame, to: CorridorFrame): Reframe {
+  const perDegreeLongitude = METRES_PER_DEGREE_LATITUDE * Math.cos((from.latitude * Math.PI) / 180);
+  const point = (x: number, z: number): { readonly x: number; readonly z: number } =>
+    localMetres(
+      to,
+      from.longitude - x / perDegreeLongitude,
+      from.latitude + z / METRES_PER_DEGREE_LATITUDE,
+    );
+  return {
+    point,
+    line: (line) => {
+      const out = new Float32Array(line.length);
+      for (let i = 0; i + 1 < line.length; i += 2) {
+        const at = point(line[i] as number, line[i + 1] as number);
+        out[i] = at.x;
+        out[i + 1] = at.z;
+      }
+      return out;
+    },
+  };
+}
+
+/** What {@link reframer} hands back: a point, and an `x0, z0, x1, z1, …` line or ring. */
+export interface Reframe {
+  point(x: number, z: number): { readonly x: number; readonly z: number };
+  line(line: Float32Array): Float32Array;
+}
+
+/** A block's per-tile streets in another frame, as `reframeCorridorFeatures` moves its features. */
+function reframeStreets(streets: readonly TileStreets[], to: Reframe): TileStreets[] {
+  return streets.map((each) => ({
+    tile: each.tile,
+    streets: each.streets.map((f) => ({ ...f, line: to.line(f.line) })),
+  }));
+}
+
+/**
  * A crossing's delay (R-8): `random()` scaled onto [0, {@link CROSSING_DELAY_MAX_MS}].
  * ⚠️ It is handed nothing but the draw, so no position, block or time of
  * crossing can decide it.
@@ -176,6 +252,28 @@ export interface HeldBlock {
   readonly streets: readonly TileStreets[];
 }
 
+/**
+ * One block as the ridden-block cache keeps it (#2891): its tiles' states, its
+ * features and its streets, **in {@link blockFrame}**, never the ride's.
+ */
+export interface KeptBlock {
+  readonly tiles: readonly CorridorTile[];
+  readonly features: CorridorFeatures;
+  readonly streets: readonly TileStreets[];
+}
+
+/**
+ * The ridden-block cache, as the reader sees it (ADR 0090 D-6.7): read before
+ * the network, written after it. `world-data/ridden-blocks.ts` is the
+ * product's, over the store and for one athlete.
+ */
+export interface AreaCache {
+  /** The block as kept, in {@link blockFrame}, or `undefined` when it is not. */
+  get(block: BlockId): Promise<KeptBlock | undefined>;
+  /** Keeps a block whose every tile was read from the archive whose identity is `identity`. */
+  put(block: BlockId, kept: KeptBlock, identity: string): Promise<void>;
+}
+
 /** What {@link AreaReader.start} came to. */
 export type AreaStart =
   | { readonly kind: 'off'; readonly why: 'map-tiles-off' | 'no-archive' | 'wrong-schema' }
@@ -187,8 +285,16 @@ export type AreaStart =
 export interface AreaReaderOptions {
   /** `corridor-source.ts` §`corridorArchive` in the product; `undefined` when none is configured. */
   readonly archive: CorridorArchive | undefined;
-  /** The frame the ride's world is drawn in; the features are decoded into it. */
+  /**
+   * The frame the ride's world is drawn in: the features are decoded into
+   * it, and a kept block is converted into it ({@link reframer}).
+   */
   readonly frame: CorridorFrame;
+  /**
+   * The ridden-block cache (#2891), asked before every request. With map
+   * tiles off, a ride reads only what it holds (D-7.2).
+   */
+  readonly cache?: AreaCache | undefined;
   /** The map-tiles switch (ADR 0090 D-7.1), read before every request. */
   readonly mapTilesOn: () => boolean;
   /** The draw for R-8's delay. `Math.random` in the product. */
@@ -211,13 +317,23 @@ export interface AreaReader {
   held(): readonly HeldBlock[];
   /** Whether the block `position` is in is held. */
   holds(position: AreaPosition): boolean;
-  /** Resolves when no read is running (a delayed one not yet due does not count). */
+  /**
+   * Resolves when no read is running (a delayed one not yet due does not
+   * count) and every block kept has been written to the cache.
+   */
   settled(): Promise<void>;
   /** The ride has ended: the running read is abandoned and nothing more is asked. */
   stop(): void;
 }
 
-const keyOf = (block: BlockId): number => block.y * BLOCKS + block.x;
+const keyOf = blockKey;
+
+/** An error's class name, which says what failed and carries no value. */
+const nameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown');
+
+/** Whether every tile of a block was read: none refused (#2891). */
+const fullyRead = (tiles: readonly CorridorTile[]): boolean =>
+  tiles.every((tile) => tile.state !== 'refused');
 
 const defaultSchedule = (run: () => void, ms: number): (() => void) => {
   const timer = setTimeout(run, ms);
@@ -327,14 +443,88 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     );
   };
 
+  const log = options.log ?? ((): void => undefined);
+  const idle = options.yieldToIdle ?? idleYield;
+
+  /** The block from the cache, in the ride's frame, or `undefined`; a store that fails is a miss. */
+  const cached = async (block: BlockId): Promise<HeldBlock | undefined> => {
+    if (options.cache === undefined) return undefined;
+    try {
+      const kept = await options.cache.get(block);
+      if (kept === undefined) return undefined;
+      // The unpack was one task; the conversion is another, as a fresh read
+      // yields between its tiles (#2891 review).
+      await idle();
+      const move = reframer(blockFrame(block), options.frame);
+      return {
+        block,
+        tiles: kept.tiles,
+        features: reframeCorridorFeatures(kept.features, move),
+        streets: reframeStreets(kept.streets, move),
+      };
+    } catch (error) {
+      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
+      return undefined;
+    }
+  };
+
+  /** The cache writes still running: {@link AreaReader.settled} waits for them. */
+  const writes = new Set<Promise<void>>();
+
+  /**
+   * Keeps a block whose every tile is read, in its own frame, for the next
+   * ride. A block read in part is not kept (#2891): the next ride reads it
+   * again. A store that refuses it costs that ride a re-read.
+   *
+   * ⚠️ **Never awaited by the read** ({@link keepLater}): the next block's
+   * request, and the start, wait on no IndexedDB write. It yields to idle
+   * once before it converts the block and the cache packs it, so that work
+   * does not run in the same task as the read that held the block, inside a
+   * frame of a moving ride.
+   */
+  const keep = async (done: HeldBlock, identity: string): Promise<void> => {
+    if (options.cache === undefined || !fullyRead(done.tiles)) return;
+    try {
+      await idle();
+      // ⚠️ Stopped while it waited: kept nothing. A ride that ends and an
+      // "Erase this device" straight after must not have this write land after
+      // the erase, re-created athlete and all (#2891 review). A block not kept
+      // is read again on the next ride.
+      if (stopped) return;
+      const move = reframer(options.frame, blockFrame(done.block));
+      const features = reframeCorridorFeatures(done.features, move);
+      const streets = reframeStreets(done.streets, move);
+      await options.cache.put(done.block, { tiles: done.tiles, features, streets }, identity);
+    } catch (error) {
+      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
+    }
+  };
+
+  /** {@link keep}, fire and forget: it catches and says its own failure. */
+  const keepLater = (done: HeldBlock, identity: string): void => {
+    const write = keep(done, identity);
+    writes.add(write);
+    void write.finally(() => writes.delete(write));
+  };
+
   const readOne = async (
     block: BlockId,
     stop: AbortController,
   ): Promise<'read' | 'wrong-schema' | 'none'> => {
-    if (archive === undefined) return 'none';
     const key = keyOf(block);
     // A block read in part is read again for its failed tiles alone.
     const before = held.get(key);
+    // D-6.7: a block in the cache is never asked for again while it is there.
+    if (before === undefined) {
+      const kept = await cached(block);
+      if (kept !== undefined) {
+        if (stopped || !wanted.has(key)) return 'none';
+        held.set(key, kept);
+        options.onChange?.();
+        return 'read';
+      }
+    }
+    if (archive === undefined) return 'none';
     if (before !== undefined) rereads.set(key, (rereads.get(key) ?? 0) + 1);
     const tiles =
       before === undefined
@@ -359,31 +549,30 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       mustStop: () => stopped || !options.mapTilesOn(),
       yieldToIdle: options.yieldToIdle,
       // #3052, ADR 0096: the open world names its streets on the road and in
-      // the junction prompt. Held in memory with the block, never stored.
+      // the junction prompt. Held in memory with the block, and kept on the
+      // device with it in the ridden-block cache alone (ADR 0098).
       streetNames: true,
     });
     if (read.kind === 'wrong-schema') return 'wrong-schema';
     // A block the rider has left behind while it was read is not kept: its
     // read runs on until a crossing's delay ends, and may finish first.
     if (read.kind !== 'read' || stopped || !wanted.has(key)) return 'none';
+    let now: HeldBlock;
     if (before === undefined) {
-      held.set(key, {
-        block,
-        tiles: read.tiles,
-        features: read.features,
-        streets: read.tileStreets,
-      });
+      now = { block, tiles: read.tiles, features: read.features, streets: read.tileStreets };
     } else {
       // Dropped while it was read again: not kept, as any block left behind.
       if (held.get(key) !== before) return 'none';
-      held.set(key, {
+      now = {
         block,
         tiles: read.tiles,
         features: joinCorridorFeatures(before.features, read.features),
         streets: [...before.streets, ...read.tileStreets],
-      });
+      };
     }
+    held.set(key, now);
     options.onChange?.();
+    keepLater(now, read.identity);
     return 'read';
   };
 
@@ -461,12 +650,18 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     start: async (position) => {
       const block = blockOf(position);
       if (stopped || block === undefined) return { kind: 'unavailable' };
-      const why = off();
-      if (why !== undefined) return why;
+      // With no cache, map tiles off or no archive means nothing to read at all.
+      if (options.cache === undefined) {
+        const why = off();
+        if (why !== undefined) return why;
+      }
       ask(centreOn(block));
       await pumping;
       if (sawWrongSchema) return { kind: 'off', why: 'wrong-schema' };
-      return held.has(keyOf(block)) ? { kind: 'ready' } : { kind: 'unavailable' };
+      if (held.has(keyOf(block))) return { kind: 'ready' };
+      // D-7.2: the start's block is not kept, and tiles off or no archive is
+      // why it was not read.
+      return off() ?? { kind: 'unavailable' };
     },
     moveTo: (position) => {
       const block = blockOf(position);
@@ -495,7 +690,11 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       const block = blockOf(position);
       return block !== undefined && held.has(keyOf(block));
     },
-    settled: () => pumping,
+    settled: async () => {
+      await pumping;
+      // And every block a read kept, written or refused by the store (#2891).
+      while (writes.size > 0) await Promise.all([...writes]);
+    },
     stop: () => {
       stopped = true;
       queue.length = 0;

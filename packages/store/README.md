@@ -935,7 +935,7 @@ waiting on the instance, so a rider's edit or delete in that wait is not undone
 database ends an IndexedDB transaction, and the write would land outside the check. No schema
 change. `write-condition.test.ts` reads each answer back on a fresh connection.
 
-## World corridors: the one ODbL table — #1545, ADR 0054 D-3
+## World corridors: an ODbL table — #1545, ADR 0054 D-3
 
 Schema version 20, additive: a new store, `worldCorridors`, and no existing record changes shape.
 ⚠️ **This package's code is Apache-2.0; the rows of this one table are ODbL 1.0 data.** They are the
@@ -989,6 +989,32 @@ activity deletes its frames"* holds for a snapshot; moving a ride to Recently de
 as it leaves the ride's report and streams, so a ride brought back is whole. `survivingSnapshotStoreFactory` is
 the store that reports one snapshot deleted and keeps the picture, and `camera-frame-store.test.ts` is
 the red/green pair.
+
+## Ridden blocks: the second ODbL table — #2891, ADR 0090 D-6
+
+Schema version 23, additive: a new store, `riddenBlocks`, and no existing record changes shape. It is
+the open-world ride's cache. A block is one z14 tile of the archive's grid, read as its four z15
+tiles, and a row holds what `worldCorridors` holds for a corridor, for one block: the decoded features
+(packed by the app, never the raw tile bytes), the four tiles' states, the archive URL and identity,
+the reader version, when it was read and **when it was last ridden**. ⚠️ ODbL 1.0 data, held in its
+own table for `worldCorridors`' reason, and **location data**: which blocks a rider has ridden says
+where they ride.
+
+One row per **(owner, block)**, keyed `[owner+block]` and indexed `owner` and `[owner+riddenAt]`.
+`getRiddenBlock(owner, block)` and `markRiddenBlock(owner, block, riddenAt)` both take the owner first,
+so `activity-store.scoping.test.ts` derives a probe for each one. `putRiddenBlock(record)` refuses
+another licence, features that are not a `Blob` or are over 4 MiB (the message names the sizes and
+never the block), a block that is not a non-negative integer, and an owner who is not an athlete, so
+nothing outlives an erase. **Bounded**: in the same transaction as the write it drops that owner's
+least recently ridden blocks past `RIDDEN_BLOCKS_LIMIT` (256), and another owner's are never counted.
+⚠️ **256 and 4 MiB are owed to a tablet measurement** (ADR 0090 D-6.5). `deleteAthlete` counts the
+removed rows as `riddenBlocks`.
+
+**It never leaves the device** (ADR 0090 D-6.4). `apps/web/src/transfer/ridden-blocks-not-exported.test.ts`
+and `apps/web/src/privacy/world-corridor-never-sent.test.ts` hold that. **It is a cache that can be
+dropped**, which is also the rollback: export → downgrade → re-import keeps every other table,
+`worldCorridors` included and read back, and leaves version 23 with an empty `riddenBlocks`. That is
+run by `migrations.test.ts` §"version 23 rolls back".
 
 ## Not in this package
 

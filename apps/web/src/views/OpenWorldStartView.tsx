@@ -34,9 +34,11 @@
  * ("the pin", a route's name, a ride's name and date), never by a number.
  *
  * ⚠️ **Map tiles off** (ADR 0090 D-7.2): an open-world ride reads its map as it
- * goes, and with tiles off it may ride only what is cached. Nothing is cached
- * until #2891, so the screen says the ride needs map tiles and offers no
- * *Start the ride*.
+ * goes, and with tiles off it may ride only what is cached. Since #2891 the
+ * reader keeps the blocks a ride read (the ridden-block cache) and rides them
+ * with tiles off, but this screen cannot yet tell whether the start's block is
+ * kept, so it still says the ride needs map tiles and offers no *Start the
+ * ride*. Offering it over kept blocks is #2908's.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';

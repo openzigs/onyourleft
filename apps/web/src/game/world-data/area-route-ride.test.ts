@@ -30,12 +30,15 @@ const SOURCE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
  * open-world session (#2896), and the open-world ride's height tiles (#2899),
  * which take its block arithmetic and its crossing delay (`blockOf`,
  * `blocksAround`, `crossingDelayMs`) so that the heights are read on the same
- * grid and under the same delay as the map (ADR 0087 D-2.2). Both are the
- * open-world ride's, and neither is on a route ride's path.
+ * grid and under the same delay as the map (ADR 0087 D-2.2), and
+ * `world-data/ridden-blocks.ts` (#2891), the cache the reader asks before the
+ * network, which takes the block's key and the cache's shape from it. All are
+ * the open-world ride's, and none is on a route ride's path.
  */
 const AREA_READER_IMPORTERS: readonly string[] = [
   join('game', 'open-world', 'heights.ts'),
   join('game', 'open-world', 'session.ts'),
+  join('world-data', 'ridden-blocks.ts'),
 ];
 
 /** The route ride's own read: each must keep to the corridor (ADR 0054 D-2.4). */

@@ -229,6 +229,15 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('documents you added');
   });
 
+  it('names the map blocks an open-world ride kept, with their street names, among what an erase removes — #2891', () => {
+    const line = ERASE_REMOVES.find((each) =>
+      each.includes('map blocks your open-world rides kept'),
+    );
+    expect(line).toBeDefined();
+    expect(line).toContain('the names of their streets');
+    expect(line).toContain('when you last rode through each');
+  });
+
   it('names no hosted key among what an erase removes: #1103 deletes it at launch', () => {
     // From #518 the list named it, because this device kept it. #1103 deletes
     // it on the first launch (`camera/retired-hosted-key.ts`), so the line

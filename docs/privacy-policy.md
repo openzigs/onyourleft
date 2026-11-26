@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-11-18.** This is the policy for the On Your Left Android app
+**Last updated: 2026-11-25.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -128,6 +128,7 @@ your own action:
 | Routes, segments, efforts and workouts | drawn in the app, or imported from a file you choose |
 | A threshold power and a unit preference | typed by you in Settings |
 | Your list of words to mask before anything is sent to a hosted model — a street, a town, a name | typed by you in Settings; kept with your rides on this device, not put in the account export, and *Erase everything* removes it |
+| The map blocks your open-world rides read whole, with the names of their streets and when you last rode through each, up to 256 for each rider | read from the map host as you ride an open-world ride (see *An open-world ride* under **What leaves the device**); kept on this device, not put in the account export, not synced, not sent to an instance, and *Erase everything* removes them |
 | Whether the app is shown light or dark, if you chose one | chosen by you in Settings, and kept in this device's browser storage; *Erase everything* removes it |
 | A signing keypair, used to sign your own activity records | generated on the device the first time it is needed |
 | The address of an instance you connected to, the account id it gave you, and this device's sign-in to it (a session token) | kept in this device's browser storage when you press *Connect*; never put in an export; *Disconnect* and *Erase everything* remove it |
@@ -285,7 +286,12 @@ own computer, which travels unencrypted when your computer's address starts with
   which someone could work out roughly where you rode and the streets you probably took. Unlike a
   route's read, an open-world ride reads the blocks round your privacy zones the same way as
   anywhere else, so the requests do not show where a zone is. Your start and your position are never
-  sent, only the blocks. With map tiles off an open-world ride cannot start, and asks for nothing.
+  sent, only the blocks. Your device **keeps each block it read whole on this device**, with the
+  names of its streets and when you last rode through it, up to 256 blocks for each rider, the least
+  recently ridden going first, so riding there again requests nothing for those blocks. Which blocks
+  are kept shows roughly where you have ridden, and when. What is kept is map data and never leaves
+  your device: it is not in an export, not synced, and not sent to an instance, and it is erased
+  with the rest of your data. With map tiles off an open-world ride cannot start, and asks for nothing.
   Indoor rides, the map drawn during a game ride, and every game ride but an open-world one request
   nothing while you ride. The tiles cover the
   contiguous United States; elsewhere the map shows your line on a plain background, the game draws

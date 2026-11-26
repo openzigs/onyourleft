@@ -108,6 +108,7 @@ import type {
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -132,6 +133,7 @@ import {
   unpackWorldCorridorFeatures,
   worldCorridorFeaturesFor,
   worldCorridorFor,
+  riddenBlockFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -208,6 +210,13 @@ interface World {
    * owner's read may find one.
    */
   readonly levelCorridorRefusal: unknown;
+  /** #2891: a block this athlete's open-world ride read, at a block no other athlete has. */
+  readonly riddenBlock: RiddenBlockRecord;
+  /**
+   * #2891: the SAME block every athlete has ridden, each with different
+   * features — the owner is all that tells their rows apart.
+   */
+  readonly sharedBlock: RiddenBlockRecord;
   /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
   readonly binned: ReturnType<typeof rideFor>;
 }
@@ -303,6 +312,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // #2361. The same level key for every athlete, different features each.
   const levelCorridor = await worldCorridorFor(owner, SCOPING_LEVEL, { seed: 7 });
   let levelCorridorRefusal: unknown;
+  // #2891. One block per athlete, and one block every athlete has ridden.
+  const riddenBlock = await riddenBlockFor(owner);
+  const sharedBlock = await riddenBlockFor(owner, { block: SCOPING_BLOCK, seed: 3 });
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -345,6 +357,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
     await store.putWorldCorridor(corridor);
     await store.putWorldCorridor(circuitCorridor);
+    await store.putRiddenBlock(riddenBlock);
+    await store.putRiddenBlock(sharedBlock);
     levelCorridorRefusal = await store.putWorldCorridor(levelCorridor).then(
       () => undefined,
       (error: unknown) => error,
@@ -376,12 +390,17 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     corridor,
     circuitCorridor,
     levelCorridorRefusal,
+    riddenBlock,
+    sharedBlock,
     binned,
   };
 }
 
 /** #2293: the built-in circuit every athlete keeps a corridor for. */
 const SCOPING_CIRCUIT = circuitRouteId('scoping-fixture');
+
+/** #2891: a block every athlete in the scoping world has ridden. */
+const SCOPING_BLOCK = 6000 * 2 ** 14 + 4000;
 
 /** #2361: the built-in Delivery level every athlete offers the store a corridor for. */
 const SCOPING_LEVEL = levelRouteId('scoping-fixture');
@@ -1154,6 +1173,47 @@ const PROBES: readonly ScopingProbe[] = [
     async run(store, mine, theirs) {
       await store.deleteWorldCorridor(mine.owner, theirs.route.id);
       await expect(store.getWorldCorridor(theirs.owner, theirs.route.id)).resolves.toBeDefined();
+    },
+  },
+  {
+    member: 'getRiddenBlock',
+    leaks:
+      "the map features of a block another athlete's open-world ride read — which blocks they have ridden says where they ride",
+    async run(store, mine, theirs) {
+      await expect(
+        store.getRiddenBlock(mine.owner, theirs.riddenBlock.block),
+      ).resolves.toBeUndefined();
+      const read = await store.getRiddenBlock(mine.owner, mine.riddenBlock.block);
+      expect(read?.owner).toBe(mine.owner);
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(mine.riddenBlock.features),
+      );
+      // The block every athlete rode: the owner half of the key is all that
+      // keeps theirs, read round where THEY ride, from being mine.
+      const shared = await store.getRiddenBlock(mine.owner, SCOPING_BLOCK);
+      expect(shared?.owner).toBe(mine.owner);
+      expect(shared?.archive.identity).toBe(mine.sharedBlock.archive.identity);
+      expect(shared?.archive.identity).not.toBe(theirs.sharedBlock.archive.identity);
+      expect(shared && (await unpackWorldCorridorFeatures(shared.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(mine.sharedBlock.features),
+      );
+    },
+  },
+  {
+    member: 'markRiddenBlock',
+    leaks:
+      "another athlete's ridden block kept past its eviction, or a block of theirs said to exist by the answer",
+    async run(store, mine, theirs) {
+      await expect(
+        store.markRiddenBlock(mine.owner, theirs.riddenBlock.block, '2099-01-01T00:00:00.000Z'),
+      ).resolves.toBe(false);
+      await expect(
+        store.markRiddenBlock(mine.owner, SCOPING_BLOCK, '2099-01-01T00:00:00.000Z'),
+      ).resolves.toBe(true);
+      const theirShared = await store.getRiddenBlock(theirs.owner, SCOPING_BLOCK);
+      expect(theirShared?.riddenAt).toBe(theirs.sharedBlock.riddenAt);
+      const theirOwn = await store.getRiddenBlock(theirs.owner, theirs.riddenBlock.block);
+      expect(theirOwn?.riddenAt).toBe(theirs.riddenBlock.riddenAt);
     },
   },
   {

@@ -35,7 +35,7 @@ describe('main.tsx hands the game the open-world session — #2896', () => {
   it('builds the game port’s openWorld over the tab’s one entry', () => {
     expect(gamePort.length).toBeGreaterThan(0);
     expect(gamePort).toMatch(
-      /openWorld: lazyOpenWorldSessions\(\{\s*entry: openWorldEntry,\s*basemap: browserBasemapConfig,\s*mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\),\s*terrain: browserTerrainConfig,\s*\}\)/,
+      /openWorld: lazyOpenWorldSessions\(\{\s*entry: openWorldEntry,\s*basemap: browserBasemapConfig,\s*mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\),\s*terrain: browserTerrainConfig,\s*riddenBlocks: \{ store, owner: LOCAL_ATHLETE \},\s*\}\)/,
     );
     expect(main).toMatch(
       /import \{ lazyOpenWorldSessions \} from '\.\/game\/open-world\/session-lazy';/,

@@ -76,6 +76,7 @@ export type {
   SegmentRecord,
   WorkoutRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
   WorldCorridorTileState,
 } from './records';
 export {
@@ -91,6 +92,8 @@ export {
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
   WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
+  RIDDEN_BLOCK_FEATURES_LIMIT_BYTES,
+  RIDDEN_BLOCKS_LIMIT,
 } from './records';
 
 // --- Identifiers ------------------------------------------------------------

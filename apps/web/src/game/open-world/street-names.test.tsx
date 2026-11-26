@@ -22,8 +22,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
 
+import { openActivityStore, type ActivityStore } from '@onyourleft/store';
+import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
+
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
-import { countingSource } from '../../world-data/archive-testing';
+import { countingSource, type CountingSource } from '../../world-data/archive-testing';
+import type { RiddenBlockCacheOptions } from '../../world-data/ridden-blocks';
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
 import { GameView, type GamePort } from '../GameView';
 import type { GameRenderer, SceneFrame } from '../port';
@@ -251,8 +255,15 @@ function capturingRenderer(): GameRenderer {
   };
 }
 
-async function rideTheNamedGrid(metres: number): Promise<void> {
-  const source = countingSource(await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS));
+async function rideTheNamedGrid(
+  metres: number,
+  options: {
+    readonly riddenBlocks?: RiddenBlockCacheOptions;
+    readonly source?: CountingSource;
+  } = {},
+): Promise<void> {
+  const source =
+    options.source ?? countingSource(await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS));
   const entry = createOpenWorldEntry();
   entry.hand(fixtureStart(START_COLUMN, START_ROW));
   const port: GamePort = {
@@ -276,6 +287,7 @@ async function rideTheNamedGrid(metres: number): Promise<void> {
             archive: corridorArchiveFrom(source),
             mapTilesOn: () => true,
             yieldToIdle: () => Promise.resolve(),
+            riddenBlocks: options.riddenBlocks,
           }),
         ),
     ),
@@ -409,5 +421,76 @@ describe('street names through the real game screen and session — #3052', () =
     ).map((button) => button.textContent ?? '');
     expect(ways.some((text) => text.includes('onto Oak Street'))).toBe(true);
     expect(ways.some((text) => text.includes('along Main Street'))).toBe(true);
+  });
+});
+
+describe('a ridden block shows the same names as a fresh read — #2891, ADR 0098', () => {
+  let harness: ReturnType<typeof createStoreHarness>;
+  const handles: ActivityStore[] = [];
+
+  beforeEach(async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    await harness.discard();
+  });
+
+  afterEach(async () => {
+    for (const store of handles.splice(0)) store.close();
+    await harness.destroy();
+  });
+
+  /** The ridden-block cache over a fresh handle on the harness's database. */
+  function riddenBlocks(): RiddenBlockCacheOptions {
+    const store = openActivityStore(harness.databaseName);
+    handles.push(store);
+    return {
+      store,
+      owner: ATHLETE_A,
+      archiveUrl: 'https://tiles.example.invalid/a.pmtiles',
+      now: () => new Date('2026-11-25T09:00:00Z'),
+    };
+  }
+
+  /** What the scene was handed to paint, and what the junction prompt says, after 60 m. */
+  async function namesAfter60m(options: Parameters<typeof rideTheNamedGrid>[1]) {
+    frames.length = 0;
+    inputs.length = 0;
+    await rideTheNamedGrid(60, options);
+    const labels = (frames[frames.length - 1]?.input.streetNames ?? []).map((label) => ({
+      text: label.text,
+      x: label.x,
+      z: label.z,
+    }));
+    const ways = queryAll<HTMLButtonElement>(
+      document,
+      '.oyl-hud__junction-popup button[data-oyl-way]',
+    ).map((button) => button.textContent ?? '');
+    mounted?.unmount();
+    mounted = undefined;
+    return { labels, ways };
+  }
+
+  it('paints the same names on the road, and says them in the prompt, with no request for the kept blocks', async () => {
+    const fresh = await namesAfter60m({ riddenBlocks: riddenBlocks() });
+    // Not vacuous: the fresh ride named streets on the road and in the prompt.
+    expect(fresh.labels.map((label) => label.text)).toContain('Main Street');
+    expect(fresh.ways.some((text) => text.includes('onto Oak Street'))).toBe(true);
+    for (const store of handles.splice(0)) store.close();
+
+    // Ride 2, on a fresh handle, every block of the fixture kept by ride 1.
+    const source = countingSource(await openWorldFixtureArchive(OPEN_WORLD_GRID_STREETS));
+    const kept = await namesAfter60m({ riddenBlocks: riddenBlocks(), source });
+    expect(source.calls).toStrictEqual([]);
+    // The same names, in the same order, each where the fresh read put it to
+    // the centimetre the cache packs to.
+    expect(kept.labels.map((label) => label.text)).toStrictEqual(
+      fresh.labels.map((label) => label.text),
+    );
+    for (const [index, label] of kept.labels.entries()) {
+      const was = fresh.labels[index];
+      expect(Math.abs(label.x - (was?.x ?? Infinity)), label.text).toBeLessThanOrEqual(0.01);
+      expect(Math.abs(label.z - (was?.z ?? Infinity)), label.text).toBeLessThanOrEqual(0.01);
+    }
+    expect(kept.ways).toStrictEqual(fresh.ways);
   });
 });

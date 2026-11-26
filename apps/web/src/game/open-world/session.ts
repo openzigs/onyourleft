@@ -113,6 +113,7 @@ import {
 } from './ride';
 import type { DecodeHeightTile } from '../../terrain/decode';
 import type { TerrainArchive } from '../../terrain/terrain-source';
+import { riddenBlockCache, type RiddenBlockCacheOptions } from '../../world-data/ridden-blocks';
 import { createRoadHeights, type RoadHeights } from './heights';
 import { OpenWorldRoad } from './road';
 import { streetNameLabels, type NamedStreetLine, type StreetNameLabel } from '../street-names';
@@ -171,6 +172,14 @@ export interface OpenWorldSessionOptions {
   readonly streetName?: ((name: string) => string | undefined) | undefined;
   /** Where the tiles are planned (#2901): `tile-planner.ts` §`createTilePlanner`, a worker, when absent. */
   readonly tilePlanner?: ((options: TilePlannerOptions) => TilePlanner) | undefined;
+  /**
+   * #2891, ADR 0090 D-6: the riding athlete's ridden-block cache — their
+   * store, their id, the archive's URL and the clock. The reader asks it
+   * before every block and keeps every block it reads whole, so a second ride
+   * in the same place asks the archive nothing for it. Absent — no store, or
+   * no athlete — and the ride reads every block, as before.
+   */
+  readonly riddenBlocks?: RiddenBlockCacheOptions | undefined;
 }
 
 /**
@@ -593,6 +602,8 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   const reader = createAreaReader({
     archive: options.archive,
     frame,
+    // #2891: the athlete's kept blocks, converted into this ride's frame by the reader.
+    cache: options.riddenBlocks === undefined ? undefined : riddenBlockCache(options.riddenBlocks),
     mapTilesOn: options.mapTilesOn,
     random: options.random,
     schedule,

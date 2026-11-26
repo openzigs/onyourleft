@@ -114,6 +114,7 @@ import type {
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -1243,6 +1244,87 @@ export async function worldCorridorFor(
     features:
       overrides.features ??
       (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed))),
+    licence: 'ODbL-1.0',
+  };
+}
+
+/**
+ * The street name {@link riddenBlockFor}'s `streets` carries: one no real
+ * street has, different per athlete and per seed (#2891, ADR 0098).
+ */
+export function riddenBlockStreetName(owner: AthleteId, seed = 0): string {
+  return `Quillfeather Ride ${String(ATHLETES.indexOf(owner) * 10 + seed)}`;
+}
+
+/**
+ * One of an athlete's ridden blocks — #2891. ⚠️ **Different features per
+ * athlete and per `seed`** ({@link worldCorridorFeaturesFor}'s), so a read
+ * that handed back somebody else's block cannot match. `block` defaults to a
+ * block that differs per athlete too; pass the same one to two athletes to
+ * make the owner the only thing telling their rows apart.
+ */
+export async function riddenBlockFor(
+  owner: AthleteId,
+  overrides: {
+    readonly block?: number;
+    readonly seed?: number;
+    readonly riddenAt?: string;
+    readonly features?: Blob;
+    readonly streets?: Blob;
+  } = {},
+): Promise<RiddenBlockRecord> {
+  const seed = overrides.seed ?? 0;
+  const offset = ATHLETES.indexOf(owner) * 10 + seed;
+  const block = overrides.block ?? 6269 * 2 ** 14 + 4685 + offset;
+  const at = new Date((FIXTURE_EPOCH + 800_000 + offset) * 1000).toISOString();
+  return {
+    owner,
+    block,
+    archive: {
+      url: 'https://tiles.example.org/basemap.pmtiles',
+      identity: `"etag-block-${String(offset)}"`,
+    },
+    readerVersion: 1,
+    readAt: at,
+    riddenAt: overrides.riddenAt ?? at,
+    tiles: [
+      { x: 9370, y: 12538, state: 'covered' },
+      { x: 9371, y: 12538, state: 'covered' },
+      { x: 9370, y: 12539, state: 'refused' },
+      { x: 9371, y: 12539, state: 'outside-archive' },
+    ],
+    features:
+      overrides.features ??
+      (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed + 20))),
+    // Opaque to the store, as `features` is: the app packs it. Different per
+    // athlete and per seed, so a read that handed back another's cannot match,
+    // and carrying a street's name (ADR 0098), {@link riddenBlockStreetName},
+    // so a test can look for the name wherever the block must not go.
+    streets:
+      overrides.streets ??
+      new Blob([
+        JSON.stringify({
+          v: 1,
+          tiles: [
+            {
+              x: 9370,
+              y: 12538,
+              streets: [
+                {
+                  kind: 'minor_road',
+                  detail: 'residential',
+                  g: 'ground',
+                  o: 'no',
+                  a: 'open',
+                  l: false,
+                  n: riddenBlockStreetName(owner, seed),
+                  line: [0, 0, 1250, -3375],
+                },
+              ],
+            },
+          ],
+        }),
+      ]),
     licence: 'ODbL-1.0',
   };
 }

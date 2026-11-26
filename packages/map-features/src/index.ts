@@ -7,7 +7,7 @@
  */
 
 export { corridorTileCover, tileBox } from './cover';
-export { decodeTile } from './decode';
+export { decodeTile, streetNameOf } from './decode';
 export { clipToBox, rasterise, simplifyRing, triangulate } from './geometry';
 export {
   checkHeightTileBytes,

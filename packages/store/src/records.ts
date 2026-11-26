@@ -2081,3 +2081,83 @@ export interface WorldCorridorRecord {
  * the issue's bound for a 600-tile corridor.
  */
 export const WORLD_CORRIDOR_FEATURES_LIMIT_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The map features of one block an open-world ride read — #2891, ADR 0090
+ * D-6. A block is one z14 tile of the archive's grid, read as its four z15
+ * tiles. One row per **(owner, block)**, keyed by both, so a second ride in
+ * the same place reads it here and asks the archive nothing for it (D-6.7).
+ *
+ * ⚠️ **ODbL 1.0, not Apache-2.0**, exactly as {@link WorldCorridorRecord}
+ * (ADR 0090 D-6.3): the decoded features and never the raw tile bytes, which
+ * carry the addresses and other names the decoder drops. A street's own name
+ * is kept, in {@link RiddenBlockRecord.streets} alone (ADR 0098).
+ *
+ * ⚠️ **It never leaves the device** (D-6.4): no account export, no sync, no
+ * instance call. It is a cache: dropping a row costs a re-read and nothing of
+ * the rider's (D-6.6).
+ *
+ * ⚠️ **Location data**: which blocks a rider has ridden says where they ride.
+ * Every read takes the owner, and no error, log or message may carry a block,
+ * a tile or a coordinate.
+ */
+export interface RiddenBlockRecord {
+  /** Whose. **Every read of this record names it** — it leads the key. */
+  readonly owner: AthleteId;
+  /** The block, as `y × 2^14 + x` on the z14 grid. */
+  readonly block: number;
+  /** The archive URL it was read from, and its identity then. */
+  readonly archive: { readonly url: string; readonly identity: string };
+  /** The reader's `CORRIDOR_READER_VERSION` when it was read: another is read again. */
+  readonly readerVersion: number;
+  /** ISO-8601, the device's clock, when it was read. */
+  readonly readAt: string;
+  /**
+   * ISO-8601, the device's clock, when a ride last held it. The least
+   * recently ridden go first when the owner's blocks pass
+   * {@link RIDDEN_BLOCKS_LIMIT} (D-6.5).
+   */
+  readonly riddenAt: string;
+  /** Its four z15 tiles, and per tile: covered, or why not. */
+  readonly tiles: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly state: WorldCorridorTileState;
+  }[];
+  /**
+   * The decoded features, packed by the app, about the block's own corner
+   * (its frame is fixed to the grid, so a block serves any ride). Opaque
+   * here; with {@link streets}, at most {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}.
+   */
+  readonly features: Blob;
+  /**
+   * Each of its tiles' streets with their road fields and their names, packed
+   * by the app, for the open-world street graph, which is built a tile at a
+   * time, and for the names on the road and in the junction prompt. Opaque
+   * here. ⚠️ **The one store that holds a street's name** (ADR 0098, in part
+   * superseding ADR 0096 D-1.4): it is never logged, sent or exported, and
+   * goes with the athlete.
+   */
+  readonly streets: Blob;
+  /** What the data is licensed under. The only value there is. */
+  readonly licence: 'ODbL-1.0';
+}
+
+/**
+ * The most blocks one owner's cache keeps: **256** (#2891, ADR 0090 D-6.5).
+ *
+ * ⚠️ **Owed to a tablet measurement.** D-6.5 sets the ceiling from a
+ * measurement of a block's decoded size on the tablet, which #2882 and #2910
+ * take and which did not exist when this was written. 256 blocks is about
+ * 30 km × 30 km of riding at 40° N, and at {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}
+ * a block it bounds the store at 1 GiB in the worst case; the measurement
+ * replaces the number, never the rule.
+ */
+export const RIDDEN_BLOCKS_LIMIT = 256;
+
+/**
+ * The most one ridden block's `features` and `streets` blobs may hold
+ * together: **4 MiB**, a quarter of a 600-tile corridor's
+ * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES} for four tiles. ⚠️ Owed to the same measurement as {@link RIDDEN_BLOCKS_LIMIT}.
+ */
+export const RIDDEN_BLOCK_FEATURES_LIMIT_BYTES = 4 * 1024 * 1024;

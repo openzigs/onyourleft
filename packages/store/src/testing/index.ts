@@ -69,6 +69,8 @@ export {
   unpackWorldCorridorFeatures,
   worldCorridorFeaturesFor,
   worldCorridorFor,
+  riddenBlockFor,
+  riddenBlockStreetName,
   CHANNELS_WITHOUT_POSITION,
   chunksOf,
   claimsFor,
