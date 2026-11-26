@@ -171,7 +171,7 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 
 | Option | Values | Default |
 |---|---|---|
-| `--scene` | `route-hud`, `delivery`, `lap-race`, `workout`, `pacer`, `free-ride` | `route-hud` |
+| `--scene` | `route-hud`, `climb`, `delivery`, `lap-race`, `workout`, `pacer`, `free-ride` | `route-hud` |
 | `--seconds` | seconds of ride, positive; `seconds × fps` must be whole | `20` |
 | `--fps` | whole frames a second, 1 to 60 | `60` |
 | `--size` | `WIDTHxHEIGHT`, each even, at least 64 | `1920x1080` |
@@ -179,6 +179,7 @@ Chromium, as the demo's render does. That run took four minutes for 1,200 frames
 | `--start` | `free-ride` only: where the ride starts, `<lat>,<lon>` in decimal degrees | none: required |
 | `--archive` | `free-ride` only: a local copy of the basemap archive (`.pmtiles`) | none: required |
 | `--script` | `youtube`: the whole video from its scene script, in place of `--scene` and `--seconds` (#3156) | none |
+| `--music` | `--script` only: `aurora-ride`, the music bed mixed under the whole video (#3223) | none: silent |
 
 ### How it works
 
@@ -190,7 +191,9 @@ first script runs, `tools/capture/capture-clock.ts` replaces the page's `perform
 1. imports a synthetic route through the Routes page's own form. It is about 9.5 invented
    kilometres from 0° 0° under the placeholder name *Capture loop*, so no real street or place is
    on screen. It runs 8 km north and swings 1.2 km east and then west, so the HUD's map draws it as
-   an S, not a straight line.
+   an S, not a straight line. Each of its two rises climbs 90 m over two kilometres north, over 4 %
+   for most of a kilometre of road and about 6 % at its steepest (#3223), so the `climb` scene
+   films a real climb.
    It also sets the rider's weight on the Settings page, so W/kg has one to read. Before that, the
    browser profile already holds the device's choices (#3175, below);
 2. opens `#/game?capture=<scene>`, with `route=` the scene's built-in level or circuit when it
@@ -315,6 +318,7 @@ it has no buildings and is never the video's.
 | `lap-race` | the built-in circuit *Bellwether Loop* | the race's seed, five seeded `brisk` bots (no instance), four laps, the rider at the bots' own 2.8 W/kg so the scene stays in the group, with a bot's attack from Go in frame (#3198, `capture-lap-race-wiring.test.tsx`); an item used once one is held, after its second |
 | `workout` | the synthetic route | a tailored built-in (`#/ride?workout=built-in:sweet-spot-3x12&length=45&intensity=5`) from 10 s before its warm-up ends, its ERG target held at a 250 W threshold |
 | `pacer` | the synthetic route | the pacer at 3.1 W/kg, and the rider's "own best" as a bundled synthetic ride at 31 km/h |
+| `climb` | the synthetic route, 1,000 m in (#3223) | over 5 % from its first frame; power and heart rate rise and cadence falls as the climb bites (240 W to 345 W, 88 rpm to 77, 140 bpm to 160). A capture of 16 s at 5 fps read +5.2 % at 4 s and +5.3 % at 14 s on the HUD |
 
 - **Seeds.** Delivery's round seed and the lap race's are drawn from `crypto.getRandomValues` at the
   press on every ride. A scene's `seed` is the only other source, and only the capture build reads a
@@ -347,7 +351,10 @@ renders the whole video from **one scene script** and writes three files to
 - `youtube-1920x1080-60fps.srt`: every caption, timed in the whole video. The closing card's
   entry carries the map credit lines that the card shows;
 - `youtube-1920x1080-60fps.chapters.txt`: the chapter list for the YouTube description
-  (`0:00 On Your Left`, `0:10 The HUD`, …), one line per scene that starts a chapter.
+  (`0:00 On Your Left`, `0:10 The HUD`, …), one line per scene that starts a chapter;
+- `youtube-1920x1080-60fps.description.txt` (#3223): the description's draft: the chapter list,
+  then the closing card's credits and the project's address, then the music's credit when the
+  video carries the bed. It has no words of its own; the owner writes the rest.
 
 The script rides the free ride, so it needs `--start` and `--archive` as that scene does.
 `--size`, `--fps` and `--out` work as they do for one scene. Each scene's event and request logs
@@ -366,6 +373,47 @@ every line before the final render, as on #3074.
 The epic's scenes 9 (group ride) and 11 (after the ride, the AI write-up) need a self-hosted
 instance. They come from [#3155](https://github.com/openzigs/onyourleft/issues/3155), which the
 owner holds, and are left out of the script; comments in the file mark where they go.
+
+The owner's rulings of 2026-11-25 on the final render
+([#3223](https://github.com/openzigs/onyourleft/issues/3223)) shaped the script as it is now:
+
+- **No workouts scene.** The `workout` capture scene is still there for `--scene workout`.
+- **The trainer scene rides a real climb**: the `climb` capture scene, over 4 % for the whole
+  scene, with the gradient's callout and then the readings' over it, where power, cadence and heart
+  rate move with the effort. `video-script.test.ts` reads the road through the Routes page's GPX
+  decoder and the ride's own `gradeAt`, and holds the scene's every possible position to 4 % or more.
+- **No caption over held readings.** `route-hud`'s script goes on to 150 s, so the *Worlds* scene,
+  written from two minutes in, no longer films 205 W, 86 rpm and 141 bpm standing still; a test holds
+  every caption of the script to at least one moving reading.
+- **No long empty road at the start.** The video opens in the open world, on real streets, from
+  20 s into the free ride (after the seconds the free-ride scene films), and the HUD tour is 16 s,
+  not 31: the climb profile, the map and the totals. The readings and the gradient are called out
+  over the climb instead.
+
+#### Music, for the YouTube cut only (#3223)
+
+```sh
+pnpm --filter @onyourleft/web run capture -- --script youtube --music aurora-ride \
+  --start <lat>,<lon> --archive /path/to/basemap.pmtiles
+```
+
+mixes the app's own menu loop under the whole video: *Upbeat Game Loop - Aurora Ride* by Venus17
+(Freesound 841299, CC0), the file the menus play (`apps/web/public/audio/upbeat-game-loop-aurora-ride.ogg`,
+its `ASSETS.toml` row the record). `--music` takes a name from `capture-args.ts` §`SCRIPT_MUSIC`,
+never a path, so a video can only carry a track whose licence this repository records, and the
+description's credit comes from the same entry.
+
+Once every frame is encoded, `ffmpeg` mixes the bed in (`capture-args.ts` §`musicMuxArgs`): the
+picture is copied, not encoded again; the 16-bar loop is repeated by `aloop` with no gap at the join,
+cut to the video's length, 4 dB down (the file is mastered at about −14 LUFS integrated, so the bed
+sits near −18, under YouTube's −14 reference), faded in over 2 s and out over the last 3, as
+48 kHz stereo AAC. The mixed file is written beside the silent one and only then named
+`youtube-…mp4`; a mix that fails leaves the silent partial and any earlier video as they were. The
+music file is looked for before the first frame is rendered.
+
+Without `--music` the video is silent, as every capture is (`-an`), and the demo's own renders
+(`demo:video`, the GitHub Pages demo's) stay silent whatever is asked: `tools/demo/video.ts`
+encodes with `-an`, which `video.test.ts` pins.
 
 #### What a script may say
 

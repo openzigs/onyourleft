@@ -154,11 +154,24 @@ export interface CaptureScene {
 }
 
 /**
+ * Where the `climb` scene starts on the capture's synthetic route, metres —
+ * #3223: a kilometre up its first rise, where the road is already over 5 %
+ * and steepening (`tools/capture/capture-args.ts` §`captureRouteGpx`;
+ * `video-script.test.ts` holds the script's trainer scene to it).
+ */
+export const CAPTURE_CLIMB_START_METRES = 1_000;
+
+/**
  * The scenes, by the name the capture tool asks for. The numbers are a fit
  * amateur's, chosen rather than measured.
  *
  * - `route-hud`: a route ride with the full HUD (#3152), a steady build to a
- *   hard minute and an easing off, so every panel has something moving.
+ *   hard minute and an easing off, so every panel has something moving;
+ *   since #3223 the efforts go on to 150 s, so a scene written from two
+ *   minutes in (the script's *Worlds*) does not film one held reading.
+ * - `climb` (#3223): the synthetic route from {@link CAPTURE_CLIMB_START_METRES},
+ *   on its steepest rise, the rider digging in as the road stiffens: power
+ *   and heart rate up, cadence down, the effort a climb asks of a rider.
  * - `delivery` (#3153): the first built-in level (`delivery/levels/`), its
  *   round from a fixed seed, throwing at each house as it comes into reach.
  * - `lap-race` (#3153): a built-in circuit (`circuits/data/`) against five
@@ -180,7 +193,27 @@ export const CAPTURE_SCENES: Readonly<Record<string, CaptureScene>> = {
       { second: 18, watts: 320, cadence: 97, heartRate: 158 },
       { second: 26, watts: 240, cadence: 90, heartRate: 155 },
       { second: 40, watts: 205, cadence: 86, heartRate: 141 },
+      // #3223: on past the first minute, as a ride's efforts are.
+      { second: 60, watts: 235, cadence: 89, heartRate: 146 },
+      { second: 80, watts: 270, cadence: 92, heartRate: 153 },
+      { second: 100, watts: 220, cadence: 87, heartRate: 150 },
+      { second: 120, watts: 250, cadence: 90, heartRate: 152 },
+      { second: 135, watts: 290, cadence: 94, heartRate: 159 },
+      { second: 150, watts: 240, cadence: 89, heartRate: 156 },
     ],
+  },
+  climb: {
+    id: 'oyl-capture-scene:climb',
+    // #3223: a rider on a 5 % climb: harder as it bites, the legs slowing
+    // to a grind and the heart rate rising behind the effort.
+    keys: [
+      { second: 0, watts: 240, cadence: 88, heartRate: 140 },
+      { second: 4, watts: 285, cadence: 85, heartRate: 144 },
+      { second: 9, watts: 325, cadence: 80, heartRate: 150 },
+      { second: 14, watts: 345, cadence: 77, heartRate: 156 },
+      { second: 20, watts: 330, cadence: 78, heartRate: 160 },
+    ],
+    startMetres: CAPTURE_CLIMB_START_METRES,
   },
   delivery: {
     id: 'oyl-capture-scene:delivery',
