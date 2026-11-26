@@ -67,6 +67,16 @@ import { blockOf, blocksAround, crossingDelayMs } from '../world-data/area';
  */
 export const HEIGHTS_START_TIMEOUT_MS = 10_000;
 
+/**
+ * How many times a tile whose decode ran out of time is asked for again:
+ * **2**, so three tries in all. *#2891's choice.* A decode that is merely late
+ * (a ride started from the kept-block cache unpacks, reframes and plans in the
+ * same moments as the first tile decodes) is not a hostile tile, and holding it
+ * as one left the whole block's road level. A tile that is late every time is
+ * held as one with no heights, so a slow device is not asked for ever.
+ */
+export const HEIGHTS_TIMED_OUT_RETRIES = 2;
+
 export interface RoadHeightsOptions {
   /** `terrain/terrain-source.ts` §`terrainArchive` in the product; `undefined` when none is configured. */
   readonly archive: TerrainArchive | undefined;
@@ -138,6 +148,8 @@ export function createRoadHeights(options: RoadHeightsOptions): RoadHeights {
   const asked = new Map<string, (() => void) | undefined>();
   let wanted = new Map<string, HeightTileId>();
   let block: string | undefined;
+  /** How many times each tile's decode has run out of time. */
+  const timedOut = new Map<string, number>();
   let version = 0;
   let stopped = false;
   const stopping = new AbortController();
@@ -158,6 +170,13 @@ export function createRoadHeights(options: RoadHeightsOptions): RoadHeights {
       if (stopped || !wanted.has(key)) return;
       if (isHeightTileRefusal(decoded)) {
         options.log?.(describeHeightTileRefusal(decoded));
+        const late = (timedOut.get(key) ?? 0) + 1;
+        timedOut.set(key, late);
+        if (decoded.reason === 'timed-out' && late <= HEIGHTS_TIMED_OUT_RETRIES) {
+          // Late, not hostile: not held, so the next `moveTo` asks again.
+          block = undefined;
+          return;
+        }
         held.set(key, null);
         return;
       }
@@ -184,6 +203,7 @@ export function createRoadHeights(options: RoadHeightsOptions): RoadHeights {
     block = round.block;
     wanted = new Map(round.tiles.map((tile) => [keyOf(tile), tile]));
     for (const key of [...held.keys()]) if (!wanted.has(key)) held.delete(key);
+    for (const key of [...timedOut.keys()]) if (!wanted.has(key)) timedOut.delete(key);
     for (const [key, cancel] of [...asked]) {
       if (wanted.has(key)) continue;
       cancel?.();
@@ -246,6 +266,7 @@ export function createRoadHeights(options: RoadHeightsOptions): RoadHeights {
       for (const cancel of asked.values()) cancel?.();
       asked.clear();
       held.clear();
+      timedOut.clear();
       wanted.clear();
     },
   };

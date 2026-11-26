@@ -35,6 +35,7 @@ import { CROSSING_DELAY_MAX_MS } from '../world-data/area';
 import {
   createRoadHeights,
   HEIGHTS_START_TIMEOUT_MS,
+  HEIGHTS_TIMED_OUT_RETRIES,
   type RoadHeights,
   type RoadHeightsOptions,
 } from './heights';
@@ -236,6 +237,48 @@ describe('with map tiles off, or no archive', () => {
     await heights.start(MIDDLE);
     expect(heights.heightAt(MIDDLE)).toBeUndefined();
     heights.stop();
+  });
+});
+
+describe('a decode that runs out of time is late, not hostile (#2891)', () => {
+  const lateOnce = (late: number) => {
+    let calls = 0;
+    return (bytes: Uint8Array) => {
+      calls += 1;
+      return calls <= late
+        ? Promise.resolve({ reason: 'timed-out' as const, limit: 2_000 })
+        : fixtureDecode(bytes);
+    };
+  };
+
+  it('asks again at the next move, and the road then has its heights', async () => {
+    const { heights, clock } = await heightsOver(
+      [{ tile: FIXTURE_HEIGHT_TILE, bytes: slopeHeightTile(0.5) }],
+      { decode: lateOnce(1) },
+    );
+    await heights.start(MIDDLE);
+    expect(heights.heightAt(MIDDLE)).toBeUndefined();
+    heights.moveTo(SAME_BLOCK);
+    clock.runAll();
+    await settled();
+    expect(heights.heightAt(MIDDLE)).toBeDefined();
+    expect(heights.version).toBe(1);
+  });
+
+  it('gives a tile that is late every time up after its retries', async () => {
+    const decode = vi.fn(lateOnce(99));
+    const { heights, clock } = await heightsOver(
+      [{ tile: FIXTURE_HEIGHT_TILE, bytes: flatHeightTile() }],
+      { decode },
+    );
+    await heights.start(MIDDLE);
+    for (let move = 0; move < 6; move += 1) {
+      heights.moveTo(SAME_BLOCK);
+      clock.runAll();
+      await settled();
+    }
+    expect(decode).toHaveBeenCalledTimes(1 + HEIGHTS_TIMED_OUT_RETRIES);
+    expect(heights.heightAt(MIDDLE)).toBeUndefined();
   });
 });
 
