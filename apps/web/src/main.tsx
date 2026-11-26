@@ -14,7 +14,7 @@ import {
   createOpenBikeControlClient,
   createWebBluetoothTransport,
 } from '@onyourleft/sensors/web-bluetooth';
-import { metres, unixSeconds } from '@onyourleft/domain';
+import { metres, seconds, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
   cameraFrameId,
@@ -950,12 +950,18 @@ function buildGamePort(
           name: route.name,
           profile: route.profile,
           attempts: attempts.length,
-          bestSeconds: fastestAttempt(
-            attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
-          )?.movingSeconds,
+          // #2319: the loop's best lap, kept on the route.
+          bestLapSeconds: route.bestLap,
         });
       }
       return rows;
+    },
+    // #2319: a lap race's lap of one of the rider's loops, kept on the route if
+    // it is the fastest (`ActivityStore.recordBestLap`). ⚠️ An optional member,
+    // so dropping this line is green in `check:wiring`;
+    // `game/lap-race/best-lap-wiring.test.ts` is what goes red.
+    recordBestLap: async (route: string, lap: number): Promise<void> => {
+      await store.recordBestLap(LOCAL_ATHLETE, routeId(route), seconds(lap));
     },
     loadGhost: async (route: string): Promise<GhostTrack | undefined> => {
       // ⚠️ The athlete is what makes this the rider's OWN attempt, and it is not

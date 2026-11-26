@@ -17,9 +17,11 @@
  *   raced on, from the course picker's own list (`game/courses.ts`). ⚠️ Not a
  *   best finish: ADR 0060 D-12.2 stores no position against bots, and the
  *   race keeps nothing once a ride ends (`lap-race/ride-race.ts`). "Your
- *   best" is the rider's fastest moving time over a ride on any of those
- *   loops, read from the attempt summaries the route list already holds
- *   (`RidableRoute.bestSeconds`), so it costs no stream decode. The owner's
+ *   best lap" (#2319) is the fastest lap a lap race has kept on any of the
+ *   rider's own loops (`RidableRoute.bestLapSeconds`), a field of the route
+ *   the list already reads, so it costs no other read; a built-in circuit
+ *   keeps none, and with circuits listed the card says "on your loops" so the
+ *   time is not read as theirs. The owner's
  *   ruling of 2026-11-07 (#2293): the card counts the built-in circuits too,
  *   as many as `GamePort.listCircuits` lists, never a number written down
  *   here; a failed read of them leaves the loop count alone, as before.
@@ -68,14 +70,17 @@ export function deliveryWeekProgressText(week: Pick<WeekProgress, 'day' | 'score
 
 /**
  * How many loops the rider can race on, as a reading: *"2 loops to race on"*,
- * and with a best time round one, *"2 loops to race on · your best 12:34"*.
+ * and with a best lap kept on one (#2319), *"2 loops to race on · your best
+ * lap 4:05"*. ⚠️ Draft wording for the owner's approval with the screenshots.
  */
-export function lapRaceLoopsText(loops: number, bestSeconds?: number): string {
+export function lapRaceLoopsText(loops: number, bestLapSeconds?: number): string {
   if (loops === 0) {
     return 'No loops to race on yet';
   }
   const count = `${String(loops)} ${loops === 1 ? 'loop' : 'loops'} to race on`;
-  return bestSeconds === undefined ? count : `${count} · your best ${formatDuration(bestSeconds)}`;
+  return bestLapSeconds === undefined
+    ? count
+    : `${count} · your best lap ${formatDuration(bestLapSeconds)}`;
 }
 
 /**
@@ -84,24 +89,31 @@ export function lapRaceLoopsText(loops: number, bestSeconds?: number): string {
  * *"4 built-in circuits"* alone when the rider has no loop. With no circuits
  * listed (none offered, or their read failed), the loop count alone.
  */
-export function lapRaceCoursesText(circuits: number, loops: number, bestSeconds?: number): string {
+export function lapRaceCoursesText(
+  circuits: number,
+  loops: number,
+  bestLapSeconds?: number,
+): string {
   if (circuits === 0) {
-    return lapRaceLoopsText(loops, bestSeconds);
+    return lapRaceLoopsText(loops, bestLapSeconds);
   }
   const builtIn = `${String(circuits)} built-in ${circuits === 1 ? 'circuit' : 'circuits'}`;
   if (loops === 0) {
     return builtIn;
   }
   const count = `${builtIn}, ${String(loops)} of your loops`;
-  return bestSeconds === undefined ? count : `${count} · your best ${formatDuration(bestSeconds)}`;
+  // #2319: a circuit keeps no lap, so the time is said to be the loops'.
+  return bestLapSeconds === undefined
+    ? count
+    : `${count} · your best lap on your loops ${formatDuration(bestLapSeconds)}`;
 }
 
-/** The fastest moving time over the loops among `routes`; none if no loop has been ridden. */
-function bestOnLoops(routes: readonly RidableRoute[]): number | undefined {
+/** The fastest lap kept over the loops among `routes` (#2319); none if no lap has been kept. */
+function bestLapOnLoops(routes: readonly RidableRoute[]): number | undefined {
   let best: number | undefined;
   for (const { route } of coursesFor('lap-race', routes)) {
-    if (!route.profile.loop || route.bestSeconds === undefined) continue;
-    if (best === undefined || route.bestSeconds < best) best = route.bestSeconds;
+    if (!route.profile.loop || route.bestLapSeconds === undefined) continue;
+    if (best === undefined || route.bestLapSeconds < best) best = route.bestLapSeconds;
   }
   return best;
 }
@@ -132,7 +144,7 @@ export function GamesView(props: GamesViewProps): JSX.Element {
       if (cancelled) return;
       setCircuits(circuitsFound.length);
       setLoops(choosableCourses(coursesFor('lap-race', routes)));
-      setBest(bestOnLoops(routes));
+      setBest(bestLapOnLoops(routes));
     });
     return () => {
       cancelled = true;

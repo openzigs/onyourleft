@@ -2207,6 +2207,48 @@ export class ActivityStore {
     });
   }
 
+  /**
+   * Keeps `lap` as this athlete's best lap of one of their loops, if it is
+   * faster than the one kept — #2319, ADR 0060's amendment of 2026-11-26. A
+   * lap time and nothing else: no place and no bot (D-12.2). It is a field of
+   * the route (`records.ts` §`RouteRecord.bestLap`), so it is exported, erased
+   * and never synced with the route.
+   *
+   * Read and written in one transaction, so two laps recorded at once keep the
+   * faster. `updatedAt` does not move: a lap is no edit of the route, and an
+   * editor holding the route open must not be told it changed elsewhere.
+   *
+   * @returns whether `lap` is now the route's best. `false` for a lap no
+   * faster than the one kept, and for a route that does not exist **or**
+   * belongs to somebody else, which are deliberately indistinguishable, for
+   * {@link deleteRoute}'s reason.
+   *
+   * @throws {StoreValidationError} for a lap that is not a finite time over
+   * nought, or for a route that is not a loop, which has no lap.
+   */
+  async recordBestLap(owner: AthleteId, id: RouteId, lap: Seconds): Promise<boolean> {
+    if (!Number.isFinite(lap) || lap <= 0) {
+      throw new StoreValidationError('routes.bestLap: must be a finite time over nought');
+    }
+    return this.#db.transaction('rw', [this.#routes], async () => {
+      const existing = await this.#routes
+        .where(INDEX.routeByOwnerAndId)
+        .equals([owner, id])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      if (!existing.loop) {
+        throw new StoreValidationError('routes.bestLap: a route that is not a loop has no lap');
+      }
+      if (existing.bestLap !== undefined && existing.bestLap <= lap) {
+        return false;
+      }
+      await this.#routes.put({ ...existing, bestLap: lap });
+      return true;
+    });
+  }
+
   // --- Workouts (#14) -------------------------------------------------------
 
   /**

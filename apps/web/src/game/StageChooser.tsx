@@ -118,11 +118,16 @@ export interface RidableRoute {
    */
   readonly attempts: number;
   /**
-   * The moving time, in seconds, of the rider's fastest attempt: the figure
-   * the Games tab reads as "your best" (#2292). Each attempt's summary already
-   * carries it, so it costs no stream decode. Absent: no attempt yet.
+   * The rider's fastest lap of this loop in a lap race on this device, in
+   * seconds of moving time — #2319, `@onyourleft/store` §`RouteRecord.bestLap`.
+   * The Games tab's Lap race card and its course picker read it as "your best
+   * lap". Absent: no lap raced yet, a route that is not a loop, or a built-in
+   * circuit, which keeps none.
+   *
+   * It replaces #2292's `bestSeconds`, the fastest whole attempt's moving
+   * time, which was the card's "your best" until a lap was kept.
    */
-  readonly bestSeconds?: number | undefined;
+  readonly bestLapSeconds?: number | undefined;
 }
 
 /**

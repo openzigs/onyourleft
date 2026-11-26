@@ -51,6 +51,8 @@ const OWN: RidableRoute = {
 const STEP_MS = 250;
 
 let asked: string[] = [];
+/** What the port was asked to keep as a best lap, as `[route, lap]` — #2319. */
+let keptLaps: [string, number][] = [];
 /** The routes the port lists: the capture tool's own, unless a test rides a loop. */
 let own: RidableRoute = OWN;
 /** The built-in circuits the port lists: the shipped ones, unless a test rides a shorter one. */
@@ -72,6 +74,10 @@ function gamePort(): GamePort {
       return Promise.resolve({ kind: 'unavailable' });
     },
     readSensors: () => NO_SENSORS,
+    recordBestLap: (route, lap) => {
+      keptLaps.push([route, lap]);
+      return Promise.resolve();
+    },
   };
 }
 
@@ -158,6 +164,7 @@ const NO_LEVELS = JSON.stringify({ finished: [] });
 beforeEach(() => {
   running = new AbortController();
   asked = [];
+  keptLaps = [];
   own = OWN;
   circuits = () => loadBuiltInCircuits();
   localStorage.clear();
@@ -333,6 +340,31 @@ describe('a lap race scene — #3153', () => {
     // Its first pick-up is a quarter of the way round, minutes in: no item yet, so none used.
     expect(events.filter((event) => event.kind === 'cue')).toEqual([]);
     expect(asked).toEqual([]);
+  });
+});
+
+describe('a lap race scene on a saved loop keeps no best lap — #2319', () => {
+  const SAVED = 'saved-loop-lap-race';
+
+  afterEach(() => {
+    delete (CAPTURE_SCENES as Record<string, unknown>)[SAVED];
+  });
+
+  it('states its laps in memory only: the port is asked to keep none', async () => {
+    // The scene's race on the capture tool's own route, here a 377 m loop the
+    // port lists as a rider's saved one, started 20 m short of its line.
+    const lapRace = CAPTURE_SCENES['lap-race'];
+    (CAPTURE_SCENES as Record<string, unknown>)[SAVED] = {
+      ...lapRace,
+      route: undefined,
+      startMetres: 357,
+    };
+    own = { ...OWN, profile: circuitRoute(60, () => 0) };
+    const events = await capture(SAVED, 120);
+    // The control: the capture did cross the line as a lap, so a kept lap
+    // would have been offered.
+    expect(events.some((event) => event.kind === 'lap')).toBe(true);
+    expect(keptLaps).toEqual([]);
   });
 });
 
