@@ -583,7 +583,9 @@ export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
  * whole cars made it 261 436, within 2 % of the frame #1523 measured on the
  * tablet with its GPU at the ceiling (266 739); #1815 recorded 171 874 before
  * any car. The 2 % margin is for nothing but run-to-run noise: a change past it
- * goes to the owner and the tablet list (#733).
+ * goes to the owner and the tablet list (#733). #2576: a level frame's corridor
+ * holds at most five obstacles at any density a level may ask for, a quarter of
+ * that frame's twenty (`delivery/levels/level-frame-obstacles.test.ts`).
  *
  * @test-facing held by `realistic-delivery.browser.spec.ts`; nothing in the
  * product applies a triangle ceiling at run time
