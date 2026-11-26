@@ -607,8 +607,7 @@ import {
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
-  carriesTheLogo,
-  gateLogoPlace,
+  gateLogoPlaces,
   logoBoxes,
   type LogoPlace,
 } from './logo-board';
@@ -11090,9 +11089,8 @@ export class LogoBelt {
       count += 1;
     };
     if (this.#shown && this.#switchedOn) {
-      for (const line of lines) {
-        if (carriesTheLogo(line)) place(gateLogoPlace(line));
-      }
+      // #976: never two gate boards crossed on one point. @see gateLogoPlaces
+      for (const at of gateLogoPlaces(lines)) place(at);
       for (const board of billboards) place(billboardLogoPlace(board));
     }
     this.#mesh.count = count;
@@ -26094,7 +26092,7 @@ class RealisticDrawing {
   readonly grounding: GroundBlobBelt;
   /** The start and finish gantries — #679. */
   readonly gantries: GantryBelt;
-  /** The wordmark's boards, on the start gate and the billboards — #966. */
+  /** The wordmark's boards, on every gate (the finish's since #978) and the billboards — #966. */
   readonly logos: LogoBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
@@ -27089,7 +27087,7 @@ export function gantriesShownOf(view: GameView, on: boolean): void {
 
 /**
  * Turns a view's wordmark boards off, or on again — #966. The browser gate's
- * control: with them off, the probe aimed at the start gate's board or a
+ * control: with them off, the probe aimed at a gate's board or a
  * billboard must read no wordmark, and the stylised world must upload no
  * texture at all.
  *
@@ -28063,7 +28061,7 @@ class ThreeGameView implements GameView {
     this.#sideRoads.addTo(this.#scene);
 
     this.#scatter.addTo(this.#scene);
-    // #966: the start gate and the billboards, in the stylised world.
+    // #966: the gates and the billboards, in the stylised world.
     this.#gantries.addTo(this.#scene);
     this.#logos.addTo(this.#scene);
     // #1535: the village pavements, in the stylised world.
@@ -28273,7 +28271,8 @@ class ThreeGameView implements GameView {
     this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
-    // on the start gate and the billboards. The hidden world's draw nothing.
+    // on every gate (the finish's since #978) and the billboards. The hidden
+    // world's draw nothing.
     this.#realistic?.gantries.update(frame.lines);
     this.#realistic?.logos.update(frame.lines, frame.billboards);
     this.#gantries.update(frame.lines);
