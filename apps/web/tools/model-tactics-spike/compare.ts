@@ -46,7 +46,10 @@ export interface FieldNumbers {
   readonly firstMoveS: number | null;
   /** The most bots attacking or on a flyer on any one tick (#2708). */
   readonly mostMovingAtOnce: number;
-  /** For each chase, the gap to the racer ahead on its first tick, metres to 1 place (#2708). */
+  /**
+   * For each chase, the gap to the racer ahead on its first tick, metres to 1
+   * place (#2708); a chase begun in the lead is not in it (#2715).
+   */
   readonly chaseStartGapsM: readonly number[];
   /** How many bots attacked or went on a flyer at least once (#2720). */
   readonly movers: number;
@@ -80,14 +83,18 @@ function gapAhead(tick: FieldTick, id: string): number | null {
 const moving = (tactic: BotTactic | undefined): boolean =>
   tactic === 'attack' || tactic === 'flyer';
 
-/** For each run of ticks in which a bot chased, the gap ahead on its first tick. */
+/**
+ * For each run of ticks in which a bot chased, the gap ahead on its first
+ * tick. A chase begun in the lead has no gap to cross and is skipped (#2715):
+ * read as 0 m, it would count as a chase across no gap at all.
+ */
 function chaseStartGaps(ticks: readonly FieldTick[], bots: readonly string[]): number[] {
   const gaps: number[] = [];
   for (const id of bots) {
     ticks.forEach((tick, at) => {
-      if (tick.tactic.get(id) === 'chase' && ticks[at - 1]?.tactic.get(id) !== 'chase') {
-        gaps.push(Math.round((gapAhead(tick, id) ?? 0) * 10) / 10);
-      }
+      if (tick.tactic.get(id) !== 'chase' || ticks[at - 1]?.tactic.get(id) === 'chase') return;
+      const gap = gapAhead(tick, id);
+      if (gap !== null) gaps.push(Math.round(gap * 10) / 10);
     });
   }
   return gaps;

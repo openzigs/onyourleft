@@ -44,8 +44,6 @@ import {
   snapshotFor,
   streamSetFor,
 } from '@onyourleft/store/testing';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { act, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1386,15 +1384,9 @@ describe('#2194 — the owner’s screenshot rulings of 2026-11-06', () => {
     );
   });
 
-  it('gives a failed slot no chart’s height in the stylesheet', () => {
-    const theme = readFileSync(join(import.meta.dirname, '../design/theme.css'), 'utf8');
-    const slot = theme.indexOf('.oyl-trace-slot {');
-    const failed = theme.indexOf('.oyl-trace-slot--failed {');
-    expect(slot).toBeGreaterThan(-1);
-    // After the slot's own rule, so it wins at the same specificity.
-    expect(failed).toBeGreaterThan(slot);
-    expect(theme.slice(failed, theme.indexOf('}', failed))).toMatch(/min-height:\s*0;/);
-  });
+  // #2261: that a failed slot keeps no chart's height is a layout claim, so it
+  // is measured in the browser (`list-detail.browser.spec.ts` §"#2194 — a slot
+  // whose read failed keeps no chart’s height"), not read off the stylesheet.
 });
 
 describe('#2081 — the ride’s power curve, beside the all-time one', () => {
