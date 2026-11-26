@@ -180,8 +180,19 @@ const ON_LEVEL: Course = {
   level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres, id: LEVEL.id },
 };
 
-/** The round's seed: distinctive, so its digits are a marker. Under 2³². */
-const SEED = 3_141_592_653;
+/**
+ * The round's seed: distinctive, so its digits are a marker. Under 2³².
+ *
+ * #3251: 3 141 592 653 until this town's houses were planned contemporary.
+ * A seed picks the round's houses, and the ride presses a throw on the frame
+ * nearest each one's landing place, in frames of {@link SHARED_FRAME_MS}:
+ * half a second, about five metres of road. Under the old seed the houses now
+ * picked each fell between two frames, so no parcel landed and the round did
+ * not settle. That is this ride's coarse clock, not the round: a ride draws a
+ * frame every 16 ms. Of five seeds tried, this one rides both rounds with
+ * deliveries in them, as the cases below need.
+ */
+const SEED = 1_732_050_807;
 
 /** A short week's round, so the ride covers it whole: three houses, on day 2. */
 const WEEK: WeekProgress = { day: 2, houses: 3, score: 4 };
