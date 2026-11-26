@@ -212,6 +212,10 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
         OSM_ATTRIBUTION,
       );
       expect(document.getElementById(LEVEL_WORLD_ID) !== null).toBe(!realistic);
+      // #2578: and the round's weather, four radios in one named group, audited with the rest.
+      const weather = queryAll<HTMLInputElement>(document, 'input[name="oyl-level-weather"]');
+      expect(weather).toHaveLength(4);
+      expect(weather[0]?.closest('fieldset')?.querySelector('legend')?.textContent).toBe('Weather');
       expect(formatViolations(auditAccessibility(document))).toBe('');
     });
   }

@@ -49,9 +49,9 @@ import { stripComments } from '../../../units/no-inline-units';
 import { GAME_COURSES_TEXT } from '../../../views/GameCoursesView';
 import { endRideAnswer } from '../../end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from '../../GameView';
-import { DELIVERY_CHOICE_TEXT } from '../../StageChooser';
+import { DELIVERY_CHOICE_TEXT, LEVEL_WEATHER_TEXT } from '../../StageChooser';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../../hud/announce-preference';
-import type { GameRenderer } from '../../port';
+import type { GameRenderer, SceneFrame } from '../../port';
 import { northRoute } from '../../route-fixtures-testing';
 import { SHIPPED_LEVELS } from '../../shipped-levels';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../../world-preference';
@@ -118,6 +118,9 @@ function port(routes: readonly RidableRoute[] = []): GamePort {
 /** How many times the ride asked for the realistic world's files. */
 let realisticAsked = 0;
 
+/** #2578: every frame the ride handed the view, in order. */
+const rendered: SceneFrame[] = [];
+
 function renderer(): GameRenderer {
   return {
     loadRealisticWorld: () => {
@@ -127,7 +130,9 @@ function renderer(): GameRenderer {
     create: () => ({
       hasContext: true,
       prepare: () => Promise.resolve(),
-      render: () => undefined,
+      render: (frame: SceneFrame) => {
+        rendered.push(frame);
+      },
       setQuality: () => undefined,
       setRiderKit: () => undefined,
       setSeason: () => undefined,
@@ -146,6 +151,7 @@ beforeEach(() => {
   pending = [];
   nowMs = 0;
   realisticAsked = 0;
+  rendered.length = 0;
   read.length = 0;
   localStorage.clear();
   writeRealisticWorldChoice(localStorage, true);
@@ -579,6 +585,71 @@ describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
     expect(houses?.querySelector('.oyl-hud__value')?.firstChild?.textContent).toBe(
       String(fixtureAs(FIRST.id).round.houses),
     );
+  });
+});
+
+describe('the weather a level’s round rides in, chosen in the setup — #2578', () => {
+  /** The setup's weather radio for `choice`. */
+  const weatherRadio = (choice: string): HTMLInputElement | undefined =>
+    queryAll<HTMLInputElement>(document, 'input[name="oyl-level-weather"]').find(
+      (radio) => radio.value === choice,
+    );
+
+  /** Choose `choice` (none: the setup's own), ride level 1 a few frames, and return the round's frames. */
+  const rideIn = async (choice: string | undefined): Promise<readonly SceneFrame[]> => {
+    stubSeed(7);
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    if (choice !== undefined) await click(weatherRadio(choice));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    for (let frame = 0; frame < 4; frame += 1) await pump();
+    return rendered.filter((frame) => frame.delivery !== undefined);
+  };
+
+  it('offers the level’s own, named, chosen, then clear, rain and dusk, each said not to reach the trainer', async () => {
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    const radios = queryAll<HTMLInputElement>(document, 'input[name="oyl-level-weather"]');
+    expect(radios.map((radio) => radio.value)).toStrictEqual(['level', 'clear', 'rain', 'dusk']);
+    expect(radios.map((radio) => radio.closest('label')?.textContent)).toStrictEqual([
+      LEVEL_WEATHER_TEXT.level(fixtureAs(FIRST.id).round),
+      'Clear',
+      'Rain',
+      'Dusk',
+    ]);
+    expect(LEVEL_WEATHER_TEXT.level(fixtureAs(FIRST.id).round)).toBe('Level’s own: clear');
+    expect(weatherRadio('level')?.checked).toBe(true);
+    const hint = document.getElementById(
+      weatherRadio('rain')?.getAttribute('aria-describedby') ?? '',
+    );
+    expect(hint?.textContent).toBe(LEVEL_WEATHER_TEXT.hint);
+    expect(hint?.textContent).toContain('changes nothing your trainer is sent');
+  });
+
+  for (const [choice, sky] of [
+    [undefined, { rain: false, dusk: false }],
+    ['rain', { rain: true, dusk: false }],
+    ['dusk', { rain: false, dusk: true }],
+    ['clear', { rain: false, dusk: false }],
+  ] as const) {
+    it(`draws every frame of the round in ${choice ?? 'the level’s own'} weather`, async () => {
+      const frames = await rideIn(choice);
+      expect(frames.length).toBeGreaterThan(0);
+      for (const frame of frames) expect(frame.delivery?.weather).toStrictEqual(sky);
+    });
+  }
+
+  it('holds the house markers to the 40 m reveal in the chosen rain, as it does not in the level’s own clear', async () => {
+    const clear = await rideIn(undefined);
+    mounted?.unmount();
+    mounted = undefined;
+    rendered.length = 0;
+    vi.restoreAllMocks();
+    const rain = await rideIn('rain');
+    const markers = (frames: readonly SceneFrame[]): number =>
+      frames[0]?.delivery?.markers.length ?? Number.NaN;
+    // The same seed's round: its houses drawn in clear, the far ones held back in rain.
+    expect(markers(clear)).toBeGreaterThan(0);
+    expect(markers(rain)).toBeLessThan(markers(clear));
   });
 });
 
