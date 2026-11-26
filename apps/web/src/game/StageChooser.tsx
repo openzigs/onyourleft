@@ -1858,14 +1858,18 @@ export const LAP_RACE_CHOICE_TEXT = {
    * that has spent its W′ at it until it recovers (ADR 0067 D-1, D-2). The
    * standings show the tick's figure. Since #2455 each bot also has its own
    * pace (`@onyourleft/domain` §`pace.ts`), which its name in the standings
-   * says. ⚠️ Draft wording for the owner's approval (#2455, #2458).
+   * says. Since #2463 a bot's tactics read the race (ADR 0067 D-0): on a
+   * wheel it sits in under its figure, and it rides over it to close a gap,
+   * so "holds it on the flat" is true only of a bot riding on its own (#2541).
+   * ⚠️ Draft wording for the owner's approval (#2455, #2458, #2541).
    * `lap-race/bot-figure.test.ts` holds each clause to what the HUD shows.
    */
   tierLive:
-    'The figure beside a bot in the race moves around that: a bot holds it on the flat, eases ' +
-    'downhill and goes harder on climbs and in the final sprint, and one that goes too hard ' +
-    'for too long fades back to it until it recovers. Each bot paces the race its own way, ' +
-    'and its name says how.',
+    'The figure beside a bot in the race moves around that. Riding on its own, a bot holds it ' +
+    'on the flat, eases downhill and goes harder on climbs. On a wheel it sits in and rides ' +
+    'easier; it goes harder to close a gap to the racer ahead, and in the final sprint. One ' +
+    'that goes too hard for too long fades back to it until it recovers. Each bot paces the ' +
+    'race its own way, and its name says how.',
   items: 'Race with items',
   assistedOn: 'Your assisted race setting is on.',
   assistedOff: 'An assisted race setting can make a race easier.',
