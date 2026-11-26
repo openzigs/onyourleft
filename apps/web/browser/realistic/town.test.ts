@@ -129,8 +129,13 @@ describe('the realistic page’s `house-archetypes` lever — #1782', () => {
 describe('the realistic page’s `roof-variants` lever — #1785', () => {
   const street = houseStreetFixture();
 
-  it('gives the street of houses every roof variant on the product’s page', () => {
-    const { plans } = plannedTown(street, parseConfig('?town=houses').leversOff);
+  it('gives the street of houses every roof variant on the page', () => {
+    // #3251: with `-house-styles`, the look pair this lever is taken on. On the product's page
+    // most of this village street is contemporary, and a contemporary house wears no variant.
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-house-styles').leversOff,
+    );
     const variants = new Set(plans.map((plan) => plan.roofVariant));
     for (const variant of ROOF_VARIANTS) expect(variants).toContain(variant);
   });
@@ -277,6 +282,22 @@ describe('the realistic page’s `house-styles` lever — #3251', () => {
     expect(modelled(on)).toBeLessThan(modelled(plans));
   });
 
+  it('draws the street of houses and the mixed town contemporary on the product’s page, and not with the lever', () => {
+    for (const [town, query] of [
+      [houseStreetFixture(), 'houses'],
+      [mixedTownFixture(), 'mixed'],
+    ] as const) {
+      const contemporary = (levers: string): number =>
+        plannedTown(town, parseConfig(`?town=${query}${levers}`).leversOff).plans.filter((plan) =>
+          plan.archetype.startsWith('contemporary'),
+        ).length;
+      expect(contemporary(''), query).toBeGreaterThan(20);
+      expect(contemporary('&levers=-house-styles'), query).toBe(0);
+      // And with no class there is no modern setting.
+      expect(contemporary('&levers=-urban-class'), query).toBe(0);
+    }
+  });
+
   it('draws every footprint traditional with `levers=-urban-class`, which gives the street no class', () => {
     const { plans } = plannedTown(
       street,
@@ -390,8 +411,9 @@ describe('the realistic page’s `dormer-variants` lever — #1786', () => {
       .plans.filter((plan) => plan.archetype === 'foursquare')
       .reduce((sum, plan) => sum + plan.dormers, 0);
 
-  it('stands a dormer on the street’s Foursquares on the product’s page', () => {
-    expect(foursquareDormers('?town=houses')).toBeGreaterThan(3);
+  it('stands a dormer on the street’s Foursquares on the page', () => {
+    // #3251: with `-house-styles`, for the reason the roof variants' case gives.
+    expect(foursquareDormers('?town=houses&levers=-house-styles')).toBeGreaterThan(3);
   });
 
   it('plans every house as the planner with them off does, with `levers=-dormer-variants`', () => {

@@ -396,7 +396,10 @@ import {
   buildingArchetypeOf,
   GARDEN_APARTMENT_FEATURES,
   MAIN_STREET_AWNING_SHARE,
-  type BuildingArchetype,
+  MODERN_FLATS_FEATURES,
+  modernFlatsFit,
+  type BuildingArchetypeInput,
+  type PlanBuildingArchetype,
 } from './building-archetypes';
 import {
   BARN_FEATURES,
@@ -434,7 +437,8 @@ import {
 } from './porch';
 import {
   ARCHETYPE_DROPS,
-  ARCHETYPE_FEATURES,
+  archetypeFeaturesOf,
+  contemporaryArchetypeOf,
   droppedFeatures,
   footprintShapeOf,
   houseArchetypeOf,
@@ -443,7 +447,7 @@ import {
   type FeatureShare,
   type DormerCall,
   type DormerKind,
-  type HouseArchetype,
+  type PlanHouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
 import {
@@ -949,7 +953,7 @@ export interface FootprintPlan {
    * porch, shutters, dormers, garage and cladding together; `unknown` where
    * none fits, or with `levers=-house-archetypes`, and planned as before.
    */
-  readonly archetype: HouseArchetype;
+  readonly archetype: PlanHouseArchetype;
   /**
    * The commercial or multi-family building it is — #1783
    * (`building-archetypes.ts`): a main-street block, a strip front or a garden
@@ -957,7 +961,7 @@ export interface FootprintPlan {
    * together; `unknown` where none fits, or with `levers=-commercial-archetypes`,
    * and planned as before.
    */
-  readonly buildingArchetype: BuildingArchetype;
+  readonly buildingArchetype: PlanBuildingArchetype;
   /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
@@ -1808,6 +1812,8 @@ const STREAM_ROOF_VARIANT = 33;
 const STREAM_STEEPLE = 34;
 /** #3251: whether a footprint beside a village stretch keeps the traditional style. */
 const STREAM_HOUSE_STYLE = 35;
+/** #3251: whether a contemporary house's roof is flat or low-pitched. */
+const STREAM_CONTEMPORARY_ROOF = 36;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -7650,6 +7656,17 @@ function planFootprint(
   };
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
+  // #3251: the style its setting calls for — modern beside a village, town or city-centre
+  // stretch, traditional on farmland and beside a rural or unclassed one — which chooses its
+  // house model, its contemporary archetype and the modern flats; none with the lever off.
+  const houseStyle =
+    choice.houseStyles === true
+      ? houseStyleOf({
+          urban: urbanClass,
+          farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
+          share: share(STREAM_HOUSE_STYLE),
+        })
+      : undefined;
   // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
   // #3132: a terrace's party wall; a flush wall shared outside one changes no roof.
   const terraced = party.some((wall) => wall.terrace);
@@ -7732,20 +7749,25 @@ function planFootprint(
       : family === 'apartments'
         ? apartmentArchetypeOf
         : undefined;
-  const buildingArchetype: BuildingArchetype =
+  const buildingCues: BuildingArchetypeInput = {
+    area,
+    aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+    rectangularity,
+    fourCorners: drawn.length / 2 === 4,
+    storeys,
+    use,
+    urban: urbanClass,
+    terraced,
+  };
+  // #3251: a modern block of flats first, where the setting calls for the modern style.
+  const buildingArchetype: PlanBuildingArchetype =
     choice.buildings === true && !part && archetypeOfBuilding !== undefined
-      ? archetypeOfBuilding({
-          area,
-          aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
-          rectangularity,
-          fourCorners: drawn.length / 2 === 4,
-          storeys,
-          use,
-          urban: urbanClass,
-          terraced,
-        })
+      ? houseStyle === 'modern' && modernFlatsFit(buildingCues)
+        ? 'modern-flats'
+        : archetypeOfBuilding(buildingCues)
       : 'unknown';
-  const pitched =
+  // The roof by the plan's own rule, before #3251's contemporary house may flatten it.
+  const pitchedByRule =
     !roofing.flat &&
     // #1794: a church's nave is pitched, at any size or height.
     (church ||
@@ -7763,16 +7785,53 @@ function planFootprint(
           // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
           (buildingArchetype === 'garden-apartment' &&
             wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
+  const residential = use === 'residential' && !outbuilding;
+  const shape = footprintShapeOf(drawn.length / 2, split?.length);
+  // #3251: a contemporary house, first, where the setting calls for the modern style: an
+  // untyped footprint or a mapped house that no building archetype took, while #1782's
+  // archetypes are on. A mapped bungalow, a church and every other mapped type keep theirs.
+  const contemporary =
+    choice.on &&
+    houseStyle === 'modern' &&
+    frontFrame !== undefined &&
+    (family === undefined || family === 'house') &&
+    buildingArchetype === 'unknown' &&
+    !church
+      ? contemporaryArchetypeOf(
+          {
+            area,
+            rectangularity,
+            shape,
+            storeys,
+            residential,
+            terraced,
+            pitched: pitchedByRule,
+            roofMapped: mappedRoof !== undefined,
+            share: share(STREAM_CONTEMPORARY_ROOF),
+          },
+          choice.startYear === true ? building.startYear : null,
+        )
+      : undefined;
+  // #3251: flat under a contemporary flat roof and over the modern flats, but for a mapped
+  // roof, which is the building's own.
+  const pitched =
+    pitchedByRule &&
+    !(
+      mappedRoof === undefined &&
+      (contemporary === 'contemporary-flat' || buildingArchetype === 'modern-flats')
+    );
+  // #3251: plain windows, no shingle and its own walls: a contemporary house's and the flats'.
+  const modernLook = contemporary !== undefined || buildingArchetype === 'modern-flats';
   // #3132: and a flush wall shared outside a terrace, drawn once as a party wall is.
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = party.length > 0 ? { party: { walls: party, eaves } } : {};
-  const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house
   // by the same rule, a mapped bungalow the bungalow alone, and every other mapped type none.
-  const archetype: HouseArchetype =
-    choice.on &&
+  const archetype: PlanHouseArchetype =
+    contemporary ??
+    (choice.on &&
     frontFrame !== undefined &&
     (family === undefined || family === 'house' || family === 'bungalow')
       ? houseArchetypeOf(
@@ -7780,7 +7839,7 @@ function planFootprint(
             area,
             aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
             rectangularity,
-            shape: footprintShapeOf(drawn.length / 2, split?.length),
+            shape,
             storeys,
             residential,
             urban: urbanClass,
@@ -7794,23 +7853,26 @@ function planFootprint(
           // #1793: its mapped year, which only narrows the candidates.
           choice.startYear === true ? building.startYear : null,
         )
-      : 'unknown';
+      : 'unknown');
   const features = droppedFeatures(
     // #1794: a church's nave under its steep gable.
     church
       ? CHURCH_FEATURES
       : archetype !== 'unknown'
-        ? ARCHETYPE_FEATURES[archetype]
-        : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
-          // block's, so none has a garage.
-          buildingArchetype === 'garden-apartment' || family === 'apartments'
-          ? GARDEN_APARTMENT_FEATURES
-          : family === undefined
-            ? SEEDED_FEATURES
-            : // #2024: an inferred barn's gambrel on a seeded share only.
-              measured.inferred && family === 'barn'
-              ? INFERRED_BARN_FEATURES
-              : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
+        ? (archetypeFeaturesOf(archetype) ?? SEEDED_FEATURES)
+        : // #3251: the modern flats' own.
+          buildingArchetype === 'modern-flats'
+          ? MODERN_FLATS_FEATURES
+          : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
+            // block's, so none has a garage.
+            buildingArchetype === 'garden-apartment' || family === 'apartments'
+            ? GARDEN_APARTMENT_FEATURES
+            : family === undefined
+              ? SEEDED_FEATURES
+              : // #2024: an inferred barn's gambrel on a seeded share only.
+                measured.inferred && family === 'barn'
+                ? INFERRED_BARN_FEATURES
+                : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -7921,7 +7983,8 @@ function planFootprint(
   const shingled =
     roofMaterial !== null
       ? roofMaterial === 'asphalt'
-      : roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+      : // #3251: nor a contemporary house's low roof, which is its plain grey.
+        roof !== 'flat' && !pole && !modernLook && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
@@ -7930,7 +7993,8 @@ function planFootprint(
     share(STREAM_FOUNDATION) < shareOf(features.brickFoundation, BRICK_FOUNDATION_SHARE);
   const flags =
     // #1783: a main-street block's upper windows are sashes, in the bays' rhythm.
-    (residential || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
+    // #3251: but a contemporary house's and the modern flats' are plain panes.
+    ((residential && !modernLook) || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < shareOf(features.shutters, SHUTTER_SHARE)
       ? STYLE_SHUTTERS
       : 0) +
@@ -8126,8 +8190,9 @@ function planFootprint(
         )
       : undefined;
   const middle = (frontBays - 1) / 2;
+  // #3251: and on a contemporary house of two storeys too.
   const picture =
-    storeys === 1 &&
+    (storeys === 1 || contemporary !== undefined) &&
     residential &&
     shop === undefined &&
     frontBays >= 3 &&
@@ -8567,14 +8632,7 @@ function planFootprint(
             storeys,
             use,
             front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
-            style:
-              choice.houseStyles === true
-                ? houseStyleOf({
-                    urban: urbanClass,
-                    farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
-                    share: share(STREAM_HOUSE_STYLE),
-                  })
-                : undefined,
+            style: houseStyle,
           },
           houseModels,
         );
@@ -8601,16 +8659,21 @@ function planFootprint(
       : // #1795: a town hall's and a school's brick.
         civicLandmark !== undefined
         ? 'brick'
-        : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
-          buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
-          ? 'brick'
-          : // #1791: a mapped barn's planks, under any roof.
-            family === 'barn'
-            ? 'planks'
-            : // #2024: a pole building's metal sheet.
-              pole
-              ? 'corrugated'
-              : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+        : // #3251: a contemporary house's and the modern flats' render — and under clapboard
+          // its boards, which are drawn on render too. Never a surface of their own: a seventh
+          // surface in a frame is a building that waits for a refill (`mapped-buildings.ts`).
+          modernLook
+          ? 'render'
+          : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+            buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+            ? 'brick'
+            : // #1791: a mapped barn's planks, under any roof.
+              family === 'barn'
+              ? 'planks'
+              : // #2024: a pole building's metal sheet.
+                pole
+                ? 'corrugated'
+                : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
@@ -8619,7 +8682,8 @@ function planFootprint(
     ? SHINGLE_SURFACE
     : roofMaterialSurface !== undefined
       ? roofMaterialSurface
-      : (pole && roof !== 'flat') || drew.steeple
+      : // #3251: and a contemporary house's low roof.
+        (pole && roof !== 'flat') || drew.steeple || (contemporary !== undefined && roof !== 'flat')
         ? 'slate'
         : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =

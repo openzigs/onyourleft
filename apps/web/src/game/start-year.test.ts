@@ -304,7 +304,8 @@ describe('#1793: an undated town plans as before', () => {
         undefined,
         urban,
         // Since #2848 the shops' aprons are off: the plans before #1793 had none.
-        { shopAprons: false, ...options },
+        // Since #3251 the choice by setting too: they had no contemporary house.
+        { shopAprons: false, houseStyles: false, ...options },
       );
       expect(planFingerprint(plans)).toBe(MIXED_TOWN_BEFORE_1793);
     }

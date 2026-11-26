@@ -381,13 +381,21 @@ export type Layer = (typeof LAYERS)[number];
  *   and beside a `rural` or unclassed stretch, and a small seeded share of a
  *   village stretch's traditional. Every committed model is traditional, so
  *   on, a footprint beside a town is drawn as its extrusion where before it
- *   was drawn as one of #1585's models. Off, a footprint takes any model that
- *   fits it, as before. Read at load, as `house-archetypes` is, and only
- *   while `urban-class` is on: with no class every footprint is traditional.
- *   The owner's BY-EYE pair and the tablet's cost pair (plan-time only: no
- *   call, no byte, no shader term; fewer model triangles on, never more);
- *   pair it with `town=richmond`, whose narrow lots fit #1585's models. The
- *   product always chooses by setting.
+ *   was drawn as one of #1585's models. And a modern footprint's extrusion
+ *   is a CONTEMPORARY house (`house-archetypes.ts` §`contemporaryArchetypeOf`:
+ *   a flat or low 25° roof, plain windows with no sash bars or shutters, a
+ *   picture window, a garage on most, render or boards, no porch, dormer or
+ *   chimney) where it was one of #1782's or a seeded one, and a residential
+ *   block of three or four storeys in a town is the modern flats
+ *   (`building-archetypes.ts` §`modernFlatsFit`). Off, a footprint takes any
+ *   model that fits it and every plan is as before, byte for byte. Read at
+ *   load, as `house-archetypes` is, and only while `urban-class` is on: with
+ *   no class every footprint is traditional. The owner's BY-EYE pair and the
+ *   tablet's cost pair (plan-time only: no call, no byte, no surface and no
+ *   shader term; fewer triangles on, never more); pair it with `town=houses`,
+ *   a village's street of houses, `town=mixed`, a town's, and `town=richmond`,
+ *   whose narrow lots fit #1585's models. The product always chooses by
+ *   setting.
  * - `inferred-outbuildings` — #2023: an untagged footprint inferred a garage
  *   (20 to 75 m², roughly square, a house within 40 m and set back behind it
  *   from the street) or a shed (12 to 20 m²), spike 0033's thresholds, and

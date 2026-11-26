@@ -128,7 +128,8 @@ function plannedStreet(
     street.origin,
     undefined,
     urban,
-    options,
+    // #3251: with the choice by setting off, so the street's houses are #1782's, as this file holds them.
+    { houseStyles: false, ...options },
   );
   // Every footprint kept, so each plan is its footprint's.
   expect(verdicts.kept).toBe(corridor.buildings.length);
@@ -500,7 +501,8 @@ describe('#1791: untyped changes nothing, and the lever puts the type out', () =
     const land = landClassMask(town.corridor);
     const urban = urbanClassMap(town.corridor, land, town.profile);
     // Since #2848 the shops' aprons are off: the plans before #1791 had none.
-    const before = { shopAprons: false } as const;
+    // Since #3251 the choice by setting is off too: the plans before had no contemporary house.
+    const before = { shopAprons: false, houseStyles: false } as const;
     expect(
       planFingerprint(
         footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, before)

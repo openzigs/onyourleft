@@ -191,3 +191,67 @@ export const GARDEN_APARTMENT_FEATURES: ArchetypeFeatures = {
 
 /** The share of main-street shop fronts with an awning — #1783: **two in three**. */
 export const MAIN_STREET_AWNING_SHARE = 2 / 3;
+
+// --- Modern flats — #3251 ----------------------------------------------------
+
+/**
+ * A modern block of flats — #3251, the owner's ruling of 2026-11-26, *"3 to 4
+ * storey flats in town"*: a residential footprint of three or four storeys
+ * and **200 m² or more** beside a `town` or `city-centre` stretch, not
+ * terraced. Flat-roofed, in render (a surface every town already draws, so
+ * none is added), its windows plain, with no garage, shutters, porch or dormer.
+ *
+ * ⚠️ **Beside #1783's three, never in their table.** {@link BUILDING_CUES}
+ * and {@link BUILDING_ARCHETYPES} are not touched, and
+ * {@link BuildingArchetype} still names those three and `unknown`. The flats
+ * are chosen FIRST, by {@link modernFlatsFit}, only for a footprint whose
+ * setting calls for the modern style (`house-models.ts` §`houseStyleOf`), so
+ * a three-storey garden apartment in a town is these flats and one in a
+ * village, or with `levers=-house-styles`, is a garden apartment as before.
+ * The storeys are the footprint's own, mapped or chosen (#1634): nothing
+ * here makes a building taller.
+ */
+export type ModernBuildingArchetype = 'modern-flats';
+
+/** What a plan's building may be: one of #1783's, the modern flats, or `unknown`. */
+export type PlanBuildingArchetype = BuildingArchetype | ModernBuildingArchetype;
+
+/** The modern flats' cue. A sketch, to be tuned on the owner's look pair. */
+export const MODERN_FLATS_CUE = {
+  storeys: [3, 4],
+  area: 200,
+  urban: ['town', 'city-centre'],
+} as const satisfies {
+  readonly storeys: readonly [number, number];
+  readonly area: number;
+  readonly urban: readonly UrbanClass[];
+};
+
+/** Whether a footprint is a modern block of flats, by {@link MODERN_FLATS_CUE}. */
+export function modernFlatsFit(input: BuildingArchetypeInput): boolean {
+  const [least, most] = MODERN_FLATS_CUE.storeys;
+  return (
+    input.use === 'residential' &&
+    !input.terraced &&
+    input.storeys >= least &&
+    input.storeys <= most &&
+    input.area >= MODERN_FLATS_CUE.area &&
+    (MODERN_FLATS_CUE.urban as readonly UrbanClass[]).includes(input.urban)
+  );
+}
+
+/** The modern flats' features: no house feature at all but a door canopy with no posts. */
+export const MODERN_FLATS_FEATURES: ArchetypeFeatures = {
+  ...SEEDED_FEATURES,
+  hip: 0,
+  chimney: 0,
+  canopy: 1,
+  canopyPosts: 0,
+  frontPorch: 0,
+  shutters: 0,
+  picture: 0,
+  garage: 0,
+  dormer: 0,
+  siding: 0,
+  brickFoundation: 0,
+};

@@ -197,7 +197,9 @@ describe('a terrace — the read path (#1635)', () => {
   });
 
   it('plans the same pair in a village exactly as with no urban class: the class gate', () => {
-    const village = plansOf(pair(0), everywhere('village'));
+    // #3251: with the choice by setting off. On, a village's detached pair is contemporary,
+    // which is that rule's and not the terrace's class gate.
+    const village = plansOf(pair(0), everywhere('village'), { houseStyles: false });
     const none = plansOf(pair(0), undefined);
     expect(village.map(bytesOf)).toStrictEqual(none.map(bytesOf));
     expect(village.some(terraced)).toBe(false);

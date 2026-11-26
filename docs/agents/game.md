@@ -2144,7 +2144,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `realistic-budget.ts` §`REALISTIC_BUILDING_MODEL_TRIANGLES`
                         (3 000, ADR 0099 D-4.2). A village's plots with no map
                         data keep the traditional set. The look pair is
-                        `town=richmond` against `levers=-house-styles`
+                        `town=richmond` against `levers=-house-styles`.
+                        The modern look itself is built from code, not a file:
+                        a modern footprint's extrusion is a CONTEMPORARY house
+                        (`house-archetypes.ts` §`contemporaryArchetypeOf`,
+                        `contemporary-flat` or `contemporary-low`: plain
+                        windows, a picture window, no shutters, porch, dormer
+                        or chimney, render or boards) and a 3 to 4 storey
+                        residential block in a town the modern flats
+                        (`building-archetypes.ts` §`modernFlatsFit`), both
+                        chosen BEFORE #1782's and #1783's tables, which are
+                        untouched. ⚠️ Their walls stay on the `render` surface:
+                        a surface of their own was a seventh in a frame and
+                        left front-row buildings undrawn
+                        (`mapped-buildings-ahead.test.ts`). Pairs: `town=houses`
+                        and `town=mixed` against `levers=-house-styles`
     src/game/facade.ts  a mapped building's windows and front door, laid out in
                         a bay and a storey (#1581), and since #1588 its US sash
                         windows, shutters, reveal and cladding — drawn by the shader

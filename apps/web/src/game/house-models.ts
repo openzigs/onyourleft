@@ -53,9 +53,12 @@
  * other style in its place.
  *
  * ⚠️ **Every model committed today is `traditional`.** No modern model is in
- * the set yet, so a modern footprint is drawn as its extrusion. A modern
- * model joins by a row in {@link HOUSE_MODELS} with `style: 'modern'`, and
- * nothing else here changes. A village's plots in the world with no map data
+ * the set, so a modern footprint is drawn as its extrusion — and that
+ * extrusion is the modern building: a contemporary house
+ * (`house-archetypes.ts` §`contemporaryArchetypeOf`) or the modern flats
+ * (`building-archetypes.ts` §`modernFlatsFit`), built from code and chosen by
+ * this same style. A modern MODEL would join by a row in {@link HOUSE_MODELS}
+ * with `style: 'modern'`, and nothing else here changes. A village's plots in the world with no map data
  * ({@link VILLAGE_HOUSE_MODELS}) have no class and keep the traditional set.
  *
  * ⚠️ **A model is drawn only at the near level**: past
