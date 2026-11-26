@@ -228,6 +228,22 @@ describe('a saved route ride names the street it is on — #3245', () => {
     expect(along.has('Testz Spur')).toBe(false);
   });
 
+  it('ends a stretch at a long unnamed gap, so the street gets a fresh join label and the gap none', () => {
+    const labels = routeStreetNameLabels(
+      [streetAlong(100, 600, 'Testa Way'), streetAlong(800, 1_300, 'Testa Way')],
+      profile,
+      origin(),
+    );
+    const at = alongByName(labels).get('Testa Way') ?? [];
+    const half = paintedLength('Testa Way') / 2;
+    expect(at).toHaveLength(2);
+    expect(at[0]).toBeLessThan(600);
+    // The second label is the join label of the street's second stretch.
+    expect(at[1]).toBeGreaterThanOrEqual(800 + ROUTE_STREET_NAME_JOIN_METRES + half - 10);
+    expect(at[1]).toBeLessThan(800 + ROUTE_STREET_NAME_JOIN_METRES + half + 20);
+    for (const along of at) expect(along < 600 || along > 800).toBe(true);
+  });
+
   it('moves a label on past a corner rather than lay it across one', () => {
     // A street that starts just before the first corner: its join label
     // would straddle the corner, so it is laid wholly past it.

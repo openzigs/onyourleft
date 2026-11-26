@@ -17,6 +17,8 @@
     **D-1.2**'s *"Only the open world's area reader asks for names … A route ride's corridor read,
     the store and the export never carry a name"*, for the corridor read and the store. The export
     still carries none;
+  - ADR 0096 **D-1.4**'s *"never stored"*, for the saved route ride: a street's name is kept in the
+    ODbL corridor store (D-1). It stays never logged or sent;
   - [ADR 0054](0054-towns-from-real-map-data.md) **D-2.2**'s rule that no name is read, for the
     `name` of a `roads` street on a route's corridor; its **D-3.3**'s one sentence of what the store
     holds, which gains a street's name; and its **D-5.7**, *"No street name … reaches the world"*,
