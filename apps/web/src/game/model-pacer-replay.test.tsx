@@ -68,7 +68,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { endRideAnswer } from './end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer } from './port';
-import { rideConditionsFor } from './rider';
+import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
 import { rollingRoute } from './route-fixtures-testing';
 import { SIMULATION_STEP_SECONDS, type GameState } from './simulation';
 import { gameTrainerPortOver } from './trainer-port';
@@ -99,6 +99,8 @@ const PACER_INTENSITY = '2.9';
 const WIND_SPEED = '15';
 const WIND_FROM = '200';
 const ROUTE_ID = 'route-rolling';
+/** Not {@link DEFAULT_RIDING_POSITION} — #2727. */
+const RIDDEN_POSITION: RidingPosition = 'drops';
 const CHECKPOINTS: RecordingCheckpointStore = {
   putRecordingSession: (record) => Promise.resolve(record.id),
   appendRecordingChunk: () => Promise.resolve(1),
@@ -238,6 +240,13 @@ function toggle(words: string): HTMLInputElement | undefined {
   );
 }
 
+function positionChoice(position: RidingPosition): HTMLInputElement | undefined {
+  return queryAll<HTMLInputElement>(
+    mounted?.container ?? document,
+    'input[name="oyl-riding-position"]',
+  ).find((input) => input.value === position);
+}
+
 function labelledStarting(words: string): HTMLInputElement {
   const label = queryAll<HTMLLabelElement>(mounted?.container ?? document, 'label').find(
     (candidate) => (candidate.textContent ?? '').startsWith(words),
@@ -328,6 +337,9 @@ async function rideAndSave(): Promise<Ridden> {
   await press(toggle('Ride in a wind'));
   await typeInto(labelledStarting('Wind speed'), WIND_SPEED);
   await typeInto(labelledStarting('Wind direction'), WIND_FROM);
+  // #2727: a position other than the default, so a log that always stored
+  // the default would neither say this one nor replay this ride.
+  await press(positionChoice(RIDDEN_POSITION));
   await press(toggle('Let the AI on your server coach you through the pacer'));
   await press(buttonStarting('Allow the AI pacer'));
   await press(buttonStarting('Ride '));
@@ -421,6 +433,8 @@ describe('a directed pacer replays from its saved ride — #2712’s review, ADR
     expect(log.pacerWPerKg).toBe(Number(PACER_INTENSITY));
     expect(log.routeId).toBe(ROUTE_ID);
     expect(log.wind?.fromBearing).toBe(Number(WIND_FROM));
+    expect(RIDDEN_POSITION).not.toBe(DEFAULT_RIDING_POSITION);
+    expect(log.position).toBe(RIDDEN_POSITION);
     // Applied, decisions that asked for no line, and refused at the end.
     // Every one carries the device's decision, so the replay rides a change
     // of direction through lines never asked for, the start ramp from where

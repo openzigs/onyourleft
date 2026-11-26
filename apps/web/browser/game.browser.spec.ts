@@ -191,6 +191,8 @@ interface GameHarnessResult {
   readonly frameMsNoise: number;
   readonly litDrawCalls: number;
   readonly flatDrawCalls: number;
+  readonly litShadedMaterials: readonly string[];
+  readonly flatShadedMaterials: readonly string[];
   readonly sceneryIndicesModelled: Readonly<Record<string, number>>;
   readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
   readonly sceneryInstances: Readonly<Record<string, number>>;
@@ -479,6 +481,11 @@ function expectWordmarkRead(logos: LogoMeasurement): void {
   );
   // One draw call for every board in a frame.
   expect(logos.calls).toBe(1);
+  // #976: …measured on a frame that holds two, the start's and the finish's
+  // of a 300 m point-to-point route — until then only jsdom's instance count
+  // said the second board cost no call.
+  expect(logos.bothGatesBoards).toBe(2);
+  expect(logos.bothGatesCalls).toBe(1);
 }
 
 /**
@@ -2361,6 +2368,21 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // and nowhere else.
     expect(result.litDrawCalls).toBeGreaterThan(0);
     expect(result.litDrawCalls).toBe(result.flatDrawCalls);
+  });
+
+  test('mounts every belt’s unlit twin at the floor rung, the gate and its board too — #976', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
+
+    // Each belt's own swap is tested in jsdom (`three-renderer.test.ts`);
+    // what calls them all is the view's `#applyShading`, which jsdom cannot
+    // build with a context. So, on the whole frame at the start line: lit,
+    // drawn meshes wear lit materials (the control — the read can see one)…
+    expect(result.litShadedMaterials.length).toBeGreaterThan(0);
+    // …and flat, not one does. A belt left out of `#applyShading` keeps its
+    // lit material here: #970's review found the gate's and the board's out.
+    expect(result.flatShadedMaterials).toEqual([]);
   });
 
   test('carries a real sun on the frame, derived from the route', async ({ harnessRun }) => {

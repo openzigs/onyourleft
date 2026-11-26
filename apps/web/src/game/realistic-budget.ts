@@ -1286,16 +1286,22 @@ export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 25_000;
  * **4 400** since #1274 — #679's ceiling was **1 000**, against the 1 350 its
  * research found spare in the worst frame before #617 freed more. Spent only within
  * `gantry.ts` §`LINE_DRAW_AHEAD_METRES` of a line, and nothing anywhere else.
- * The worst a frame carries is two gantries and a board — a point-to-point
- * route shorter than the reach, whose start and finish are both in view —
- * which `realistic-budget.test.ts` counts from `gantry.ts`' own boxes: 858;
+ * The sum is priced as two gantries and a board — both gates of a route
+ * shorter than the reach, and a board before a line, though no one route
+ * has both (below) — which `realistic-budget.test.ts` counts from
+ * `gantry.ts`' own boxes: 858;
  * and since #966 the wordmark's board on the start gate, 36 triangles
  * (`logo-board.ts`' three boxes), counted twice for a loop shorter than the
- * reach: **930**, still inside the 1 000. ⚠️ **#978 put a board on the finish
- * gate too, and 930 did NOT move**: the frame above — both gates of a short
- * point-to-point route — now holds two boards, the start's and the finish's,
- * which is exactly the two the sum already priced. A billboard's board spends
- * a STRUCTURE's slot (`scene.ts`), not this ceiling.
+ * reach: **930**, still inside the 1 000. ⚠️ **930 is an upper bound, and no
+ * route's frame holds all of it** (#976): the board before a line stands only
+ * on a route over a distance unit and `BOARD_CLEAR_OF_START_METRES` long
+ * (`gantry.ts` §`lineStands`), and both gates are in reach only on one under
+ * `LINE_DRAW_AHEAD_METRES` + `LINE_DRAW_BEHIND_METRES` (405 m). Each term is
+ * reachable on its own, so the sum bounds every frame. ⚠️ **#978 put a board
+ * on the finish gate too, and 930 did NOT move**: the two boards it prices
+ * cover a short loop's two placings and, since #978, a short point-to-point
+ * route's start and finish. A billboard's board spends a STRUCTURE's slot
+ * (`scene.ts`), not this ceiling.
  *
  * ## ⚠️ Raised by #1274, and the draw calls were not
  *
@@ -1308,7 +1314,7 @@ export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 25_000;
  * therefore submits both, 60 triangles, legs and beam and board post as much
  * as a barrier:
  *
- * | The worst frame: two gantries and a board, two wordmark boards | triangles |
+ * | The bound: two gantries and a board, two wordmark boards | triangles |
  * |---|--:|
  * | Before: 71 boxes at 12, three banners at 2, two boards' 36 | 930 |
  * | After: 71 instances at 12 + 48, three banners at 2, two boards' 36 | **4 338** |
