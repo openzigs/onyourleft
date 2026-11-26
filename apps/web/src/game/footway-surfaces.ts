@@ -615,6 +615,10 @@ export function footwaysInView(
   cameraZ: number,
   streets: readonly VillageStreet[],
 ): readonly FootwayPiece[] {
+  // #3107: a corridor with no mapped footway — an open-world ride's, which
+  // carries streets alone — has no surface and no zebra, and is not read for
+  // its junctions to keep them off: that reading is every street of it.
+  if (corridor.paths.length === 0) return NO_FOOTWAYS;
   const surfaces = surfacesOf(corridor, profile, origin, seed, land);
   const candidates: { order: number; distance: number; triangles: number }[] = [];
   surfaces.zebras.forEach((zebra, order) => {

@@ -60,7 +60,9 @@
  * eases a new view's line in from the path last drawn over the next
  * `line-ease.ts` §`LINE_EASE_METRES` ridden, so a choice moves neither the
  * drawn rider nor the camera on the frame it is made (ADR 0089 C-6, #2989). A
- * U-turn's line is drawn at once: the road under the rider changed.
+ * U-turn's is eased in too, and drawn round a half-turn of its own from where
+ * the rider was drawn at the press (#3066, §`pressedTurn`): the road under
+ * the rider changed, so the view's own line turns back within a sample of them.
  *
  * ## What a change means for the scenery (#3055)
  *
@@ -101,6 +103,7 @@
  */
 
 import {
+  distanceBetween,
   metres,
   positionAt,
   type GeographicPosition,
@@ -109,16 +112,36 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { drawnLine, type DrawnLine } from '../drawn-line';
+import { JunctionScan } from '../cross-streets';
+import {
+  drawnLine,
+  drawnLineAt,
+  type DrawnLine,
+  type PathPoint,
+  type PressedTurn,
+} from '../drawn-line';
+import type { LandClassMask } from '../land-class';
+import {
+  JUNCTION_HEADING_METRES,
+  TURNED_JUNCTION_DEGREES,
+  junctionWayWidth,
+  type JunctionWay,
+  type TurnedJunction,
+} from '../junction-surface';
 import type { MappedBuildings } from '../mapped-buildings';
+import type { MappedTown } from '../settlements';
+import { NearbyStreetScan } from '../nearby-streets';
+import { lineOffsetAt } from '../racing-line';
 import { MAPPED_RANKED_AHEAD_METRES } from '../realistic-budget';
-import { routeSeed } from '../scatter';
-import { anchorScenery } from '../scenery-anchor';
+import { routeSeed, WaysOutPlacing } from '../scatter';
+import type { StreetScans } from '../scene';
+import { anchorScenery, elevationBand, type ElevationBand } from '../scenery-anchor';
 import type { GameState } from '../simulation';
 import type { StreetNameLabel } from '../street-names';
 import { StreetLevels } from '../street-levels';
 import type { WorldCorridor } from '../world-data/corridor';
 import {
+  ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
   VIEW_BEHIND_METRES,
   corridorOrigin,
@@ -126,7 +149,9 @@ import {
   localGroundPosition,
   type CorridorOrigin,
 } from '../terrain';
-import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
+import { TURNED_OFF_REACH_METRES } from '../way-roads';
+import { easeWeight, easedLine, heldLine, reframing, type HeldLine } from './line-ease';
+import { openWorldTown } from './urban-stretch';
 
 /** No street names: what a road with no names hook paints. */
 const NO_LABELS: readonly StreetNameLabel[] = [];
@@ -136,6 +161,68 @@ const NO_LABELS: readonly StreetNameLabel[] = [];
  * **1 km**. *#2982's choice*, above.
  */
 export const OPEN_WORLD_REACH_FLOOR_METRES = 1_000;
+
+/**
+ * How far across the road a pressed U-turn is drawn, at least, in metres:
+ * **3**, `drawn-line.ts` §`U_TURN_LEAST_ACROSS_METRES` — #3066, *its
+ * choice*. The half-turn ends across from where the rider was, on the new
+ * view's line where that is far enough over, and otherwise this far over,
+ * towards it where there is room: the new view's line can run back within a
+ * metre of where the rider was, and a half-turn that narrow is a spin on the
+ * spot.
+ */
+const PRESSED_TURN_ACROSS_METRES = 3;
+
+/** How far in from the road's edge a pressed U-turn stays, metres: **0.75**. */
+const PRESSED_TURN_KERB_METRES = 0.75;
+
+/** Half the road's width, metres: `terrain.ts` §`ROAD_WIDTH_METRES` over two. */
+const ROAD_HALF_METRES = ROAD_WIDTH_METRES / 2;
+
+/**
+ * How much odometer a pressed U-turn's half-turn is ridden over, in metres:
+ * **15** — #3066's review, *its choice*. Each piece is a cubic in the
+ * odometer (`drawn-line.ts` §`hermiteAt`), whose pull on the drawn rider is
+ * largest at its ends, `12r/S²` across and `2/S` along for a radius `r` and a
+ * span `S`: at 15 m under 0.25 a metre for the widest half-turn the road has
+ * room for. The press was first drawn over `πr/0.5`, 9.4 m for the narrowest,
+ * and the drawn rider's move changed by 0.06 to 0.1 m from one frame to the
+ * next (`u-turn-press.test.tsx`). The rider slows into the half-turn, to a
+ * third to a half of their pace midway, and picks up out of it. A fixed span
+ * keeps the lag the merge gives back, and so the whole turn, inside 40 m,
+ * short of `camera.ts` §`U_TURN_PIVOT_METRES`' 45.
+ */
+const PRESSED_TURN_SPAN_METRES = 15;
+
+/**
+ * How far along the road back the drawn rider is eased from the side of the
+ * road the half-turn ends on to the new view's line, at least, in metres:
+ * **10** — #3066. And for each metre the drawn rider is behind (or ahead of)
+ * the new line's place when the half-turn ends, {@link PRESSED_TURN_MERGE_PER_LAG}
+ * more (#3066's review): the half-turn makes no way along the road while the
+ * odometer runs on, so the merge gives that back, and over a short one it
+ * does so with a jerk.
+ */
+const PRESSED_TURN_MERGE_METRES = 10;
+
+/** The merge's metres for each metre of lag it gives back: **1** — #3066's review. */
+const PRESSED_TURN_MERGE_PER_LAG = 1;
+
+/** The step the slope of a path is read over, metres of odometer either side. */
+const SLOPE_STEP_METRES = 0.01;
+
+/** The path at odometer `at`, and its slope per metre of odometer there. */
+function pathPointAt(line: DrawnLine, at: number): PathPoint {
+  const here = drawnLineAt(line, at);
+  const before = drawnLineAt(line, at - SLOPE_STEP_METRES);
+  const after = drawnLineAt(line, at + SLOPE_STEP_METRES);
+  return {
+    x: here.x,
+    z: here.z,
+    slopeX: (after.x - before.x) / (2 * SLOPE_STEP_METRES),
+    slopeZ: (after.z - before.z) / (2 * SLOPE_STEP_METRES),
+  };
+}
 
 /**
  * How far ahead of the rider a junction's ways out are handed to the scene:
@@ -198,6 +285,51 @@ interface HeldWayOut extends OpenWorldWayOut {
 }
 
 const NO_WAYS_OUT: readonly OpenWorldWayOut[] = [];
+
+/**
+ * A junction where the route leaves the road it came along — #3123: it takes
+ * a way that is not ADR 0088 D-1.4's default, so the road the rider came
+ * along carries on past the junction as {@link way}, and runs back from it as
+ * the road itself. `scene.ts` §`SceneInput.turnedOff`. @see OpenWorldRoad.turnedOff
+ */
+export interface OpenWorldTurnedOff {
+  /** The junction's ride distance. */
+  readonly junction: number;
+  /** The way the route would have taken there: the road turned off, on past the junction. */
+  readonly way: OpenWorldWayOut;
+}
+
+const NO_TURNED_OFF: readonly OpenWorldTurnedOff[] = [];
+
+/**
+ * A junction the route turns through — #3133: it takes a way that turns
+ * `junction-surface.ts` §`TURNED_JUNCTION_DEGREES` or more, chosen or not, so
+ * the scene draws the junction as the streets meeting there
+ * (`scene.ts` §`SceneInput.junctionsTurned`). @see OpenWorldRoad.junctionsTurned
+ */
+export type OpenWorldJunctionTurned = TurnedJunction;
+
+const NO_JUNCTIONS_TURNED: readonly OpenWorldJunctionTurned[] = [];
+
+/** A junction turned through, as held: which way was taken, and the origin it was read on. */
+interface HeldJunctionTurned {
+  readonly taken: string;
+  readonly origin: number;
+  readonly turned: OpenWorldJunctionTurned;
+}
+
+/** `way`'s street as the scene reads its arm: its point {@link JUNCTION_HEADING_METRES} along, and its width. */
+function junctionWayOf(way: RollingJunction['ways'][number]): JunctionWay | undefined {
+  const points = way.edge.points;
+  const first = points[0];
+  if (first === undefined) return undefined;
+  let toward = first.position;
+  for (let index = 1; index < points.length; index += 1) {
+    toward = (points[index] as (typeof points)[number]).position;
+    if ((distanceBetween(first.position, toward) as number) >= JUNCTION_HEADING_METRES) break;
+  }
+  return { toward, width: junctionWayWidth(way.edge.roadClass) };
+}
 
 /**
  * One junction of the ride, as the scene cuts a village's street at it
@@ -269,6 +401,14 @@ export interface OpenWorldRoadHooks {
    */
   readonly graphVersion?: (() => number) | undefined;
   /**
+   * How many height tiles have arrived (`heights.ts` §`RoadHeights.version`):
+   * a change since the last follow means the route may now know heights it
+   * lacked, so it asks again (`RollingRoute.refill`) — #2899.
+   */
+  readonly heightsVersion?: (() => number) | undefined;
+  /** That the road's heights are read from the terrain archive: the corner credits it (ADR 0087 D-8). */
+  readonly realHeights?: boolean | undefined;
+  /**
    * #2901: the route and the rider, after each follow has advanced it, so the
    * session can ask for the map tiles ahead and on every way on from the next
    * junction to be planned (`tiles-ahead.ts`).
@@ -284,6 +424,12 @@ export interface OpenWorldRoadHooks {
   /** #2902: the mapped buildings planned round the rider, in {@link frame}, once there are any. */
   readonly buildings?: (() => MappedBuildings | undefined) | undefined;
   /**
+   * #3105: the real water of the tiles planned so far, in {@link frame}, as
+   * the land mask the scene reads its water from (`water-mask.ts`);
+   * `undefined` while no tile planned holds any.
+   */
+  readonly water?: (() => LandClassMask | undefined) | undefined;
+  /**
    * #2903: the held blocks' streets as a corridor in {@link frame}
    * (`street-corridor.ts`), which the scene draws to the fog as road and
    * stubs at each junction; `undefined` until a block is held.
@@ -297,6 +443,110 @@ export interface OpenWorldRoadHooks {
   readonly streetNames?: (() => readonly StreetNameLabel[]) | undefined;
 }
 
+/**
+ * The half-turn a U-turn pressed is drawn round, on `line`'s view, whose
+ * distance zero is ride distance `origin`, for a rider drawn at ride distance
+ * `rider` — #3066. The road turns back at ride distance `turnedAt`, and
+ * `before` is the path drawn on the view before the press, whose distance
+ * zero is `beforeOrigin`.
+ *
+ * Two pieces: a half-turn from where `before` has the rider, across to
+ * {@link PRESSED_TURN_ACROSS_METRES} over, towards the new line where the
+ * road has that much room that way and otherwise on the side with more,
+ * over {@link PRESSED_TURN_SPAN_METRES}; then, facing back, an ease onto
+ * `line` over at least {@link PRESSED_TURN_MERGE_METRES} of the road back.
+ * Undefined where the view ends before that, or the rider is past the turn.
+ */
+function pressedTurn(
+  before: DrawnLine,
+  beforeOrigin: number,
+  line: DrawnLine,
+  origin: number,
+  rider: number,
+  turnedAt: number,
+): PressedTurn | undefined {
+  const from = rider - origin;
+  const ahead = turnedAt - rider;
+  if (!(from >= 0 && ahead >= 0)) return undefined;
+  const { shift, scaleX } = reframing(corridorOrigin(before.profile), corridorOrigin(line.profile));
+  const was = pathPointAt(before, rider - beforeOrigin);
+  const start: PathPoint = {
+    x: was.x * scaleX + shift.x,
+    z: was.z + shift.z,
+    slopeX: was.slopeX * scaleX,
+    slopeZ: was.slopeZ,
+  };
+  const pace = Math.hypot(start.slopeX, start.slopeZ);
+  if (!(pace > 0)) return undefined;
+  // Across, along the path's normal: `scene.ts` §`chaseRider`'s, (−z, x) of
+  // its heading, the side its offsets are measured to.
+  const normalX = -start.slopeZ / pace;
+  const normalZ = start.slopeX / pace;
+  const offset = lineOffsetAt(before, rider - beforeOrigin);
+  const room = ROAD_HALF_METRES - PRESSED_TURN_KERB_METRES;
+  // Where the new line runs back, across the road the same way: its own
+  // normal faces the other way. Estimated where the rider will be once the
+  // half-turn is ridden; read again at the merge's end, below.
+  const back = -lineOffsetAt(line, from + 2 * ahead + PRESSED_TURN_MERGE_METRES);
+  const wanted = back - offset;
+  const towards = wanted >= 0 ? 1 : -1;
+  const roomOn = (side: number): number => room - side * offset;
+  // #3066's review: towards the new line only where that side has room for
+  // the whole half-turn; a half-turn a metre across is a spin on the spot.
+  const side =
+    roomOn(towards) >= PRESSED_TURN_ACROSS_METRES || roomOn(towards) >= roomOn(-towards)
+      ? towards
+      : -towards;
+  const across = Math.min(Math.max(PRESSED_TURN_ACROSS_METRES, Math.abs(wanted)), roomOn(side));
+  const turnSpan = PRESSED_TURN_SPAN_METRES;
+  // The half-turn ends about where along the road it began, `turnSpan` past
+  // the press; the new line is then `turnSpan − 2·ahead` further back along
+  // the road (it turns `ahead` past the press), which the merge gives back.
+  const lag = turnSpan - 2 * ahead;
+  const span = turnSpan + PRESSED_TURN_MERGE_METRES + PRESSED_TURN_MERGE_PER_LAG * Math.abs(lag);
+  const to = from + span;
+  if (!(across > 0) || !(to <= (line.profile.totalDistance as number))) return undefined;
+  const across1: PathPoint = {
+    x: start.x + normalX * side * across,
+    z: start.z + normalZ * side * across,
+    slopeX: -start.slopeX,
+    slopeZ: -start.slopeZ,
+  };
+  return {
+    pieces: [
+      { from, to: from + turnSpan, start, end: across1 },
+      { from: from + turnSpan, to, start: across1, end: pathPointAt({ ...line, uTurns: [] }, to) },
+    ],
+  };
+}
+
+/**
+ * `line` with `turn` drawn on it — #3066. The view's own U-turn at the press
+ * is the half-turn's to draw, so it is not drawn as well; and over the
+ * half-turn, and the samples either side of it, the line's curvature is
+ * nought. `scene.ts` §`drawnRider` eases the drawn rider off for a sharp bend
+ * read from that curvature, and the view's own was its U-turn's, a bend the
+ * half-turn is not: read there, the drawn place moved with every step of the
+ * rider's speed, by up to 17 cm from one frame's move to the next. So the
+ * drawn rider does not lean round the half-turn, either.
+ */
+function withPressedTurn(line: DrawnLine, turn: PressedTurn): DrawnLine {
+  const first = turn.pieces[0];
+  const last = turn.pieces[turn.pieces.length - 1];
+  if (first === undefined || last === undefined) return line;
+  const resolution = line.profile.resolution as number;
+  const low = Math.max(0, Math.floor(first.from / resolution) - 1);
+  const high = Math.min(line.curvatures.length - 1, Math.ceil(last.to / resolution) + 1);
+  const curvatures = new Float64Array(line.curvatures);
+  curvatures.fill(0, low, high + 1);
+  return {
+    ...line,
+    curvatures,
+    pressed: turn,
+    uTurns: line.uTurns.filter((sample) => !(sample + 1 >= low && sample - 1 <= high)),
+  };
+}
+
 /** One open-world ride's road, from its start. See the file's header. */
 export class OpenWorldRoad {
   /** The rolling route itself: #2897's junction choice presses through it. */
@@ -304,6 +554,8 @@ export class OpenWorldRoad {
   readonly #hooks: OpenWorldRoadHooks;
   /** The ride's scenery seed, from its first view (#3055). */
   readonly #seed: number;
+  /** The ride's elevation range, from its first view (#3065). */
+  readonly #band: ElevationBand;
   /**
    * #3094: the streets the ride holds, which every view's ground is levelled
    * beside — one for the ride, so every view reads the same ground.
@@ -311,24 +563,48 @@ export class OpenWorldRoad {
   readonly #levels: StreetLevels;
   /** #3094: the frame the ride's places are read in: the session's, or the first view's. */
   readonly #placeFrame: CorridorOrigin;
+  /**
+   * #3107: the ride's readings of its streets, a slice a frame
+   * (`scene.ts` §`SceneInput.streetScans`). One for the ride: a reading is
+   * handed on as last read through every view and corridor change. #3119:
+   * and the ways out whose scenery is placed a few a frame.
+   */
+  readonly streetScans: StreetScans = {
+    nearby: new NearbyStreetScan(),
+    junctions: new JunctionScan(),
+    ways: new WaysOutPlacing(),
+  };
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
+  #heightsVersion: number | undefined;
   /** The path last handed out by {@link drawnPath}, on {@link view}: what the screen drew. */
   #drawn: DrawnLine | undefined;
   /** The path being eased from, and the ride distance the ease began at. @see drawnPath */
   #easing: { readonly from: HeldLine; readonly at: number } | undefined;
   /** Where the rider was at the last {@link follow} that placed them on the road. @see position */
   #position: GeographicPosition | undefined;
+  /**
+   * #3066: a U-turn pressed since the last path was drawn, and the path drawn
+   * before it with its view's origin, which the half-turn starts from.
+   */
+  #press:
+    { readonly from: DrawnLine; readonly origin: number; readonly turnedAt: number } | undefined;
+  /** The pressed U-turn drawn on {@link view}, kept for the view. @see drawnPath */
+  #turn: PressedTurn | undefined;
+  /** The last line {@link drawnPath} drew {@link #turn} on, and that line with it. */
+  #turned: { readonly base: DrawnLine; readonly line: DrawnLine } | undefined;
 
   constructor(route: RollingRoute, hooks: OpenWorldRoadHooks = {}) {
     this.route = route;
     this.#hooks = hooks;
     this.#uTurns = route.uTurns;
     this.#graphVersion = hooks.graphVersion?.();
+    this.#heightsVersion = hooks.heightsVersion?.();
     this.#levels = new StreetLevels(() => hooks.streets?.()?.streets);
     const profile = this.#framed(route.view());
     this.#seed = routeSeed(profile);
+    this.#band = elevationBand(profile);
     this.#placeFrame = corridorOrigin(profile);
     this.#view = this.#anchored({ profile, origin: route.origin, turned: false });
   }
@@ -342,6 +618,26 @@ export class OpenWorldRoad {
   /** The mapped buildings planned round the rider (#2902), or `undefined` while none are. */
   buildings(): MappedBuildings | undefined {
     return this.#hooks.buildings?.();
+  }
+
+  /**
+   * #3131: what the scene's lots, field boundaries and streets read of the
+   * mapped town round the rider — its planned footprints and how built-up
+   * each view and way out is (`urban-stretch.ts`) — or `undefined` while no
+   * building is planned or none is in reach, which is today's world. The same object while the plans are.
+   */
+  town(): MappedTown | undefined {
+    const buildings = this.buildings();
+    const streets = this.streets();
+    if (buildings === undefined || buildings.plans.length === 0 || streets === undefined) {
+      return undefined;
+    }
+    return openWorldTown(buildings, streets);
+  }
+
+  /** The real water round the rider as a land mask (#3105), or `undefined` while none is planned. */
+  water(): LandClassMask | undefined {
+    return this.#hooks.water?.();
   }
 
   /** The streets round the rider as a corridor (#2903), or `undefined` while none are held. */
@@ -406,6 +702,15 @@ export class OpenWorldRoad {
         readonly ways: readonly OpenWorldWayOut[];
       }
     | undefined;
+
+  /** Each junction where the route turns off the road it came along, by ride distance. @see turnedOff */
+  #turnedOff = new Map<number, HeldWayOut>();
+  /** What {@link turnedOff} last handed on: the same array until a junction is added, changed or dropped. */
+  #turnedOffList: readonly OpenWorldTurnedOff[] = NO_TURNED_OFF;
+  /** Each junction the route turns through, by ride distance. @see junctionsTurned */
+  #junctionsTurned = new Map<number, HeldJunctionTurned>();
+  /** What {@link junctionsTurned} last handed on: the same array until a junction is added, changed or dropped. */
+  #junctionsTurnedList: readonly OpenWorldJunctionTurned[] = NO_JUNCTIONS_TURNED;
 
   /** Every junction seen, by ride distance and node. @see junctionsSeen */
   #junctionsSeen = new Map<string, OpenWorldJunctionSeen>();
@@ -497,6 +802,21 @@ export class OpenWorldRoad {
           held.set(key, out);
           if (depth < WAYS_OUT_DEPTH) look(out.route, junction.distance, depth + 1);
         }
+        // #3123: where the road's own route turns off the road it came along,
+        // the way it would have taken is that road on past the junction. As
+        // last looked at before the rider passes it: a choice can change it
+        // until then.
+        if (route === this.route) {
+          const onward =
+            junction.taken === junction.defaultWay
+              ? undefined
+              : held.get(`${String(junction.distance)}:${junction.defaultWay}`);
+          if (onward === undefined) this.#turnedOff.delete(junction.distance);
+          else this.#turnedOff.set(junction.distance, onward);
+          // #3133: and where the way it takes turns, the junction is drawn as
+          // the streets meeting there, whichever way is taken.
+          this.#noteTurned(junction, origin);
+        }
       }
     };
     // Behind the rider: what each junction of the road had as the rider
@@ -522,6 +842,38 @@ export class OpenWorldRoad {
     if (this.#junctionsSeenList === NO_JUNCTIONS_SEEN && this.#junctionsSeen.size > 0) {
       this.#junctionsSeenList = [...this.#junctionsSeen.values()];
     }
+    // #3123: a junction turned off at is handed on until it is past the fog behind.
+    for (const [junction, way] of this.#turnedOff) {
+      if (junction < rider - TURNED_OFF_REACH_METRES || !(fixed || way.origin === origin)) {
+        this.#turnedOff.delete(junction);
+      }
+    }
+    // #3133: a junction turned through, as long as a road turned off is.
+    for (const [junction, held] of this.#junctionsTurned) {
+      if (junction < rider - TURNED_OFF_REACH_METRES || !(fixed || held.origin === origin)) {
+        this.#junctionsTurned.delete(junction);
+      }
+    }
+    const turnedThrough = this.#junctionsTurnedList;
+    if (
+      turnedThrough.length !== this.#junctionsTurned.size ||
+      turnedThrough.some((each) => this.#junctionsTurned.get(each.junction)?.turned !== each)
+    ) {
+      this.#junctionsTurnedList =
+        this.#junctionsTurned.size === 0
+          ? NO_JUNCTIONS_TURNED
+          : [...this.#junctionsTurned.values()].map((held) => held.turned);
+    }
+    const listed = this.#turnedOffList;
+    if (
+      listed.length !== this.#turnedOff.size ||
+      listed.some((each) => this.#turnedOff.get(each.junction) !== each.way)
+    ) {
+      this.#turnedOffList =
+        this.#turnedOff.size === 0
+          ? NO_TURNED_OFF
+          : [...this.#turnedOff].map(([junction, way]) => ({ junction, way }));
+    }
     const ways: readonly OpenWorldWayOut[] = [...held.values()];
     const same =
       last !== undefined &&
@@ -536,9 +888,97 @@ export class OpenWorldRoad {
     return this.#waysOutFor.ways;
   }
 
+  /**
+   * Every junction within {@link TURNED_OFF_REACH_METRES} of a rider at ride
+   * distance `rider` where the route turns off the road it came along — #3123,
+   * the owner's tablet ride of 2026-11-24: after a turn, the road turned off
+   * stopped at the junction although it carries on.
+   *
+   * After a turn the road the rider came along is neither the road the scene
+   * draws (it draws the view's road from `terrain.ts` §`VIEW_BEHIND_METRES`
+   * behind the rider) nor a street the streets' own drawing reads (it is the
+   * route, so `nearby-streets.ts` keeps off it, and the way on past the
+   * junction was the route until the choice), and a way out is handed on only
+   * to {@link WAYS_OUT_BEHIND_METRES} behind the rider. So each is handed on
+   * here, with the way the route would have taken, until the rider is past
+   * the fog from it: `scene.ts` draws the road on past the junction and back
+   * from it (`way-roads.ts` §`WayReached.turnedOff`) once the rider has passed
+   * it. Junctions ahead are handed on too, as the route stands now, so the
+   * scene starts drawing on the frame the rider passes one. A U-turn drops
+   * them all, as it drops the ways out. The same array until one is added,
+   * changed or dropped; none for a rider distance that is not a number.
+   */
+  turnedOff(rider: number): readonly OpenWorldTurnedOff[] {
+    if (!Number.isFinite(rider)) return NO_TURNED_OFF;
+    this.waysOut(rider);
+    return this.#turnedOffList;
+  }
+
+  /** Notes whether the route turns through `junction`, read on a view at ride distance `origin`. @see junctionsTurned */
+  #noteTurned(junction: RollingJunction, origin: number): void {
+    const taken = junction.ways.find((way) => way.edge.id === junction.taken);
+    if (taken === undefined || Math.abs(taken.turnDegrees) < TURNED_JUNCTION_DEGREES) {
+      this.#junctionsTurned.delete(junction.distance);
+      return;
+    }
+    if (this.#junctionsTurned.get(junction.distance)?.taken === junction.taken) return;
+    const position = taken.edge.points[0]?.position;
+    const onward = junctionWayOf(taken);
+    if (position === undefined || onward === undefined) {
+      this.#junctionsTurned.delete(junction.distance);
+      return;
+    }
+    const ways: JunctionWay[] = [];
+    for (const way of junction.ways) {
+      if (way.edge.id === junction.taken) continue;
+      const read = junctionWayOf(way);
+      if (read !== undefined) ways.push(read);
+    }
+    this.#junctionsTurned.set(junction.distance, {
+      taken: junction.taken,
+      origin,
+      turned: { junction: junction.distance, position, taken: onward, ways },
+    });
+  }
+
+  /**
+   * Every junction within {@link TURNED_OFF_REACH_METRES} of a rider at ride
+   * distance `rider` where the route turns — #3133, the owner's tablet ride
+   * of 2026-11-24: a junction turned through was drawn as one road bending,
+   * not as a T or a crossroads. The way taken turns
+   * `junction-surface.ts` §`TURNED_JUNCTION_DEGREES` or more, chosen or the
+   * default; each comes with every other way on from it, so `scene.ts` draws
+   * the streets meeting there and stops the road's lines at the mouth. As
+   * last looked at before the rider passes it, kept until the rider is that
+   * far past it, and dropped at a U-turn, as {@link turnedOff} is. The same
+   * array until one is added, changed or dropped; none for a rider distance
+   * that is not a number.
+   */
+  junctionsTurned(rider: number): readonly OpenWorldJunctionTurned[] {
+    if (!Number.isFinite(rider)) return NO_JUNCTIONS_TURNED;
+    this.waysOut(rider);
+    return this.#junctionsTurnedList;
+  }
+
   /** The view last handed on. */
   get view(): OpenWorldRoadView {
     return this.#view;
+  }
+
+  /** That the road's heights are read from the terrain archive (ADR 0087 D-8's credit). */
+  get realHeights(): boolean {
+    return this.#hooks.realHeights === true;
+  }
+
+  /**
+   * Whether the grade at ride distance `rider` rests on known heights
+   * (`RollingRoute.gradeKnownAt`) — #2899. Where it does not, the road reads
+   * 0 %, and the ride loop hands the gradient session its bounded path, so
+   * the grade sent walks to 0 % at 1 % a second and back up once the heights
+   * are known (ADR 0087 D-7).
+   */
+  heightsKnownAt(rider: number): boolean {
+    return this.route.gradeKnownAt(rider);
   }
 
   /**
@@ -569,6 +1009,14 @@ export class OpenWorldRoad {
         this.#graphVersion = version;
         route.reopen(rider);
       }
+      // #2899: a height tile arrived since, so the road asks again for the
+      // heights it lacked. A grade this changes under the rider is walked at
+      // 1 % a second (`gradient.ts` §`follow`, ADR 0087 D-6.4).
+      const heights = this.#hooks.heightsVersion?.();
+      if (heights !== this.#heightsVersion) {
+        this.#heightsVersion = heights;
+        route.refill();
+      }
       if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
       const at = alongView(route, rider);
       if (at >= 0 && at <= route.end - route.origin) {
@@ -586,24 +1034,42 @@ export class OpenWorldRoad {
     const turned = route.uTurns !== this.#uTurns;
     this.#uTurns = route.uTurns;
     // #2989: the new view's line is eased in from the path last drawn, from
-    // here; after a U-turn that path is on a road the rider has left.
+    // here. #3066: after a U-turn too, where the road up to the rider is the
+    // road they came along, and the half-turn starts from that path.
     const drawn = this.#drawn;
     this.#easing =
-      turned || drawn === undefined || !Number.isFinite(rider)
+      drawn === undefined || !Number.isFinite(rider)
         ? undefined
         : { from: heldLine(drawn, this.#view.origin), at: rider };
+    // `RollingRoute.uTurn` turns the road round on the first sample at or
+    // after the rider.
+    const resolution = profile.resolution as number;
+    this.#press =
+      turned && drawn !== undefined && Number.isFinite(rider)
+        ? {
+            from: drawn,
+            origin: this.#view.origin,
+            turnedAt: Math.ceil(rider / resolution) * resolution,
+          }
+        : undefined;
+    this.#turn = undefined;
+    this.#turned = undefined;
     this.#drawn = undefined;
     // #3051: after a U-turn no junction behind is one the rider passed on this road.
     if (turned) {
       this.#waysOut.clear();
       this.#junctionsSeen.clear();
       this.#junctionsSeenList = NO_JUNCTIONS_SEEN;
+      this.#turnedOff.clear();
+      this.#turnedOffList = NO_TURNED_OFF;
+      this.#junctionsTurned.clear();
+      this.#junctionsTurnedList = NO_JUNCTIONS_TURNED;
     }
     this.#view = this.#anchored({ profile, origin: route.origin, turned });
     return this.#view;
   }
 
-  /** `view`, its scenery keyed on the ride's seed and distance (#3055). */
+  /** `view`, its scenery keyed on the ride's seed, distance (#3055) and elevation range (#3065). */
   #anchored(view: OpenWorldRoadView): OpenWorldRoadView {
     this.#keyed(view.profile, view.origin);
     return view;
@@ -616,6 +1082,7 @@ export class OpenWorldRoad {
       origin,
       levels: this.#levels,
       frame: this.#placeFrame,
+      band: this.#band,
     });
   }
 
@@ -633,7 +1100,25 @@ export class OpenWorldRoad {
     const easing = this.#easing;
     const weight = easing === undefined ? 1 : easeWeight(rider - easing.at);
     if (easing !== undefined && !(weight < 1)) this.#easing = undefined;
-    const drawn = easing === undefined ? line : easedLine(easing.from, line, view.origin, weight);
+    const eased = easing === undefined ? line : easedLine(easing.from, line, view.origin, weight);
+    // #3066: a U-turn pressed since the last path, drawn from where that path
+    // had the rider on this frame.
+    const press = this.#press;
+    this.#press = undefined;
+    if (press !== undefined && Number.isFinite(rider)) {
+      this.#turn = pressedTurn(press.from, press.origin, line, view.origin, rider, press.turnedAt);
+    }
+    const turn = this.#turn;
+    const known = this.#turned;
+    const drawn =
+      turn === undefined
+        ? eased
+        : known?.base === eased
+          ? known.line
+          : withPressedTurn(eased, turn);
+    // Kept while the ease runs, the eased line being a new one each frame;
+    // once it is over the line is the view's own, and so is this.
+    if (turn !== undefined) this.#turned = { base: eased, line: drawn };
     this.#drawn = drawn;
     return drawn;
   }

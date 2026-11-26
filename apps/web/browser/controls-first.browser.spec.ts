@@ -1532,8 +1532,12 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
     return last;
   }
 
-  async function openPicker(page: Page, viewport: Viewport): Promise<Box> {
-    await open(page, viewport, 'data=populated');
+  async function openPicker(
+    page: Page,
+    viewport: Viewport,
+    query = 'data=populated',
+  ): Promise<Box> {
+    await open(page, viewport, query);
     await visit(page, routeById('open-world'));
     await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
     return (await mapFrame(page)).canvas;
@@ -1674,6 +1678,184 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
       await mapFrame(page),
       `${PHONE.name} widened to ${String(landscape.width)}×${String(landscape.height)}`,
     );
+  });
+
+  /**
+   * #3050: the owner dropped a pin on the tablet and saw no way to start. At
+   * 1280×800 the page was 1,529 px tall and *Start the ride* stood at y ≈ 1,350,
+   * under the map and both lists. Once a start is chosen — a pin, a saved
+   * route, a past ride — the button must be on the screen where the rider is,
+   * with nothing over it: its box between the top of the window and the fold
+   * (`reflow-harness.tsx` §`foldLine`: the bottom inset, or a bottom bar), and
+   * a hit test at its centre landing on it, so neither the sticky header nor
+   * the navigation covers it. The rider does not scroll: a pin is dropped on
+   * the map as the page opens, and a route or a ride is pressed where Playwright
+   * scrolls it to, which is what a rider's own scroll to the list would do.
+   *
+   * The harness hands the picker a port (`?openworld=port`), as `main.tsx`
+   * does; with none, as in every other walk, there is no button to find.
+   */
+  test.describe('#3050 — Start the ride is on screen once a start is chosen', () => {
+    /** Where the button is, against the window, the fold and whatever is drawn over it. */
+    async function startInView(page: Page): Promise<{
+      top: number;
+      bottom: number;
+      fold: number;
+      hit: boolean;
+    }> {
+      const button = page.getByRole('button', { name: 'Start the ride', exact: true });
+      await expect(button).toHaveCount(1);
+      return button.evaluate((element) => {
+        const probe = document.createElement('div');
+        probe.style.cssText =
+          'position:fixed;visibility:hidden;padding-bottom:env(safe-area-inset-bottom,0px)';
+        document.body.append(probe);
+        const inset = Number.parseFloat(getComputedStyle(probe).paddingBottom);
+        probe.remove();
+        let fold = window.innerHeight - inset;
+        const nav = document.querySelector('.oyl-nav');
+        if (nav !== null && getComputedStyle(nav).position === 'fixed') {
+          const bar = nav.getBoundingClientRect();
+          if (bar.width >= window.innerWidth - 1 && bar.top > window.innerHeight / 2) {
+            fold = Math.min(fold, bar.top);
+          }
+        }
+        const box = element.getBoundingClientRect();
+        const atCentre = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          fold,
+          hit: atCentre !== null && element.contains(atCentre),
+        };
+      });
+    }
+
+    function expectInView(seen: Awaited<ReturnType<typeof startInView>>, where: string): void {
+      console.log(
+        `[#3050] ${where}: Start the ride ${seen.top.toFixed(1)}–${seen.bottom.toFixed(1)}, ` +
+          `fold ${seen.fold.toFixed(1)}, hit ${String(seen.hit)}`,
+      );
+      expect(seen.top, `${where}: Start the ride is above the window`).toBeGreaterThanOrEqual(0);
+      expect(seen.bottom, `${where}: Start the ride is below the fold`).toBeLessThanOrEqual(
+        seen.fold,
+      );
+      expect(seen.hit, `${where}: something is drawn over Start the ride`).toBe(true);
+    }
+
+    for (const viewport of [PHONE, ...TABLETS]) {
+      test(`after a pin, a saved route and a past ride, on a ${viewport.name}`, async ({
+        page,
+      }) => {
+        const canvas = await openPicker(page, viewport, 'data=populated&openworld=port');
+        await expect(page.getByRole('button', { name: 'Start the ride', exact: true })).toHaveCount(
+          0,
+        );
+        // A tap on the part of the map that is on the screen as the page opens.
+        const fold = await page.evaluate(() => window.innerHeight);
+        const seenBottom = Math.min(canvas.y + canvas.height, fold);
+        await page.mouse.click(canvas.x + canvas.width / 2, (canvas.y + seenBottom) / 2);
+        await expect(page.locator('main .oyl-map__waypoint--pin')).toHaveCount(1);
+        expectInView(await startInView(page), `${viewport.name}, a pin`);
+
+        // The next step, said where the pin's drop is said.
+        const said = page.locator('section[aria-labelledby="oyl-open-world-pin"] [role="status"]');
+        await expect(said).toHaveText(/^Pin dropped\. .*Start the ride/u);
+
+        // The map's own buttons (`z-index` 1) pass beneath the bar, not over
+        // it: scrolled so the first of them is behind the bar's middle, a hit
+        // test there lands on the bar. They stand at the top of the map, above
+        // the bar at every size, so a spacer the height of the window is put
+        // above the view first, for the page to scroll them up through it.
+        const beneath = await page.evaluate((height) => {
+          const bar = document.querySelector('.oyl-open-world__go');
+          const control = document.querySelector('main .oyl-map__controls button');
+          const main = document.querySelector('.oyl-main');
+          if (bar === null || control === null || main === null) {
+            throw new Error('no bar, no map button or no main');
+          }
+          const spacer = document.createElement('div');
+          spacer.style.height = `${String(height)}px`;
+          main.prepend(spacer);
+          const middle = (): number => {
+            const box = bar.getBoundingClientRect();
+            return box.top + box.height / 2;
+          };
+          const first = control.getBoundingClientRect();
+          globalThis.scrollBy(0, first.top + first.height / 2 - middle());
+          const now = control.getBoundingClientRect();
+          const hit = document.elementFromPoint(now.left + now.width / 2, middle());
+          const seen = {
+            behind: Math.abs(now.top + now.height / 2 - middle()) < 2,
+            onBar: hit !== null && bar.contains(hit),
+          };
+          spacer.remove();
+          return seen;
+        }, viewport.height);
+        expect(beneath.behind, 'the map’s button was not scrolled behind the bar').toBe(true);
+        expect(beneath.onBar, 'the map’s button is drawn over the bar').toBe(true);
+
+        await page.getByRole('button', { name: 'The mill loop' }).click();
+        expectInView(await startInView(page), `${viewport.name}, a saved route`);
+
+        await page.getByRole('button', { name: /^Morning ride, / }).click();
+        expectInView(await startInView(page), `${viewport.name}, a past ride`);
+
+        // Tab never stops on a control drawn under the pinned button (WCAG 2.2
+        // SC 2.4.11): `theme.css` §"#3050"'s scroll padding. As
+        // `shell.browser.spec.ts` §`lowestFocusedBottom` does, a column of
+        // buttons 16 px apart is Tabbed down from the top, so each press
+        // scrolls the next one only just into view, against the bottom edge.
+        const presses = await page.evaluate((height) => {
+          const main = document.querySelector('.oyl-main');
+          if (main === null) throw new Error('no .oyl-main');
+          const column = document.createElement('div');
+          column.dataset['oylProbe'] = 'column';
+          for (let index = 0; index < Math.ceil((height * 2) / 60); index += 1) {
+            const control = document.createElement('button');
+            control.type = 'button';
+            control.textContent = `Probe ${String(index)}`;
+            control.style.display = 'block';
+            control.style.marginBlock = '16px';
+            column.append(control);
+          }
+          main.prepend(column);
+          globalThis.scrollTo(0, 0);
+          column.querySelector('button')?.focus({ preventScroll: true });
+          return column.querySelectorAll('button').length - 1;
+        }, viewport.height);
+        const under: string[] = [];
+        for (let press = 0; press < presses; press += 1) {
+          await page.keyboard.press('Tab');
+          const at = await page.evaluate(() => {
+            const focused = document.activeElement;
+            const bar = document.querySelector('.oyl-open-world__go');
+            if (focused?.closest('[data-oyl-probe="column"]') == null || bar === null) {
+              throw new Error('Tab left the probe column, or the bar is gone');
+            }
+            return {
+              name: focused.textContent ?? '',
+              bottom: focused.getBoundingClientRect().bottom,
+              barTop: bar.getBoundingClientRect().top,
+            };
+          });
+          if (at.bottom > at.barTop + 0.5) {
+            under.push(`${at.name}: bottom ${at.bottom.toFixed(1)}, bar ${at.barTop.toFixed(1)}`);
+          }
+        }
+        console.log(
+          `[#3050] ${viewport.name}: ${String(presses)} Tab presses, ` +
+            `${String(under.length)} under the bar`,
+        );
+        expect(under, 'focus drawn under the pinned Start the ride').toEqual([]);
+
+        await page.getByRole('button', { name: 'Start the ride', exact: true }).click();
+        expect(await page.evaluate(() => window.__oylOpenWorldBegun)).toBe(1);
+      });
+    }
   });
 
   test.describe('with a mouse and a keyboard, on the landscape tablet', () => {
@@ -1964,6 +2146,330 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
 });
 
 /**
+ * #3134 — the route planner's map and the route editor's, moved by touch on
+ * the landscape tablet, as the open-world picker's is (§"#2889" above).
+ *
+ * The owner found on the tablet (build 1124c) that a finger on the planner's
+ * map did nothing: a one-finger drag did not pan it, a pinch did not zoom it,
+ * and its compass buttons were the only way to move it. `map/maplibre.ts`
+ * §`EXPLORABLE` turns MapLibre's touch pan off on an explorable map (#2003),
+ * so that a thumb on a saved route's map scrolls the page; on a map a rider
+ * draws on, that left nothing to move it by hand. These cases are #3134's
+ * acceptance, in `reflow.html`'s real shell at the tablet's 1280×800 with its
+ * insets and touch emulation:
+ *
+ * - **One finger on empty map pans it**, the page does not scroll under it,
+ *   and no waypoint is added.
+ * - **A pinch zooms it**, and no waypoint is added.
+ * - **A tap still adds a waypoint, and a finger on a waypoint still moves
+ *   it** — the waypoint, and not the map under it.
+ * - **The route editor's map pans by one finger as well**: it is the same
+ *   editable map.
+ *
+ * Every movement is read off a marker: a marker stands still on the ground,
+ * so it moves on the screen exactly as the map does. The planner's waypoint
+ * list is read as well, so a drag that added a point fails twice.
+ *
+ * ⚠️ Not proved here: how a real finger on the owner's tablet feels — #3134's
+ * third criterion is the owner's.
+ */
+test.describe('#3134 — the route planner’s map moves by touch on the landscape tablet', () => {
+  test.use({ hasTouch: true });
+  const [landscape] = TABLETS;
+
+  interface Point {
+    readonly x: number;
+    readonly y: number;
+  }
+
+  interface Canvas extends Point {
+    readonly width: number;
+    readonly height: number;
+  }
+
+  function apart(a: Point, b: Point): number {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  /** The map's canvas as the engine laid it out, on the screen. */
+  async function mapCanvas(page: Page): Promise<Canvas> {
+    return page.evaluate(() => {
+      const canvas = document.querySelector('main .oyl-map canvas');
+      if (!(canvas instanceof HTMLCanvasElement)) throw new Error('no map canvas');
+      const box = canvas.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    });
+  }
+
+  /** Each marker's centre, from the canvas's top left, by the number it shows. */
+  async function markers(page: Page): Promise<Record<string, Point>> {
+    return page.evaluate(() => {
+      const canvas = document.querySelector('main .oyl-map canvas');
+      if (canvas === null) throw new Error('no map canvas');
+      const origin = canvas.getBoundingClientRect();
+      const seen: Record<string, { x: number; y: number }> = {};
+      for (const marker of document.querySelectorAll('main .oyl-map .oyl-map__waypoint')) {
+        const box = marker.getBoundingClientRect();
+        seen[marker.textContent] = {
+          x: box.left + box.width / 2 - origin.left,
+          y: box.top + box.height / 2 - origin.top,
+        };
+      }
+      return seen;
+    });
+  }
+
+  /** One marker, once the camera has stopped: two readings a moment apart agree. */
+  async function settled(page: Page, label: string): Promise<Point> {
+    // MapLibre's ease, and a pan's inertia, begin a frame after the finger lifts.
+    await page.waitForTimeout(400);
+    const read = async (): Promise<Point> => {
+      const at = (await markers(page))[label];
+      if (at === undefined) throw new Error(`no marker ${label} on the map`);
+      return at;
+    };
+    let last = await read();
+    await expect
+      .poll(async () => {
+        await page.waitForTimeout(150);
+        const next = await read();
+        const still = apart(last, next) < 0.5;
+        last = next;
+        return still;
+      })
+      .toBe(true);
+    return last;
+  }
+
+  /** One touch gesture from `from` to `to`, a list of fingers each, in ten steps. */
+  async function touch(page: Page, from: readonly Point[], to: readonly Point[]): Promise<void> {
+    const cdp = await page.context().newCDPSession(page);
+    const at = (step: number): { x: number; y: number; id: number }[] =>
+      from.map((finger, id) => {
+        const end = to[id] ?? finger;
+        return {
+          x: finger.x + ((end.x - finger.x) * step) / 10,
+          y: finger.y + ((end.y - finger.y) * step) / 10,
+          id,
+        };
+      });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+    for (let step = 1; step <= 10; step += 1) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(step) });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+
+  /**
+   * How far the page has scrolled: the document and every box the map sits
+   * in, so the reading does not depend on which of them the shell scrolls.
+   */
+  async function pageScrolled(page: Page): Promise<number> {
+    return page.evaluate(() => {
+      let total = globalThis.scrollY;
+      let box = document.querySelector('main .oyl-map')?.parentElement ?? null;
+      while (box !== null) {
+        total += box.scrollTop;
+        box = box.parentElement;
+      }
+      return total;
+    });
+  }
+
+  /** The markers on the map. */
+  function onMap(page: Page): ReturnType<Page['locator']> {
+    return page.locator('main .oyl-map .oyl-map__waypoint');
+  }
+
+  /** The waypoints in the planner's list, which is what a save would keep. */
+  function listed(page: Page): ReturnType<Page['locator']> {
+    return page.locator('main').getByRole('button', { name: /^Delete waypoint \d+$/ });
+  }
+
+  /** Opens a route over a fixture, scrolled so that its map is on the screen. */
+  async function openWithMap(
+    page: Page,
+    route: RouteId,
+    data: 'empty' | 'populated',
+  ): Promise<Canvas> {
+    if (landscape === undefined) throw new Error('no landscape tablet');
+    await open(page, landscape, `data=${data}`);
+    await visit(page, routeById(route));
+    await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+    await page.locator('main .oyl-map').scrollIntoViewIfNeeded();
+    return mapCanvas(page);
+  }
+
+  /**
+   * The planner with no draft — the populated fixture seeds one — and one
+   * waypoint tapped down away from the map's centre, so that a zoom moves it.
+   */
+  async function plannerWithOne(page: Page): Promise<{ canvas: Canvas; before: Point }> {
+    const canvas = await openWithMap(page, 'route-builder', 'empty');
+    const aimed = { x: canvas.width / 2 + 110, y: canvas.height / 2 + 50 };
+    await page.touchscreen.tap(canvas.x + aimed.x, canvas.y + aimed.y);
+    await expect(onMap(page)).toHaveCount(1);
+    const before = await settled(page, '1');
+    expect(apart(before, aimed), 'the tapped waypoint from the tap').toBeLessThan(3);
+    return { canvas, before };
+  }
+
+  test('one finger on empty map pans it, scrolls nothing and adds no waypoint', async ({
+    page,
+  }) => {
+    const { canvas, before } = await plannerWithOne(page);
+    await expect(listed(page)).toHaveCount(1);
+    const top = await pageScrolled(page);
+    const centre = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+    // From the far side of the centre to the waypoint, up and to the left.
+    const drag = { x: -80, y: -100 };
+    const from = { x: centre.x - 100, y: centre.y + 60 };
+    await touch(page, [from], [{ x: from.x + drag.x, y: from.y + drag.y }]);
+    const after = await settled(page, '1');
+    const scrolled = (await pageScrolled(page)) - top;
+    console.log(
+      `[#3134] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}, ` +
+        `page scrolled ${scrolled.toFixed(1)} px`,
+    );
+    const carried = { x: before.x + drag.x, y: before.y + drag.y };
+    expect(apart(after, carried), 'one finger did not carry the map with it').toBeLessThan(20);
+    expect(Math.abs(scrolled), 'the drag scrolled the page as well').toBeLessThan(3);
+    await expect(onMap(page)).toHaveCount(1);
+    await expect(listed(page)).toHaveCount(1);
+  });
+
+  test('a pinch zooms it and adds no waypoint', async ({ page }) => {
+    const { canvas, before } = await plannerWithOne(page);
+    const middle = { x: canvas.width / 2, y: canvas.height / 2 };
+    const near = apart(before, middle);
+    const centre = { x: canvas.x + middle.x, y: canvas.y + middle.y };
+    await touch(
+      page,
+      [
+        { x: centre.x - 30, y: centre.y - 20 },
+        { x: centre.x + 30, y: centre.y - 20 },
+      ],
+      [
+        { x: centre.x - 150, y: centre.y - 20 },
+        { x: centre.x + 150, y: centre.y - 20 },
+      ],
+    );
+    const after = apart(await settled(page, '1'), middle);
+    console.log(
+      `[#3134] pinch: marker ${near.toFixed(1)} → ${after.toFixed(1)} px from the middle`,
+    );
+    expect(after, 'the pinch did not zoom in').toBeGreaterThan(near * 1.5);
+    await expect(onMap(page)).toHaveCount(1);
+    await expect(listed(page)).toHaveCount(1);
+  });
+
+  test('a pinch whose first finger lands and moves first zooms it too', async ({ page }) => {
+    const { canvas, before } = await plannerWithOne(page);
+    const middle = { x: canvas.width / 2, y: canvas.height / 2 };
+    const near = apart(before, middle);
+    const centre = { x: canvas.x + middle.x, y: canvas.y + middle.y };
+    const top = await pageScrolled(page);
+    const cdp = await page.context().newCDPSession(page);
+    const y = centre.y - 20;
+    // A real hand: one finger is down and drifting before the other lands.
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: centre.x - 30, y, id: 0 }],
+    });
+    for (let step = 1; step <= 3; step += 1) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: centre.x - 30, y: y - step * 8, id: 0 }],
+      });
+    }
+    const first = { x: centre.x - 30, y: y - 24 };
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [
+        { ...first, id: 0 },
+        { x: centre.x + 30, y: first.y, id: 1 },
+      ],
+    });
+    for (let step = 1; step <= 10; step += 1) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [
+          { x: first.x - step * 12, y: first.y, id: 0 },
+          { x: centre.x + 30 + step * 12, y: first.y, id: 1 },
+        ],
+      });
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    const after = apart(await settled(page, '1'), middle);
+    const scrolled = (await pageScrolled(page)) - top;
+    console.log(
+      `[#3134] staggered pinch: marker ${near.toFixed(1)} → ${after.toFixed(1)} px from the ` +
+        `middle, page scrolled ${scrolled.toFixed(1)} px`,
+    );
+    expect(after, 'the pinch did not zoom in').toBeGreaterThan(near * 1.5);
+    expect(Math.abs(scrolled), 'the pinch scrolled the page').toBeLessThan(3);
+    await expect(onMap(page)).toHaveCount(1);
+  });
+
+  test('a tap adds a waypoint, and a finger on a waypoint moves it and not the map', async ({
+    page,
+  }) => {
+    const { canvas, before } = await plannerWithOne(page);
+    await page.touchscreen.tap(
+      canvas.x + canvas.width / 2 - 120,
+      canvas.y + canvas.height / 2 - 60,
+    );
+    await expect(onMap(page)).toHaveCount(2);
+    await expect(listed(page)).toHaveCount(2);
+    const second = await settled(page, '2');
+
+    const drag = { x: 60, y: 70 };
+    const from = { x: canvas.x + before.x, y: canvas.y + before.y };
+    await touch(page, [from], [{ x: from.x + drag.x, y: from.y + drag.y }]);
+    const moved = await settled(page, '1');
+    const stayed = await settled(page, '2');
+    console.log(
+      `[#3134] marker 1 ${JSON.stringify(before)} → ${JSON.stringify(moved)}, ` +
+        `marker 2 ${JSON.stringify(second)} → ${JSON.stringify(stayed)}`,
+    );
+    const carried = { x: before.x + drag.x, y: before.y + drag.y };
+    expect(apart(moved, carried), 'the waypoint did not follow the finger').toBeLessThan(5);
+    expect(apart(stayed, second), 'the map moved under the waypoint').toBeLessThan(3);
+    await expect(onMap(page)).toHaveCount(2);
+    await expect(listed(page)).toHaveCount(2);
+  });
+
+  test('the route editor’s map pans by one finger as well', async ({ page }) => {
+    const canvas = await openWithMap(page, 'route-editor', 'populated');
+    // A tap picks the place on the line nearest it: the stretch's marker A.
+    await page.touchscreen.tap(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+    await expect(onMap(page)).toHaveCount(1);
+    const label = 'A';
+    const before = await settled(page, label);
+    // A finger on empty map: the corner farthest from the marker.
+    const [corner] = [
+      { x: 40, y: 40 },
+      { x: canvas.width - 40, y: 40 },
+      { x: 40, y: canvas.height - 40 },
+      { x: canvas.width - 40, y: canvas.height - 40 },
+    ].sort((a, b) => apart(b, before) - apart(a, before));
+    if (corner === undefined) throw new Error('no corner');
+    const drag = {
+      x: corner.x < canvas.width / 2 ? 60 : -60,
+      y: corner.y < canvas.height / 2 ? 60 : -60,
+    };
+    const from = { x: canvas.x + corner.x, y: canvas.y + corner.y };
+    await touch(page, [from], [{ x: from.x + drag.x, y: from.y + drag.y }]);
+    const after = await settled(page, label);
+    console.log(`[#3134] editor one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+    const carried = { x: before.x + drag.x, y: before.y + drag.y };
+    expect(apart(after, carried), 'one finger did not carry the editor’s map').toBeLessThan(20);
+    // A drag is not a tap: it picked no second place, so there is still no B.
+    expect(Object.keys(await markers(page))).toEqual([label]);
+  });
+});
+
+/**
  * #2065 — the title block costs less than half what it did.
  *
  * Every route in `ALL_ROUTES` is opened in `reflow.html` at the owner's tablet
@@ -2106,6 +2612,65 @@ test.describe('#2065 — the title block costs less than half what it did', () =
         (route) => route.id,
       );
       expect(metAsItWas, 'routes whose OLD title block is within the ceiling').toEqual([]);
+    });
+  }
+});
+
+/**
+ * #3185 — the route planner's distance and climbing, on the screen with its
+ * map.
+ *
+ * The UI evaluation of PR 3149 found the totals under the legs table and the
+ * surface choice: 2196 px down on a phone, off the tablet's screen as the
+ * legs grew, so a rider dragged a waypoint, scrolled two screens to read the
+ * result, and scrolled back. The strip (`views/RouteBuilderView.tsx`
+ * §"The numbers beside the map") is directly above the map. Measured here, in
+ * `reflow.html`'s real shell over the populated fixture's draft, at the phone
+ * and the tablet both ways up: with the map scrolled onto the screen, the
+ * strip is on it too, whole, uncovered (a hit test at its centre lands in
+ * it), and nothing stands between the strip and the map.
+ *
+ * ⚠️ Not proved here: the map's own share of the screen, which #3185's
+ * second suggestion asks for and its lane leaves for later.
+ */
+test.describe('#3185 — the route planner’s distance and climbing stay on the screen with its map', () => {
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`directly above the map, and on the screen with it, at a ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, 'data=populated');
+      await visit(page, routeById('route-builder'));
+      await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+      await expect(page.locator('main .oyl-planner__summary')).toHaveCount(1);
+      await page.locator('main .oyl-map').scrollIntoViewIfNeeded();
+      const seen = await page.evaluate(() => {
+        const strip = document.querySelector('main .oyl-planner__summary');
+        const map = document.querySelector('main .oyl-map');
+        if (strip === null || map === null) throw new Error('no strip or no map');
+        const box = strip.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          mapTop: map.getBoundingClientRect().top,
+          window: window.innerHeight,
+          uncovered: hit !== null && strip.contains(hit),
+          text: strip.textContent,
+          page: document.documentElement.scrollHeight,
+        };
+      });
+      console.log(
+        `[#3185] ${viewport.name}: strip ${seen.top.toFixed(0)}–${seen.bottom.toFixed(0)} px, ` +
+          `map from ${seen.mapTop.toFixed(0)} px, window ${String(seen.window)} px, ` +
+          `page ${String(seen.page)} px: "${seen.text}"`,
+      );
+      expect(seen.text, 'the strip names both figures').toMatch(/Distance.*Climbing/);
+      expect(seen.top, 'the strip starts on the screen').toBeGreaterThanOrEqual(0);
+      expect(seen.bottom, 'the strip ends on the screen').toBeLessThanOrEqual(seen.window);
+      expect(seen.uncovered, 'the strip is not under the shell’s chrome').toBe(true);
+      const between = seen.mapTop - seen.bottom;
+      expect(between, 'the gap from the strip to the map').toBeGreaterThanOrEqual(0);
+      expect(between, 'the gap from the strip to the map').toBeLessThanOrEqual(8);
     });
   }
 });

@@ -20,7 +20,7 @@
  * ⚠️ **Only a rider BEHIND the rider, in their lane — the owner's ruling of
  * 2026-11-15** from the tablet: a bot riding one place across and a little
  * behind showed the stipple, and *"fade when behind"*. A rider beside the
- * rider is always drawn whole.
+ * rider is always drawn whole, until it is at the camera's eye (#3198, below).
  *
  * In plan, a line runs from the camera's EYE through the rider. Another
  * rider's drawn place is measured on it: how far behind the rider along it
@@ -64,13 +64,38 @@
  * faded too, which the camera does not see, so that one passing the eye is
  * already faded when it comes into the frame.
  *
- * ⚠️ **Since the ruling, a rider passing BESIDE the eye is drawn whole.** A
- * rider a place across that drops back past the camera stays whole as it
- * passes it, and the near plane (`camera.ts` §`NEAR_PLANE_METRES`, 0.5 m) may
- * cut its edge for the moment it is beside the eye. The ruling puts the
- * stipple on a rider beside the rider first. The solo pacer is not such a
- * rider: `scene.ts` brings it into the rider's lane as it is dropped, so it is
- * gone before it reaches the eye (`rider-fade.test.ts`).
+ * ## And a rider at the eye — #3198
+ *
+ * The ruling left a rider passing BESIDE the eye whole, and the demo video's
+ * lap race (#3198) showed what that costs: a bot a place across, dropping
+ * back past the camera, filled the bottom left of the frame as a flat shape
+ * the near plane (`camera.ts` §`NEAR_PLANE_METRES`, 0.5 m) cut through. So a
+ * third share, on the eye itself, in plan:
+ *
+ *     fromEye  = √(ahead² + (across / eye.across)²)
+ *     eyeShare = clamp((eye.whole − fromEye) / (eye.whole − eye.gone), 0, 1)
+ *     faded    = max(behindShare × asideShare, eyeShare)
+ *
+ * `ahead` is how far the rider's drawn place is in front of the eye along the
+ * line (behind it, a negative), and `across` how far off the line, so
+ * `fromEye` is a distance on an ellipse about the eye, **1.25 times as wide as
+ * it is long** (`eye.across`). **Gone at 1.2, whole at 1.5.**
+ *
+ * - Gone at 1.2, because nearer than that a rider's body and bicycle
+ *   (`bicycle.ts`, with 0.1 m to spare all round) can reach the solid between
+ *   the eye and the near plane: at most 0.8 m ahead of the eye, and up to
+ *   1.05 m to the side on a landscape phone's wide frame, where the descent
+ *   pitches the plane down (on the level, at 16 : 9 and wider, never). That is
+ *   why the ellipse is wider than it is long: `rider-fade.test.ts` §"#3198"
+ *   sweeps a rider about the eye at the device aspects, on the level and onto
+ *   a climb and a descent, and holds every place the solid meets to this
+ *   share being 1.
+ * - Whole at 1.5, so the ruling still holds: a bot a place across from 3 m
+ *   behind the rider to level is 1.5 m or more ahead of the eye and 0.55 m
+ *   aside, 1.56 or more, and this share never touches it.
+ *
+ * The ramp between is 0.3, a little longer than the `aside` ramp, so a bot
+ * dropping back past the camera fades over several frames, never in one.
  *
  * ⚠️ **The rider's own avatar is never faded**: {@link riderFaded} returns 0
  * for `kind: 'rider'` before it measures anything.
@@ -90,12 +115,18 @@ import type { CameraPose, RiderMarker } from './port';
 
 /**
  * How far behind the rider along the camera's line a rider begins to fade
- * (`behind.whole`) and is gone (`behind.gone`), and how far off that line it
- * is gone (`aside.gone`) and whole (`aside.whole`), in metres. @see riderFaded
+ * (`behind.whole`) and is gone (`behind.gone`), how far off that line it
+ * is gone (`aside.gone`) and whole (`aside.whole`), and how far from the eye it
+ * is gone (`eye.gone`) and whole (`eye.whole`), in metres. @see riderFaded
  */
 export const RIDER_FADE_METRES = {
   behind: { whole: 0.9, gone: 1.7 },
   aside: { gone: 0.1, whole: 0.4 },
+  /**
+   * #3198: how far from the eye a rider is gone and whole, measured along the
+   * line and across it in plan, the distance across divided by `across`.
+   */
+  eye: { gone: 1.2, whole: 1.5, across: 1.25 },
 } as const;
 
 /**
@@ -167,8 +198,16 @@ export function riderFaded(marker: RiderMarker, line: RiderFadeLine | undefined)
   const offZ = marker.z - line.riderZ;
   const behind = -(offX * line.alongX + offZ * line.alongZ);
   const aside = Math.abs(offX * line.alongZ - offZ * line.alongX);
-  const { behind: back, aside: side } = RIDER_FADE_METRES;
+  const { behind: back, aside: side, eye } = RIDER_FADE_METRES;
   const behindShare = Math.min(1, Math.max(0, (behind - back.whole) / (back.gone - back.whole)));
   const asideShare = Math.min(1, Math.max(0, (side.whole - aside) / (side.whole - side.gone)));
-  return behindShare * asideShare;
+  // #3198: and by how near it is to the eye, whichever side of the line.
+  const eyeX = marker.x - line.eyeX;
+  const eyeZ = marker.z - line.eyeZ;
+  const fromEye = Math.hypot(
+    eyeX * line.alongX + eyeZ * line.alongZ,
+    (eyeX * line.alongZ - eyeZ * line.alongX) / eye.across,
+  );
+  const eyeShare = Math.min(1, Math.max(0, (eye.whole - fromEye) / (eye.whole - eye.gone)));
+  return Math.max(behindShare * asideShare, eyeShare);
 }

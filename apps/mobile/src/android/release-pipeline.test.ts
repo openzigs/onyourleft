@@ -640,3 +640,166 @@ describe('where the App Bundle goes (#958)', () => {
     expect(stepScript('Fetch bundletool')).toContain('sha256sum -c -');
   });
 });
+
+/**
+ * The app's version, which three places state and nothing else compared
+ * ([#3221](https://github.com/openzigs/onyourleft/issues/3221)).
+ *
+ * Google Play files an upload under the `versionName` the build declares, the
+ * GitHub Release under the tag, and `apps/mobile/package.json` carries the
+ * workspace's own copy. The first release is 0.9.0; a tag typed as `v1.0.0`
+ * against a build that says 0.9.0 would publish a release whose two labels
+ * disagree, with every step green.
+ */
+describe('the app version (#3221)', () => {
+  const VERSION_STEP = "Check the release tag names the app's version";
+
+  /** `versionName` as `build.gradle` states it. */
+  function gradleVersionName(): string {
+    const match = /^\s*versionName\s+"([^"]*)"/m.exec(
+      read('apps', 'mobile', 'android', 'app', 'build.gradle'),
+    );
+    expect(match, 'build.gradle declares no versionName').not.toBeNull();
+    return match?.[1] ?? '';
+  }
+
+  /** `version` as `apps/mobile/package.json` states it, read through JSON.parse. */
+  function packageVersion(): string {
+    const parsed = JSON.parse(read('apps', 'mobile', 'package.json')) as { version?: unknown };
+    expect(typeof parsed.version, 'apps/mobile/package.json declares no version').toBe('string');
+    return parsed.version as string;
+  }
+
+  it('is the same in build.gradle and apps/mobile/package.json', () => {
+    expect(gradleVersionName(), 'versionName and the package version disagree').toBe(
+      packageVersion(),
+    );
+  });
+
+  it('is a three-part version, the form a release tag names', () => {
+    expect(gradleVersionName()).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  /**
+   * Run the version step the way the runner does, against a throwaway tree
+   * holding only the two files it reads, so each disagreement can be built.
+   */
+  function runVersionStep(input: {
+    readonly gradle: string;
+    readonly pkg: string;
+    readonly ref: string;
+    readonly refName: string;
+  }): { readonly status: number; readonly log: string } {
+    const directory = mkdtempSync(join(tmpdir(), 'oyl-version-'));
+    try {
+      mkdirSync(join(directory, 'apps', 'mobile', 'android', 'app'), { recursive: true });
+      writeFileSync(
+        join(directory, 'apps', 'mobile', 'android', 'app', 'build.gradle'),
+        input.gradle,
+      );
+      writeFileSync(join(directory, 'apps', 'mobile', 'package.json'), input.pkg);
+      const script = join(directory, 'step.sh');
+      writeFileSync(script, stepScript(VERSION_STEP));
+      const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin', REF: input.ref, REF_NAME: input.refName },
+      });
+      return { status: result.status ?? -1, log: `${result.stdout}${result.stderr}` };
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  const gradleFile = (name: string): string =>
+    `android {\n    defaultConfig {\n        versionCode 1\n        versionName "${name}"\n    }\n}\n`;
+  const packageFile = (version: string): string =>
+    `{\n  "name": "@onyourleft/mobile",\n  "version": "${version}",\n  "dependencies": { "x": "1.2.3" }\n}\n`;
+
+  it('lets a tag through when it is v plus the version both files state', () => {
+    const run = runVersionStep({
+      gradle: gradleFile('0.9.0'),
+      pkg: packageFile('0.9.0'),
+      ref: 'refs/tags/v0.9.0',
+      refName: 'v0.9.0',
+    });
+    expect(run.status, run.log).toBe(0);
+  });
+
+  it('refuses a tag that names a different version than the build', () => {
+    const run = runVersionStep({
+      gradle: gradleFile('0.9.0'),
+      pkg: packageFile('0.9.0'),
+      ref: 'refs/tags/v1.0.0',
+      refName: 'v1.0.0',
+    });
+    expect(run.status, 'a v1.0.0 tag against a 0.9.0 build was let through').toBe(1);
+    expect(run.log).toContain('::error::');
+    expect(run.log).toContain('v0.9.0');
+  });
+
+  it('refuses a tag with no leading v even when the number is right', () => {
+    const run = runVersionStep({
+      gradle: gradleFile('0.9.0'),
+      pkg: packageFile('0.9.0'),
+      ref: 'refs/tags/0.9.0',
+      refName: '0.9.0',
+    });
+    expect(run.status).toBe(1);
+  });
+
+  it('refuses a build.gradle and a package.json that disagree, on a tag and off it', () => {
+    for (const [ref, refName] of [
+      ['refs/tags/v0.9.0', 'v0.9.0'],
+      ['refs/heads/main', 'main'],
+    ] as const) {
+      const run = runVersionStep({
+        gradle: gradleFile('0.9.0'),
+        pkg: packageFile('0.0.0'),
+        ref,
+        refName,
+      });
+      expect(run.status, `${ref}: the two files disagreed and the step passed`).toBe(1);
+      expect(run.log).toContain('disagrees');
+    }
+  });
+
+  it('compares only the two files on a manual run, which has no tag to compare', () => {
+    const run = runVersionStep({
+      gradle: gradleFile('0.9.0'),
+      pkg: packageFile('0.9.0'),
+      ref: 'refs/heads/some-branch',
+      refName: 'some-branch',
+    });
+    expect(run.status, run.log).toBe(0);
+  });
+
+  it('refuses a build.gradle it cannot read a versionName from', () => {
+    const run = runVersionStep({
+      gradle: 'android { }\n',
+      pkg: packageFile('0.9.0'),
+      ref: 'refs/heads/main',
+      refName: 'main',
+    });
+    expect(run.status, 'an unreadable versionName was treated as a match').toBe(1);
+    expect(run.log).toContain('Could not read');
+  });
+
+  it('passes for the files this repository actually carries, under the tag it names', () => {
+    const run = runVersionStep({
+      gradle: read('apps', 'mobile', 'android', 'app', 'build.gradle'),
+      pkg: read('apps', 'mobile', 'package.json'),
+      ref: `refs/tags/v${gradleVersionName()}`,
+      refName: `v${gradleVersionName()}`,
+    });
+    expect(run.status, run.log).toBe(0);
+  });
+
+  it('runs before the build, so a wrong tag costs no Gradle run', () => {
+    const at = (needle: string): number => WORKFLOW.indexOf(needle);
+    expect(at(`- name: ${VERSION_STEP}`)).toBeGreaterThan(-1);
+    expect(at(`- name: ${VERSION_STEP}`)).toBeLessThan(
+      at('- name: Build the web client for Google Play'),
+    );
+  });
+});

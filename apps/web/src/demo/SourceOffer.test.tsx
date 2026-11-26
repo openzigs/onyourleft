@@ -5,7 +5,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { SOURCE_CODE_URL } from '../privacy/policy';
-import { DEMO_LICENCE_URL, DEMO_NOTICES_PATH, DemoSourceOffer } from './SourceOffer';
+import {
+  DEMO_LICENCE_URL,
+  DEMO_NOTICES_PATH,
+  DEMO_VIDEO_URL,
+  DemoSourceOffer,
+} from './SourceOffer';
 
 const markup = renderToStaticMarkup(<DemoSourceOffer />);
 
@@ -28,5 +33,21 @@ describe('the demo offers its source — AGPL-3.0 §6, #1645', () => {
   it('links the third-party notices the build copies, relative to the page', () => {
     expect(DEMO_NOTICES_PATH).toBe('./licences/third-party.txt');
     expect(linkText(DEMO_NOTICES_PATH)).toBe('Third-party notices');
+  });
+});
+
+describe('the demo links its two-minute video — #3225', () => {
+  it('links the video by name, as a link to YouTube and not an embed', () => {
+    expect(DEMO_VIDEO_URL).toBe('https://www.youtube.com/watch?v=lgpE-VbyFa0');
+    // The lead is its own span, which `demo.css` leaves to a screen reader in a small frame.
+    // Read as text, not through a pattern built from the address.
+    const opening = `<a class="oyl-demo__video-link" href="${DEMO_VIDEO_URL}" target="_blank" rel="noreferrer">`;
+    const start = markup.indexOf(opening);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const inside = markup.slice(start + opening.length, markup.indexOf('</a>', start));
+    expect(inside).toBe(
+      '<span class="oyl-demo__video-lead">Watch the two-minute </span>demo on YouTube',
+    );
+    expect(markup).not.toMatch(/<iframe/);
   });
 });

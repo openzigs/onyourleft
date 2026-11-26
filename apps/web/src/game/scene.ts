@@ -93,6 +93,7 @@ import {
   type ScatterItem,
   type ScatterWay,
   type StructureKind,
+  type WaysOutPlacing,
 } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
@@ -127,6 +128,7 @@ import {
   drawnRoadFrame,
   localGroundPosition,
   roadCorridor,
+  VIEW_AHEAD_METRES,
   type CorridorOrigin,
   type CorridorPoint,
   type RoadCorridor,
@@ -142,6 +144,7 @@ import {
   structuresAt,
   structuresOnWay,
   structuresWithin,
+  urbanOfTown,
   type MappedTown,
   type SettlementFootprint,
 } from './settlements';
@@ -156,11 +159,20 @@ import {
   sideRoadClearance,
   sideRoadsAt,
   joinedJunctions,
+  type JunctionScan,
   type SideRoad,
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
-import { nearbyStreets, nearbyStreetsAt, routeGround } from './nearby-streets';
+import { riddenSpanParts, riddenSpans, sideDeckParts } from './mapped-spans';
+import {
+  nearbyStreets,
+  nearbyStreetsAt,
+  routeGround,
+  type NearbyStreetScan,
+} from './nearby-streets';
+import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
+import { junctionSurfacesAt, type JunctionSurface, type TurnedJunction } from './junction-surface';
 import { streetNamesInView, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -218,6 +230,14 @@ export interface JunctionSeen {
   readonly distance: number;
   /** Where it is. */
   readonly position: GeographicPosition;
+}
+
+/** A junction where an open-world ride's route turns off the road it came along. @see SceneInput.turnedOff */
+export interface TurnedOffRoad {
+  /** Its ride distance. */
+  readonly junction: number;
+  /** The way the route would have taken there: the road turned off, on past the junction. */
+  readonly way: ScatterWay;
 }
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -355,6 +375,39 @@ export interface SceneInput {
    * reads the pavements back off the renderer's frames through a press.
    */
   readonly junctionsSeen?: readonly JunctionSeen[] | undefined;
+  /**
+   * #3123: in an open-world ride, each junction near the rider where the
+   * route turns off the road it came along (`open-world/road.ts`
+   * §`OpenWorldRoad.turnedOff`), at its ride distance, with the way the
+   * route would have taken there. Once the rider has passed one, the road
+   * turned off is drawn on past the junction along that way and back from
+   * it along the road, to `open-world/road.ts` §`TURNED_OFF_REACH_METRES`
+   * each way, wherever nothing else draws it (`way-roads.ts`): the road
+   * the frame draws stops `terrain.ts` §`VIEW_BEHIND_METRES` behind the
+   * rider, and a way out is handed on no further behind. Absent on every
+   * other ride.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link waysOut}: with it gone the
+   * road turned off is cut off at the junction again.
+   * `open-world/turned-off-road.test.tsx` reads it back off the frames the
+   * renderer was handed.
+   */
+  readonly turnedOff?: readonly TurnedOffRoad[] | undefined;
+  /**
+   * #3133: in an open-world ride, each junction near the rider that the
+   * route turns through, chosen or not (`open-world/road.ts`
+   * §`OpenWorldRoad.junctionsTurned`), with every way on from it the route
+   * does not take. Each in view is drawn as the streets meeting there, each
+   * arm to its own width, joined at a surface with rounded corners, and the
+   * road's edge lines and centre line stop at its mouths
+   * (`junction-surface.ts`). Absent on every other ride.
+   *
+   * ⚠️ Optional the unsafe way round, like {@link waysOut}: with it gone a
+   * junction turned through is one road bending again.
+   * `open-world/junction-surface.test.tsx` reads it back off the frames the
+   * renderer was handed.
+   */
+  readonly junctionsTurned?: readonly TurnedJunction[] | undefined;
   /**
    * What #1550's procedural lots read of the corridor's footprints, built ONCE,
    * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
@@ -534,6 +587,21 @@ export interface SceneInput {
    */
   readonly nearbyStreetsOff?: boolean | undefined;
   /**
+   * #3107: where an open-world ride's streets are read a slice a frame —
+   * its nearby streets and its junctions, each handed on as last read until
+   * a new reading is whole (`nearby-streets.ts` §`NearbyStreetScan`,
+   * `cross-streets.ts` §`JunctionScan`). One for the ride
+   * (`open-world/road.ts` §`OpenWorldRoad.streetScans`), since what is read
+   * is kept across the views and corridors the ride goes through. Absent,
+   * every other ride's, the streets are read whole, once, as they were:
+   * a route ride's road and corridor are fixed when it starts.
+   *
+   * #3119: and where the scenery along its ways out ({@link waysOut}) is
+   * placed a few ways a frame (`scatter.ts` §`WaysOutPlacing`). Absent,
+   * every way handed is placed on the frame it is handed.
+   */
+  readonly streetScans?: StreetScans | undefined;
+  /**
    * #2972's mapped footways, cycleways, park paths, steps and zebras left
    * undrawn (`footway-surfaces.ts`) — the realistic page's `-footways` lever,
    * the tablet's cost pair, and nothing else. Optional the safe way round, for
@@ -670,6 +738,8 @@ export interface RaceBotInput {
   readonly hit?: RaceHitLook | undefined;
   /** Which body it is drawn as, seeded for the race (#2839). @see RiderMarker.body */
   readonly body?: RiderBody | undefined;
+  /** Which skin tone it is drawn with, seeded from its id (#3214). @see RiderMarker.skin */
+  readonly skin?: number | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -691,12 +761,46 @@ export interface RemoteRiderInput {
   readonly body?: RiderBody | undefined;
 }
 
+/** One open-world ride's readings of its streets. @see SceneInput.streetScans */
+export interface StreetScans {
+  readonly nearby: NearbyStreetScan;
+  readonly junctions: JunctionScan;
+  /** #3119: and the ways out whose scenery a frame may place. */
+  readonly ways: WaysOutPlacing;
+}
+
+/**
+ * `input` with the ways out a frame may place the scenery along — #3119: of
+ * an open-world ride's, those its {@link StreetScans.ways} hands on; every
+ * other ride's as handed. The same object where that is every way.
+ */
+function withWaysPlaced(input: SceneInput): SceneInput {
+  // Called on a frame with no ways too: that spends the ride's first call (PR #3125's review).
+  if (input.streetScans === undefined) return input;
+  const ways = input.waysOut ?? [];
+  const placed = input.streetScans.ways.placing(
+    ways,
+    (input.state.ride.distance as number) + (sceneryAnchor(input.profile)?.origin ?? 0),
+  );
+  return placed === ways ? input : { ...input, waysOut: placed };
+}
+
 /** Builds one frame. */
-export function sceneFrame(input: SceneInput): SceneFrame {
+export function sceneFrame(handed: SceneInput): SceneFrame {
+  // #3119: the ways out whose scenery this frame may place, a few new ones a frame.
+  const input = withWaysPlaced(handed);
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
   // where the corridor, the camera and the scenery are built around.
   const riderDistance: number = drawnRider(input).distance;
-  const corridor = roadCorridor(input.profile, input.origin, riderDistance);
+  // #3133: the junctions the route turns through in view, drawn as the
+  // streets meeting there, with the road's lines stopped at their mouths.
+  const surfaces = junctionSurfacesInView(input, riderDistance);
+  const corridor =
+    surfaces.length === 0
+      ? roadCorridor(input.profile, input.origin, riderDistance)
+      : roadCorridor(input.profile, input.origin, riderDistance, {
+          unpainted: surfaces.map((surface) => surface.mouths),
+        });
   // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
   // keyed on a profile is a second source of truth a route change has to
   // remember to clear. One seed for the scenery and the ground under it, so a
@@ -710,19 +814,31 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const junctions =
     input.worldCorridor === undefined
       ? undefined
-      : mappedJunctions(
-          input.worldCorridor,
-          input.profile,
-          input.origin,
-          seed,
-          input.landClass ?? NO_LAND_CLASS,
-        );
+      : input.streetScans === undefined
+        ? mappedJunctions(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+          )
+        : // #3107: an open-world ride's, a slice a frame.
+          input.streetScans.junctions.junctions(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+            { rideOrigin: sceneryAnchor(input.profile)?.origin ?? 0, riderMetres: riderDistance },
+          );
   // #3095: the ways out the route does not take that this frame's view
   // reaches, each as far along it as the view reaches through its junction.
-  const reached = waysReached(
-    input,
-    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
-  );
+  const reachesTo = (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along;
+  const reached = waysReached(input, reachesTo);
+  // #3119: but every way handed is drawn as road where nothing else draws it,
+  // placed or not: a way the junction prompt offers is never a turn into a
+  // hedge, and the way roads keep to their own bound a frame.
+  const reachedRoads = input === handed ? reached : waysReached(handed, reachesTo);
   const roadSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
@@ -770,7 +886,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // road runs on off both ends of its deck, and is a side road: drawn in the
   // road's material by the same mesh and kept clear of the scenery.
   const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
-  const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  const waterBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  // #3105: and, on an open-world view, the mapped bridges and tunnels the
+  // ridden road itself is on (`mapped-spans.ts`): parapets along the whole
+  // mapped span, a portal at each tunnel mouth, in the same belt's boxes.
+  const spanParts =
+    input.worldCorridor === undefined || sceneryAnchor(input.profile) === undefined
+      ? NO_BRIDGE_PARTS
+      : riddenSpanParts(
+          input.profile,
+          input.origin,
+          corridor,
+          riddenSpans(input.worldCorridor, input.profile, input.origin),
+          ways,
+          riderDistance,
+          MAXIMUM_BRIDGE_PARTS - waterBridges.length,
+        );
+  const streamBridges = spanParts.length === 0 ? waterBridges : [...waterBridges, ...spanParts];
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
   // #2973: and the mapped streets that never touch the route, out to the fog —
   // side roads too, so the same mesh draws them and the scenery keeps off them.
@@ -778,17 +910,48 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.worldCorridor === undefined || input.nearbyStreetsOff === true
       ? NO_SIDE_ROADS
       : nearbyStreetsAt(
-          nearbyStreets(input.worldCorridor, input.profile, input.origin),
+          input.streetScans === undefined
+            ? nearbyStreets(input.worldCorridor, input.profile, input.origin)
+            : // #3107: an open-world ride's, a slice a frame.
+              input.streetScans.nearby.streets(input.worldCorridor, input.profile, input.origin),
           input.profile,
           input.origin,
           seed,
           riderDistance,
           input.landClass ?? NO_LAND_CLASS,
         );
-  const sideRoads =
-    crossings.roads.length === 0 && nearby.length === 0
+  const streetRoads =
+    crossings.roads.length === 0 && nearby.length === 0 && surfaces.length === 0
       ? crossSideRoads
-      : [...crossSideRoads, ...crossings.roads, ...nearby];
+      : [
+          ...crossSideRoads,
+          ...crossings.roads,
+          ...nearby,
+          ...surfaces.map((surface) => surface.road),
+        ];
+  // #3106: and every way out of an open-world junction, wherever none of the
+  // above draws it — a fork, a street mapped on a bridge — so no way the
+  // junction prompt offers is a turn into a hedge. Side roads too. Off with
+  // the nearby streets, whose control would otherwise be drawn back in here.
+  const onWays =
+    input.nearbyStreetsOff === true
+      ? NO_SIDE_ROADS
+      : wayRoads(
+          // #3123: and the road the rider turned off, each way from the junction.
+          // #3119: on every way handed, placed or not (`reachedRoads`).
+          withTurnedOff(reachedRoads, input, riderDistance),
+          {
+            profile: input.profile,
+            origin: input.origin,
+            seed,
+            land: input.landClass ?? NO_LAND_CLASS,
+            // The next junction's ways are read first, and those behind the rider last.
+            riderMetres: riderDistance,
+            drawnFromMetres: (corridor.centre[0] as CorridorPoint).along,
+          },
+          streetRoads,
+        );
+  const sideRoads = onWays.length === 0 ? streetRoads : [...streetRoads, ...onWays];
   const { scatter: items, billboards } = scenery(
     corridor,
     input,
@@ -813,8 +976,9 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.landClass ?? NO_LAND_CLASS,
     // #1637: and a city centre's street wherever the ride's urban class says
     // so, broken over the mapped junctions' mouths — both fixed at the press,
-    // so this too is a lookup on every later frame.
-    input.mappedTown?.urban,
+    // so this too is a lookup on every later frame. #3131: an open-world
+    // view's own class, kept for the view and the plans it was read from.
+    urbanOfTown(input.mappedTown, input.profile),
     junctions,
     // #3095: in pieces either side of every junction of the road in view.
     junctionsOn(input.profile, input),
@@ -880,7 +1044,12 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     sideRoads,
     streets,
     // #3052: an open-world ride's street names, on their streets' surfaces.
-    ...(input.streetNames === undefined || input.streetNames.length === 0
+    // #3107: carried on EVERY frame of a ride that may name a street, the
+    // ones with no name in sight too (an empty view), so the renderer knows
+    // from the ride's first frame to make the names' belt ready
+    // (`three-renderer.ts` §`StreetNameBelt`) and not on the frame the first
+    // name comes into view.
+    ...(input.streetNames === undefined
       ? {}
       : {
           streetNames: streetNamesInView(
@@ -934,7 +1103,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #2661: and the mapped streets crossing over or under the route, with them.
     // #2974: and the channels beside the road laid on this frame's ground,
     // and the mapped pools round the camera.
-    water: water(input, corridor, ways, streamBridges, crossings, ground, camera, seed),
+    water: water(input, corridor, ways, streamBridges, crossings, nearby, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -944,6 +1113,9 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     ),
   };
 }
+
+/** No boxes: a frame on no mapped bridge. */
+const NO_BRIDGE_PARTS: readonly BridgePart[] = [];
 
 /** No side roads: a frame with no nearby street. */
 const NO_SIDE_ROADS: readonly SideRoad[] = [];
@@ -1256,6 +1428,7 @@ function water(
   ways: Waterways,
   streams: readonly BridgePart[],
   crossings: CrossingsInView,
+  nearby: readonly SideRoad[],
   ground: TerrainMesh,
   camera: CameraPose,
   seed: number,
@@ -1272,9 +1445,13 @@ function water(
           camera.x,
           camera.z,
         );
+  const bridges = crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts];
+  // #3105: and the parapets of the side streets' decks in view, in what room
+  // the belt has left. None but on an open-world ride (`nearby-streets.ts`).
+  const decks = sideDeckParts(nearby, MAXIMUM_BRIDGE_PARTS - bridges.length);
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways, ground, pools),
-    bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
+    bridges: decks.length === 0 ? bridges : [...bridges, ...decks],
     seconds: input.state.elapsed,
   };
 }
@@ -1408,7 +1585,7 @@ function scenery(
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
   // #2428: and none across a mapped building's driveway, a roadside hedge
-  // row the likeliest.
+  // row the likeliest. #3132: and no building on a mapped building's plot.
   const built = clearOfDriveways(
     clearOfSideRoads(structures, sideRoads, SCENERY_CLEARANCE, sideRoadNaturalMargin),
     input.mappedBuildings,
@@ -1471,6 +1648,75 @@ function waysReached(input: SceneInput, toMetres: number): readonly ReachedWay[]
     if (reach > way.fromMetres) reached.push({ way, toMetres: reach, shift });
   }
   return reached;
+}
+
+const NO_JUNCTION_SURFACES: readonly JunctionSurface[] = [];
+
+/**
+ * The surfaces of the junctions of {@link SceneInput.junctionsTurned} that
+ * are near a rider at `riderDistance` — #3133: from `way-roads.ts`
+ * §`TURNED_OFF_REACH_METRES` behind them, as far as the road turned off is
+ * drawn back (#3123), to the view's reach ahead.
+ * ⚠️ Read off the constants, not the corridor: the corridor is built after,
+ * since which of its stretches go unpainted is these surfaces' answer.
+ */
+function junctionSurfacesInView(
+  input: SceneInput,
+  riderDistance: number,
+): readonly JunctionSurface[] {
+  const junctions = input.junctionsTurned;
+  if (junctions === undefined || junctions.length === 0) return NO_JUNCTION_SURFACES;
+  return junctionSurfacesAt(
+    input.profile,
+    input.origin,
+    junctions,
+    // Both count ride distance from the view's first sample.
+    sceneryAnchor(input.profile)?.origin ?? 0,
+    riderDistance - TURNED_OFF_REACH_METRES,
+    riderDistance + VIEW_AHEAD_METRES,
+  );
+}
+
+/**
+ * `reached`, with the road the rider turned off at each junction of
+ * {@link SceneInput.turnedOff} they have passed — #3123: the way the route
+ * would have taken, from the junction on, and the road itself from the
+ * junction back, each to `way-roads.ts` §`TURNED_OFF_REACH_METRES`. A way
+ * so handed is not handed again as a way out. `reached` itself where no
+ * junction turned off at is behind the rider.
+ */
+function withTurnedOff(
+  reached: readonly ReachedWay[],
+  input: SceneInput,
+  riderDistance: number,
+): readonly WayReached[] {
+  const turnedOff = input.turnedOff;
+  if (turnedOff === undefined || turnedOff.length === 0) return reached;
+  // Both views count ride distance from their own first sample.
+  const rides = sceneryAnchor(input.profile)?.origin ?? 0;
+  const passed = turnedOff.filter(({ junction }) => junction - rides <= riderDistance);
+  if (passed.length === 0) return reached;
+  const out: WayReached[] = reached.filter(
+    ({ way }) => !passed.some((each) => each.way.profile === way.profile),
+  );
+  for (const { junction, way } of passed) {
+    const junctionMetres = junction - rides;
+    out.push(
+      {
+        way,
+        toMetres: way.fromMetres + TURNED_OFF_REACH_METRES,
+        shift: (sceneryAnchor(way.profile)?.origin ?? 0) - rides,
+        turnedOff: { junctionMetres, back: false },
+      },
+      {
+        way: { profile: input.profile, fromMetres: junctionMetres },
+        toMetres: junctionMetres - TURNED_OFF_REACH_METRES,
+        shift: 0,
+        turnedOff: { junctionMetres, back: true },
+      },
+    );
+  }
+  return out;
 }
 
 /**
@@ -1958,6 +2204,110 @@ export function cameraPose(
   atDistance: number,
   lateralMetres: number,
   eyeLateralMetres: number = lateralMetres,
+  path?: DrawnLine,
+): CameraPose {
+  const pose = roadPose(corridor, atDistance, lateralMetres, eyeLateralMetres, path);
+  // #3122: through a one-point U-turn the camera pivots on the rider instead.
+  const share = path === undefined ? 0 : uTurnPivotShare(path, atDistance);
+  if (!(share > 0) || path === undefined) return pose;
+  const rider = chaseRider(corridor, atDistance, lateralMetres, path);
+  return pivotedOnRider(pose, rider, share);
+}
+
+/**
+ * How much of the way the chase camera is pivoted on the drawn rider at
+ * `atDistance`, nought to one — #3122: one through a recorded one-point
+ * U-turn (`drawn-line.ts` §`uTurns`), eased in over
+ * {@link U_TURN_CAMERA_METRES}' `easedIn` before the road the camera looks at
+ * reaches the U-turn, and handed back over its `handedBack` once the road
+ * behind the rider is straight again. Nought on a line with none.
+ *
+ * The U-turn is found where `drawn-line.ts` §`drawnLineAt` draws it, on the
+ * route position the odometer wraps to, so on a loop it pivots on every lap
+ * and not only the first.
+ */
+function uTurnPivotShare(path: DrawnLine, atDistance: number): number {
+  const { profile } = path;
+  const resolution: number = profile.resolution;
+  const { easedIn, handedBack } = U_TURN_CAMERA_METRES;
+  let most = 0;
+  for (const sample of path.uTurns) {
+    const turning = sample * resolution;
+    const from = profile.loop ? distanceOnRoute(profile, atDistance) : atDistance;
+    // The U-turn is ridden from one sample before the turning point to one
+    // after it (`drawn-line.ts` §`uTurned`).
+    const begins = turning - resolution - CAMERA_TARGET_AHEAD_METRES;
+    const ends = turning + resolution + CAMERA_TARGET_AHEAD_METRES;
+    const into = smoothstep01((from - (begins - easedIn)) / easedIn);
+    const out = 1 - smoothstep01((from - ends) / handedBack);
+    most = Math.max(most, Math.min(into, out));
+  }
+  return most;
+}
+
+/**
+ * Over how much road the chase camera is brought onto the rider before a
+ * one-point U-turn, and handed back after it, in metres: **10** and **15** —
+ * #3122. @see uTurnPivotShare
+ *
+ * ⚠️ **What the pivot is for.** Through a recorded U-turn the frame's own pose
+ * (`roadPose`) is the wrong camera twice over. Its eye stands on the drawn
+ * path {@link CAMERA_BEHIND_METRES} back (#2422), which round a turn a few
+ * metres across is on the other leg, BESIDE the rider; and it looks at the
+ * nearest road ten metres up the route (#1994), which comes back past the
+ * rider, so it looks across the road. On the synthetic 174° coast turnaround
+ * (`turnaround-coast.test.ts`) the eye was 1.2 m behind the rider and 1.9 m
+ * to the side, and stepped 0.3 m in one frame at 30 km/h: the owner's "camera
+ * beside the rider, low, looking sideways". Pivoted on the rider, along the
+ * rider's own heading, `camera.ts` §`turnedPose` swings the eye round behind
+ * them at the damped rate, {@link CAMERA_BEHIND_METRES} back, and the rider's
+ * heading turns no faster than that rate (#3045). 10 m is about a second at
+ * 30 km/h; 15 m is #3066's hand-back after a pressed U-turn. Not measured
+ * optima.
+ */
+const U_TURN_CAMERA_METRES = { easedIn: 10, handedBack: 15 } as const;
+
+/** A smoothstep of `value`, clamped to nought and one. */
+function smoothstep01(value: number): number {
+  const t = Math.min(1, Math.max(0, value));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * `pose` moved `share` of the way to the camera that pivots on the drawn
+ * `rider` and looking the way they ride — #3122. How far it looks is the
+ * frame's own, which `GameView` damps (`camera.ts` §`dampedLookAhead`), at the
+ * rider's own height: along the rider's heading at the tip of a U-turn there
+ * is no road to read one off. @see U_TURN_CAMERA_METRES
+ */
+function pivotedOnRider(
+  pose: CameraPose,
+  rider: ReturnType<typeof chaseRider>,
+  share: number,
+): CameraPose {
+  const keep = 1 - share;
+  const headingX = pose.headingX * keep + rider.tangent.headingX * share;
+  const headingZ = pose.headingZ * keep + rider.tangent.headingZ * share;
+  const length = Math.hypot(headingX, headingZ);
+  const look =
+    length > 1e-6 ? { headingX: headingX / length, headingZ: headingZ / length } : rider.tangent;
+  return {
+    x: pose.x * keep + rider.x * share,
+    y: pose.y,
+    z: pose.z * keep + rider.z * share,
+    ...look,
+    targetAheadMetres: pose.targetAheadMetres,
+    eyeRoadY: pose.eyeRoadY * keep + rider.y * share,
+    targetRoadY: pose.targetRoadY * keep + rider.y * share,
+  };
+}
+
+/** {@link cameraPose} as it is everywhere but round a one-point U-turn. */
+function roadPose(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+  eyeLateralMetres: number,
   path?: DrawnLine,
 ): CameraPose {
   const rider = chaseRider(corridor, atDistance, lateralMetres, path);
@@ -2452,6 +2802,8 @@ interface Rider {
   readonly followed?: boolean | undefined;
   /** @see RiderMarker.body */
   readonly body?: RiderBody | undefined;
+  /** @see RiderMarker.skin */
+  readonly skin?: number | undefined;
   /** A lap-race bot's lane, across the road, in place of the line. @see RaceBotInput.lateralMetres */
   readonly laned?: number | undefined;
   /** @see RaceBotInput.laidOut */
@@ -2617,6 +2969,7 @@ function ridersOnTheRoad(
       laidOut: bot.laidOut,
       hit: bot.hit,
       body: bot.body,
+      skin: bot.skin,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -2689,7 +3042,9 @@ function ridersOnTheRoad(
     // realistic world's split. Only a race's bots are laned.
     const raced = rider.laned === undefined ? hit : { ...hit, racer: true as const };
     // #2839: which body, where one was given; absent draws the default.
-    const cranked = rider.body === undefined ? raced : { ...raced, body: rider.body };
+    const bodied = rider.body === undefined ? raced : { ...raced, body: rider.body };
+    // #3214: which skin tone, where one was given; absent draws the first.
+    const cranked = rider.skin === undefined ? bodied : { ...bodied, skin: rider.skin };
     return {
       // #783: the name the room gave them, carried to the frame as words only.
       marker:
@@ -3140,8 +3495,12 @@ function markerAt(
     const on = drawnLineAt(line, clampedTo(corridor, atDistance));
     const aside = across.metres - lineOffsetAt(line, atDistance);
     const facing = turnedBy(on, facingTurn(Math.atan(across.rate - lineSlopeAt(line, atDistance))));
-    const x = on.x - on.headingZ * aside;
-    const z = on.z + on.headingX * aside;
+    // #3061's review: moved with the road where the road was moved, so a bot
+    // already round a turnaround is drawn on the road laid along the rider's
+    // pass, not on its own pass's place beside it.
+    const shift = movedBy(corridor, atDistance);
+    const x = on.x - on.headingZ * aside + shift.x;
+    const z = on.z + on.headingX * aside + shift.z;
     return {
       kind,
       x,
@@ -3352,7 +3711,28 @@ interface CorridorPlacement {
  * {@link markerAt} promises and what keeps a bot far up the road on the road.
  */
 function placeOnCorridor(corridor: RoadCorridor, atDistance: number): CorridorPlacement {
-  const centre = corridor.centre;
+  return placeAlong(corridor.centre, atDistance);
+}
+
+/**
+ * How far the road at a distance was moved in plan from its own place, metres
+ * — #3061's review: none unless {@link RoadCorridor.unmoved} is given, where
+ * `terrain.ts` §`towardTheRidersPass` laid the far pass along the rider's.
+ */
+function movedBy(
+  corridor: RoadCorridor,
+  atDistance: number,
+): { readonly x: number; readonly z: number } {
+  if (corridor.unmoved === undefined) return NOT_MOVED;
+  const drawn = placeAlong(corridor.centre, atDistance);
+  const own = placeAlong(corridor.unmoved, atDistance);
+  return { x: drawn.x - own.x, z: drawn.z - own.z };
+}
+
+const NOT_MOVED = { x: 0, z: 0 } as const;
+
+/** {@link placeOnCorridor} on a list of corridor points. */
+function placeAlong(centre: readonly CorridorPoint[], atDistance: number): CorridorPlacement {
   const last = centre.length - 1;
   if (last <= 0) {
     // A one-point corridor has nothing to interpolate along. `cameraPose`'s own

@@ -69,14 +69,15 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { MIXED_TOWN_EDGE_RUNG } from '../src/game/footprint-fixtures-testing';
 import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_GANTRY_TRIANGLES,
+  REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_SCENERY_CYCLIST_TRIANGLES,
-  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
   STYLISED_SCENE_DRAW_CALLS,
   stylisedSceneDrawCallCeiling,
@@ -3738,6 +3739,23 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     );
   });
 
+  test('draws none of a lap race’s five bots near the rider unlit — #3176', async ({
+    harnessRun,
+  }) => {
+    const { lapRaceLight: light } = await realistic(harnessRun);
+    console.log(
+      `#3176: ${String(light.racers)} racing bots, ${String(light.stylisedMeshes)} meshes past the ` +
+        `realistic bodies; meshes on a Lambert material ${String(light.unlitWith)} with the race, ` +
+        `${String(light.unlitWithout)} without`,
+    );
+    expect(light.measured).toBe(true);
+    // Not vacuous: more bots than wear the realistic body, so the stylised belt draws the rest.
+    expect(light.racers).toBeGreaterThan(REALISTIC_REMOTE_RIDERS);
+    expect(light.stylisedMeshes).toBeGreaterThan(0);
+    // The realistic world has no ambient lamp, so a Lambert rider drew black where the sun is not.
+    expect(light.unlitWith).toBe(light.unlitWithout);
+  });
+
   /**
    * **No stall when the realistic world arrives mid-ride — #2663.** The
    * tablet logged one frame of 1.5–3 s around a lap race's start, whose
@@ -4367,8 +4385,11 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
     testInfo.annotations.push({ type: 'a town’s edge', description: measured });
     console.log(`a town’s edge — ${measured}`);
-    // The issue's frame: the procedural structures alone fill the cap.
-    expect(edge.structures).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // The issue's frame: the procedural structures alone fill the cap — since
+    // #3161 a rung of `MIXED_TOWN_EDGE_RUNG`, which the probe draws it at. At
+    // the realistic rung's 36 the frame's 15 since #3132 (32 since #2848)
+    // leave room, and the town is drawn whatever the ranking does.
+    expect(edge.structures).toBeGreaterThanOrEqual(MIXED_TOWN_EDGE_RUNG);
     // Ranked by distance, the houses round the rider are drawn, and submitted.
     expect(edge.buildings).toBeGreaterThan(0);
     expect(edge.drawCalls).toBeGreaterThan(0);

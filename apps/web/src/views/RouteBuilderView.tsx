@@ -25,6 +25,7 @@ import {
 import type { RouteId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { RenderBoundary } from '../design/ChartSlot';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -58,6 +59,7 @@ import {
 } from '../routing/draft';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
+import type { RouteHeights } from '../terrain/heights';
 import {
   canRedo,
   canUndo,
@@ -90,11 +92,19 @@ import {
   elevationSentence,
   GRADE_BANDS,
   profileRows,
+  routeSummary,
+  ROUTING_TEXT,
   surfaceSummary,
   unresolvedSentence,
 } from '../routing/present';
+import { ProfileChart } from '../routing/ProfileChart';
 import { ScrollTable } from '../design/ScrollTable';
-import { FLAT_DRAWN_ROUTE_TEXT, routeFromDraft, type SaveRefusal } from '../routes/save';
+import {
+  FLAT_DRAWN_ROUTE_TEXT,
+  FLAT_WITHOUT_ELEVATION_TEXT,
+  routeFromDraft,
+  type SaveRefusal,
+} from '../routes/save';
 import type { RoutePort } from '../routes/store-port';
 import { hrefForSelection, routeById } from '../shell/routes';
 
@@ -132,11 +142,15 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * reviewer who remembers this paragraph saying there is no tile archive is
  * reading the old file.
  *
- * ⚠️ **There is no routing engine.** `routing/testing.ts` says why at length:
- * ADR 0010 D-4 chose Valhalla and nothing is running, so the provider arrives
- * as a prop and this screen explains itself when there is none. With none, a
- * new leg is freehand — a straight line whose distance is a lower bound — so
- * a route can still be drawn and saved (#2006).
+ * ## The routing engine — #2008
+ *
+ * The provider arrives as a prop: the rider's instance's Valhalla
+ * (`instance/routing-port.ts`) when this device is connected to an instance
+ * it can seal to, and nothing otherwise. With none this screen explains
+ * itself, and a new leg is freehand — a straight line whose distance is a
+ * lower bound — so a route can still be drawn and saved (#2006). ⚠️ A
+ * reviewer who remembers this paragraph saying nothing is running is reading
+ * the old file.
  *
  * ## Saving it — #2006
  *
@@ -165,6 +179,16 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * **Nothing on this screen is carried by colour.** Every gradient band has a
  * name and the table prints it — #72's last criterion and `AnalysisView.tsx`'s
  * standing rule.
+ *
+ * ## The numbers beside the map — #3185
+ *
+ * A rider drags a waypoint to make a route 40 km or to miss a climb, so the
+ * distance and the climbing are in a strip directly above the map, with
+ * *Routing…* while a leg is out, rather than two screens down under the legs.
+ * Under the map the profile is drawn (`routing/ProfileChart.tsx`), and the
+ * gradient table that was the only profile is behind a disclosure under it:
+ * the chart's non-visual equivalent, one press away, and on its own, open, if
+ * the chart throws (`design/ChartSlot.tsx` §`RenderBoundary`).
  */
 
 export interface RouteBuilderViewProps {
@@ -177,6 +201,12 @@ export interface RouteBuilderViewProps {
    * is geometry between them, and the screen says so rather than looking broken.
    */
   readonly provider?: RoutingProvider | undefined;
+  /**
+   * Heights along the drawn line from the terrain archive (#2013), or
+   * `undefined` for a build configured with none. Asked only where there is no
+   * engine: with one, the engine's own heights are the route's.
+   */
+  readonly heights?: RouteHeights | undefined;
   /**
    * Where a half-drawn route is kept across a reload.
    *
@@ -208,6 +238,14 @@ type MapEngine =
   | { readonly kind: 'ready'; readonly port: MapPort }
   | { readonly kind: 'failed' };
 
+/** What the planner says with no routing engine and no terrain archive to read (#2006). */
+export const NO_ROUTING_NO_HEIGHTS_TEXT =
+  'Lines are drawn straight between your points: the distance is at least the one shown, and climbing stays empty. Connect a home instance that runs road routing to follow roads and see surfaces and climbing.';
+
+/** What it says with no routing engine and the terrain archive to read (#2013). */
+export const NO_ROUTING_TERRAIN_HEIGHTS_TEXT =
+  'Lines are drawn straight between your points: the distance is at least the one shown, and the climbing is that of the ground under the straight line. Connect a home instance that runs road routing to follow roads and see their surfaces and climbing.';
+
 /** What the planner says when the map engine itself could not be loaded (#2006). */
 export const PLANNER_MAP_FAILED_TEXT =
   'The map could not be loaded on this device. The waypoint list places and moves every waypoint.';
@@ -219,6 +257,12 @@ export const PLANNER_MAP_TEXT =
 /** What the save says of a route saved as a loop (#2102): where it is offered. */
 export const SAVED_LOOP_TEXT =
   'It is a loop: choose it on the game’s route picker to race laps on it, or make a room on it.';
+
+/** The gradient table's disclosure under the profile chart (#3185). */
+export const GRADIENT_TABLE_SUMMARY = 'The gradient along the route, as a table';
+
+/** The name of the summary strip above the map (#3185). */
+export const ROUTE_SUMMARY_LABEL = 'This route so far';
 
 /** A profile, and the draft it was worked out for — see `routeFromDraft`'s `elevation`. */
 interface ElevationFor {
@@ -276,6 +320,7 @@ const DEFAULT_ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitud
 
 export function RouteBuilderView({
   provider,
+  heights,
   storage,
   origin,
   map,
@@ -370,14 +415,18 @@ export function RouteBuilderView({
   // The profile follows the geometry rather than the edit, so it is not
   // recomputed while a leg is still being routed.
   const routedLegs = draft.legs.filter((leg) => leg.state === 'routed').length;
+  // #2013: with no engine, the terrain archive answers, at its own spacing.
+  const heightSource = provider ?? heights;
+  const heightInterval = provider === undefined ? heights?.interval : undefined;
   useEffect(() => {
-    if (provider === undefined || routedLegs === 0) {
+    if (heightSource === undefined || routedLegs === 0) {
       setElevation(undefined);
+      setElevationFault(undefined);
       return;
     }
     let live = true;
     setElevationFault(undefined);
-    void planElevation(draft, provider)
+    void planElevation(draft, heightSource, heightInterval)
       .then((planned) => {
         if (live) setElevation(planned === undefined ? undefined : { draft, planned });
       })
@@ -394,7 +443,7 @@ export function RouteBuilderView({
     return () => {
       live = false;
     };
-  }, [draft, provider, routedLegs]);
+  }, [draft, heightSource, heightInterval, routedLegs]);
 
   // The map engine, fetched once (#2006): the loader is the module's `import()`.
   useEffect(() => {
@@ -502,14 +551,66 @@ export function RouteBuilderView({
   const unresolved = unresolvedSentence(draft.legs);
   const risk = strandingRisk(preferences.surface);
   const loop = loopReadout(draft, loopTarget, units);
+  const summary = routeSummary(draft, elevation, units);
+
+  /**
+   * The profile's non-visual equivalent, as a table — under the chart behind a
+   * disclosure, or on its own if the chart throws (#3185).
+   */
+  const gradientTable =
+    elevation === undefined ? null : (
+      <ScrollTable
+        caption={
+          <>
+            The gradient along the route. Each row names its band, so nothing here is carried by
+            colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
+          </>
+        }
+      >
+        {/*
+          ⚠️ **The unit is in the column heading, not beside every number,
+          and that is a decision rather than a side effect of the #238
+          refactor.** #238's third criterion reads *"the unit is always
+          shown beside the number, never implied"*, and a review asked
+          whether this is a step away from it. It is not, for a reason
+          specific to a table: `scope="col"` is the association HTML
+          provides, so a screen reader announces "From (km), 0.0" for the
+          cell — the unit is *carried* rather than implied, which a caption
+          or a paragraph above the table would not do. Repeating it on
+          every row of a twenty-row gradient table would also be read out
+          twenty times. The library table and the laps table already work
+          this way; a number outside a table — the elevation sentence,
+          every reading on the ride screen — still carries its own unit,
+          which is where the criterion bites.
+        */}
+        <thead>
+          <tr>
+            <th scope="col">From ({distanceUnit(units)})</th>
+            <th scope="col">To ({distanceUnit(units)})</th>
+            <th scope="col">Gradient</th>
+            <th scope="col">Steepest</th>
+            <th scope="col">Measured</th>
+          </tr>
+        </thead>
+        <tbody>
+          {profileRows(elevation, units).map((row) => (
+            <tr key={`${row.from}-${row.to}`}>
+              <th scope="row">{row.from}</th>
+              <td>{row.to}</td>
+              <td>{row.band}</td>
+              <td>{`${String(row.steepest)}%`}</td>
+              <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </ScrollTable>
+    );
 
   return (
     <>
       {provider === undefined ? (
         <StatusMessage tone="warning" label="No routing service">
-          Nothing can work out the roads between waypoints until a routing service is configured, so
-          each leg is a straight line: the distance is at least the one shown, and climbing stays
-          empty.
+          {heights === undefined ? NO_ROUTING_NO_HEIGHTS_TEXT : NO_ROUTING_TERRAIN_HEIGHTS_TEXT}
         </StatusMessage>
       ) : null}
 
@@ -629,15 +730,47 @@ export function RouteBuilderView({
             </StatusMessage>
           ) : null}
 
+          {/* Only over a map there is to tap: with no basemap, or offline with
+              tiles on, the panel says why there is none instead. */}
+          {map !== undefined &&
+          engine.kind === 'ready' &&
+          basemap !== undefined &&
+          (online || !tiles) ? (
+            <p>{PLANNER_MAP_TEXT}</p>
+          ) : null}
+
+          {/*
+            #3185: the two numbers a rider plans by, directly above the map,
+            so a drag and its result are on the screen together. Not a live
+            region: they change on every tap, drag and nudge, and the legs'
+            own warning says when a leg has no route.
+
+            ⚠️ On the page from the start, and *Routing…* in a slot that is
+            always there: the strip is above the map, so a strip that appeared
+            with the first leg, or grew a line while a leg was out, would move
+            the map under the rider's finger mid-edit. The browser gate's #3134
+            drag caught the first: a waypoint dragged from where it had been.
+          */}
+          <div className="oyl-planner__summary" role="group" aria-label={ROUTE_SUMMARY_LABEL}>
+            <dl>
+              <div>
+                <dt>Distance</dt>
+                <dd>{summary.distance}</dd>
+              </div>
+              <div>
+                <dt>Climbing</dt>
+                <dd>{summary.climbing}</dd>
+              </div>
+            </dl>
+            <p className="oyl-planner__routing">{summary.routing ? ROUTING_TEXT : ''}</p>
+          </div>
+
           {map === undefined ? null : engine.kind === 'failed' ? (
             <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
           ) : engine.kind === 'loading' ? (
             <p className="oyl-muted">Loading the map…</p>
           ) : (
             <>
-              {/* Only over a map there is to tap: with no basemap, or offline with
-              tiles on, the panel says why there is none instead. */}
-              {basemap !== undefined && (online || !tiles) ? <p>{PLANNER_MAP_TEXT}</p> : null}
               <MapPanel
                 port={engine.port}
                 basemap={basemap}
@@ -653,6 +786,17 @@ export function RouteBuilderView({
                 }}
               />
             </>
+          )}
+
+          {/* #3185: the profile under the map, and its table one press away. */}
+          {elevation === undefined ? null : (
+            <RenderBoundary fallback={gradientTable}>
+              <ProfileChart planned={elevation} units={units} />
+              <details className="oyl-details oyl-chart-table">
+                <summary>{GRADIENT_TABLE_SUMMARY}</summary>
+                {gradientTable}
+              </details>
+            </RenderBoundary>
           )}
 
           {isEmpty(draft) ? (
@@ -840,62 +984,17 @@ export function RouteBuilderView({
           </p>
 
           {elevationFault === undefined ? null : (
-            <StatusMessage tone="danger" label="No elevation">
+            <StatusMessage
+              tone={provider === undefined ? 'warning' : 'danger'}
+              label="No elevation"
+            >
               {elevationFault}
             </StatusMessage>
           )}
           {elevation === undefined ? (
             <p>No elevation profile yet.</p>
           ) : (
-            <>
-              <p>{elevationSentence(elevation, units)}</p>
-              <ScrollTable
-                caption={
-                  <>
-                    The gradient along the route. Each row names its band, so nothing here is
-                    carried by colour alone. Bands:{' '}
-                    {GRADE_BANDS.map((band) => band.name).join(', ')}.
-                  </>
-                }
-              >
-                {/*
-              ⚠️ **The unit is in the column heading, not beside every number,
-              and that is a decision rather than a side effect of the #238
-              refactor.** #238's third criterion reads *"the unit is always
-              shown beside the number, never implied"*, and a review asked
-              whether this is a step away from it. It is not, for a reason
-              specific to a table: `scope="col"` is the association HTML
-              provides, so a screen reader announces "From (km), 0.0" for the
-              cell — the unit is *carried* rather than implied, which a caption
-              or a paragraph above the table would not do. Repeating it on
-              every row of a twenty-row gradient table would also be read out
-              twenty times. The library table and the laps table already work
-              this way; a number outside a table — the elevation sentence
-              above, every reading on the ride screen — still carries its own
-              unit, which is where the criterion bites.
-            */}
-                <thead>
-                  <tr>
-                    <th scope="col">From ({distanceUnit(units)})</th>
-                    <th scope="col">To ({distanceUnit(units)})</th>
-                    <th scope="col">Gradient</th>
-                    <th scope="col">Steepest</th>
-                    <th scope="col">Measured</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {profileRows(elevation, units).map((row) => (
-                    <tr key={`${row.from}-${row.to}`}>
-                      <th scope="row">{row.from}</th>
-                      <td>{row.to}</td>
-                      <td>{row.band}</td>
-                      <td>{`${String(row.steepest)}%`}</td>
-                      <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </ScrollTable>
-            </>
+            <p>{elevationSentence(elevation, units)}</p>
           )}
 
           {/* #2102: a short loop for a lap race, its length against a target. */}
@@ -974,7 +1073,9 @@ export function RouteBuilderView({
               {saved?.kind === 'saved' ? (
                 <StatusMessage tone="success" live>
                   {`Saved “${saved.name}” to your routes. It is private.`}
-                  {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}
+                  {saved.flat
+                    ? ` ${heightSource === undefined ? FLAT_DRAWN_ROUTE_TEXT : FLAT_WITHOUT_ELEVATION_TEXT}`
+                    : ''}
                   {saved.loop ? ` ${SAVED_LOOP_TEXT}` : ''}{' '}
                   <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
                 </StatusMessage>

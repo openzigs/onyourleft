@@ -93,6 +93,7 @@ import {
   type TileId,
 } from '@onyourleft/map-features';
 
+import type { LandClassMask } from '../land-class';
 import { sceneryAnchor } from '../scenery-anchor';
 import { createAreaReader, type HeldBlock } from '../world-data/area';
 import type { CorridorArchive, WorldCorridor } from '../world-data/corridor';
@@ -110,6 +111,9 @@ import {
   type OpenWorldRefusal,
   type OpenWorldSession,
 } from './ride';
+import type { DecodeHeightTile } from '../../terrain/decode';
+import type { TerrainArchive } from '../../terrain/terrain-source';
+import { createRoadHeights, type RoadHeights } from './heights';
 import { OpenWorldRoad } from './road';
 import { streetNameLabels, type NamedStreetLine, type StreetNameLabel } from '../street-names';
 import type { OpenWorldStart } from './start';
@@ -118,6 +122,7 @@ import { OPEN_WORLD_BUILDINGS_REPLAN_METRES } from './tile-buildings';
 import type { TileBlockFeatures } from './tile-plan';
 import { createTilePlanner, type TilePlanner, type TilePlannerOptions } from './tile-planner';
 import { tilesToPlan } from './tiles-ahead';
+import { WaterMaskKeeper } from './water-mask';
 
 /**
  * How long the start may take before the session gives up on the map:
@@ -152,6 +157,18 @@ export interface OpenWorldSessionOptions {
   readonly startTimeoutMs?: number | undefined;
   /** Where the graph is built: `graph-build.ts` §`graphBuilder`, a worker, when absent. */
   readonly graphBuilder?: ((frame: CorridorFrame) => GraphBuilder) | undefined;
+  /**
+   * The terrain archive the road's heights are read from (#2899, ADR 0087
+   * D-2): `terrain/terrain-source.ts` §`terrainArchive` in the product.
+   * `undefined` for a build with none, whose road is flat, as before.
+   */
+  readonly terrain?: TerrainArchive | undefined;
+  /** The height tiles' decoder: the platform's, inside ADR 0087 D-3's bounds, when absent. */
+  readonly decodeHeights?: DecodeHeightTile | undefined;
+  /** How long the start waits for its height tiles: `heights.ts` §`HEIGHTS_START_TIMEOUT_MS` when absent. */
+  readonly heightsStartTimeoutMs?: number | undefined;
+  /** #3154: the name each street is shown by, or none. @see OpenWorldSessionExtras.streetName */
+  readonly streetName?: ((name: string) => string | undefined) | undefined;
   /** Where the tiles are planned (#2901): `tile-planner.ts` §`createTilePlanner`, a worker, when absent. */
   readonly tilePlanner?: ((options: TilePlannerOptions) => TilePlanner) | undefined;
 }
@@ -173,6 +190,8 @@ function featuresOf(block: HeldBlock): TileBlockFeatures {
     features = {
       buildings: block.features.buildings,
       landUse: block.features.landUse,
+      // #3105: and its rivers, streams and canals, which each tile plans its own of.
+      waterLines: block.features.waterLines ?? [],
       tiles: block.streets,
     };
     blockFeatures.set(block, features);
@@ -198,9 +217,22 @@ function positionAt(frame: CorridorFrame, x: number, z: number): GeographicPosit
   );
 }
 
-/** A point of a street, flat until #2899 reads real heights. */
+/**
+ * A point of a street. Its own height is 0: with a terrain archive the
+ * rolling route reads each sample's height from the height tiles instead
+ * (#2899, `heights.ts`), and with none the road is flat.
+ */
 function pointAt(frame: CorridorFrame, x: number, z: number): RollingPoint {
   return { position: positionAt(frame, x, z), elevation: altitudeMetres(0) };
+}
+
+/**
+ * The map's `is_bridge` and `is_tunnel` on a street, as the rolling route's
+ * mark: its height is the straight line between the ground at its two ends,
+ * never the valley under it or the ridge over it (ADR 0087 D-4.3).
+ */
+function spanOf(edge: StreetGraphEdge): { readonly span?: true } {
+  return edge.grade === 'ground' ? {} : { span: true };
 }
 
 /** What the session reads of the graph: the page's copy of it (`graph-build.ts`). */
@@ -212,6 +244,35 @@ interface StreetLookup {
 }
 
 const tileKey = (tile: TileId): string => `${String(tile.x)}/${String(tile.y)}`;
+
+/**
+ * #3154: `graph` with every street's name shown as `rename` says, or none —
+ * the one place the session's names come from, so the junction prompt and
+ * the names painted on the road both read the renamed one.
+ */
+function renamedStreets(
+  graph: StreetLookup,
+  rename: (name: string) => string | undefined,
+): StreetLookup {
+  const renamed = (edge: StreetGraphEdge): StreetGraphEdge => {
+    if (edge.name === undefined) return edge;
+    // Never the map's: renamed, or no name at all.
+    return { ...edge, name: rename(edge.name) };
+  };
+  return {
+    get version() {
+      return graph.version;
+    },
+    node: (id) => graph.node(id),
+    edge: (id) => {
+      const edge = graph.edge(id);
+      return edge === undefined ? undefined : renamed(edge);
+    },
+    *edges() {
+      for (const edge of graph.edges()) yield renamed(edge);
+    },
+  };
+}
 
 /** Where the start meets a street: the edge, the segment and how far along it. */
 interface Snap {
@@ -318,6 +379,7 @@ class GraphStreets implements RollingStreetGraph {
       to: String(forward ? edge.to : edge.from),
       points,
       roadClass: ROAD_CLASS[edge.kind] ?? 0,
+      ...spanOf(edge),
       // #3052: the mapped name, for the junction prompt (ADR 0096).
       ...(edge.name === undefined ? {} : { name: edge.name }),
     };
@@ -373,6 +435,7 @@ function startWays(
     to: String(forwards ? edge.to : edge.from),
     points: points(forwards ? ahead : behind),
     roadClass,
+    ...spanOf(edge),
     ...named,
   };
   const other: RollingEdge = {
@@ -381,6 +444,7 @@ function startWays(
     to: String(forwards ? edge.from : edge.to),
     points: points(forwards ? behind : ahead),
     roadClass,
+    ...spanOf(edge),
     ...named,
   };
   return [first, other];
@@ -396,8 +460,14 @@ function rollingRouteFrom(
   graph: StreetLookup,
   frame: CorridorFrame,
   ways: readonly [RollingEdge, RollingEdge],
+  heights: RoadHeights | undefined,
 ): RollingRoute {
-  return new RollingRoute(new GraphStreets(graph, frame, ways), ways[0]);
+  return new RollingRoute(
+    new GraphStreets(graph, frame, ways),
+    ways[0],
+    // #2899: with a terrain archive, each sample's height is the ground's.
+    heights === undefined ? {} : { heights: heights.heightAt },
+  );
 }
 
 /** A session on `options.start`: its start is under way when this returns. */
@@ -409,16 +479,19 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   };
   const schedule = options.schedule ?? defaultSchedule;
   const mirror = new StreetMirror();
+  // #3154: what the ride reads of the graph, every street by the name it is shown by.
+  const rename = options.streetName;
+  const streets = rename === undefined ? mirror : renamedStreets(mirror, rename);
   /** #3052: the graph's street names, where to paint each, built again only when the graph changes. */
   let named: { readonly version: number; readonly labels: readonly StreetNameLabel[] } | undefined;
   const streetNames = (): readonly StreetNameLabel[] => {
     if (named?.version !== mirror.version) {
-      const streets: NamedStreetLine[] = [];
-      for (const edge of mirror.edges()) {
+      const lines: NamedStreetLine[] = [];
+      for (const edge of streets.edges()) {
         if (edge.name !== undefined)
-          streets.push({ id: String(edge.id), line: edge.line, name: edge.name });
+          lines.push({ id: String(edge.id), line: edge.line, name: edge.name });
       }
-      named = { version: mirror.version, labels: streetNameLabels(streets) };
+      named = { version: mirror.version, labels: streetNameLabels(lines) };
     }
     return named.labels;
   };
@@ -463,12 +536,17 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   function planAhead(route: RollingRoute, rider: number): void {
     if (planner === undefined || !Number.isFinite(rider)) return;
     const view = route.view();
-    if (asked?.view === view && Math.abs(rider - asked.rider) < TILE_ASK_METRES) return;
-    asked = { view, rider };
-    planner.want(tilesToPlan(route, rider));
+    if (asked?.view !== view || Math.abs(rider - asked.rider) >= TILE_ASK_METRES) {
+      asked = { view, rider };
+      planner.want(tilesToPlan(route, rider));
+    } else if (buildingsAsked !== undefined) {
+      return;
+    }
     // #2902: and the mapped buildings round the rider, against this view,
     // whenever the view or the tiles planned changed, or the rider has ridden
-    // on far enough that the reach planned no longer covers the belt's.
+    // on far enough that the reach planned no longer covers the belt's. Until
+    // they are first asked for, every call looks, so a standing start asks as
+    // soon as its first tile is planned rather than 25 m on.
     const along = rider - route.origin;
     if (!(along >= 0 && along <= route.end - route.origin)) return;
     const tiles = [...planner.plans()].length;
@@ -494,6 +572,20 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       ...(anchor === undefined ? {} : { scenery: { seed: anchor.seed, origin: anchor.origin } }),
     });
   }
+  /**
+   * #3105: the real water of the tiles planned so far, as the scene's land
+   * mask — looked for again only when the planner's plans changed, and the
+   * same object until a tile that holds water is planned or let go.
+   */
+  const waterKeeper = new WaterMaskKeeper();
+  let water: { readonly version: number; readonly mask: LandClassMask | undefined } | undefined;
+  const waterMask = (): LandClassMask | undefined => {
+    if (planner === undefined) return undefined;
+    if (water?.version !== planner.version) {
+      water = { version: planner.version, mask: waterKeeper.of(planner.plans()) };
+    }
+    return water.mask;
+  };
   /** What the buildings were last planned for. @see planAhead */
   let buildingsAsked:
     | { readonly view: unknown; readonly tiles: number; readonly x: number; readonly z: number }
@@ -511,6 +603,20 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       void sync();
     },
   });
+  // #2899: the height tiles round the rider, under the reader's own rules
+  // (the map-tiles switch, R-8's delay, the same scheduler and draw).
+  const heights =
+    options.terrain === undefined
+      ? undefined
+      : createRoadHeights({
+          archive: options.terrain,
+          mapTilesOn: options.mapTilesOn,
+          decode: options.decodeHeights,
+          schedule,
+          random: options.random,
+          log: options.log,
+          startTimeoutMs: options.heightsStartTimeoutMs,
+        });
   /**
    * What the reader holds now, against what the graph was sent: the tiles
    * gained go in and the tiles dropped come out, in one change. Resolves when
@@ -575,9 +681,13 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     await sync();
     if (stopped) return { kind: 'stopped' };
     if (graphFailed) return refused('unavailable');
-    const ways = startWays(mirror, frame);
+    const ways = startWays(streets, frame);
     if (ways === undefined) return refused('no-street');
-    const route = rollingRouteFrom(mirror, frame, ways);
+    // #2899: the start's height tiles, asked for at once and waited for a
+    // bounded while. The ride does not need them to begin (ADR 0087 D-7).
+    await heights?.start(start.position);
+    if (stopped) return { kind: 'stopped' };
+    const route = rollingRouteFrom(streets, frame, ways, heights);
     return {
       kind: 'ready',
       route: {
@@ -591,15 +701,21 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // the rider has not moved. #2990: the road tells the reader where the
       // rider is, and reopens a turn-round once the graph has grown past it.
       road: () =>
-        new OpenWorldRoad(rollingRouteFrom(mirror, frame, ways), {
+        new OpenWorldRoad(rollingRouteFrom(streets, frame, ways, heights), {
           at: (position) => {
             reader.moveTo(position);
+            heights?.moveTo(position);
           },
           graphVersion: () => mirror.version,
+          ...(heights === undefined
+            ? {}
+            : { heightsVersion: () => heights.version, realHeights: true }),
           ahead: planAhead,
           // #2902: the whole ride drawn in the start's frame, the tiles' own.
           frame: { latitude: frame.latitude, longitude: frame.longitude, elevation: 0 },
           buildings: () => planner?.buildings,
+          // #3105: the tiles' real water, which the scene draws and bridges.
+          water: waterMask,
           // #2903: every held street, drawn to the fog as road.
           streets: () => streetCorridor,
           // #3052: and where each named one's name is painted on it.
@@ -616,6 +732,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // The reader's start then resolves at once, and the start's deadline
       // is cancelled there, as it is after any start.
       reader.stop();
+      heights?.stop();
       builder?.stop();
       planner?.stop();
     },

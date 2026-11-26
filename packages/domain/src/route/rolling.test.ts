@@ -954,3 +954,67 @@ describe("a loop's two ways — #2990", () => {
     expect(legs[uTurn + 1]?.edge.id).toBe('stem');
   });
 });
+
+describe('a U-turn just past a junction: the road back undoes the turn — #3129, ADR 0088', () => {
+  /** East along row 3, right... north at the first junction (180 m), and turned round `past` metres on. */
+  function turnedNorthThenRound(past: number) {
+    const { route } = eastAlongRow3();
+    const junction = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(junction.distance).toBeCloseTo(180, 0);
+    expect(route.choose(junction.distance, 'v1,3', 50)).toBe('swapped');
+    const rider = junction.distance + past;
+    route.advance(rider);
+    route.uTurn(rider);
+    const back = route.junctionsAfter(rider)[0] as RollingJunction;
+    return { route, rider, back };
+  }
+
+  it('takes, as its default, the way back onto the street ridden in on, within the lock', () => {
+    const { route, back } = turnedNorthThenRound(60);
+    // Ridden back to the junction from 60 m past it.
+    expect(back.distance).toBeCloseTo(300, 0);
+    expect(back.defaultWay).toBe('h0,3');
+    expect(back.taken).toBe('h0,3');
+    // Read through the view the game reads: past the junction, west along row 3.
+    const view = route.view();
+    for (const on of [20, 60, 150]) {
+      expect(
+        distanceBetween(
+          readAt(view, route.origin, back.distance + on).position,
+          placeAt(180 - on, ROWS[3] as number),
+        ),
+      ).toBeLessThan(1);
+    }
+    // Set by the U-turn itself: the junction is inside the lock, so no press made it.
+    expect(back.distance - 240).toBeLessThanOrEqual(JUNCTION_LOCK_METRES);
+    expect(route.choose(back.distance, 'v1,2', 240)).toBe('locked');
+  });
+
+  it('still takes it with the turn 90 m past the junction, which is still inside the lock', () => {
+    const { route, rider, back } = turnedNorthThenRound(90);
+    expect(back.defaultWay).toBe('h0,3');
+    expect(back.taken).toBe('h0,3');
+    // The turn is on the next sample, and the junction is no further from it than the lock.
+    expect(route.choose(back.distance, 'v1,2', rider)).toBe('locked');
+  });
+
+  it('keeps D-1.4’s default for a U-turn further past the junction than the lock', () => {
+    const { back } = turnedNorthThenRound(JUNCTION_LOCK_METRES + 10);
+    // Straight on, south across row 3: the smallest change of bearing.
+    expect(back.defaultWay).toBe('v1,2');
+    expect(back.taken).toBe('v1,2');
+    // And the street turned off from is still offered both ways, for a press to take.
+    expect(back.ways.map((way) => way.edge.id).sort()).toEqual(['h0,3', 'h1,3', 'v1,2']);
+  });
+
+  it('keeps D-1.4’s default for a U-turn on the street ridden from the start, with no junction behind', () => {
+    const { graph, route } = eastAlongRow3();
+    route.advance(60);
+    route.uTurn(60);
+    const [start, back] = route.legs;
+    const wanted = waysOn(back?.edge as RollingEdge, graph.edgesFrom('0,3')).defaultWay;
+    expect(start?.kind).toBe('start');
+    expect(route.legs[2]?.kind).toBe('default');
+    expect(route.legs[2]?.edge.id).toBe(wanted?.edge.id);
+  });
+});

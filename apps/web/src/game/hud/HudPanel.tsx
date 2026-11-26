@@ -356,7 +356,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    * on every ride with no corridor, which draws the route's outline as before.
    * A workout's strip still takes the panel while one runs. `GameView` hands
    * it exactly when it hands {@link attribution}, so the map is never drawn
-   * without its credit.
+   * without its credit. #3106: on an open-world ride it is the streets the
+   * ride holds round the rider (`open-world/street-corridor.ts`), a new one
+   * whenever a block is read or let go, and the map follows it.
    */
   readonly corridor?: WorldCorridor | undefined;
   /**
@@ -541,6 +543,8 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               corridor={corridor}
               profile={props.profile}
               distance={props.state.ride.distance}
+              // #3106: an open-world ride's map says no share of a route ridden.
+              openEnded={props.openEnded}
             />
           )
         ) : (

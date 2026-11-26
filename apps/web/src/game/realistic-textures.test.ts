@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { metres, metresPerSecond, seconds as secondsOf } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
@@ -104,12 +104,14 @@ import {
 } from './world';
 import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
 import {
+  MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_PIXELS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { treeSlots } from './tree-levels';
+import { RIDER_SKIN_TONES } from './rider-body';
 import {
   albedoBytes,
   toldApartFaults,
@@ -1368,6 +1370,102 @@ describe('the dressed rider — #623', () => {
     const helmet = riders.helmets;
     expect(helmet.geometry.getAttribute('color')).toBeDefined();
     expect((helmet.material as unknown as { vertexColors: boolean }).vertexColors).toBe(true);
+    // #3214: but for the face — the lenses and the eyes — which the shader
+    // draws as the file paints it, untinted (`oylKit` 4), where the shell and
+    // the straps, every grey, keep the tint (0).
+    const colour = helmet.geometry.getAttribute('color');
+    const role = helmet.geometry.getAttribute('oylKit');
+    expect(role.count).toBe(colour.count);
+    const hueOf = (at: number): number => {
+      const channels = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+      return Math.max(...channels) - Math.min(...channels);
+    };
+    const roles = { bare: 0, tinted: 0, shell: 0 };
+    for (let at = 0; at < role.count; at += 1) {
+      const bare = role.getX(at) === 4;
+      expect([0, 4]).toContain(role.getX(at));
+      if (bare) roles.bare += 1;
+      else roles.tinted += 1;
+      // A grey is tinted and a hue is not: the lens leads with its blue by 0.04.
+      expect(bare, String(at)).toBe(hueOf(at) > 0.015);
+      // The pale shell, the helmet itself, is never bare.
+      if (colour.getX(at) > 0.6 && hueOf(at) < 0.01) {
+        roles.shell += 1;
+        expect(bare).toBe(false);
+      }
+    }
+    console.log(`#3214: the helmet mesh is ${JSON.stringify(roles)} vertices`);
+    expect(roles.bare).toBeGreaterThan(20);
+    expect(roles.shell).toBeGreaterThan(100);
+    // And its material reads the mark, which a helmet that lost it would not.
+    const material = helmet.material as unknown as {
+      customProgramCacheKey(): string;
+      onBeforeCompile(shader: unknown, renderer: unknown): void;
+    };
+    expect(material.customProgramCacheKey()).toContain('oyl-bare');
+    // ⚠️ The file's colour is a vec4, so three declares `color` a vec4 and a
+    // splice that hands it on as it is does not compile — the helmet is then
+    // not drawn at all, which #3214's first capture showed and the browser
+    // gate's "compiles every shader" did not. Hand on its rgb.
+    expect(colour.itemSize).toBe(4);
+    const shader = {
+      vertexShader: [
+        '#include <common>',
+        '#include <fog_pars_vertex>',
+        'void main() {',
+        '#include <begin_vertex>',
+        '#include <color_vertex>',
+        '#include <fog_vertex>',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        '#include <common>',
+        '#include <fog_pars_fragment>',
+        'void main() {',
+        '#include <clipping_planes_fragment>',
+        '#include <opaque_fragment>',
+        '#include <fog_fragment>',
+        '}',
+      ].join('\n'),
+      uniforms: {},
+      defines: {},
+    };
+    material.onBeforeCompile(shader, undefined);
+    expect(shader.vertexShader).toContain(
+      'vColor.rgb = oylRiderColour(oylKit, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);',
+    );
+    expect(shader.vertexShader.split('vec3 oylRiderColour(')).toHaveLength(2);
+    // #3214: each body's skin is its own marker's tone, as a share of the
+    // maps' — 1 for the first tone, which the maps are drawn in.
+    const at = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0, crankAngle: 0 };
+    riders.place([
+      { ...at, kind: 'rider' },
+      { ...at, kind: 'bot', skin: 4 },
+      { ...at, kind: 'ghost', skin: 2 },
+    ] as never);
+    const [own, bot, ghost] = riders.skinShares;
+    for (const channel of [own?.r, own?.g, own?.b]) expect(channel).toBeCloseTo(1, 9);
+    const shareOf = (hex: number): number[] => {
+      const linear = (byte: number): number => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const first = RIDER_SKIN_TONES[0] as number;
+      return [16, 8, 0].map(
+        (shift) => linear((hex >> shift) & 0xff) / linear((first >> shift) & 0xff),
+      );
+    };
+    for (const [drawn, tone] of [
+      [bot, 4],
+      [ghost, 2],
+    ] as const) {
+      const wanted = shareOf(RIDER_SKIN_TONES[tone] as number);
+      [drawn?.r, drawn?.g, drawn?.b].forEach((channel, at) =>
+        expect(channel).toBeCloseTo(wanted[at] ?? Number.NaN, 5),
+      );
+      // Darker than the maps' own skin in every channel, never brighter.
+      for (const each of wanted) expect(each).toBeLessThan(1);
+    }
   }, 120_000);
 
   it('holds the body, the helmet and the glasses together inside the rider’s 9 000 triangles', async () => {
@@ -4015,6 +4113,202 @@ describe('the mapped buildings’ blobs, through the drawing a view builds — #
       drawing.dispose();
     }
   }, 120_000);
+});
+
+describe('every set of mapped buildings is drawn in the one set of materials, by the one belt — #3107, #3119', () => {
+  // An open-world ride plans the buildings round the rider again as it goes:
+  // each plan is another `MappedBuildings`. Until #3119 the drawing built
+  // another belt for each, its buffers allocated and uploaded whole inside
+  // the frame the plan arrived on. Three sets are drawn once, here, through
+  // the drawing a view builds, and the cases read what each was drawn by and
+  // in: the second by the first's belt, and the third, whose cap the belt
+  // cannot hold, by another. Two belts allocated, as before #3119: a belt's
+  // buffers and the world's load are more than a case's time on a slow runner.
+  let drawn:
+    | {
+        /** Whether the second set was drawn by the belt the first was, and the third. */
+        readonly sameBelt: readonly boolean[];
+        /** Whether each set was what the belt drew from after the frame that carried it. */
+        readonly drewTheSetCarried: readonly boolean[];
+        /** The plans the first two sets drew, as plan objects. */
+        readonly plansDrawn: readonly (readonly unknown[])[];
+        /** How many buildings each set drew. */
+        readonly buildings: readonly number[];
+        /** How many of the attributes the second set was drawn in, and of their arrays, the first was not. */
+        readonly newAttributes: number;
+        readonly newArrays: number;
+        readonly attributes: number;
+        /** For each attribute after the second set's refill: what it will upload, and what it holds, in floats. */
+        readonly uploads: readonly { readonly count: number; readonly length: number }[];
+        /** How many materials the first belt and the last drew in. */
+        readonly materials: readonly number[];
+        /** How many of the later sets' materials the first did not draw in. */
+        readonly newMaterials: number;
+        readonly disposed: () => number;
+        readonly dispose: () => void;
+      }
+    | undefined;
+
+  beforeAll(async () => {
+    // The world's files, served as every case's `beforeEach` serves them: a
+    // `beforeAll` runs before it.
+    const whileServed = served();
+    let renderer: Awaited<ReturnType<typeof loadedOn>>;
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of whileServed.reverse()) each();
+    }
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    const mixed = mixedTownFixture();
+    const land = landClassMask(mixed.corridor);
+    const { plans } = footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin);
+    const start = atStartLine(mixed.profile);
+    const frame = sceneFrame({
+      profile: mixed.profile,
+      origin: mixed.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+      worldCorridor: mixed.corridor,
+      landClass: land,
+      mappedBuildings: mappedBuildingsOf(plans),
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+    const carried = frame.mappedBuildings;
+    if (carried === undefined) throw new Error('the frame carried no buildings');
+    type Belt = NonNullable<typeof drawing.mapped>;
+    /** What this reads off a belt's attribute: `three-seam.test.ts` keeps `three` to the renderer. */
+    interface Attribute {
+      readonly array: ArrayLike<number>;
+      readonly updateRanges: readonly { readonly start: number; readonly count: number }[];
+    }
+    const beltOf = (): Belt => {
+      const belt = drawing.mapped;
+      if (belt === undefined) throw new Error('the drawing built no belt');
+      return belt;
+    };
+    const materialsOf = (): Set<unknown> => {
+      const belt = beltOf();
+      const surfaces = belt.mesh.material;
+      return new Set([
+        ...(Array.isArray(surfaces) ? surfaces : [surfaces]),
+        belt.modelMesh.material,
+      ]);
+    };
+    const attributesOf = (): Attribute[] => {
+      const belt = beltOf();
+      return [
+        ...Object.values(belt.mesh.geometry.attributes),
+        ...Object.values(belt.modelMesh.geometry.attributes),
+      ] as Attribute[];
+    };
+    // Read back as a consumer reads what is drawn: its places, through the set the belt holds.
+    const plansOf = (): unknown[] => {
+      const belt = beltOf();
+      return belt.drawnPlans().map((index) => belt.buildings.plans[index]);
+    };
+    const carry = (buildings: ReturnType<typeof mappedBuildingsOf>): void => {
+      drawing.updateMapped({ ...carried, buildings }, frame.scatter, frame.billboards.length);
+    };
+    const sets = [
+      mappedBuildingsOf(plans),
+      // The next plan: the same buildings in another order, so each is at
+      // another place in the set, and a refill that read places in the set
+      // before would draw others.
+      mappedBuildingsOf([...plans].reverse()),
+      // And a set indexed with a larger cap than the belt was built to hold
+      // (#1638's city centre): drawn by another belt.
+      mappedBuildingsOf(plans, MAPPED_BUILDING_MAX + 4),
+    ] as const;
+    carry(sets[0]);
+    const first = beltOf();
+    const before = materialsOf();
+    const attributesBefore = attributesOf();
+    const arraysBefore = new Set(attributesBefore.map((attribute) => attribute.array));
+    const plansDrawn = [plansOf()];
+    const buildings = [first.stats.buildings];
+    const drewTheSetCarried = [first.buildings === sets[0]];
+    let disposed = 0;
+    for (const material of before) {
+      (
+        material as { addEventListener(type: 'dispose', listener: () => void): void }
+      ).addEventListener('dispose', () => {
+        disposed += 1;
+      });
+    }
+    carry(sets[1]);
+    const second = beltOf();
+    const attributesAfter = attributesOf();
+    plansDrawn.push(plansOf());
+    buildings.push(second.stats.buildings);
+    drewTheSetCarried.push(second.buildings === sets[1]);
+    const uploads = attributesAfter.map((attribute) => ({
+      count: attribute.updateRanges.reduce((sum, range) => sum + range.count, 0),
+      length: attribute.array.length,
+    }));
+    const materialsSecond = materialsOf();
+    carry(sets[2]);
+    const third = beltOf();
+    buildings.push(third.stats.buildings);
+    drewTheSetCarried.push(third.buildings === sets[2]);
+    // The same material objects, compared as such: a material holds its textures.
+    const materialsThird = materialsOf();
+    const after = new Set([...materialsSecond, ...materialsThird]);
+    drawn = {
+      sameBelt: [second === first, third === first],
+      drewTheSetCarried,
+      plansDrawn,
+      buildings,
+      newAttributes: attributesAfter.filter((attribute) => !attributesBefore.includes(attribute))
+        .length,
+      newArrays: attributesAfter.filter((attribute) => !arraysBefore.has(attribute.array)).length,
+      attributes: attributesAfter.length,
+      uploads,
+      materials: [before.size, materialsThird.size],
+      newMaterials: [...after].filter((material) => !before.has(material)).length,
+      disposed: () => disposed,
+      dispose: () => {
+        drawing.dispose();
+      },
+    };
+  });
+
+  afterAll(() => {
+    drawn?.dispose();
+  });
+
+  it('draws another set by the belt it has, in its buffers, uploading only what the refill wrote — #3119', () => {
+    if (drawn === undefined) throw new Error('nothing was drawn');
+    // One belt for the first two sets, each refill drawing from the set the
+    // frame carried.
+    expect(drawn.sameBelt[0]).toBe(true);
+    expect(drawn.drewTheSetCarried).toStrictEqual([true, true, true]);
+    // No buffer allocated: every attribute, and every array, is the first set's.
+    expect(drawn.attributes).toBe(13);
+    expect(drawn.newAttributes).toBe(0);
+    expect(drawn.newArrays).toBe(0);
+    // And what is uploaded is the range the refill wrote, not the buffer, as
+    // three uploads an attribute it has not seen whole.
+    expect(drawn.uploads.some(({ count }) => count > 0)).toBe(true);
+    for (const { count, length } of drawn.uploads) expect(count).toBeLessThan(length / 2);
+    // The same buildings drawn, read back through the new set's places.
+    const [firstPlans = [], secondPlans = []] = drawn.plansDrawn;
+    expect(firstPlans.length).toBeGreaterThan(0);
+    expect(secondPlans.every((plan) => plan !== undefined)).toBe(true);
+    expect(new Set(secondPlans)).toStrictEqual(new Set(firstPlans));
+  });
+
+  it('draws a set it cannot hold by another belt, and every set in the same materials, none of them disposed of', () => {
+    if (drawn === undefined) throw new Error('nothing was drawn');
+    expect(drawn.sameBelt[1]).toBe(false);
+    for (const count of drawn.buildings) expect(count).toBeGreaterThan(0);
+    expect(drawn.materials[0]).toBeGreaterThan(1);
+    // Every set in the first's materials and no other, none of them disposed
+    // of: three keeps their programs, and a new set of buildings links none.
+    expect(drawn.materials[1]).toBe(drawn.materials[0]);
+    expect(drawn.newMaterials).toBe(0);
+    expect(drawn.disposed()).toBe(0);
+  });
 });
 
 describe('the village models and the procedural belts, through the drawing a view builds — #1566', () => {

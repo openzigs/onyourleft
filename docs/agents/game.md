@@ -1148,6 +1148,32 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
                         which hands it a pad's turns), named as roots, with
                         the prompt importing `gradient.ts` a red case
+    src/game/open-world/turn-limits.ts
+                        where an open-world ride offers NO turn, on purpose
+                        (#3124), and the words the open-world start screen's
+                        help says it in (`shell/routes.ts`, drafts for the
+                        owner). Each limit is an accepted ADR decision:
+                        service ways, i.e. driveways, car parks and alleys
+                        (ADR 0091 D-3, D-9 Q2); `access` `no`/`private` and
+                        motorways (D-3); footways, cycleways, paths, tracks
+                        (D-3, D-9 Q1); a street mapped to stop more than 3 m
+                        short of the road (D-4, `T_SNAP_METRES`); and a
+                        junction whose choice is final (100 m before it,
+                        ADR 0088 D-1.5, ADR 0087 D-6.2) before it was ever
+                        prompted, whose pop-up says "Too close to the last
+                        junction to choose". Since #3129 (ADR 0088's
+                        amendments of 2026-11-24) the pop-up offers the
+                        first junction not yet final within 250 m while the
+                        next is final, titled "At the 2nd junction"
+                        (`junction-choice.ts` §`promptedJunction`), and a
+                        U-turn within 100 m past a junction takes the street
+                        came along as its default (`RollingRoute.uTurn`), so
+                        a dense town and a quick U-turn are offered. A one-way
+                        street is offered BOTH ways (ADR 0091 D-5): not a
+                        limit. `junction-limits.test.tsx` rides each through
+                        the real game screen and holds its words in the help.
+                        ⚠️ A new reason a junction offers no turn goes in this
+                        list and that test, or it is a defect
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and
@@ -1659,7 +1685,45 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `channel` set, `CHANNEL_SHAPES` by kind, its water
                         following the road), laid on the frame's drawn ground
                         where the columns cannot cut it; a ditch or drain is
-                        never bridged (`BRIDGED_WATER_LINE_KINDS`)
+                        never bridged (`BRIDGED_WATER_LINE_KINDS`).
+                        ⚠️ Since #3105, on an OPEN-WORLD view only, the
+                        map's water under the road and on both sides of it
+                        is one crossing as wide as that water
+                        (`waterUnderRoad`, `Crossing.halfWidth`): its bed,
+                        banks, surface, deck, abutments and approaches lie
+                        `crossingWiden` further out, and a deck is at most
+                        `BRIDGE_MAX_PIECES` pieces. A route's crossings are
+                        its water lines' alone, as before
+    src/game/mapped-spans.ts
+                        the mapped bridges and tunnels an open-world ride is
+                        on (#3105): the stretches of the view along a street
+                        graded `bridge` or `tunnel` (`riddenSpans`, by
+                        geometry from `WorldCorridor.streets`, parallel to
+                        the road within 30° so an overpass is not the road's
+                        own) carry the stream bridges' parapets for the whole
+                        span and a concrete portal at each tunnel mouth; a
+                        side street's bridge gets a parapet along each edge
+                        (`sideDeckParts`). ⚠️ All in `BridgeBelt`'s 128
+                        boxes, no mesh or draw call of its own; the deck is
+                        the road at the road's level (flat until #2899), so a
+                        trainer's grade there is the route's. Open-world
+                        views only (`scene.ts` asks where the profile is
+                        anchored)
+    src/game/open-world/water-mask.ts
+                        an open-world ride's real water as the land mask the
+                        scene reads water from (#3105), from the planned
+                        tiles' `water` cells and the water lines through each
+                        tile, each read once (`tile-plan.ts` §`TileWater`). ⚠️ **Water and
+                        its wetland only**: every other class reads
+                        `unknown`, so no placement rule changes; `covered`
+                        is true only within 200 m of real water
+                        (`REAL_WATER_BUFFER_METRES`), which is what drops an
+                        invented stream or lake beside it; no mask at all
+                        where no tile holds water, and the same object until
+                        a tile that holds water is planned or let go
+                        (`WaterMaskKeeper`). `session.ts` hands it to the
+                        road (`OpenWorldRoad.water`) and `GameView` to the
+                        scene as `landClass`; `real-water.test.ts` rides it
     src/game/mapped-pools.ts
                         the map's swimming pools and fountains (#2974), round
                         the camera, as lighter water and a stone coping in the
@@ -2047,7 +2111,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+                        the tint is a VERTEX attribute, and there is no ground blob (#620).
+                        ⚠️ **One belt a world since #3119**: an open-world
+                        ride's every plan is another set, handed to the belt
+                        it has (`MappedBuildingBelt.rebind`,
+                        `mappedBeltFor`) and refilled in its buffers; a new
+                        belt allocated and uploaded ~10 MB inside the frame
     src/game/house-models.ts
                         which mapped plans are drawn as a house MODEL (#1585):
                         GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
@@ -2342,7 +2411,90 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         A footprint on one is dropped `on-street`
                         (`footprint-buildings.ts` rule 3b). `streetRibbon` names
                         no route: #2903's open world draws with it.
-                        Lever `-nearby-streets`, page `town=streets`
+                        Lever `-nearby-streets`, page `town=streets`.
+                        ⚠️ **Since #3106 only the streets near the road are
+                        read**: this file and `cross-streets.ts`
+                        §`mappedJunctions` skip every segment off the road's
+                        neighbourhood (`road-grid.ts` §`roadNeighbourhood`:
+                        72 m for a junction's arm, 440 m for a street in
+                        sight) and count none of it against
+                        §`STREET_MAX_METRES`. An open-world ride holds nine
+                        blocks in the order they were read; where they held
+                        more street than the 400 km bound it was spent on
+                        blocks a kilometre off, and the blocks ahead of the
+                        rider had no stub and no street. And a
+                        **fork** — a street leaving the route at under 30°,
+                        which has no stub — is drawn from the verge, not from
+                        the 23.5 m hand-over a stub covers.
+                        ⚠️ **Since #3107 an open-world ride reads them a
+                        slice a frame**: `NearbyStreetScan` here and
+                        `cross-streets.ts` §`JunctionScan`, one of each a ride
+                        (`open-world/road.ts` §`streetScans`, handed to the
+                        scene as `SceneInput.streetScans`), read at most 1 000
+                        units of street a call and hand on the last whole
+                        reading until the new one is whole — the junctions
+                        carried onto the new view by how far its start moved.
+                        A piece or a junction found again is the same object,
+                        so the side road built on it and the renderer's mesh
+                        are kept. Read whole, every change of the road's view
+                        or of the blocks held read every street inside one
+                        frame. A route ride's are read whole, once, as before.
+                        A reading's grid of segments (`onNearbyStreet`) is
+                        built when a planner of buildings first asks for it.
+                        ⚠️ **Since #3119 the scenery along the ways out is
+                        placed a few ways a frame** (`scatter.ts`
+                        §`WaysOutPlacing`, `StreetScans.ways`): at most
+                        `WAYS_PLACED_A_FRAME` (2) new ways a frame, nearest
+                        first, all on the ride's first frame; a junction in a
+                        dense town hands on ~20 at once. The way roads below
+                        still read every way handed on.
+                        ⚠️ Since #3105 an open-world ride draws a side
+                        street's BRIDGE too, as a deck at the road's level
+                        across the water a ground street stops at
+                        (`deckGround`, `SideRoad.deck`); a route ride still
+                        leaves every bridge to `overpasses.ts`.
+    src/game/way-roads.ts
+                        way roads (#3106) — every way out of an open-world
+                        junction (`SceneInput.waysOut`, the views the rolling
+                        route would hand out, which is what the junction
+                        prompt offers) drawn as road from its junction to the
+                        view's reach, wherever neither the road nor a side
+                        road of the frame already covers it: a fork's mouth, a
+                        street mapped on a bridge from the junction, a way too
+                        short for a stub. Nothing where the streets' own
+                        drawing is whole. Side roads, so the one mesh draws
+                        them and the scenery is kept off them; worked out
+                        again when the ways, the side roads or the reach in
+                        40 m steps change; at most 1 024 stations a frame.
+                        Off with the `-nearby-streets` lever.
+                        ⚠️ **Since #3123 also the road turned off**: once
+                        the rider passes a junction where the route left
+                        the road it came along (`open-world/road.ts`
+                        §`turnedOff`, `SceneInput.turnedOff`), that road on
+                        past the junction and back from it, 400 m each way,
+                        read right after the next junction's ways. The road
+                        covers it only where the frame draws the road (from
+                        60 m behind the rider, in 40 m steps): the road back
+                        is the route still, which nothing else draws
+    src/game/junction-surface.ts
+                        junction surfaces (#3133) — a junction an open-world
+                        ride turns through (the way taken turns 30° or more,
+                        chosen or the default: `open-world/road.ts`
+                        §`junctionsTurned`, `SceneInput.junctionsTurned`)
+                        drawn as the streets meeting there and not as one
+                        road bending: every arm to its own width (the route's
+                        7 m, a way not taken at its street's class) from the
+                        graph's node to its mouth, the square where they
+                        overlap, and each corner rounded to 6 m (less at a
+                        narrow angle; straight along the top of a T). One
+                        side road a junction, a fan of about 36 triangles, at
+                        the road's level lifted as a nearby street is, kept
+                        from 400 m behind the rider to the view's reach.
+                        ⚠️ **The road's lines stop at the mouth**: between the
+                        mouths of the way in and the way taken `terrain.ts`
+                        §`roadCorridor` (`unpainted`) paints no edge line and
+                        no centre-line mark. A junction ridden straight
+                        through is unchanged
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m
@@ -2481,6 +2633,57 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PreviewControl`): a power and a 1–8× speed-up, ridden
                         on a NEW screen `GameView` mounts with none of those
                         ports; ending it mounts an ordinary picker again.
+                        Since #3210 (owner ruling 2026-11-25) it invents a
+                        cadence and heart rate, live and paired, so the HUD
+                        shows both and the legs turn (`&cadence=`, `&hr=`
+                        fix them); they reach no recording, by the same
+                        absent ports.
+    src/game/simulated-body.ts
+                        the invented cadence and heart rate (#3210): ~86–94
+                        rpm on the flat, 70–80 on a steep climb, a spin-up on
+                        a surge, nought within 2 s of no power; heart rate
+                        from 70 bpm at rest, lagging power by tens of seconds
+                        and settling a step up in 2–3 min (#3215) towards the
+                        rider's own thresholds (else 250 W / 170
+                        bpm). Seeded wobble, no jumps; `simulated-body.test.ts`
+                        pins the curves.
+    src/game/capture-scene.ts
+                        capture mode (#3152): `#/game?capture=<scene>` is a
+                        simulated ride whose power, cadence and heart rate
+                        follow a scene's script, with no simulated mark on the
+                        HUD, for `tools/capture/`'s frame-stepped 1080p60
+                        render of the real app. The same absent ports as the
+                        simulated rider; `capture-wiring.test.tsx` holds the
+                        stepped clock. Read only in a `--mode capture` build;
+                        `tools/capture/capture-stays-out.ts` fails a product
+                        build that carries a scene (found by the id mark
+                        `oyl-capture-scene:`, #3153). #3153's scenes: Delivery
+                        on a built-in level, a lap race on a built-in circuit,
+                        a workout and the pacer — a seed only a scene sets,
+                        scripted presses (`CaptureCues`), an event log the
+                        tool writes beside the video (`CaptureLog`), and an
+                        in-memory store (`captureStorage`) so no rider data is
+                        read or written. `capture-modes-wiring.test.tsx`.
+                        `docs/demo-video.md` §"Capture mode"
+    src/game/capture-recording.ts
+                        a capture ride's Moving, Elapsed, ride-so-far and
+                        Calories, folded in memory by `recording/totals.ts`
+                        §`rideTotals` from the readings it rode, never stored;
+                        and its laps over a course's line (#3153)
+    src/game/capture-free-ride.ts
+                        a free-ride capture (#3154): the command's start, read
+                        from `start=` in a capture build only, and the
+                        placeholder street names a capture shows every street
+                        by — handed to the open-world session's one source of
+                        names (`session.ts` §`renamedStreets`,
+                        `ride.ts` §`OpenWorldSessionExtras`), so the road's
+                        painted names and the junction prompt both read them.
+                        `capture-free-ride-wiring.test.tsx`
+    src/game/capture-workout.ts
+                        a capture's workout (#3153): the Ride screen's built-in
+                        address, tailored and expanded as a rider's is, held at
+                        its ERG target on the ride's clock and drawn by
+                        `WorkoutStrip`. Writes to nothing
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

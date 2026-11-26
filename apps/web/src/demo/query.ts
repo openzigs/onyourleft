@@ -12,6 +12,8 @@
  * | `autoplay` | whether the demo starts moving on load (#1654) | `1` (default) or `0`: a still frame and a *Play* button, as reduced motion gives |
  * | `controls` | whether the HUD's *Stop* is shown (#1654) | `1` (default) or `0`; *Pause* and *Play* are always shown (owner, 2026-10-30) |
  * | `units` | the HUD's units (#1654) | `metric` (default) or `imperial` |
+ * | `captions` | a captioned tour's script (#3074, `caption-script.ts`), with `scene` | `youtube` |
+ * | `scene` | which of the script's scenes is ridden, with its captions; it names the preset, so `preset` and `showcase` are refused beside it, and `route` unless the scene rides one | a scene's id |
  *
  * Each of the last three is in the query only when it is not the default, as
  * `showcase` is only when present, so a link that names a default reads the
@@ -24,11 +26,27 @@
  */
 
 import { ROUTE_ID } from '../../tools/demo/route-bundle';
+import {
+  CAPTION_SCRIPTS,
+  isCaptionScriptId,
+  type CaptionScene,
+  type CaptionScriptId,
+} from './caption-script';
 import { DEMO_PRESETS } from './presets';
 import type { DemoPreset } from './script';
 
 /** The parameters the page understands. */
-const KNOWN = new Set(['preset', 'route', 'showcase', 'render', 'autoplay', 'controls', 'units']);
+const KNOWN = new Set([
+  'preset',
+  'route',
+  'showcase',
+  'render',
+  'autoplay',
+  'controls',
+  'units',
+  'captions',
+  'scene',
+]);
 
 /** A switch's two values — #1654. */
 const SWITCH = ['0', '1'] as const;
@@ -60,6 +78,8 @@ export type DemoQuery =
       readonly controls?: false;
       /** #1654: `?units=imperial`. */
       readonly units?: 'imperial';
+      /** #3074: the captioned scene ridden, and the script it is from. */
+      readonly captions?: { readonly script: CaptionScriptId; readonly scene: CaptionScene };
     }
   | { readonly ok: false; readonly message: string };
 
@@ -91,7 +111,12 @@ export function parseDemoQuery(search: string): DemoQuery {
       message: `This demo’s showcase is ridden by the ${SHOWCASE_PRESET_ID} preset.`,
     };
   }
-  const asked = params.get('preset') ?? (showcase === null ? 'climb' : SHOWCASE_PRESET_ID);
+  const captions = captionsAsked(params);
+  if (captions !== undefined && !('script' in captions)) return captions;
+  const asked =
+    captions?.scene.preset ??
+    params.get('preset') ??
+    (showcase === null ? 'climb' : SHOWCASE_PRESET_ID);
   const preset = DEMO_PRESETS.find((each) => each.id === asked);
   if (preset === undefined) {
     const names = DEMO_PRESETS.map((each) => each.id).join(', ');
@@ -123,5 +148,42 @@ export function parseDemoQuery(search: string): DemoQuery {
     ...(params.get('autoplay') === '0' ? { autoplay: false as const } : {}),
     ...(params.get('controls') === '0' ? { controls: false as const } : {}),
     ...(units === 'imperial' ? { units: 'imperial' as const } : {}),
+    ...(captions === undefined ? {} : { captions }),
   };
+}
+
+/**
+ * #3074: the captioned scene `params` asks for, none, or why it is refused. A
+ * scene names its own preset; it is ridden on a baked route only if it is
+ * marked to be, so a caption about its own road stays true.
+ */
+function captionsAsked(
+  params: URLSearchParams,
+):
+  | { readonly script: CaptionScriptId; readonly scene: CaptionScene }
+  | { readonly ok: false; readonly message: string }
+  | undefined {
+  const script = params.get('captions');
+  const sceneId = params.get('scene');
+  if (script === null && sceneId === null) return undefined;
+  if (script === null || sceneId === null) {
+    return { ok: false, message: 'This demo’s “captions” and “scene” settings come together.' };
+  }
+  if (!isCaptionScriptId(script)) {
+    const names = Object.keys(CAPTION_SCRIPTS).join(', ');
+    return { ok: false, message: `This demo’s captions are one of ${names}, not “${script}”.` };
+  }
+  const scene = CAPTION_SCRIPTS[script].scenes.find((each) => each.id === sceneId);
+  if (scene === undefined) {
+    return { ok: false, message: `This demo’s ${script} captions have no scene “${sceneId}”.` };
+  }
+  for (const key of ['preset', 'showcase'] as const) {
+    if (params.has(key)) {
+      return { ok: false, message: `This demo’s scene “${sceneId}” takes no “${key}” setting.` };
+    }
+  }
+  if (params.has('route') && scene.route !== true) {
+    return { ok: false, message: `This demo’s scene “${sceneId}” rides its own road.` };
+  }
+  return { script, scene };
 }

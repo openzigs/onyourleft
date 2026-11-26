@@ -110,7 +110,9 @@ import {
   type SimulationDriver,
 } from '@onyourleft/domain';
 import {
+  controlRefusalOf,
   createSimulationWriter,
+  type ControlRefusal,
   type SimulationSink,
   type SimulationWriter,
 } from '@onyourleft/sensors/protocol';
@@ -125,6 +127,17 @@ export interface GradientSessionOptions {
   readonly control: GradientTrainer;
   /** Told after anything that changes {@link GradientSessionState}. */
   readonly onChange?: ((state: GradientSessionState) => void) | undefined;
+  /**
+   * The grade the first write is walked from — #2899, ADR 0087 D-6.4, which
+   * names the start of a ride among the changes sent through the bounded
+   * path. With it the first write is at most one step
+   * (`CORRECTION_GRADE_STEP_PERCENT_PER_SECOND`) from this grade, and the
+   * writes after it walk to the road's own at that rate; without it the
+   * first write is the driver's, the road's grade at once, as on a route the
+   * rider chose. `GameView` hands 0 % for an open-world road whose heights
+   * come from tiles the rider did not choose.
+   */
+  readonly walkFrom?: GradePercent | undefined;
 }
 
 /** What the screen may say about the road the trainer is simulating. */
@@ -274,8 +287,8 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
   };
 
   const writer: SimulationWriter = createSimulationWriter(sink, {
-    onError: (error: unknown) => {
-      fault = faultText(error);
+    onError: (error: unknown, parameters) => {
+      fault = faultText(error, parameters.grade);
       // ⚠️ **The half that is easy to leave out, and the one that matters.**
       // The driver believes it wrote the gradient it was refused, so its
       // deadband would suppress the identical value for as long as the road
@@ -340,23 +353,32 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       // the trainer is on the road's own grade again — which is usually AFTER
       // the correction: the rider is moved before the road under them turns.
       if (bounded) owed = true;
-      if (owed && sent !== undefined) {
+      // #2899, ADR 0087 D-6.4: with nothing written (the start of the ride, or
+      // a write refused before any was confirmed) and a grade to walk from,
+      // the first write is a step from that grade, never the road's at once.
+      const first = sent === undefined && options.walkFrom !== undefined;
+      const last = first
+        ? { grade: options.walkFrom as number, at: Number.NEGATIVE_INFINITY }
+        : sent;
+      if (first) owed = true;
+      if (owed && last !== undefined) {
         // #782: toward the road at a bounded rate, on the driver's own clock.
-        if (!(at - sent.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
+        if (!(at - last.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
         const onRoad = roadGrade(road);
         // ⚠️ The time since the last write is capped at one write interval
         // (#928's review): on a steady climb the driver writes nothing for
         // minutes (its deadband), and a correction's first step measured from
         // that old write would carry the whole change in one — 8 % at once
         // after 81 s on the 4 % hill `trainer-wiring.test.tsx` §"#782" rides.
-        const elapsed = Math.min(at - sent.at, SIMULATION_SETPOINT_INTERVAL_SECONDS);
+        const elapsed = Math.min(at - last.at, SIMULATION_SETPOINT_INTERVAL_SECONDS);
         const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * elapsed;
-        const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, onRoad));
+        const grade = Math.max(last.grade - step, Math.min(last.grade + step, onRoad));
         if (!bounded && grade === onRoad) owed = false;
         // The driver is told nothing it would believe it wrote, so when this
         // hands back it writes the road afresh rather than trusting a deadband.
         driver.restart();
-        if (Math.abs(grade - sent.grade) < SIMULATION_GRADE_DEADBAND_PERCENT) return;
+        // The first write is made whatever it is: the trainer has been told nothing yet.
+        if (!first && Math.abs(grade - last.grade) < SIMULATION_GRADE_DEADBAND_PERCENT) return;
         sent = { grade, at };
         fault = undefined;
         offer(gradePercent(grade));
@@ -384,8 +406,9 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       road = { profile, origin };
       if (stopped || sent === undefined) return;
       // ADR 0087 D-6.4: walked, from the grade last written, at 1 % a second.
-      // With nothing written yet there is nothing to walk from, and the first
-      // write is the driver's, as at the start of any ride.
+      // With nothing written yet there is nothing to walk from here: the first
+      // write is the driver's, or with `walkFrom` a step from that grade
+      // (`sample`), as at the start of the ride.
       if (
         turned ||
         Math.abs(roadGrade(road) - roadGrade(before)) >= SIMULATION_GRADE_DEADBAND_PERCENT
@@ -483,7 +506,7 @@ const HELD_AFTER_DISCONNECT =
  * than for a target — a rider reading "the trainer refused that target" while
  * looking at a hill would go looking for a workout they are not riding.
  */
-function faultText(error: unknown): string {
+function faultText(error: unknown, grade?: number): string {
   // `ride/controller.ts` §`mustWaitForForget` (#718's second review, #721):
   // the app, not the machine, held the gradient back, so this does not say the
   // trainer refused anything. By class and first, never by the reason's words
@@ -518,5 +541,30 @@ function faultText(error: unknown): string {
   if (message.includes('timed out') || message.includes('timeout')) {
     return 'The trainer did not answer. The next gradient will be sent again.';
   }
+  // #3104: and which gradient, and what refused it, where the protocol client
+  // says. The owner's tablet showed this sentence just after a one-point
+  // turnaround with nothing to tell a machine's answer from Bluetooth's.
+  const refusal = controlRefusalOf(error);
+  if (refusal !== undefined && grade !== undefined && Number.isFinite(grade)) {
+    return `The trainer refused that gradient, ${grade.toFixed(1)} % (${refusalWords(refusal)}). The next one will be sent again.`;
+  }
   return 'The trainer refused that gradient. The next one will be sent again.';
+}
+
+/**
+ * What refused a gradient, in words — #3104. The machine's FTMS result by
+ * name, so a screenshot says which; never the GATT characteristic.
+ */
+function refusalWords(refusal: ControlRefusal): string {
+  if (refusal.by === 'attribute-protocol') return 'Bluetooth refused the write';
+  switch (refusal.result) {
+    case 'invalid-parameter':
+      return 'it answered “invalid parameter”';
+    case 'operation-failed':
+      return 'it answered “operation failed”';
+    case 'op-code-not-supported':
+      return 'it answered “not supported”';
+    default:
+      return 'it answered with a code FTMS does not define';
+  }
 }

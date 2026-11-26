@@ -80,14 +80,17 @@
  * same reason a tunnel is impossible here (`waterways.ts`).
  *
  * ⚠️ **A road ridden twice — an out-and-back's shared stretch — is #1996's.**
- * Where a later pass runs along an earlier one within half a road
- * (`terrain.ts` §`retracedRows`), the pass further from where the camera
+ * Where a later pass runs along an earlier one within a road's width (half a
+ * road until #3140; `terrain.ts` §`retracedRows`), the pass further from where the camera
  * looks has no road drawn, and its ground is either sunk out of sight with
  * the turning point closed round the end of the road ({@link retracedRoles},
  * {@link retracedGround}) or, where it only lies alongside, drawn
  * {@link RETRACE_UNDER_METRES} under the nearer pass's. Both passes read one
  * height field ({@link reliefFields}), so changing pass at the turn changes
- * nothing in view.
+ * nothing in view. ⚠️ **Under the nearer pass's ROAD, since #3103**, not its
+ * own: a recorded way back need not be at the way out's height
+ * ({@link nearerRoadHeight}), and its lake is not drawn there either
+ * (`waterways.ts` §`waterSurface`).
  *
  * ⚠️ **The inside of a very sharp bend, where the two legs' ground overlaps**
  * (#2096), is #2101's: past the line between the legs each one's ground sinks
@@ -688,7 +691,18 @@ export function terrainCorridor(
     const wetRow = hasWater && waterNearRoute(ways, profile, point.distance);
     // #1996: a pass alongside a nearer one keeps its ground, under the
     // nearer one's. @see RETRACE_UNDER_METRES
-    const under = corridor.retraced[row] === 1 ? RETRACE_UNDER_METRES : 0;
+    // #3103: under the nearer one's ROAD, not its own: two passes of one place
+    // need not have one height (@see nearerRoadHeight). And let in from the
+    // ends of the run, where the row beside it is drawn (@see UNDER_RAMP_METRES).
+    // #3122: and only as far under it as the nearer pass's own ground covers
+    // this one's: where it does not — the inside of its U-turn, folded —
+    // this pass's ground is the ground, met at the nearer road's height.
+    // @see coveredShare
+    const alongside = corridor.retraced[row] === 1;
+    const overNearer = alongside ? point.y - nearerRoadHeight(centre, corridor.retraced, row) : 0;
+    const letIn = alongside
+      ? smoothstep01(fromDrawnRow(centre, corridor.retraced, row) / UNDER_RAMP_METRES)
+      : 0;
     for (let side = 0; side < 2; side += 1) {
       const sign = side === 0 ? 1 : -1;
       // #3094: on an open-world view, each vertex reads its own place's.
@@ -773,6 +787,14 @@ export function terrainCorridor(
               Math.min(SHALLOW_SINK_METRES, sunk(lateral - held, sinking)),
             )
           : met;
+        // Its road's edge is not a road's edge, its road not being drawn: it
+        // is held at the verge's foot with the rest of the verge.
+        const under = alongside
+          ? (RETRACE_UNDER_METRES * coveredShare(centre, normals2d, reach, x, z) +
+              overNearer +
+              (column === 0 ? VERGE_DROP_METRES : 0)) *
+            letIn
+          : 0;
         vertices[at * 3 + 1] = height - under;
         vertices[at * 3 + 2] = z;
         // #501: the wet margin. Column 0 is the road's own edge and is never
@@ -866,8 +888,165 @@ export const RETRACE_SINK_METRES = 200;
  * clear, and the drawn-path camera (#2422) looked at it 32 m ahead. 0.755 m
  * plus `out-and-back.test.ts`' half-metre floor is 1.255 m; 1.5 is the next
  * half metre, not a measured optimum.
+ *
+ * ⚠️ **Under the nearer pass's road height, and let in over
+ * {@link UNDER_RAMP_METRES}** — #3103: see {@link nearerRoadHeight}.
  */
 export const RETRACE_UNDER_METRES = 1.5;
+
+/**
+ * The height of the drawn road nearest a point of a pass that is not drawn,
+ * in plan — #3103: the nearest segment of the corridor whose two ends are
+ * both drawn ({@link RoadCorridor.retraced} 0), read where the point falls
+ * on it. The point's own height where no drawn segment lies within twice
+ * {@link RETRACE_OVERLAP_METRES} of it.
+ *
+ * ⚠️ **Why the ground of a pass alongside is held to this, and not to its
+ * own road.** {@link RETRACE_UNDER_METRES} keeps that ground under the nearer
+ * pass's only while the two passes are at one height, which `outAndBackRoute`
+ * is by construction and a recorded ride is not: a GPS file's way out and way
+ * back over the same road carry their own elevations. On a synthetic
+ * out-and-back climbing 2.7 % to its turning point and falling 0.5 % from it,
+ * the way back stood 4.4 m over the way out 200 m short of the turn, and its
+ * ground, drawn 1.5 m under its OWN road, stood 2.7 m over the drawn road at
+ * 6.6 m from its centre: a step from the verge up onto a plain above the
+ * road — the owner's tablet ride of 2026-11-23.
+ */
+function nearerRoadHeight(
+  centre: readonly CorridorPoint[],
+  retraced: Uint8Array,
+  row: number,
+): number {
+  const point = centre[row] as CorridorPoint;
+  let nearest = (2 * RETRACE_OVERLAP_METRES) ** 2;
+  let height = point.y;
+  NEARER_SEGMENT.segment = -1;
+  for (let segment = 0; segment + 1 < centre.length; segment += 1) {
+    if (retraced[segment] === 1 || retraced[segment + 1] === 1) continue;
+    const from = centre[segment] as CorridorPoint;
+    const to = centre[segment + 1] as CorridorPoint;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const span = dx * dx + dz * dz;
+    const t =
+      span > 0
+        ? Math.min(1, Math.max(0, ((point.x - from.x) * dx + (point.z - from.z) * dz) / span))
+        : 0;
+    const across = (point.x - from.x - dx * t) ** 2 + (point.z - from.z - dz * t) ** 2;
+    if (across < nearest) {
+      nearest = across;
+      height = from.y + (to.y - from.y) * t;
+      NEARER_SEGMENT.segment = segment;
+      NEARER_SEGMENT.share = t;
+    }
+  }
+  return height;
+}
+
+/**
+ * The drawn segment {@link nearerRoadHeight} last found, and where along it:
+ * `segment` −1 where it found none. Module scratch, so the build allocates
+ * nothing per row (`landform-levelling.test.ts`). @see coveredShare
+ */
+const NEARER_SEGMENT = { segment: -1, share: 0 };
+
+/**
+ * How far, nought to one, the ground of the drawn pass covers the point
+ * `(x, z)` of a pass alongside it — #3122: one from
+ * {@link RETRACE_COVER_METRES} inside the reach of the drawn segment
+ * {@link nearerRoadHeight} last found on that side, nought at the reach and
+ * past it, and one where it found none. Read off the same `reach` the drawn
+ * rows' columns stop at.
+ *
+ * ⚠️ **Why the pass alongside is not simply drawn under everywhere.** It was,
+ * {@link RETRACE_UNDER_METRES} under the nearer pass's road (#1996, #3103),
+ * and that is right wherever the nearer pass's ground is over it. Inside the
+ * nearer pass's own U-turn it is not: there the nearer pass's ground is folded
+ * in ({@link BEND_FOLD_SHARE}), and the pass alongside is the only ground. On
+ * the synthetic 174° coast turnaround (`turnaround-coast.test.ts`) it showed
+ * as a pit up to 1.65 m under the road, 6 m from the road's edge beside the
+ * turn, walled by the folded edge of the nearer pass's ground — the owner's
+ * trench and wall of 2026-11-24 — and it came and went as the folded edge
+ * moved with the corridor from frame to frame, 1.6 m between frames at one
+ * place: the flashing. Covered, it is drawn under as before, so the two
+ * sheets never lie at one height where both are drawn; uncovered, it meets
+ * the nearer road as that pass's own ground would.
+ */
+function coveredShare(
+  centre: readonly CorridorPoint[],
+  normals2d: Float64Array,
+  reach: Float64Array,
+  x: number,
+  z: number,
+): number {
+  const { segment, share } = NEARER_SEGMENT;
+  if (segment < 0) return 1;
+  const from = centre[segment] as CorridorPoint;
+  const to = centre[segment + 1] as CorridorPoint;
+  const keep = 1 - share;
+  const normalX =
+    (normals2d[segment * 2] as number) * keep + (normals2d[segment * 2 + 2] as number) * share;
+  const normalZ =
+    (normals2d[segment * 2 + 1] as number) * keep + (normals2d[segment * 2 + 3] as number) * share;
+  const lateral =
+    (x - (from.x * keep + to.x * share)) * normalX + (z - (from.z * keep + to.z * share)) * normalZ;
+  const side = lateral >= 0 ? 0 : 1;
+  const fromReach = reach[segment * 2 + side] as number;
+  const toReach = reach[segment * 2 + 2 + side] as number;
+  // A side nothing limits is not folded at all.
+  if (!(Number.isFinite(fromReach) && Number.isFinite(toReach))) return 1;
+  const drawn = fromReach * keep + toReach * share;
+  return Math.min(1, Math.max(0, (drawn - Math.abs(lateral)) / RETRACE_COVER_METRES));
+}
+
+/**
+ * Over how far inside the reach of the nearer pass's ground a pass alongside
+ * it goes from meeting the nearer road to {@link RETRACE_UNDER_METRES} under
+ * it, in metres: **40** — #3122. @see coveredShare
+ *
+ * The pass alongside is a grid of its own columns, 4 to 13 m apart out to
+ * 40 m, so a triangle of it that spans the folded edge of the nearer pass's
+ * ground is under that edge by the drop at its inner vertex times that
+ * vertex's share of the span: a groove along the edge. Measured on the coast
+ * turnaround's return 3 m over, seen from 80 m and 120 m back, the deepest
+ * ground within 9.5 m of the drawn road was 0.50 m under it at 12 m, 0.37 at
+ * 24 and 0.32 at 40, against the verge's 0.25. Wider still, the two sheets
+ * lie close over more of the nearer one's edge: at 40 they are within 2 cm of
+ * each other only in the 53 cm inside it, where 2 cm is what a 24-bit depth
+ * buffer with the chase camera's 0.5 m near plane tells apart at 300 m.
+ */
+const RETRACE_COVER_METRES = 40;
+
+/**
+ * Over how much road a pass alongside takes on its whole drop under the
+ * nearer pass, from a point of its own whose road IS drawn: **10 m** — #3103.
+ *
+ * The rows of one corridor are one route in order, so the row beside the
+ * first or last point of a run not drawn is the same pass, drawn at its own
+ * height. Dropped all at once, the ground stood 1.5 m over the next row's at
+ * the road's edge, 4 cm apart in plan, where the way back's road began at the
+ * tip of the U-turn: the straight vertical step beside the road on the
+ * owner's tablet. Ten metres is five {@link CORRIDOR_STEP_METRES} rows, and
+ * a drop of {@link RETRACE_UNDER_METRES} over it is a slope of 0.15, under
+ * the relief's own {@link RELIEF_SLOPE}; not a measured optimum.
+ */
+const UNDER_RAMP_METRES = 10;
+
+/**
+ * How far along the road row `row` is from the nearest row whose `retraced`
+ * differs from its neighbour's — the end of a run of rows not drawn — in
+ * metres, `Infinity` where there is none. @see UNDER_RAMP_METRES
+ */
+function fromDrawnRow(centre: readonly CorridorPoint[], retraced: Uint8Array, row: number): number {
+  const along = (centre[row] as CorridorPoint).along;
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let edge = 0; edge + 1 < centre.length; edge += 1) {
+    if (retraced[edge] === retraced[edge + 1]) continue;
+    const at = retraced[edge] === 1 ? edge : edge + 1;
+    nearest = Math.min(nearest, Math.abs((centre[at] as CorridorPoint).along - along));
+  }
+  return nearest;
+}
 
 /**
  * The most rows the ground round a turning point is drawn with: **8** — #1996,
@@ -1884,6 +2063,12 @@ function heightIn(
  *
  * Seeded and stateless like the rest of this file, and lifted by the route's
  * own elevation range so that a mountain route's horizon is a mountain one.
+ *
+ * ⚠️ **On an open-world view, by the ride's range, not the view's** — #3065.
+ * A view's range moves as road is added ahead and dropped behind, and the
+ * hills, standing on its middle, rose or sank at a view change. Their middle
+ * is the ride's (`scenery-anchor.ts` §`SceneryAnchor.band`). Their foot and
+ * the skirt's base are still the view's, under the ground in view.
  */
 export function horizonRelief(
   profile: RouteProfile,
@@ -1898,8 +2083,11 @@ export function horizonRelief(
     lowest = Math.min(lowest, each);
     highest = Math.max(highest, each);
   }
+  const band = sceneryAnchor(profile)?.band;
   const low = lowest - origin.elevation;
-  const middle = (lowest + highest) / 2 - origin.elevation;
+  const middle =
+    (band === undefined ? (lowest + highest) / 2 : (band.lowest + band.highest) / 2) -
+    origin.elevation;
   const [rise, most] = HORIZON_RISE_METRES;
   const tops = new Float32Array(HORIZON_SEGMENTS);
   // Eight coarse hills round the ring, smoothed, with a little of each
@@ -2229,6 +2417,15 @@ const RETRACE_CELL_METRES = 20;
  */
 const RETRACE_CELL_LIMIT = 256;
 
+/**
+ * Whether `profile` rides a stretch of road it has already ridden — #3140,
+ * for `footprint-buildings.ts` §`groundOfAnotherPass`. Never an open-world
+ * view, which is level (`open-world/session.ts`).
+ */
+export function ridesARoadTwice(profile: RouteProfile): boolean {
+  return sceneryAnchor(profile) === undefined && retraceOf(profile) !== undefined;
+}
+
 function retraceOf(profile: RouteProfile): Retrace | undefined {
   const known = retraces.get(profile);
   if (known !== undefined) return known ?? undefined;
@@ -2277,9 +2474,12 @@ function foundRetrace(profile: RouteProfile): Retrace | undefined {
       if (!(Math.abs(ownX * dx + ownZ * dz) > RETRACE_HEADING_COSINE * own * Math.sqrt(span))) {
         continue;
       }
-      const t =
-        span > 0 ? Math.min(1, Math.max(0, ((midX - ax) * dx + (midZ - az) * dz) / span)) : 0;
+      const raw = span > 0 ? ((midX - ax) * dx + (midZ - az) * dz) / span : 0;
+      const t = Math.min(1, Math.max(0, raw));
       const across = Math.hypot(midX - (ax + dx * t), midZ - (az + dz * t));
+      // #3140: beside it, not past its end, once it is further off than half
+      // a road — where a loop's last segment runs on into its first.
+      if (across >= ROAD_HALF_WIDTH_METRES && raw !== t) continue;
       const foot = (earlier + t) * resolution;
       const apart = middle - foot;
       if (
@@ -3070,12 +3270,14 @@ const clearListPool: number[][] = [];
  * rows, and none once every column is clear, which is almost every row.
  *
  * Exported for `landform-passes.test.ts` §"clearReach", which holds its
- * contract on a taken pass directly (#2205). Through {@link terrainCorridor} nothing can: a pass
- * is taken only within `terrain.ts` §`RETRACE_OVERLAP_METRES` (3.5 m) of the
- * road, and the first column probed is 8 m out, 4.5 m from it and past the
- * 4.1 m clearance, so the taken road never stops a kept side, and a taken
- * row's own reach is overwritten by `retracedGround`. The product's one
- * caller is {@link terrainCorridor}.
+ * contract on a taken pass directly (#2205). Until #3140 nothing through
+ * {@link terrainCorridor} could: a pass was taken only within half a road of
+ * the road, 4.5 m inside the first column probed, 8 m out. Since #3140 it is
+ * taken within a road's width (`terrain.ts` §`RETRACE_OVERLAP_METRES`), so
+ * that column can come within the 4.1 m clearance of a taken road, and only
+ * the role test above keeps a kept side from stopping there. A taken row's
+ * own reach is overwritten by `retracedGround`. The product's one caller is
+ * {@link terrainCorridor}.
  */
 export function clearReach(
   centre: readonly CorridorPoint[],

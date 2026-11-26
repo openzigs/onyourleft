@@ -12,6 +12,8 @@
  * where this machine's `ffmpeg` has `libx264`. `--route <id>` rides a route
  * `demo:bake` wrote, and the video ends with ADR 0056 D-8.3's closing card;
  * `--out <dir>` writes elsewhere; `--mp4 on|off` requires or skips the MP4.
+ * `--preset youtube` renders the captioned feature tour (#3074,
+ * `demo/captions/youtube.ts`), which ends on the closing card.
  * `render-video.ts` says how, and why `ffmpeg`.
  *
  * Needs `ffmpeg` on the PATH and the pinned Chromium (`playwright install

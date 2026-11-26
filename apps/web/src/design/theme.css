@@ -5367,6 +5367,67 @@ select.oyl-input {
 }
 
 /*
+ * The route planner's summary strip — #3185: the distance and the climbing,
+ * and *Routing…* while a leg is out, in one row directly above the map, so a
+ * drag and its result are on the screen together. It wraps on a narrow phone
+ * or at large text rather than scrolling sideways (WCAG 2.2 SC 1.4.10). Each
+ * figure keeps its term and value on one line, and *Routing…* has a slot as
+ * wide as itself whether it is said or not, so a leg going out and coming
+ * back does not re-wrap the strip and move the map under a finger.
+ * Drawn in tokens already paired: ink and ink-muted on the surface, and the
+ * border colour. `controls-first.browser.spec.ts` §"#3185" measures it
+ * against the map.
+ */
+.oyl-planner__summary {
+  align-items: baseline;
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  column-gap: var(--oyl-space-md);
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+}
+
+.oyl-planner__summary > dl {
+  column-gap: var(--oyl-space-md);
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.oyl-planner__summary dt {
+  color: var(--oyl-color-ink-muted);
+  display: inline;
+  font-size: var(--oyl-font-size-sm);
+  margin-inline-end: var(--oyl-space-xs);
+}
+
+.oyl-planner__summary dd {
+  display: inline;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 0;
+}
+
+.oyl-planner__summary > dl > div {
+  white-space: nowrap;
+}
+
+.oyl-planner__routing {
+  color: var(--oyl-color-ink-muted);
+  margin: 0;
+  min-inline-size: 6em;
+}
+
+/* The strip sits on the map, so the map's own gap above it is the strip's. */
+.oyl-planner__summary + .oyl-map,
+.oyl-planner__summary + .oyl-map-frame {
+  margin-top: var(--oyl-space-xs);
+}
+
+/*
  * The same row layout as the trainer's form, and deliberately a second class
  * rather than a shared one: these two screens have no relationship, and a
  * `.oyl-form-row` would be a promise that a change for one is right for the
@@ -7196,6 +7257,56 @@ select.oyl-input {
 /* The canvas takes focus on this map; its ring is drawn inside the frame, which clips. */
 .oyl-map--direct canvas:focus-visible {
   outline-offset: -4px;
+}
+
+/*
+ * #3050: the open-world picker's *Start the ride*, pinned to the bottom of the
+ * window once a start is chosen (`OpenWorldStartView.tsx`). The owner dropped
+ * a pin on the tablet and saw no next step: the button stood at y ≈ 1,350 of
+ * a 1,529 px page, under the map and both lists, on an 800 px screen. A pin is
+ * dropped on the map near the top and a route or a ride chosen in the lists
+ * below it, so no one place in the flow is on the screen for all three.
+ *
+ * ⚠️ **Why a pin here, when the game chooser refuses one** (§"THE PRE-RIDE
+ * CHOOSER"): that pin held every notice with *Ride*, a box whose height
+ * varied and that covered controls and #503's promise. This one holds the
+ * button alone, one row whose height does not vary, and only once the start
+ * it would begin is a good one: a refusal, a ride being read, or tiles off say
+ * so in the section above it and draw no bar. Content passes beneath it on the
+ * canvas colour, and at the end of the page it is in the flow, after the last
+ * list.
+ *
+ * - **Above the inset strip and the phone's bar.** `bottom` is the inset, and
+ *   on a compact window the bar's 4.5 rem too (§BAR); `z-index` 2 is under
+ *   the strip's 3 and the navigation's 4, and over the map's own buttons'
+ *   1 (`.oyl-map__controls`), which pass beneath it as the page scrolls.
+ * - **Focus is not drawn under it** (WCAG 2.2 SC 2.4.11): the root's
+ *   `scroll-padding-bottom` grows by the bar's height while there is one —
+ *   the button's 2.75 rem floor, its line and the bar's padding, 4 rem.
+ *
+ * `controls-first.browser.spec.ts` §"#3050" measures the button between the
+ * window's top and the fold with a hit test at its centre, after a pin, a
+ * route and a ride, at 390 × 844, 1280 × 800 and 800 × 1280, and Tab stopping
+ * above it: the phone is the size that reaches the compact rule below.
+ */
+.oyl-open-world__go {
+  position: sticky;
+  bottom: var(--oyl-safe-bottom);
+  z-index: 2;
+}
+
+html:has(.oyl-open-world__go) {
+  scroll-padding-bottom: calc(4rem + var(--oyl-safe-bottom));
+}
+
+@media (max-width: 37.49rem) and (min-height: 30rem) {
+  .oyl-open-world__go {
+    bottom: calc(4.5rem + var(--oyl-safe-bottom));
+  }
+
+  html:has(.oyl-open-world__go) {
+    scroll-padding-bottom: calc(8.5rem + var(--oyl-safe-bottom));
+  }
 }
 
 .oyl-map__controls {

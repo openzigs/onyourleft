@@ -24,6 +24,7 @@ import {
 import type { RealisticWorldOutcome } from '../game/realistic-assets';
 import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
+import { SOURCE_CODE_URL } from '../privacy/policy';
 import { BAKED_ROUTE_UNAVAILABLE, type ReadDemoFile } from './baked-route';
 
 import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudCore';
@@ -71,7 +72,7 @@ interface PageOptions {
   /** What the realistic world's load comes to; never, by default. */
   readonly outcome?: Promise<RealisticWorldOutcome>;
   /** #1655: the video render's hook for the closing card. */
-  readonly registerClosingCard?: (show: () => void) => void;
+  readonly registerClosingCard?: (show: (options: { readonly credit: boolean }) => void) => void;
 }
 
 async function page(options: PageOptions = {}): Promise<Page> {
@@ -265,7 +266,7 @@ describe('the demo page — #1647', { timeout: RIDE_TIMEOUT_MS }, () => {
     [
       'an unknown preset',
       '?preset=sprnt',
-      'This demo’s preset is one of climb, sprint, group, not “sprnt”.',
+      'This demo’s preset is one of climb, sprint, group, hill, not “sprnt”.',
     ],
   ])('refuses %s, visibly, and rides nothing', async (_what, search, message) => {
     const shown = await page({ search });
@@ -505,12 +506,13 @@ describe('the demo page on a baked route — #1652', () => {
   });
 
   it.each([
-    ['?preset=climb&route=fixture&render', true],
-    ['?preset=climb&render', false],
+    ['?preset=climb&route=fixture&render', false, true],
+    ['?preset=climb&render', true, true],
+    ['?preset=climb&render', false, false],
   ])(
-    '%j shows the closing card when the render asks: %s — #1655, ADR 0056 D-8.3',
-    async (search, shows) => {
-      let show: (() => void) | undefined;
+    '%j, told the video drew map data %s, shows the closing card with the credit: %s — #1655, ADR 0056 D-8.3, #3074',
+    async (search, drewMapData, credited) => {
+      let show: ((options: { readonly credit: boolean }) => void) | undefined;
       const shown = await page({
         search,
         readFile: served(),
@@ -523,24 +525,47 @@ describe('the demo page on a baked route — #1652', () => {
       expect(document.querySelector('.oyl-demo__closing-card')).toBeNull();
       expect(show).toBeDefined();
       await act(async () => {
-        show?.();
+        show?.({ credit: drewMapData });
         await Promise.resolve();
       });
       const card = document.querySelector('.oyl-demo__closing-card');
-      if (!shows) {
-        // Nothing is owed on the synthetic road, so there is no card to end on.
-        expect(card).toBeNull();
-        return;
-      }
       expect(card?.getAttribute('role')).toBe('note');
+      // The credit when this page drew map data, or the render says an earlier
+      // scene did (a tour's last scene may ride its own road); the project's
+      // address always (#3074).
       expect([...(card?.querySelectorAll('p') ?? [])].map((each) => each.textContent)).toEqual([
-        OSM_ATTRIBUTION,
-        ODBL_NOTICE,
-        `OpenStreetMap: ${OSM_COPYRIGHT_URL}`,
-        `Open Database License: ${ODBL_LICENCE_URL}`,
+        ...(credited
+          ? [
+              OSM_ATTRIBUTION,
+              ODBL_NOTICE,
+              `OpenStreetMap: ${OSM_COPYRIGHT_URL}`,
+              `Open Database License: ${ODBL_LICENCE_URL}`,
+            ]
+          : []),
+        `On Your Left: ${SOURCE_CODE_URL}`,
       ]);
     },
   );
+
+  it.each([
+    ['?captions=youtube&scene=opening&route=fixture&render', true],
+    ['?captions=youtube&scene=opening&render', false],
+  ])('%j draws the map-data caption only with map data: %s — #3074', async (search, drawn) => {
+    const shown = await page({ search, readFile: served() });
+    await until(() => shown.last() !== undefined);
+    // 250 ms steps: the first frame is ride time 0, so 45 steps is 11 s,
+    // the middle of the opening's map-data caption (8 s for 7 s).
+    await act(async () => {
+      shown.frames.step(45, 250);
+      await Promise.resolve();
+    });
+    const card = document.querySelector('.oyl-demo__caption-card');
+    if (!drawn) {
+      expect(card).toBeNull();
+      return;
+    }
+    expect(card?.textContent).toBe('Ride your own routes as a 3D world, built from OpenStreetMap');
+  });
 });
 
 describe('the demo page under the video render — #1655', { timeout: RIDE_TIMEOUT_MS }, () => {
@@ -643,5 +668,104 @@ describe('the demo page’s showcase — #1653', { timeout: RIDE_TIMEOUT_MS }, (
     expect(caption()).toBeNull();
     expect(shown.last()?.showcase).toBeUndefined();
     expect(shown.last()?.skipped).toEqual([]);
+  });
+});
+
+describe('the demo page’s captions — #3074', { timeout: RIDE_TIMEOUT_MS }, () => {
+  const card = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('.oyl-demo__caption-card');
+
+  /** Step the page 250 ms at a time; the first frame drawn is ride time 0. */
+  async function stepQuarters(shown: Page, quarters: number): Promise<void> {
+    await act(async () => {
+      shown.frames.step(quarters, 250);
+      await Promise.resolve();
+    });
+  }
+
+  it('fades a lower third in and out over the scene’s ride time, and draws nothing outside it', async () => {
+    // The hill scene: one caption at 4 s for 7 s, half-second fades.
+    const shown = await page({ search: '?captions=youtube&scene=hill&render' });
+    expect(shown.last()?.preset).toBe('hill');
+    await stepQuarters(shown, 16); // 3.75 s
+    expect(card()).toBeNull();
+    await stepQuarters(shown, 2); // 4.25 s: half way in
+    expect(card()?.textContent).toBe(
+      'Controls your smart trainer over Bluetooth: feel every climb',
+    );
+    expect(card()?.classList.contains('oyl-demo__caption-card--lower-third')).toBe(true);
+    expect(card()?.style.opacity).toBe('0.5');
+    await stepQuarters(shown, 13); // 7.5 s: whole
+    expect(card()?.style.opacity).toBe('1');
+    await stepQuarters(shown, 13); // 10.75 s: half way out
+    expect(card()?.style.opacity).toBe('0.5');
+    await stepQuarters(shown, 1); // 11 s: gone
+    expect(card()).toBeNull();
+  });
+
+  it('draws the opening title in the middle of the stage, on the HUD’s backing', async () => {
+    const shown = await page({ search: '?captions=youtube&scene=opening&render' });
+    await stepQuarters(shown, 13); // 3 s
+    const title = card();
+    expect(title?.textContent).toBe('On Your Left — free, open-source indoor and outdoor cycling');
+    expect(title?.classList.contains('oyl-demo__caption-card--title')).toBe(true);
+    expect(title?.style.background).toBe('var(--oyl-color-hud-surface)');
+    expect(title?.style.top).toBe('40%');
+  });
+
+  it('cuts rather than fades for a visitor who asked for reduced motion', async () => {
+    const shown = await page({
+      search: '?captions=youtube&scene=hill',
+      reducedMotion: true,
+    });
+    await act(async () => {
+      shown.button('Play')?.click();
+      await Promise.resolve();
+    });
+    await stepQuarters(shown, 18); // 4.25 s
+    expect(card()?.style.opacity).toBe('1');
+  });
+
+  it('control: a preset with no captions asked for draws none', async () => {
+    const shown = await page({ search: '?preset=hill&render' });
+    await stepQuarters(shown, 30);
+    expect(card()).toBeNull();
+  });
+});
+
+describe('the demo page links the two-minute video — #3225', () => {
+  const VIDEO = 'https://www.youtube.com/watch?v=lgpE-VbyFa0';
+  const links = (): HTMLAnchorElement[] =>
+    [...(mounted?.container.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].filter((each) =>
+      each.href.includes('youtube'),
+    );
+
+  it('shows one plain link to the video, which says it opens YouTube', async () => {
+    await page({ search: '?preset=sprint' });
+    expect(links()).toHaveLength(1);
+    const [link] = links();
+    expect(link?.getAttribute('href')).toBe(VIDEO);
+    expect(link?.textContent).toBe('Watch the two-minute demo on YouTube');
+    // A navigation, never an embed: the page's own policy would refuse a frame.
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toContain('noreferrer');
+  });
+
+  it('is a link only: no frame, no media element, and YouTube named nowhere but in that link', async () => {
+    await page({ search: '?preset=sprint' });
+    const container = mounted?.container;
+    expect(container?.querySelector('iframe, embed, object, video, img')).toBeNull();
+    for (const link of links()) link.remove();
+    expect(container?.innerHTML ?? '').not.toMatch(/youtube|ytimg/i);
+  });
+
+  it('keeps the link when the stage is paused for reduced motion', async () => {
+    await page({ search: '?preset=sprint', reducedMotion: true });
+    expect(links()).toHaveLength(1);
+  });
+
+  it('control: the video render, which is the video itself, does not link it', async () => {
+    await page({ search: '?preset=sprint&render' });
+    expect(links()).toHaveLength(0);
   });
 });

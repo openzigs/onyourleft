@@ -50,6 +50,7 @@ import {
   handPosition,
   LEG_BONE_COUNT,
   legBones,
+  LIMB_RADIUS_METRES,
   riderJoints,
   RIDER_HALF_WIDTH_METRES,
   RIDER_HEIGHT_METRES,
@@ -57,9 +58,14 @@ import {
   RIDER_UPPER_BODY_PARTS_BY_BODY,
   RIDER_UPPER_BODY_PARTS_FEMALE,
   MAXIMUM_CRANK_STEP_SECONDS,
+  RIDER_BICYCLE_PARTS,
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
+  RIDER_STAND_IN_BICYCLE_PARTS,
+  RIDER_STAND_IN_PARTS_BY_BODY,
+  STAND_IN_LEGS,
+  STAND_IN_PALETTE,
   SIMULATED_DEVELOPMENT_METRES,
   simulatedCrankAngle,
   blendStance,
@@ -112,6 +118,10 @@ function reachOf(solid: RiderPart['solid']): number {
       return solid.radius + solid.thickness;
     case 'ball':
       return solid.radius;
+    case 'lathe':
+      return Math.max(...solid.rings.map(([halfWidth, height]) => Math.hypot(halfWidth, height)));
+    case 'ellipsoid':
+      return Math.max(solid.width, solid.height, solid.depth) / 2;
   }
 }
 
@@ -140,6 +150,10 @@ function sizesOf(solid: RiderPart['solid']): readonly number[] {
       return [solid.radius, solid.thickness, solid.sweep];
     case 'ball':
       return [solid.radius];
+    case 'lathe':
+      return [solid.depthShare, solid.sides, ...solid.rings.map(([halfWidth]) => halfWidth)];
+    case 'ellipsoid':
+      return [solid.width, solid.height, solid.depth];
   }
 }
 
@@ -1683,5 +1697,217 @@ describe('#2839 — the stylised rider has a female shape too', () => {
       new Set([RIDER_PALETTE.jersey, RIDER_PALETTE.limb]),
     );
     expect(named(female, 'ponytail').colour).toBe(RIDER_PALETTE.limb);
+  });
+});
+
+describe('#3211 — the realistic world’s stand-in rider', () => {
+  const { male, female } = RIDER_STAND_IN_PARTS_BY_BODY;
+  const named = (parts: readonly RiderPart[], name: string): RiderPart => {
+    const found = parts.find((each) => each.name === name);
+    if (found === undefined) throw new Error(`no part ${name}`);
+    return found;
+  };
+  /** A part's two ends along its own length, placed: a tube's, or a trunk's first and last ring. */
+  const endsOf = (
+    each: RiderPart,
+  ): readonly [{ y: number; z: number }, { y: number; z: number }] => {
+    const solid = each.solid;
+    const [low, high] =
+      solid.shape === 'lathe'
+        ? [solid.rings[0]?.[1] ?? NaN, solid.rings.at(-1)?.[1] ?? NaN]
+        : solid.shape === 'tube'
+          ? [-solid.length / 2, solid.length / 2]
+          : [NaN, NaN];
+    const at = (along: number): { y: number; z: number } => ({
+      y: each.y + along * Math.cos(each.pitch),
+      z: each.z + along * Math.sin(each.pitch),
+    });
+    return [at(low), at(high)];
+  };
+  /** How high a part reaches, exactly: its own solid, pitched about `+X`. */
+  const topOf = (each: RiderPart): number => {
+    const solid = each.solid;
+    const cos = Math.abs(Math.cos(each.pitch));
+    const sin = Math.abs(Math.sin(each.pitch));
+    if (solid.shape === 'ellipsoid') {
+      return each.y + Math.hypot((solid.height / 2) * cos, (solid.depth / 2) * sin);
+    }
+    if (solid.shape === 'lathe') {
+      return (
+        each.y +
+        Math.max(
+          ...solid.rings.map(
+            ([halfWidth, height]) =>
+              height * Math.cos(each.pitch) + halfWidth * solid.depthShare * sin,
+          ),
+        )
+      );
+    }
+    return each.y + reachOf(solid);
+  };
+  /** How far from the bicycle's plane a part reaches. */
+  const widthOf = (each: RiderPart): number => {
+    const solid = each.solid;
+    if (solid.shape === 'lathe') return Math.max(...solid.rings.map(([halfWidth]) => halfWidth));
+    if (solid.shape === 'ellipsoid') return solid.width / 2;
+    if (solid.shape === 'tube') return Math.abs(each.x) + solid.radius;
+    return Math.abs(each.x) + reachOf(solid);
+  };
+
+  it('is a shape for each body, and neither is the stylised rider’s', () => {
+    expect(female).not.toEqual(male);
+    for (const parts of [male, female]) {
+      // A trunk turned from an outline and a helmet longer than it is wide:
+      // the box and the ball are what the stylised rider is.
+      expect(parts.some((each) => each.solid.shape === 'box')).toBe(false);
+      expect(parts.some((each) => each.solid.shape === 'ball')).toBe(false);
+      expect(parts.filter((each) => each.solid.shape === 'lathe')).toHaveLength(3);
+      const helmet = named(parts, 'helmet').solid;
+      if (helmet.shape !== 'ellipsoid') throw new Error('the helmet is not an ellipsoid');
+      expect(helmet.depth).toBeGreaterThan(helmet.width);
+      for (const each of parts) {
+        for (const size of sizesOf(each.solid)) expect(size, each.name).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('is no taller and no wider than the stylised rider, so nothing sized from a rider changes', () => {
+    for (const parts of [male, female]) {
+      for (const each of parts) {
+        expect(topOf(each), each.name).toBeLessThanOrEqual(RIDER_HEIGHT_METRES);
+        expect(widthOf(each), each.name).toBeLessThanOrEqual(RIDER_HALF_WIDTH_METRES);
+      }
+      // Not vacuous: the helmet is within three centimetres of that height.
+      expect(topOf(named(parts, 'helmet'))).toBeGreaterThan(RIDER_HEIGHT_METRES - 0.03);
+    }
+  });
+
+  it('has a trunk in one piece from the saddle to the helmet: hips, back and neck', () => {
+    for (const parts of [male, female]) {
+      const [hips, back, neck] = ['hips', 'back', 'neck'].map((name) => named(parts, name));
+      if (hips === undefined || back === undefined || neck === undefined) throw new Error('trunk');
+      const rings = (each: RiderPart): readonly (readonly [number, number])[] =>
+        each.solid.shape === 'lathe' ? each.solid.rings : [];
+      // Each piece starts on the ring the one below ended on, so no gap shows.
+      expect(rings(back)[0]).toEqual(rings(hips).at(-1));
+      expect(rings(neck)[0]).toEqual(rings(back).at(-1));
+      // Every ring above the one before: an outline that never folds back.
+      for (const each of [hips, back, neck]) {
+        const heights = rings(each).map(([, height]) => height);
+        expect(heights).toEqual([...heights].sort((a, b) => a - b));
+      }
+      // The hips are on the saddle, where the legs start; the neck ends inside the helmet.
+      const [seat] = endsOf(hips);
+      expect(Math.hypot(seat.y - UPPER_BODY_PIVOT.y, seat.z - UPPER_BODY_PIVOT.z)).toBeLessThan(
+        0.1,
+      );
+      const [, crown] = endsOf(neck);
+      const helmet = named(parts, 'helmet');
+      expect(Math.hypot(crown.y - helmet.y, crown.z - helmet.z)).toBeLessThan(0.09);
+      // Widest at the shoulders, narrower at the waist and at the collar: a
+      // back, not a box.
+      const widths = rings(back).map(([halfWidth]) => halfWidth);
+      const widest = Math.max(...widths);
+      expect(widths.indexOf(widest)).toBeGreaterThan(0);
+      expect(widths.indexOf(widest)).toBeLessThan(widths.length - 1);
+      expect(widths[0]).toBeLessThan(widest - 0.03);
+      expect(widths.at(-1)).toBeLessThan(widest / 2);
+      // And the shoulders cover the arms' open ends.
+      for (const arm of parts.filter((each) => each.name.startsWith('upper arm '))) {
+        if (arm.solid.shape !== 'tube') throw new Error('an arm is not a tube');
+        expect(arm.solid.open).toBe(true);
+        expect(Math.abs(arm.x) + arm.solid.radius).toBeLessThan(widest);
+      }
+    }
+    const shoulders = (parts: readonly RiderPart[]): number =>
+      Math.max(...parts.filter((each) => each.name.startsWith('upper arm ')).map((arm) => arm.x));
+    expect(shoulders(female)).toBeLessThan(shoulders(male));
+  });
+
+  it('bends each arm at the elbow, with the hand on the bar and turning with it', () => {
+    for (const parts of [male, female]) {
+      for (const side of [-1, 1] as const) {
+        const upper = named(parts, `upper arm ${String(side)}`);
+        const forearm = named(parts, `forearm ${String(side)}`);
+        const [, elbow] = endsOf(upper);
+        const [joint, hand] = endsOf(forearm);
+        expect(joint.y).toBeCloseTo(elbow.y, 9);
+        expect(joint.z).toBeCloseTo(elbow.z, 9);
+        // Bent: the two pieces are not one line.
+        expect(Math.abs(upper.pitch - forearm.pitch)).toBeGreaterThan(0.1);
+        expect(distanceToBar(hand, side)).toBeLessThan(0.05);
+        // #2494: the hand turns with the bar and the elbow does not.
+        expect(forearm.steers).toBe('toward-end');
+        expect(upper.steers).toBeUndefined();
+      }
+    }
+  });
+
+  it('wears the kit’s jersey on its back and upper arms, and is dressed as the realistic body elsewhere', () => {
+    for (const parts of [male, female]) {
+      const jersey = parts.filter((each) => each.colour === RIDER_PALETTE.jersey);
+      expect(jersey.map((each) => each.name).sort()).toEqual([
+        'back',
+        'upper arm -1',
+        'upper arm 1',
+      ]);
+      // The kit's darker colour is the stylised rider's helmet and legs: not worn here.
+      expect(parts.some((each) => each.colour === RIDER_PALETTE.limb)).toBe(false);
+      expect(named(parts, 'helmet').colour).toBe(STAND_IN_PALETTE.helmet);
+      expect(named(parts, 'hips').colour).toBe(STAND_IN_PALETTE.shorts);
+      expect(named(parts, 'neck').colour).toBe(STAND_IN_PALETTE.skin);
+      expect(named(parts, 'forearm 1').colour).toBe(STAND_IN_PALETTE.skin);
+    }
+    expect(named(female, 'ponytail').colour).toBe(STAND_IN_PALETTE.hair);
+    expect(male.some((each) => each.name === 'ponytail')).toBe(false);
+    // Four colours, each its own: a helmet lighter than the skin, shorts darker than the hair.
+    expect(new Set(Object.values(STAND_IN_PALETTE)).size).toBe(4);
+  });
+
+  it('rides the stylised bicycle, part for part, built from fewer triangles', () => {
+    expect(RIDER_STAND_IN_BICYCLE_PARTS).toHaveLength(RIDER_BICYCLE_PARTS.length);
+    let opened = 0;
+    let coarsened = 0;
+    RIDER_STAND_IN_BICYCLE_PARTS.forEach((standIn, index) => {
+      const stylised = RIDER_BICYCLE_PARTS[index];
+      if (stylised === undefined) throw new Error('no part');
+      // The same part in the same place, colour and steer: only how it is built differs.
+      const { solid, ...placing } = standIn;
+      const { solid: was, ...placed } = stylised;
+      expect(placing, standIn.name).toEqual(placed);
+      if (solid.shape === 'tube') {
+        expect(solid, standIn.name).toEqual({ ...was, open: true });
+        opened += 1;
+      } else if (solid.shape === 'bend') {
+        expect(solid, standIn.name).toEqual({ ...was, coarse: true });
+        coarsened += 1;
+      } else {
+        expect(solid, standIn.name).toEqual(was);
+      }
+    });
+    // Not vacuous: the frame's tubes and both of the bar's bends.
+    expect(opened).toBeGreaterThan(10);
+    expect(coarsened).toBe(2);
+    // And the stylised world's own bicycle is built as it was.
+    for (const each of RIDER_BICYCLE_PARTS) {
+      expect(each.solid, each.name).not.toHaveProperty('open');
+      expect(each.solid, each.name).not.toHaveProperty('coarse');
+    }
+  });
+
+  it('gives each leg bone its dress in the order the bones are solved in', () => {
+    const bones = legBones(0);
+    expect(STAND_IN_LEGS).toHaveLength(bones.length);
+    bones.forEach((bone, index) => {
+      const leg = STAND_IN_LEGS[index];
+      if (leg === undefined) throw new Error('no leg');
+      const thigh = bone.name.startsWith('thigh');
+      expect(leg.colour, bone.name).toBe(thigh ? STAND_IN_PALETTE.shorts : STAND_IN_PALETTE.skin);
+      // A thigh thicker than the stylised leg and a shin thinner, and both a leg.
+      if (thigh) expect(leg.girth).toBeGreaterThan(1);
+      else expect(leg.girth).toBeLessThan(1);
+      expect(leg.girth * LIMB_RADIUS_METRES).toBeGreaterThan(0.03);
+      expect(leg.girth * LIMB_RADIUS_METRES).toBeLessThan(0.09);
+    });
   });
 });

@@ -74,6 +74,17 @@ describe('the demo page is accessible — #1647', () => {
     expect(violations, formatViolations(violations)).toEqual([]);
   });
 
+  it('names the video link for what it does, and reaches it from the keyboard — #3225', async () => {
+    await show('?preset=sprint');
+    const link = tabbableElements(document).find(
+      (element) => element.getAttribute('href')?.includes('youtube') === true,
+    );
+    expect(link).toBeDefined();
+    expect(accessibleName(link as Element)).toBe('Watch the two-minute demo on YouTube');
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+
   it('can be paused and stopped from the keyboard (SC 2.2.2)', async () => {
     await show('?preset=sprint');
     const names = tabbableElements(document)

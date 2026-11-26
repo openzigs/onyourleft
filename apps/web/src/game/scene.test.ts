@@ -238,6 +238,31 @@ describe('the frame carries every rider that is in play', () => {
     });
   });
 
+  it('#3214 — carries each race bot’s skin tone to its marker, and none where none was given', () => {
+    const setup = straightRoute();
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: atStartLine(setup.profile),
+      botDistance: 120,
+      raceBots: [
+        { distanceMetres: 30, speedMetresPerSecond: 8, lateralMetres: 1.75, skin: 3 },
+        { distanceMetres: 40, speedMetresPerSecond: 8, lateralMetres: -1.75, skin: 0 },
+        { distanceMetres: 50, speedMetresPerSecond: 8, lateralMetres: 0 },
+      ],
+    });
+    const racers = frame.markers
+      .filter((marker) => marker.racer === true)
+      .sort((a, b) => a.z - b.z);
+
+    expect(racers.map((marker) => marker.skin)).toEqual([3, 0, undefined]);
+    expect(racers[2]).not.toHaveProperty('skin');
+    // The pacer and the rider were given none.
+    for (const marker of frame.markers.filter((each) => each.racer !== true)) {
+      expect(marker, marker.kind).not.toHaveProperty('skin');
+    }
+  });
+
   it('gives every marker a finite position', () => {
     const setup = straightRoute();
     const frame = sceneFrame({

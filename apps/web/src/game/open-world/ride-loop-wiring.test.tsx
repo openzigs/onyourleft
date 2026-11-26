@@ -52,6 +52,7 @@ import { NO_READING } from '../hud/fields';
 import { slopeAhead, slopeSentence, slopesOf } from '../hud/climb-ahead';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
+import { HEIGHTS_UNAVAILABLE_NOTICE } from './heights-text';
 import { OPEN_WORLD_ROUTE_ID, type OpenWorldSessions } from './ride';
 import { OpenWorldRoad } from './road';
 
@@ -68,8 +69,14 @@ vi.mock('../scene', async (importOriginal) => {
   };
 });
 
-/** Half a second a frame: the ride is long, and the simulation's fixed step is not the frame. */
-const FRAME_MS = 2_000;
+/**
+ * Four seconds a frame: the ride is long, and the simulation's fixed step is
+ * not the frame. #3096: at two, the first case ran at a test's 5 s on CI.
+ * The step the rider may move in a frame is bounded by the frame's length,
+ * and is still tens of metres against the kilometres between two views'
+ * origins.
+ */
+const FRAME_MS = 4_000;
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -134,7 +141,10 @@ function hillyRoute(): RollingRoute {
  * The game port's open-world sessions: one start, ready at once on {@link hillyRoute}.
  * `attempts` is the card's: one with an attempt offers the rider's own ghost.
  */
-function sessions(attempts = 0): OpenWorldSessions {
+function sessions(
+  attempts = 0,
+  road: () => OpenWorldRoad = () => new OpenWorldRoad(hillyRoute()),
+): OpenWorldSessions {
   let start = fixtureStart(START_COLUMN, START_ROW) as ReturnType<typeof fixtureStart> | undefined;
   return {
     take: () => {
@@ -148,10 +158,10 @@ function sessions(attempts = 0): OpenWorldSessions {
         route: {
           id: OPEN_WORLD_ROUTE_ID,
           name: 'Open world',
-          profile: hillyRoute().view(),
+          profile: road().view.profile,
           attempts,
         },
-        road: () => new OpenWorldRoad(hillyRoute()),
+        road,
       }),
       stop: () => undefined,
     }),
@@ -189,7 +199,7 @@ function trainer(
   };
 }
 
-function port(attempts = 0): GamePort {
+function port(attempts = 0, road?: () => OpenWorldRoad): GamePort {
   return {
     listRoutes: () => Promise.resolve([]),
     loadGhost: () => Promise.resolve(undefined),
@@ -198,7 +208,7 @@ function port(attempts = 0): GamePort {
       cadence: { value: 90, live: true, paired: true },
       heartRate: { value: 140, live: true, paired: true },
     }),
-    openWorld: sessions(attempts),
+    openWorld: sessions(attempts, road),
   };
 }
 
@@ -306,11 +316,15 @@ describe('an open-world ride past its first view — #2982', () => {
     }
     // The HUD reads the same view at the same distance: part of the way along
     // it, never the end of it, which is where the ride distance on a view a
-    // kilometre and more behind would put it.
-    const strip = queryAll(mounted.container, '[aria-label^="Route profile"]')[0];
-    const percent = Number(/(\d+) per cent/.exec(strip?.getAttribute('aria-label') ?? '')?.[1]);
-    expect(percent).toBeGreaterThan(10);
-    expect(percent).toBeLessThan(90);
+    // kilometre and more behind would put it. Read off the marker, which is
+    // drawn at that place: the words state no share of a view (#3056).
+    const marker = queryAll(mounted.container, '[data-testid="oyl-hud-position"]')[0];
+    const along = Number(marker?.getAttribute('data-position'));
+    expect(along).toBeGreaterThan(0.1);
+    expect(along).toBeLessThan(0.9);
+    expect(
+      queryAll(mounted.container, '.oyl-hud__profile-svg')[0]?.getAttribute('aria-label'),
+    ).toBe('Road profile, open road');
     // And each grade the trainer was asked for is the road's at the rider on
     // the view drawn that frame or the one before: the same road, read at the
     // same distance, past the first view as before it.
@@ -666,5 +680,174 @@ describe('an open-world ride is ridden alone — #2982', () => {
 
     expect(inputs).toEqual([]);
     expect(rideButton()?.textContent).toBe('Ride Open world');
+  });
+});
+
+describe('an open-world ride marks the recording under it — #3088, the owner’s ruling of 2026-11-25', () => {
+  /** A trainer port over a source that counts each mark the game hands its recording. */
+  function marking(marks: { count: number }): GameTrainerPort {
+    const facts = { paired: true, controllable: true, canSimulate: true, hasControl: true };
+    return gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: facts, workout: undefined }),
+      simulationControl: () => ({
+        setSimulationParameters: () => Promise.resolve(),
+        letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+      }),
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      noteOpenWorld: () => {
+        marks.count += 1;
+      },
+      subscribe: () => () => undefined,
+    });
+  }
+
+  it('on every frame ridden, through the product’s own trainer port', async () => {
+    const marks = { count: 0 };
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    expect(marks.count).toBe(0);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBeGreaterThanOrEqual(inputs.length);
+  });
+
+  it('and never on a saved route’s ride', async () => {
+    const marks = { count: 0 };
+    const loop = squareLoop();
+    mounted = await mount(
+      <GameView
+        port={{ ...port(), listRoutes: () => Promise.resolve([loop]) }}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(cardRadio(loop.name));
+    expect(rideButton()?.textContent).toBe(`Ride ${loop.name}`);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBe(0);
+  });
+});
+
+describe('an open-world road with real heights — #2899', () => {
+  /** How far east of the grid's corner a place is, in metres. */
+  const eastOf = (place: GeographicPosition): number =>
+    (place.longitude + 105) * 111_194.9 * Math.cos((40 * Math.PI) / 180);
+
+  /**
+   * The grid, its heights read from a source that knows a steady 6 % climb for
+   * the first 600 m east and nothing past it: a height tile that is not held.
+   */
+  function roadIntoTheUnknown(): OpenWorldRoad {
+    const { graph, edges } = gridGraph(
+      [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450],
+      [0, 230, 400, 650, 820, 1_090, 1_280, 1_510],
+      roughGround,
+      3,
+    );
+    return new OpenWorldRoad(
+      new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge, {
+        heights: (place) => (eastOf(place) < 600 ? 1_600 + eastOf(place) * 0.06 : undefined),
+      }),
+      { realHeights: true },
+    );
+  }
+
+  it('eases the trainer to flat a step at a time where the heights run out, says so, and credits the terrain', async () => {
+    const written: { grade: number; frame: number }[] = [];
+    mounted = await mount(
+      <GameView
+        port={port(0, roadIntoTheUnknown)}
+        trainer={trainer(written)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+      await settle();
+    }
+    await act(async () => {
+      rideButton()?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    const text = (): string => mounted?.container.textContent ?? '';
+    // ADR 0087 D-8: the corner credits the terrain for the whole ride.
+    await pump();
+    expect(text()).toContain('Terrain © Mapterhorn');
+    // On the climb the heights are known, and nothing is said.
+    expect(text()).not.toContain(HEIGHTS_UNAVAILABLE_NOTICE.text);
+
+    // Ride until the trainer has been eased all the way to flat.
+    for (let frames = 0; frames < 400; frames += 1) {
+      await pump();
+      // Flat to within the driver's 0.1 % deadband, which writes nothing smaller.
+      const last = written.at(-1)?.grade ?? Number.NaN;
+      if (Math.abs(last) < 0.1 && text().includes(HEIGHTS_UNAVAILABLE_NOTICE.text)) break;
+    }
+    expect(text()).toContain(HEIGHTS_UNAVAILABLE_NOTICE.text);
+    const grades = written.map((write) => write.grade);
+    // It climbed the 6 %, and ended on 0 %.
+    expect(Math.max(...grades)).toBeGreaterThan(5.5);
+    expect(Math.abs(grades.at(-1) ?? Number.NaN)).toBeLessThan(0.1);
+    // ADR 0087 D-6.4: the start of the ride is walked too. The road's grade
+    // under the start is some 3 %, and the first write is one step from 0 %.
+    expect(Math.abs(grades[0] ?? Number.NaN)).toBeLessThanOrEqual(1.0001);
+    // The grid ends 2.4 km east, where the route turns round: riding back
+    // onto ground whose heights are known, the notice goes.
+    for (
+      let frames = 0;
+      frames < 400 && text().includes(HEIGHTS_UNAVAILABLE_NOTICE.text);
+      frames += 1
+    ) {
+      await pump();
+    }
+    expect(text()).not.toContain(HEIGHTS_UNAVAILABLE_NOTICE.text);
+    // ADR 0087 D-7: from the climb to flat by the bounded path — a write a
+    // second, a percent a write — never the road's own drop in one write,
+    // which is 6 % here.
+    for (let index = 1; index < grades.length; index += 1) {
+      expect(
+        Math.abs((grades[index] as number) - (grades[index - 1] as number)),
+        `write ${String(index)}`,
+      ).toBeLessThanOrEqual(1.0001);
+    }
+  });
+
+  it('says nothing of heights, and credits no terrain, on a road with none', async () => {
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={trainer([])}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+      await settle();
+    }
+    await act(async () => {
+      rideButton()?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    for (let frames = 0; frames < 10; frames += 1) await pump();
+    const text = mounted.container.textContent ?? '';
+    expect(text).not.toContain('Mapterhorn');
+    expect(text).not.toContain(HEIGHTS_UNAVAILABLE_NOTICE.text);
   });
 });

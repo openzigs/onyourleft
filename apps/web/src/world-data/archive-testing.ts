@@ -24,7 +24,7 @@ import type { RangeResponse, Source } from 'pmtiles';
 export interface ArchiveTile {
   readonly x: number;
   readonly y: number;
-  /** The tile's MVT bytes, uncompressed; the archive gzips them when asked to. */
+  /** The tile's bytes (MVT, or a WebP height tile), uncompressed; the archive gzips them when asked to. */
   readonly bytes: Uint8Array;
 }
 
@@ -38,6 +38,12 @@ export interface ArchiveOptions {
   readonly gzip?: boolean | undefined;
   /** The header's max zoom: 15 when absent. */
   readonly maxZoom?: number | undefined;
+  /** The header's min zoom: 0 when absent. */
+  readonly minZoom?: number | undefined;
+  /** The zoom every tile is at: 15 when absent. A terrain archive's tiles are at 12 (#2013). */
+  readonly zoom?: number | undefined;
+  /** The header's tile type: 1 (MVT) when absent. A terrain archive's is 4 (WebP). */
+  readonly tileType?: number | undefined;
 }
 
 /** What a synthetic archive declares itself to be, so the reader's schema check passes. */
@@ -89,7 +95,7 @@ export async function buildArchive(options: ArchiveOptions): Promise<Uint8Array>
   const bounds = options.bounds ?? { west: -180, south: -85, east: 180, north: 85 };
   const entries = await Promise.all(
     options.tiles.map(async (tile) => ({
-      id: pmtilesTileId(15, tile.x, tile.y),
+      id: pmtilesTileId(options.zoom ?? 15, tile.x, tile.y),
       data: gzip ? await gzipped(tile.bytes) : tile.bytes,
     })),
   );
@@ -139,8 +145,8 @@ export async function buildArchive(options: ArchiveOptions): Promise<Uint8Array>
   view.setUint8(96, 1);
   view.setUint8(97, 1);
   view.setUint8(98, gzip ? 2 : 1);
-  view.setUint8(99, 1);
-  view.setUint8(100, 0);
+  view.setUint8(99, options.tileType ?? 1);
+  view.setUint8(100, options.minZoom ?? 0);
   view.setUint8(101, options.maxZoom ?? 15);
   view.setInt32(102, Math.round(bounds.west * 1e7), true);
   view.setInt32(106, Math.round(bounds.south * 1e7), true);

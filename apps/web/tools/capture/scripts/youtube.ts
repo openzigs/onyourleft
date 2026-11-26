@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The demo video's words and scenes — #3156, epic #3151.
+ *
+ * ```sh
+ * pnpm --filter @onyourleft/web run capture -- --script youtube \
+ *   --start <lat>,<lon> --archive /path/to/basemap.pmtiles
+ * ```
+ *
+ * renders the whole video as one MP4, with an `.srt` of every caption and a
+ * chapter list beside it (`docs/demo-video.md` §"The scene script").
+ *
+ * ⚠️ **Every line is a claim the product makes on the day of the render, and
+ * the owner approves every line before the final render** (as on #3084).
+ * Edit the words freely; `video-script.ts` §`scriptProblems` (run by
+ * `pnpm run test` and by `capture` before it renders a frame) refuses:
+ *
+ * - a caption claiming a feature (`delivery`, `lap-race`, `workout`,
+ *   `junction`, `pacer`, `instance`) its scene does not ride, and a callout
+ *   to a panel only such a scene draws;
+ * - a load-metric trademark, a competitor's name, or "validated", "accurate
+ *   to" or "professional fit" (CLAUDE.md section 6, ADR 0030 R6);
+ * - a word for a feature only an instance runs ("AI", "instance") anywhere
+ *   but a line of the closing card that begins "Optional on your own
+ *   instance:";
+ * - a caption up for under 3 or over 6 seconds (a card, over 10), run past its scene, or less
+ *   than a second from the next; a scene under 6 seconds; a chapter under 10.
+ *
+ * A scene is a capture scene (`src/game/capture-scene.ts`) ridden from its
+ * start, written from `from` seconds in. Times are seconds from the scene's
+ * first frame. A `callout` names the HUD panel it explains
+ * (`video-script.ts` §`CALLOUT_PANELS`) and is drawn beside it with a leader
+ * line, wherever the panel is at the frame's size; every caption keeps clear
+ * of the panel it explains and of the map credit, or the render stops.
+ *
+ * The epic's scenes 9 (group ride) and 11 (after the ride, the AI write-up)
+ * need a self-hosted instance and come from #3155, which the owner holds;
+ * they are left out here, where the comments mark them.
+ *
+ * #3223, the owner's rulings of 2026-11-25 on the final render: the workouts
+ * scene is out; the trainer scene rides a real climb (the `climb` capture
+ * scene, over 4 %), with the readings callout over it, where they move with
+ * the effort; the HUD tour is 16 s; and the video opens in the open world,
+ * on real streets, not on the synthetic route's empty road.
+ */
+
+import type { VideoScript } from '../video-script';
+
+export const YOUTUBE_SCRIPT: VideoScript = {
+  id: 'youtube',
+  scenes: [
+    // 1. Cold open: the world at speed, then the logo and the title.
+    {
+      id: 'opening',
+      chapter: 'On Your Left',
+      // #3223: on real streets, with buildings and land use, not the
+      // synthetic route's empty road; from after the seconds the free-ride
+      // scene films, so no frame of it is shown twice.
+      capture: 'free-ride',
+      from: 20,
+      seconds: 10,
+      captions: [
+        {
+          at: 1,
+          seconds: 6,
+          placement: 'title',
+          // Owner ruling 2026-11-25 on #3175: the logo, centred, with the
+          // platforms line beneath it. The logo names the app, so the title
+          // does not (the owner's wording, the same day).
+          logo: true,
+          text: 'Free, open-source indoor and outdoor cycling',
+          lines: ['On Android, and in Chrome or Edge on your computer. iOS coming soon.'],
+        },
+      ],
+    },
+    // 2. The HUD, one panel at a time. #3223: 16 s, not 31; the readings and
+    // the gradient are called out over the climb, where they move.
+    {
+      id: 'hud',
+      chapter: 'The HUD',
+      capture: 'route-hud',
+      from: 14,
+      seconds: 16,
+      captions: [
+        {
+          at: 0.5,
+          seconds: 5,
+          callout: 'elevation',
+          text: 'The climb profile ahead, and how far along the route you are',
+        },
+        { at: 6.5, seconds: 4, callout: 'map', text: 'The whole route, and where you are on it' },
+        {
+          at: 11.5,
+          seconds: 4,
+          callout: 'calories',
+          text: 'Ride totals, with calories estimated from your power',
+        },
+      ],
+    },
+    // 3. Smart trainer, on a real climb (#3223): over 4 % from the first frame.
+    {
+      id: 'trainer',
+      chapter: 'Smart trainer',
+      capture: 'climb',
+      from: 2,
+      seconds: 14,
+      captions: [
+        {
+          at: 1,
+          seconds: 6,
+          callout: 'gradient',
+          text: 'Controls your smart trainer over Bluetooth: feel every climb',
+        },
+        {
+          at: 8,
+          seconds: 5,
+          callout: 'readings',
+          text: 'Power, cadence and heart rate, live from your sensors',
+        },
+      ],
+    },
+    // 4. Workouts: out, the owner's ruling of 2026-11-25 (#3223).
+    // 5. Pacer and ghost.
+    {
+      id: 'pacer',
+      chapter: 'Pacer and ghost',
+      capture: 'pacer',
+      from: 3,
+      seconds: 14,
+      captions: [
+        { at: 1, seconds: 5, callout: 'pacer', text: 'Ride with a pacer at the effort you choose' },
+        { at: 7, seconds: 5, callout: 'best', text: 'Or race your own best ride' },
+      ],
+    },
+    // 6. Free ride.
+    {
+      id: 'free-ride',
+      chapter: 'Free ride',
+      capture: 'free-ride',
+      // Past the pull-off from a stop and the post beside the start.
+      from: 2,
+      seconds: 16,
+      captions: [
+        {
+          at: 3,
+          seconds: 6,
+          feature: 'junction',
+          text: 'Open world: pick your turn at every junction',
+        },
+        { at: 10, seconds: 5, text: 'Real streets, built from OpenStreetMap data' },
+      ],
+    },
+    // 7. Delivery.
+    {
+      id: 'delivery',
+      chapter: 'Delivery',
+      capture: 'delivery',
+      // Under way, not pulling off from a stop.
+      from: 2,
+      seconds: 16,
+      captions: [
+        {
+          at: 1,
+          seconds: 6,
+          callout: 'throw',
+          text: 'Delivery: throw a parcel to each house on your round',
+        },
+        { at: 9, seconds: 5, callout: 'houses', text: 'Houses left, the next one, and your score' },
+      ],
+    },
+    // 8. Lap race.
+    {
+      id: 'lap-race',
+      chapter: 'Lap race',
+      capture: 'lap-race',
+      from: 12,
+      seconds: 21,
+      captions: [
+        {
+          at: 1,
+          seconds: 6,
+          callout: 'standings',
+          text: 'Lap races on built-in circuits, against bots',
+        },
+        // ADR 0067: the bots' tactics run on the device, with no instance.
+        // The AI bots need one, and the closing card names them (#3155).
+        {
+          at: 8,
+          seconds: 5,
+          callout: 'standings',
+          // The tactics they ride include attack, chase and sit-in
+          // (`packages/domain/src/lap-race/tactics.ts` §`BotTactic`).
+          // The owner's wording of 2026-11-25 on #3177. #3198: a bot attacks
+          // from Go and is still away, in frame, while this is up.
+          text: 'Bots that attack, chase and sit in',
+        },
+        { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
+      ],
+    },
+    // 9. Group ride: needs an instance, #3155.
+    // 10. Worlds.
+    {
+      id: 'worlds',
+      chapter: 'Worlds',
+      capture: 'route-hud',
+      from: 120,
+      seconds: 10,
+      captions: [
+        {
+          at: 2,
+          seconds: 6,
+          text: 'Any route you import becomes a world to ride, drawn on your device',
+        },
+      ],
+    },
+    // 11. After the ride, the AI write-up: needs an instance, #3155.
+    // 12. Closing card.
+    {
+      id: 'closing',
+      chapter: 'Free and open',
+      capture: 'route-hud',
+      // Under way, not pulling off from a stop.
+      from: 3,
+      seconds: 15,
+      captions: [
+        {
+          at: 0.5,
+          seconds: 5.5,
+          text: 'No subscription. Your rides stay on your device.',
+        },
+        {
+          at: 7,
+          seconds: 8,
+          placement: 'card',
+          logo: true,
+          text: 'Free and open source',
+          // Owner ruling 2026-11-25: they exist but are not filmed, as each
+          // needs an instance; only the closing card may say so, and only so.
+          // #3175, the owner's the same day: the platforms line, as on the opening.
+          lines: [
+            'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
+            'Optional on your own instance: an AI pacer and AI bots',
+          ],
+        },
+      ],
+    },
+  ],
+};

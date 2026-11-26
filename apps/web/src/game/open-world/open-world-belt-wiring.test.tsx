@@ -24,6 +24,9 @@ import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { GameView, type GamePort } from '../GameView';
+import { footprintFixture } from '../footprint-fixtures-testing';
+import { footprintPlans } from '../footprint-buildings';
+import { landClassMask, NO_LAND_CLASS, type LandClassMask } from '../land-class';
 import { mappedBuildingsOf } from '../mapped-buildings';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
@@ -32,6 +35,7 @@ import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
 import { OPEN_WORLD_ROUTE_ID, type OpenWorldSessions } from './ride';
 import { OpenWorldRoad } from './road';
 import { openWorldStreetCorridor } from './street-corridor';
+import { openWorldTown } from './urban-stretch';
 
 const inputs: SceneInput[] = [];
 
@@ -50,8 +54,24 @@ const FRAME_MS = 1_000;
 const COLUMNS = [0, 180, 410, 600, 870];
 const ROWS = [0, 230, 400, 650];
 const RIDE_FRAME = { latitude: 40, longitude: -105, elevation: 0 };
-const BUILDINGS = mappedBuildingsOf([]);
+/**
+ * #3131: two real plans, so the road has a mapped town to hand on — what the
+ * buildings hold is not asserted, only that the road's own objects arrive.
+ */
+const BUILDINGS = (() => {
+  const fixture = footprintFixture();
+  return mappedBuildingsOf(
+    footprintPlans(
+      fixture.corridor,
+      landClassMask(fixture.corridor),
+      fixture.profile,
+      fixture.origin,
+    ).plans.slice(0, 2),
+  );
+})();
 const STREETS = openWorldStreetCorridor(RIDE_FRAME, []);
+/** #3105: the road's water mask — an object of its own, holding nothing, read back by identity. */
+const WATER: LandClassMask = { ...NO_LAND_CLASS };
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -127,6 +147,7 @@ function port(): GamePort {
             frame: RIDE_FRAME,
             buildings: () => BUILDINGS,
             streets: () => STREETS,
+            water: () => WATER,
           }),
       }),
       stop: () => undefined,
@@ -170,6 +191,12 @@ describe('an open-world ride hands the scene its planned buildings — #2902', (
       expect(input.mappedBuildings).toBe(BUILDINGS);
       // #2903: and its streets, as the corridor the scene draws them from.
       expect(input.worldCorridor).toBe(STREETS);
+      // #3105: and its real water, as the land mask the scene draws water from.
+      expect(input.landClass).toBe(WATER);
+      // #3131: and the mapped town round the rider, how built-up each street
+      // is with it — the road's own, the one object while the plans are.
+      expect(input.mappedTown).toBeDefined();
+      expect(input.mappedTown).toBe(openWorldTown(BUILDINGS, STREETS));
       // The whole ride is drawn in the road's frame, whatever its view.
       expect(corridorOrigin(input.profile)).toBe(RIDE_FRAME);
     }

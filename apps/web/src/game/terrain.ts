@@ -424,8 +424,21 @@ export interface CorridorPoint {
 
 /** A ribbon of road, ready to become a vertex buffer. */
 export interface RoadCorridor {
-  /** The centreline, in order. */
+  /**
+   * The centreline, in order: the points the road and the ground are drawn
+   * on. Each is at the route distance it was built for, and where it is in
+   * plan — except, coming up to a turning point after the frame has changed
+   * pass, the drawn points of the far pass, which are moved towards the pass
+   * the rider is on (#3061, @see towardTheRidersPass).
+   */
   readonly centre: readonly CorridorPoint[];
+  /**
+   * The same points where they are in plan, before any was moved — #3061's
+   * review: given only where {@link centre} moved one. `scene.ts` §`markerAt`
+   * moves a rider drawn on the far pass's own line by as much as the road
+   * under them was moved, so a bot already round the turn stays on the road.
+   */
+  readonly unmoved?: readonly CorridorPoint[];
   /**
    * Every vertex of the road, three floats each.
    *
@@ -629,6 +642,14 @@ export function roadCorridor(
      * passes it.
      */
     readonly unsmoothed?: boolean;
+    /**
+     * #3133: stretches of the road, as odometer readings `from` to `to`, where
+     * neither its edge lines nor its centre-line marks are painted: a junction
+     * the route turns through, between the mouths of the arm it comes in by
+     * and the arm it leaves by (`junction-surface.ts`), so the lines stop at
+     * the mouth instead of bending round the turn. None by default.
+     */
+    readonly unpainted?: readonly UnpaintedStretch[];
   } = {},
 ): RoadCorridor {
   const ahead = options.aheadMetres ?? VIEW_AHEAD_METRES;
@@ -676,18 +697,35 @@ export function roadCorridor(
     centre.push(pointAt(profile, origin, layout.start + grid * gridStep, smoothing));
   }
 
-  const normals = ribbonNormals(centre);
+  const routeNormals = ribbonNormals(centre);
   const surfaceVertices = centre.length * ROAD_COLUMNS;
   // Fixed for a given corridor configuration, and that is what makes the road's
   // buffer a constant size — see `markSlotCount`.
   const slots = markSlotCount(gridSteps * gridStep);
   const vertices = new Float32Array((surfaceVertices + slots * 4) * 3);
   const colours = new Float32Array(vertices.length);
-  const retraced = retracedRows(centre, normals, atDistance + RETRACE_LOOK_AHEAD_METRES);
+  const partners: TurnPartners = {
+    along: new Float64Array(centre.length),
+    across: new Float64Array(centre.length),
+    x: new Float64Array(centre.length),
+    y: new Float64Array(centre.length),
+    z: new Float64Array(centre.length),
+  };
+  const retraced = retracedRows(
+    centre,
+    routeNormals,
+    atDistance + RETRACE_LOOK_AHEAD_METRES,
+    partners,
+  );
+  // #3061: the points the road and the ground are drawn on, and their normals.
+  const drawn = towardTheRidersPass(centre, retraced, partners, atDistance);
+  const normals = drawn === centre ? routeNormals : ribbonNormals(drawn);
   const surface = roadToTheTurn(normals, retraced);
 
-  writeSurface(profile, centre, surface.normals, vertices, colours);
-  writeCentreLine(profile, centre, normals, {
+  const unpainted = options.unpainted ?? NO_UNPAINTED;
+  writeSurface(profile, drawn, surface.normals, vertices, colours, unpainted);
+  writeCentreLine(profile, drawn, normals, {
+    unpainted,
     atDistance,
     behind,
     layout,
@@ -699,7 +737,8 @@ export function roadCorridor(
   });
 
   return {
-    centre,
+    centre: drawn,
+    ...(drawn === centre ? {} : { unmoved: centre }),
     vertices,
     colours,
     indices: withoutRetraced(roadIndices(centre.length, slots, surfaceVertices), surface.retraced),
@@ -887,11 +926,35 @@ const REVERSAL_COSINE = Math.cos((150 * Math.PI) / 180);
 
 /**
  * How near another pass of the road a corridor point must lie to be ON it, in
- * metres: **3.5**, half the road — #1996. A pass whose centreline runs inside
- * the other's carriageway is the same road ridden again, and drawing both put
+ * metres: **7**, a road's width — #1996, #3140. A pass whose carriageway
+ * overlaps the other's is the same road ridden again, and drawing both put
  * two roads and two grounds in one place. @see retracedRows
+ *
+ * ⚠️ **Why not #1996's half a road.** That took a pass as the same road only
+ * where its centreline ran inside the other's carriageway. A recorded way
+ * back along the other side of the road is further over than that: 4 to 6 m
+ * on `turnaround-coast.test.ts`' coast turnaround, where both were drawn —
+ * two roads side by side, the owner's "road twice its width" of 2026-11-24 —
+ * each at its own recorded height, so the way back's road and ground stood
+ * up to 3.7 m over the line from the chase camera to the rider 200 m before
+ * the turn: the owner's "camera low and far behind, only the helmet showing".
+ * Two roads further apart than this overlap nowhere, and are two roads.
  */
-export const RETRACE_OVERLAP_METRES = ROAD_WIDTH_METRES / 2;
+export const RETRACE_OVERLAP_METRES = ROAD_WIDTH_METRES;
+
+/**
+ * How far apart in height two passes further apart than half a road may be
+ * and still be one road, in metres: **5** — #3140, #3127's review. Within
+ * half a road a pass is the same road at any height (#1996): its centreline
+ * is on the other's carriageway. Between half a road and
+ * {@link RETRACE_OVERLAP_METRES} it may be another road beside it: the legs of
+ * a tight switchback, one above the other. Recorded passes of one road
+ * disagree by less within the reach a corridor holds both: the coast
+ * turnaround's way back, 4 and 5 m over, by at most 4.4 m in the 200 m before
+ * the turn that its corridor holds it; a switchback 5 m across climbing 6 %
+ * differs by more than this 42 m of road from its apex. Not a measured optimum.
+ */
+export const RETRACE_HEIGHT_METRES = 5;
 
 /**
  * How much further apart along the road than across it two points must be to
@@ -962,14 +1025,19 @@ function retraceKey(cellX: number, cellZ: number): number {
  * corridor's 60 m behind the rider into ground that was not there. So the
  * frame changes pass when the camera's target rounds the turn. The road under
  * the rider is then the other pass's, in the same place — or, for a return
- * recorded a lane over, as far over as that: those 25 m the rider is drawn
- * off the drawn road's centre by as much, and past its edge beyond about
- * 0.6 m of it. Across a turning point the choice is made for the pass as a
- * whole, not point by point (@see the loop below).
+ * recorded a lane over, as far over as that, which {@link roadCorridor} lays
+ * back along the rider's pass for those 25 m (#3061, @see
+ * towardTheRidersPass). Across a turning point the choice is made for the
+ * pass as a whole, not point by point (@see the loop below), and that holds
+ * where the smoothed road rounds the turn too widely for any one joint to
+ * face back (@see tipBetween).
  *
  * Every point is still in {@link RoadCorridor.centre}, at the route distance
  * it was built for, so what is placed on the road — the riders, the camera,
  * the scenery's window — is where it was.
+ *
+ * `partners`, when given, is filled with each point's nearest point of
+ * another pass, out to {@link TURN_MOVE_REACH_METRES} (#3061).
  *
  * ⚠️ Nothing at all unless the corridor turns through more than 120°, which
  * a road must to come back along itself. Past that, a point is tested only
@@ -986,9 +1054,11 @@ export function retracedRows(
   centre: readonly CorridorPoint[],
   normals: Float64Array,
   reference: number,
+  partners?: TurnPartners,
 ): Uint8Array {
   const rows = centre.length;
   const retraced = new Uint8Array(rows);
+  partners?.along.fill(Number.NaN);
   // How far along the drawn road each point is, in plan: on a turning point
   // the route distance runs on while the smoothed road all but stops.
   const arc = new Float64Array(rows);
@@ -1023,7 +1093,14 @@ export function retracedRows(
       (normals[row * 2 + 1] as number) * (normals[row * 2 + 3] as number);
     if (dot < 0) turns.push(row);
   }
+  // Where the road turns back round a bend too wide for any one joint to
+  // face back, as the smoothed road rounds a turn made at one recorded
+  // point (@see tipBetween), found as they are needed — #3061.
+  const tips: number[] = [];
   const reach = RETRACE_OVERLAP_METRES;
+  // #3061: as far as a point's other pass is looked for, which is further
+  // than one is ON it, where that pass is wanted (@see TurnPartners).
+  const search = partners === undefined ? reach : TURN_MOVE_REACH_METRES;
   // Each stretch's box in plan, widened by `reach`, filed under every
   // {@link RETRACE_CELL_METRES} cell it overlaps, in stretch order (#1688). A
   // point is within `reach` only of a stretch whose box holds it, and every
@@ -1039,10 +1116,10 @@ export function retracedRows(
   for (let segment = 0; segment + 1 < rows; segment += 1) {
     const from = centre[segment] as CorridorPoint;
     const to = centre[segment + 1] as CorridorPoint;
-    const minX = Math.min(from.x, to.x) - reach;
-    const maxX = Math.max(from.x, to.x) + reach;
-    const minZ = Math.min(from.z, to.z) - reach;
-    const maxZ = Math.max(from.z, to.z) + reach;
+    const minX = Math.min(from.x, to.x) - search;
+    const maxX = Math.max(from.x, to.x) + search;
+    const minZ = Math.min(from.z, to.z) - search;
+    const maxZ = Math.max(from.z, to.z) + search;
     left[segment] = minX;
     right[segment] = maxX;
     back[segment] = minZ;
@@ -1071,6 +1148,10 @@ export function retracedRows(
     let nearest = Number.POSITIVE_INFINITY;
     let nearestAlong = 0;
     let nearestSegment = 0;
+    let nearestX = 0;
+    let nearestY = 0;
+    let nearestZ = 0;
+    let nearestOpposite = false;
     const near = cells.get(retraceKey(retraceCell(pointX), retraceCell(pointZ))) ?? NO_STRETCHES;
     for (const segment of near) {
       if (
@@ -1091,7 +1172,7 @@ export function retracedRows(
           ? Math.min(1, Math.max(0, ((point.x - from.x) * dx + (point.z - from.z) * dz) / span))
           : 0;
       const across = Math.hypot(point.x - (from.x + dx * t), point.z - (from.z + dz * t));
-      if (!(across < reach)) continue;
+      if (!(across < search)) continue;
       const between = Math.abs(
         (arc[row] as number) -
           ((arc[segment] as number) +
@@ -1108,6 +1189,13 @@ export function retracedRows(
       ) {
         continue;
       }
+      // #3140: beyond half a road, another road unless at one height with it.
+      if (
+        across >= ROAD_WIDTH_METRES / 2 &&
+        Math.abs(point.y - (from.y + (to.y - from.y) * t)) > RETRACE_HEIGHT_METRES
+      ) {
+        continue;
+      }
       // ⚠️ The NEAREST point of the other pass, not the first found: near the
       // turning point the two passes are about as far from the rider, and a
       // point of the other pass a few metres along from this one could be the
@@ -1117,7 +1205,18 @@ export function retracedRows(
         nearest = across;
         nearestAlong = from.along + (to.along - from.along) * t;
         nearestSegment = segment;
+        nearestX = from.x + dx * t;
+        nearestY = from.y + (to.y - from.y) * t;
+        nearestZ = from.z + dz * t;
+        nearestOpposite = headingX * dx + headingZ * dz < 0;
       }
+    }
+    if (partners !== undefined && nearest < search) {
+      partners.along[row] = nearestAlong;
+      partners.across[row] = nearest;
+      partners.x[row] = nearestX;
+      partners.y[row] = nearestY;
+      partners.z[row] = nearestZ;
     }
     if (!(nearest < reach)) continue;
     // ⚠️ **Across a turning point, one pass or the other, as a whole.** Two
@@ -1130,7 +1229,9 @@ export function retracedRows(
     // of the turn from `reference` is the one not drawn.
     const low = Math.min(row, nearestSegment);
     const high = Math.max(row, nearestSegment + 1);
-    const turn = turns.find((at) => at >= low && at < high);
+    const turn =
+      turns.find((at) => at >= low && at < high) ??
+      (nearestOpposite ? tipBetween(centre, tips, low, high) : undefined);
     if (turn !== undefined) {
       const beyond = reference > (centre[turn] as CorridorPoint).along;
       if (row > turn !== beyond) retraced[row] = 1;
@@ -1171,6 +1272,44 @@ export function retracedRows(
 }
 
 /**
+ * The point where the road turns back between two of a corridor's points
+ * that lie on each other's pass running opposite ways, for
+ * {@link retracedRows} — #3061: a point of `tips` between the two, or else
+ * the point between them furthest in plan from the first, added to `tips`.
+ *
+ * ⚠️ **Why it is needed.** {@link ribbonNormals} finds a turning point only
+ * where one joint of the drawn road faces back. The smoothed road rounds a
+ * reversal made at one recorded point, as the owner's 172° turnaround is,
+ * over several joints, none of which does, so its two passes were chosen
+ * point by point, each the nearer the camera's target. Two points of the two
+ * passes are not each other's nearest, so for some frames about the change
+ * both were not drawn under the rider, or both were. Found once and kept,
+ * the turn decides every pair across it, so the frame changes pass at once.
+ */
+function tipBetween(
+  centre: readonly CorridorPoint[],
+  tips: number[],
+  low: number,
+  high: number,
+): number {
+  const known = tips.find((at) => at >= low && at < high);
+  if (known !== undefined) return known;
+  const from = centre[low] as CorridorPoint;
+  let tip = low;
+  let furthest = -1;
+  for (let row = low + 1; row < high; row += 1) {
+    const point = centre[row] as CorridorPoint;
+    const away = (point.x - from.x) ** 2 + (point.z - from.z) ** 2;
+    if (away > furthest) {
+      furthest = away;
+      tip = row;
+    }
+  }
+  tips.push(tip);
+  return tip;
+}
+
+/**
  * How far up the road from the rider {@link retracedRows} measures which pass
  * is nearer, in metres: **25**, where the chase camera looks —
  * `camera.ts` §`CAMERA_TARGET_AHEAD_METRES`, which `out-and-back.test.ts` holds
@@ -1191,6 +1330,159 @@ const RETRACE_TURN_ROWS = 8;
 const RETRACE_TURN_RADIANS = (2 * Math.PI) / 3;
 
 /**
+ * Where each corridor point's nearest point of another pass of the road is,
+ * as {@link retracedRows} found it, one entry a point — #3061: its odometer,
+ * `NaN` where the point lies on no other pass, and where it is.
+ */
+export interface TurnPartners {
+  readonly along: Float64Array;
+  readonly across: Float64Array;
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  readonly z: Float64Array;
+}
+
+/**
+ * How far back from a turning point, along the pass the rider is on, the
+ * drawn pass is laid along it in full while the rider comes up to the turn,
+ * in metres: **30** — #3061. The {@link RETRACE_LOOK_AHEAD_METRES} in which
+ * the frame has changed pass, and the 4.5 m the chase camera sits behind the
+ * rider (`camera.ts` §`CAMERA_BEHIND_METRES`), so that where the drawn road
+ * leaves the rider's pass is behind the camera at the change.
+ * @see towardTheRidersPass
+ */
+const TURN_HOLD_METRES = 30;
+
+/**
+ * And over how much road beyond that the drawn pass is eased from the
+ * rider's pass back to its own place, in metres: **20** — #3061.
+ * @see towardTheRidersPass
+ */
+const TURN_HOLD_BLEND_METRES = 20;
+
+/**
+ * Over how much of the ride to the turn, at least, a point of the far pass is
+ * eased back from the rider's pass to its own place, in metres: **10** —
+ * #3061. A point that far or further before the turn, along the rider's
+ * pass, is eased over the ride from it to the turn, but never over more than
+ * {@link RETRACE_LOOK_AHEAD_METRES}: so the point under the rider is on the
+ * rider's pass until the last 10 m, and a point eases at the rate the two
+ * passes part along a straight reversal, wherever it is.
+ * @see towardTheRidersPass
+ */
+const TURN_EASE_METRES = 10;
+
+/**
+ * How near the turn a point of the far pass is moved less, in metres: **5** —
+ * #3061. In the last 5 m to the turn it is moved by the share of them its
+ * other pass is from the turn, so the turn keeps its own shape: moved all the
+ * way there, the return of an out-and-back recorded a metre over was laid on
+ * the way out up to its turning point, and the ground's rows round the turn
+ * fanned (`landform.ts` §`fannedPairs`).
+ * @see towardTheRidersPass
+ */
+const TURN_TIP_METRES = 5;
+
+/**
+ * How far from the rider's pass a point of the far pass is still moved
+ * towards it, in metres: **10.5**, a road and a half — #3061, #3140. Moved
+ * all the way within {@link RETRACE_OVERLAP_METRES}, where the rider's pass is
+ * not drawn, and less the further out beyond that, so that where the two
+ * passes part the drawn road leaves the rider's pass along a taper rather
+ * than at a step. #3061's taper was the half road from its 3.5 m overlap to a
+ * road's width; since #3140's overlap is a road's width, the same half road
+ * past it.
+ * @see towardTheRidersPass
+ */
+const TURN_MOVE_REACH_METRES = 1.5 * ROAD_WIDTH_METRES;
+
+/**
+ * The corridor's points as the road and the ground are drawn on them — #3061:
+ * {@link retracedRows}' drawn pass, but coming up to a turning point after the
+ * frame has changed pass, laid along the pass the rider is on.
+ *
+ * ⚠️ **Why the drawn road does not jump under the rider.** The frame changes
+ * pass when the camera's target rounds the turn, {@link RETRACE_LOOK_AHEAD_METRES}
+ * before it. A return recorded to one side lies as far over, and at a
+ * one-point reversal it lies up to half the road over where the change is
+ * made, so the road and the ground moved sideways under the rider by that in
+ * one frame, and the rider rode the last 25 m beside the drawn road. So from
+ * the change to the turn, each drawn point of the far pass is moved towards
+ * its nearest point of the rider's pass: all the way at the change, where the
+ * frame before drew the rider's pass there, and none at the turn, where the
+ * two passes meet and the rider goes on along the far one, eased between the
+ * two over {@link TURN_EASE_METRES} to {@link RETRACE_LOOK_AHEAD_METRES} of
+ * the ride. Back from the turn, along the rider's pass, it is moved all the
+ * way for {@link TURN_HOLD_METRES} and eased back to its own place over the
+ * next {@link TURN_HOLD_BLEND_METRES}, so nothing within sight of the camera
+ * moves at the change; across, it is moved less beyond
+ * {@link RETRACE_OVERLAP_METRES} and not at all past
+ * {@link TURN_MOVE_REACH_METRES}; and in the last {@link TURN_TIP_METRES} to
+ * the turn, less again.
+ *
+ * Only where the road and the ground are drawn: every point keeps its route
+ * distance and its odometer, so the grade, the trainer and the odometer are
+ * the route's (ADR 0060 D-3), and the rider is drawn on the drawn line as
+ * before. A pass not drawn is not moved. The same points, not a copy, where
+ * nothing is moved.
+ */
+function towardTheRidersPass(
+  centre: readonly CorridorPoint[],
+  retraced: Uint8Array,
+  partners: TurnPartners,
+  rider: number,
+): readonly CorridorPoint[] {
+  let moved: CorridorPoint[] | undefined;
+  for (let row = 0; row < centre.length; row += 1) {
+    const partner = partners.along[row] as number;
+    const point = centre[row] as CorridorPoint;
+    // A drawn point whose other pass is behind it along the road, where the
+    // road turns back half way between the two (in route distance, a
+    // reversal is as far from either), and the rider has still to get there.
+    if (retraced[row] === 1 || !(partner < point.along)) continue;
+    const turnAlong = (point.along + partner) / 2;
+    if (!(turnAlong > rider)) continue;
+    // How far before the turn the other pass's point is, along the rider's.
+    const before = turnAlong - partner;
+    const toGo = Math.min(
+      1,
+      (turnAlong - rider) / Math.min(RETRACE_LOOK_AHEAD_METRES, Math.max(TURN_EASE_METRES, before)),
+    );
+    const back = before - TURN_HOLD_METRES;
+    const held = back > 0 ? Math.max(0, 1 - back / TURN_HOLD_BLEND_METRES) : 1;
+    const beside = (partners.across[row] as number) - RETRACE_OVERLAP_METRES;
+    const near =
+      beside > 0 ? Math.max(0, 1 - beside / (TURN_MOVE_REACH_METRES - RETRACE_OVERLAP_METRES)) : 1;
+    const share = toGo * held * near * Math.min(1, before / TURN_TIP_METRES);
+    if (!(share > 0)) continue;
+    moved ??= centre.slice();
+    moved[row] = {
+      ...point,
+      x: point.x + ((partners.x[row] as number) - point.x) * share,
+      y: point.y + ((partners.y[row] as number) - point.y) * share,
+      z: point.z + ((partners.z[row] as number) - point.z) * share,
+    };
+  }
+  return moved ?? centre;
+}
+
+/** A stretch of road left unpainted, as odometer readings — #3133. @see roadCorridor */
+export interface UnpaintedStretch {
+  readonly from: number;
+  readonly to: number;
+}
+
+const NO_UNPAINTED: readonly UnpaintedStretch[] = [];
+
+/** Whether odometer readings `from` to `to` reach into any of `stretches`. */
+function within(stretches: readonly UnpaintedStretch[], from: number, to: number): boolean {
+  for (const stretch of stretches) {
+    if (to >= stretch.from && from <= stretch.to) return true;
+  }
+  return false;
+}
+
+/**
  * Widens the centreline into a ribbon of {@link ROAD_COLUMNS} columns.
  *
  * The two outermost lanes are the edge lines and the middle one is the
@@ -1203,6 +1495,7 @@ function writeSurface(
   normals: Float64Array,
   vertices: Float32Array,
   colours: Float32Array,
+  unpainted: readonly UnpaintedStretch[],
 ): void {
   for (let index = 0; index < centre.length; index += 1) {
     const here = centre[index] as CorridorPoint;
@@ -1212,13 +1505,16 @@ function writeSurface(
     // built for: the gradient is a property of the road, so on a loop the same
     // place is the same climb on every lap. @see CorridorPoint.distance
     const tint = roadTint(gradeAt(profile, here.distance));
+    // #3133: no edge line across a junction the route turns through.
+    const bare = within(unpainted, here.along, here.along);
     for (let column = 0; column < ROAD_COLUMNS; column += 1) {
       const offset = COLUMN_OFFSETS[column] as number;
       const at = (index * ROAD_COLUMNS + column) * 3;
       vertices[at] = here.x + normalX * offset;
       vertices[at + 1] = here.y;
       vertices[at + 2] = here.z + normalZ * offset;
-      const painted = column < FIRST_CARRIAGEWAY_COLUMN || column > LAST_CARRIAGEWAY_COLUMN;
+      const painted =
+        !bare && (column < FIRST_CARRIAGEWAY_COLUMN || column > LAST_CARRIAGEWAY_COLUMN);
       writeLinearColour(colours, at, painted ? MARKING_COLOUR : tint);
     }
   }
@@ -1264,6 +1560,8 @@ interface CentreLineRequest {
   readonly colours: Float32Array;
   /** {@link RoadCorridor.retraced}: a mark that touches one of its points is not drawn. */
   readonly retraced: Uint8Array;
+  /** #3133: a mark that reaches into one of these is not drawn. @see roadCorridor */
+  readonly unpainted: readonly UnpaintedStretch[];
 }
 
 /**
@@ -1348,6 +1646,8 @@ function writeCentreLine(
         break;
       }
     }
+    // #3133: nor is one across a junction the route turns through.
+    if (within(request.unpainted, from, to)) toParameter = fromParameter;
 
     const at = (request.firstVertex + slot * 4) * 3;
     writeMarkEdge(centre, normals, fromParameter, half, vertices, at);

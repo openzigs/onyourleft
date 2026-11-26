@@ -21,7 +21,7 @@ import { metres } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
-import type { DraftLeg, RouteDraft } from './draft';
+import { draftDistance, type DraftLeg, type RouteDraft } from './draft';
 import type { PlannedElevation } from './elevation';
 
 /**
@@ -175,6 +175,62 @@ export function unresolvedSentence(legs: readonly DraftLeg[]): string | undefine
   if (pending > 0)
     parts.push(`${String(pending)} ${pending === 1 ? 'is' : 'are'} still being routed`);
   return `${parts.join(' and ')}. Distance and climbing cover the rest of the route only.`;
+}
+
+/**
+ * The planner's summary strip — #3185: the two numbers a rider plans by, kept
+ * beside the map while they draw, and whether a leg is still being routed.
+ */
+export interface RouteSummary {
+  /** The route's length so far, with its unit; "At least …" where it is a floor. */
+  readonly distance: string;
+  /** Its climbing, with its unit; "At least …" where it is a floor; {@link NO_CLIMBING_TEXT} with none. */
+  readonly climbing: string;
+  /** True while a leg is out to the routing engine. */
+  readonly routing: boolean;
+}
+
+/** What the strip says of climbing when there is no profile to read it from (#3185). */
+export const NO_CLIMBING_TEXT = 'Not known';
+
+/** What the strip says while a leg is out to the routing engine (#3185). */
+export const ROUTING_TEXT = 'Routing…';
+
+/**
+ * The strip's figures, from the draft and the latest profile worked out for it.
+ *
+ * ⚠️ **"At least" wherever a figure is a floor, as the sentences below the
+ * map say it.** A freehand leg's length is a straight line, and a leg that
+ * failed adds nothing to the distance and stops the profile (`elevation.ts`
+ * §`plannedShape`), so both totals then cover part of the route. A profile
+ * with a hole in its dataset is a floor on its own (`elevationSentence`).
+ *
+ * ⚠️ **A leg still being routed says *Routing…* instead, and adds no "At
+ * least".** The strip sits directly above the map, so anything that changes
+ * its height moves the map under the rider's finger — the browser gate's
+ * #3134 drag, aimed at a waypoint, panned the map instead once a strip that
+ * arrived with the first leg had pushed the map down under it. A
+ * prefix that came and went with every routing answer would re-wrap the strip
+ * on a phone twice per edit; *Routing…* has a slot of its own that is always
+ * there (`theme.css` §`.oyl-planner__routing`).
+ */
+export function routeSummary(
+  draft: RouteDraft,
+  planned: PlannedElevation | undefined,
+  units: UnitSystem,
+): RouteSummary {
+  const partial = draft.legs.some((leg) => leg.state === 'failed');
+  const freehand = draft.legs.some((leg) => leg.mode === 'freehand');
+  const distance = measurementText(formatDistance(draftDistance(draft), units));
+  const climbing =
+    planned === undefined
+      ? NO_CLIMBING_TEXT
+      : `${partial || !planned.coverage.complete ? 'At least ' : ''}${measurementText(formatSmallDistance(planned.profile.totalAscent, units))}`;
+  return {
+    distance: `${partial || freehand ? 'At least ' : ''}${distance}`,
+    climbing,
+    routing: draft.legs.some((leg) => leg.state === 'pending'),
+  };
 }
 
 function overlapsGap(planned: PlannedElevation, from: number, to: number): boolean {

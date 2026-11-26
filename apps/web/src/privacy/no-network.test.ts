@@ -123,6 +123,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
+import { readTerrainConfig } from '../terrain/config';
 import { stripComments } from '../units/no-inline-units';
 import { ERASE_ACCOUNT_TEXT } from '../views/erase-account-text';
 import { CHANGE_NAME_TEXT } from '../views/instance-name-text';
@@ -416,6 +417,17 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` say
   // what it sends.
   { module: join('world-data', 'corridor-source.ts'), primitive: 'fetch', count: 1 },
+  // #2013, ADR 0087 D-2.3: a drawn route's heights, read from the configured
+  // terrain archive — byte ranges of one file on the basemap's own host, at
+  // zoom 12. Its OWN `fetch`, never `pmtiles`' `FetchSource`, for the corridor
+  // read's reason: a request made inside a dependency is one this scan cannot
+  // see. Not instance traffic: a rider with no instance reads heights, and
+  // ADR 0036 D-3 (a)'s one instance module is untouched.
+  // `privacy/boundaries.test.ts` declares it departing, and
+  // `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` say
+  // what it sends. §"the terrain archive is disclosed" at the foot of this
+  // file holds its default to the host those two name.
+  { module: join('terrain', 'terrain-source.ts'), primitive: 'fetch', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -505,12 +517,18 @@ describe('the narrowed gate itself — #387', () => {
     path: CORRIDOR,
     source: 'response = await fetch(url, { headers, credentials: "omit" });',
   };
+  // #2013, ADR 0087 D-2.3: the heights read's range requests, made the same way.
+  const TERRAIN = join('terrain', 'terrain-source.ts');
+  const terrain: ScannedFile = {
+    path: TERRAIN,
+    source: 'response = await fetch(url, { headers, credentials: "omit" });',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
     expect(
       networkFindingsOutside(
-        [corridor, instance, transport, link, quiet, fence],
+        [terrain, corridor, instance, transport, link, quiet, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toEqual([]);
@@ -524,7 +542,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, link, elsewhere, fence],
+      [terrain, corridor, instance, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -539,7 +557,7 @@ describe('the narrowed gate itself — #387', () => {
     };
     expect(
       networkFindingsOutside(
-        [corridor, instance, transport, link, sibling, fence],
+        [terrain, corridor, instance, transport, link, sibling, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toHaveLength(1);
@@ -551,7 +569,10 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     expect(
-      networkFindingsOutside([corridor, instance, twice, link, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside(
+        [terrain, corridor, instance, twice, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      ),
     ).toHaveLength(1);
   });
 
@@ -561,7 +582,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, socket, link, fence],
+      [terrain, corridor, instance, socket, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -571,7 +592,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [corridor, instance, emptied, link, fence],
+      [terrain, corridor, instance, emptied, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -586,7 +607,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, twice, fence],
+      [terrain, corridor, instance, transport, twice, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -599,7 +620,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, fetched, fence],
+      [terrain, corridor, instance, transport, fetched, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -612,7 +633,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, link, elsewhere, fence],
+      [terrain, corridor, instance, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -623,7 +644,7 @@ describe('the narrowed gate itself — #387', () => {
   // a red run.
   it('goes red when the pose worker’s fence is gone', () => {
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, link],
+      [terrain, corridor, instance, transport, link],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -636,7 +657,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const request = new XMLHttpRequest();',
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, link, fence, elsewhere],
+      [terrain, corridor, instance, transport, link, fence, elsewhere],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -656,7 +677,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const send = options.send ?? (async (url, init) => fetch(url, init));',
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, link, fence, back],
+      [terrain, corridor, instance, transport, link, fence, back],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -670,6 +691,7 @@ describe('the narrowed gate itself — #387', () => {
         join('camera', 'pose-fence.ts'),
         join('camera', 'side-link-transport.ts'),
         join('instance', 'instance-transport.ts'),
+        join('terrain', 'terrain-source.ts'),
         join('world-data', 'corridor-source.ts'),
       ].sort(),
     );
@@ -678,7 +700,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
     const findings = networkFindingsOutside(
-      [corridor, instance, transport, emptied, fence],
+      [terrain, corridor, instance, transport, emptied, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -693,7 +715,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [corridor, twice, transport, link, fence],
+      [terrain, corridor, twice, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -706,7 +728,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new EventSource('https://ride.example/v1/events');`,
     };
     const findings = networkFindingsOutside(
-      [corridor, source, transport, link, fence],
+      [terrain, corridor, source, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -721,7 +743,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new WebSocket('wss://ride.example/elsewhere');`,
     };
     const findings = networkFindingsOutside(
-      [corridor, twice, transport, link, fence],
+      [terrain, corridor, twice, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('2 WebSocket')]);
@@ -736,7 +758,7 @@ describe('the narrowed gate itself — #387', () => {
     ]) {
       const elsewhere: ScannedFile = { path, source: 'const socket = new WebSocket(url);' };
       const findings = networkFindingsOutside(
-        [corridor, instance, elsewhere, transport, link, fence],
+        [terrain, corridor, instance, elsewhere, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, path).toEqual([expect.stringContaining(path)]);
@@ -752,7 +774,7 @@ describe('the narrowed gate itself — #387', () => {
       const path = join('net', 'room-port.ts');
       const elsewhere: ScannedFile = { path, source };
       const findings = networkFindingsOutside(
-        [corridor, instance, elsewhere, transport, link, fence],
+        [terrain, corridor, instance, elsewhere, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, source).toEqual([expect.stringContaining(path)]);
@@ -765,7 +787,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
     };
     const findings = networkFindingsOutside(
-      [corridor, emptied, transport, link, fence],
+      [terrain, corridor, emptied, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('0 WebSocket')]);
@@ -777,7 +799,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender = send;\nconst socket = new WebSocket(url);',
     };
     const findings = networkFindingsOutside(
-      [corridor, emptied, transport, link, fence],
+      [terrain, corridor, emptied, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -791,7 +813,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "void fetch('https://ride.example/v1/auth/session');",
     };
     const findings = networkFindingsOutside(
-      [corridor, instance, sibling, transport, link, fence],
+      [terrain, corridor, instance, sibling, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -804,7 +826,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${corridor.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [twice, instance, transport, link, fence],
+      [terrain, twice, instance, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -817,7 +839,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${corridor.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [socket, instance, transport, link, fence],
+      [terrain, socket, instance, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -827,7 +849,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the corridor read’s fetch is gone', () => {
     const emptied: ScannedFile = { path: CORRIDOR, source: 'const source = new FetchSource(url);' };
     const findings = networkFindingsOutside(
-      [emptied, instance, transport, link, fence],
+      [terrain, emptied, instance, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -842,7 +864,57 @@ describe('the narrowed gate itself — #387', () => {
     ]) {
       const beside: ScannedFile = { path, source: 'void fetch(url);' };
       const findings = networkFindingsOutside(
-        [corridor, beside, instance, transport, link, fence],
+        [terrain, corridor, beside, instance, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, path).toHaveLength(1);
+      expect(findings[0]).toContain(path);
+    }
+  });
+  // #2013: the heights read's three, as the corridor read's.
+  it('goes red for a second fetch inside the heights read', () => {
+    const twice: ScannedFile = {
+      path: TERRAIN,
+      source: `${terrain.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, corridor, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(TERRAIN);
+    expect(findings[0]).toContain('2 fetch');
+  });
+
+  it('goes red for a different primitive inside the heights read', () => {
+    const socket: ScannedFile = {
+      path: TERRAIN,
+      source: `${terrain.source}\nconst s = new WebSocket(url);`,
+    };
+    const findings = networkFindingsOutside(
+      [socket, corridor, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the heights read’s fetch is gone', () => {
+    const emptied: ScannedFile = { path: TERRAIN, source: 'const source = new FetchSource(url);' };
+    const findings = networkFindingsOutside(
+      [emptied, corridor, instance, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(TERRAIN);
+    expect(findings[0]).toContain('0 fetch');
+  });
+
+  it('goes red for a fetch beside the heights read', () => {
+    for (const path of [join('terrain', 'route-heights.ts'), join('terrain', 'decode.ts')]) {
+      const beside: ScannedFile = { path, source: 'void fetch(url);' };
+      const findings = networkFindingsOutside(
+        [terrain, corridor, beside, instance, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, path).toHaveLength(1);
@@ -873,8 +945,8 @@ describe('a side-camera picture goes to an instance through the one instance mod
     source: readFileSync(join(SOURCE_ROOT, path), 'utf8'),
   });
 
-  it('gave the picture path no permit: the list is the six entries it is (#1539 added the corridor read, #1103 took the device’s hosted transport away), one module for instance traffic', () => {
-    expect(PERMITTED_NETWORK_CALLS).toHaveLength(6);
+  it('gave the picture path no permit: the list is the seven entries it is (#1539 added the corridor read, #2013 the heights read, #1103 took the device’s hosted transport away), one module for instance traffic', () => {
+    expect(PERMITTED_NETWORK_CALLS).toHaveLength(7);
     const modules = PERMITTED_NETWORK_CALLS.map((entry) => entry.module);
     expect(modules).not.toContain(PICTURE_PATH);
     expect(modules).not.toContain(SERVICE_READER);
@@ -1451,6 +1523,18 @@ describe('nothing claims the tile host keeps nothing — #558', () => {
     expect(findings).toStrictEqual([]);
   });
 
+  it('keeps the README’s Privacy section from claiming nothing leaves the device (#3192)', () => {
+    // The README overclaimed the other way once: "Nothing is collected" and "except to an
+    // instance" read as the only exception, while the app's own code fetches map data from the
+    // tile host and Cloudflare keeps the request for 7 days. The section must say so.
+    const readme = readFileSync(join(REPOSITORY_ROOT, 'README.md'), 'utf8');
+    const section = policySection(readme, 'Privacy').replace(/\s+/g, ' ');
+    expect(section).not.toContain('Nothing is collected');
+    expect(section).toContain('tiles.openzigs.com');
+    expect(section).toContain('Cloudflare');
+    expect(section).toContain('7 days');
+  });
+
   it('would find one wrapped across lines and emphasised — the rule is not vacuous', () => {
     // The shape #535 shipped in the policy: Markdown, hard-wrapped mid-phrase.
     expect(
@@ -1936,4 +2020,94 @@ describe('re-plans during a ride are disclosed, in each place a rider reads — 
       expect(faults.every((fault) => fault.startsWith(`${heading}: `))).toBe(true);
     },
   );
+});
+
+/**
+ * **The terrain archive is disclosed — #2013.**
+ *
+ * A drawn route's heights are a second kind of request to the tile host, made
+ * by this app's own code (`terrain/terrain-source.ts`), for a second file. The
+ * policy and the Play answer say so in the same pull request as the read, as
+ * #1539's did (ADR 0054 D-6.5), and each is checked on its own.
+ *
+ * ⚠️ **The default must be on the host those two name.** The basemap's
+ * disclosure is tied to its host by §"the default basemap is disclosed"; the
+ * terrain's default is a constant of its own, and a constant moved to another
+ * host would send every rider's height reads somewhere neither document
+ * names, with every case above still green.
+ */
+describe('the terrain archive is disclosed — #2013', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const basemap = readBasemapConfig({});
+  const terrain = readTerrainConfig({});
+
+  it('has a default, on the one host the basemap’s default is on', () => {
+    expect(terrain).toBeDefined();
+    expect(basemap).toBeDefined();
+    expect(new URL(terrain!.archiveUrl).origin).toBe(basemapOrigin(basemap!));
+  });
+
+  it('is described in the policy: what is asked for, how coarse it is, and how to turn it off', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving, 'the policy does not describe a drawn route’s height read').toContain(
+      'your device requests the heights of the ground along the line from tiles.openzigs.com',
+    );
+    expect(leaving).toContain('a second static file there, a terrain archive');
+    expect(leaving).toContain('about 7.5 to 9 km across');
+    expect(leaving).toContain(
+      'it reads near your privacy zones the same way as anywhere else, so the requests do not show where a zone is',
+    );
+    expect(leaving).toContain('with map tiles off the app requests no heights');
+    expect(normalised(policySection(policy, 'The short version'))).toContain(
+      'requests the heights of the ground along the line from the same host',
+    );
+  });
+
+  it('is named in the Location row’s `why`', () => {
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'Drawing or redrawing a route requests the heights of the ground along the line from the same host, as byte ranges of a second file there, the terrain archive',
+    );
+    expect(why).toContain('near the rider’s privacy zones too (#2013)');
+  });
+
+  it('says an open-world ride reads the ground’s heights as it goes, in the policy and the Play answer — #2899', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving).toContain(
+      'it reads the heights of the ground the same way, so the road has its real climbs: from the terrain archive on the same host, it requests the one to four squares, each about 7.5 to 9 km across, that hold those blocks',
+    );
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'An open-world ride reads the heights of the ground the same way, from the terrain archive on the same host, in squares about 7.5 to 9 km across (#2899)',
+    );
+  });
+
+  it('is read by a module that holds no URL of its own, built in main.tsx from the configuration', () => {
+    const read = (path: string): string =>
+      stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8'));
+    const reader = read(join('terrain', 'terrain-source.ts'));
+    expect(reader).not.toMatch(/['"`]https?:/);
+    expect(reader).toMatch(/terrainRangeSource\(config\.archiveUrl\)/);
+    const lazy = read(join('terrain', 'heights.ts'));
+    expect(lazy).toMatch(/source\.terrainArchive\(options\.config\)/);
+    const main = read('main.tsx');
+    const builder = main.slice(
+      main.indexOf('function buildRouteHeights('),
+      main.indexOf('function buildEffortPort('),
+    );
+    expect(builder).toMatch(/const config = browserTerrainConfig\(\);/);
+    expect(builder).toMatch(/mapTilesOn: \(\) => readMapTilesChoice\(deviceStorage\(\)\)/);
+  });
 });

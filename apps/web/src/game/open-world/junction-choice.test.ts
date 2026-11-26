@@ -23,7 +23,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { distanceBetween, RollingRoute } from '@onyourleft/domain';
+import { distanceBetween, JUNCTION_LOCK_METRES, RollingRoute } from '@onyourleft/domain';
 import { gridGraph } from '@onyourleft/domain/rolling-testing';
 
 import { startSteer, steerIntentOfKey, steerToward } from '../lanes';
@@ -32,6 +32,7 @@ import {
   createJunctionChoice,
   JUNCTION_PROMPT_METRES,
   pressesOfWays,
+  TURN_NOTICE_SECONDS,
   TURN_PRESSES,
   WAY_PRESSES,
 } from './junction-choice';
@@ -318,9 +319,12 @@ describe('a press after the lock changes nothing (ADR 0088 D-1.5, ADR 0087 D-6.2
     const plain = newRide();
     const late = newRide();
     const junction = theJunction(late.route);
-    for (const rider of [junction.distance - 100, junction.distance - 99, junction.distance - 10]) {
+    // #3129: nearer than 75 m the prompt, and so a press, is for the junction
+    // after this one, which is then within 250 m and not yet final.
+    for (const rider of [junction.distance - 100, junction.distance - 99, junction.distance - 75]) {
       plain.route.advance(rider);
       late.route.advance(rider);
+      expect(late.choice.prompt(rider)?.distance).toBe(junction.distance);
       late.choice.press('left', rider);
       expect(late.choice.prompt(rider)?.chosen).toBe(junction.defaultWay);
     }
@@ -367,12 +371,68 @@ describe('turning round (ADR 0088 D-1.6, D-1.7)', () => {
     const street = lone.edgesFrom('0,0')[0];
     if (street === undefined) throw new Error('no street');
     const route = new RollingRoute(lone, street);
-    const choice = createJunctionChoice(route);
+    const choice = createJunctionChoice(route, () => 0);
     expect(route.legs[1]?.kind).toBe('turn-round');
     expect(choice.prompt(0)).toBeUndefined();
     const out = readAt(route, 300 - 40).position;
     const back = readAt(route, 300 + 40).position;
     expect(distanceBetween(out, back)).toBeLessThan(0.01);
+  });
+});
+
+describe('what a turn says, and a second U-turn press — #3058', () => {
+  it('stands Turning round for its time after a U-turn, and a second press inside it turns nothing', () => {
+    let now = 10;
+    const { route } = newRide();
+    const choice = createJunctionChoice(route, () => now);
+    route.advance(300);
+    expect(choice.notice(300)).toBeUndefined();
+    choice.press('u-turn', 300);
+    expect(choice.notice(300)).toEqual({ kind: 'turning-round', since: 10 });
+    // A double tap: the second press is harmless.
+    now = 10 + TURN_NOTICE_SECONDS - 0.1;
+    choice.press('u-turn', 301);
+    expect(route.uTurns).toBe(1);
+    // Its time over, the notice goes and a press turns the rider round again.
+    now = 10 + TURN_NOTICE_SECONDS;
+    expect(choice.notice(302)).toBeUndefined();
+    choice.press('u-turn', 302);
+    expect(route.uTurns).toBe(2);
+    expect(choice.notice(302)).toEqual({ kind: 'turning-round', since: now });
+  });
+
+  it('stands No junction yet for a way pressed with no junction near, and chooses nothing', () => {
+    const { route } = newRide();
+    const choice = createJunctionChoice(route, () => 5);
+    const junction = theJunction(route);
+    const rider = junction.distance - JUNCTION_PROMPT_METRES - 5;
+    const legs = route.legs;
+    for (const press of WAY_PRESSES) {
+      choice.press(press, rider);
+      expect(choice.notice(rider), press).toEqual({ kind: 'no-junction', since: 5 });
+    }
+    expect(route.legs).toEqual(legs);
+    // Within reach of a junction, a press chooses and begins no notice.
+    const near = createJunctionChoice(route, () => 5);
+    near.press('left', junction.distance - 200);
+    expect(near.notice(junction.distance - 200)).toBeUndefined();
+  });
+
+  it('stands Dead end once the rider passes where a dead end turns them round, and not before', () => {
+    let now = 0;
+    const lone = gridGraph([0, 300], [0], undefined).graph;
+    const street = lone.edgesFrom('0,0')[0];
+    if (street === undefined) throw new Error('no street');
+    const route = new RollingRoute(lone, street);
+    const choice = createJunctionChoice(route, () => now);
+    expect(choice.notice(0)).toBeUndefined();
+    now = 25;
+    expect(choice.notice(299)).toBeUndefined();
+    now = 26;
+    expect(choice.notice(301)).toEqual({ kind: 'dead-end', since: 26 });
+    // Passed once: reading on past it begins nothing new, and it goes in its time.
+    now = 26 + TURN_NOTICE_SECONDS;
+    expect(choice.notice(320)).toBeUndefined();
   });
 });
 
@@ -417,12 +477,168 @@ describe('the behavioural ride: the grade comes from the road ridden, never from
     const late = rideTrace(DURATION, ({ route, choice }, rider) => {
       const junction = theJunction(route);
       const toGo = junction.distance - rider;
-      if (toGo <= 100 && toGo > 0) {
+      // #3129: only while the prompt is for this junction. Nearer, it is for
+      // the next one, not yet final, where a press does choose.
+      if (toGo <= 100 && toGo > 0 && choice.prompt(rider)?.distance === junction.distance) {
         choice.press('left', rider);
         pressed += 1;
       }
     });
     expect(pressed).toBeGreaterThan(0);
     expect(late.grades).toEqual(plain.grades);
+  });
+});
+
+describe('a town of blocks under 100 m: the first junction not yet final is offered — #3129, ADR 0088 D-1.2 as amended', () => {
+  /** Blocks of 60 to 90 m along row 1, after a first block of 300 m. */
+  const DENSE = [0, 300, 360, 430, 510, 600, 900, 1_200];
+
+  function denseRide() {
+    const { graph } = gridGraph(DENSE, [0, 230, 460], undefined, 1);
+    const start = graph.edgesFrom('0,1').find((edge) => edge.id === 'h0,1');
+    if (start === undefined) throw new Error('no start street');
+    const route = new RollingRoute(graph, start);
+    const choice = createJunctionChoice(route, () => 0);
+    const junctions = route.junctionsAfter(0).map((junction) => junction.distance);
+    return { route, choice, junctions };
+  }
+
+  it('offers every junction before its choice is final, and says which junction ahead it is', () => {
+    const { route, choice, junctions } = denseRide();
+    const dense = junctions.slice(0, 5);
+    expect(dense.length).toBe(5);
+    const offered = new Set<number>();
+    let last = Number.NEGATIVE_INFINITY;
+    for (let rider = 0; rider < (dense[4] as number); rider += 1) {
+      route.advance(rider);
+      const shown = choice.prompt(rider);
+      if (shown === undefined) continue;
+      // Never steps back to a junction it has left.
+      expect(shown.distance).toBeGreaterThanOrEqual(last);
+      last = shown.distance;
+      // Which junction ahead it is: one more than the junctions between.
+      const between = junctions.filter((at) => at > rider && at < shown.distance).length;
+      expect(shown.ordinal, `at ${rider} m`).toBe(between + 1);
+      if (!shown.locked) {
+        offered.add(shown.distance);
+        expect(shown.ways.length).toBe(3);
+        expect(shown.tooClose).toBe(false);
+      }
+    }
+    expect([...offered]).toEqual(dense);
+  });
+
+  it('shows the next junction while its choice is not final, and the one after once it is', () => {
+    const { route, choice, junctions } = denseRide();
+    const [first, second] = junctions as [number, number];
+    route.advance(first - 101);
+    expect(choice.prompt(first - 101)?.distance).toBe(first);
+    expect(choice.prompt(first - 101)?.ordinal).toBe(1);
+    route.advance(first - 100);
+    const after = choice.prompt(first - 100);
+    expect(after?.distance).toBe(second);
+    expect(after?.ordinal).toBe(2);
+    expect(after?.locked).toBe(false);
+  });
+
+  it('a press while the 2nd junction is shown chooses there, and changes nothing at the 1st or before it', () => {
+    const plain = denseRide();
+    const pressed = denseRide();
+    const [first, second] = pressed.junctions as [number, number];
+    const rider = first - 50;
+    plain.route.advance(rider);
+    pressed.route.advance(rider);
+    expect(pressed.choice.prompt(rider)?.distance).toBe(second);
+    pressed.choice.press('left', rider);
+    const at = (route: RollingRoute) => route.junctionsAfter(rider);
+    expect(at(pressed.route)[0]?.taken).toBe(at(plain.route)[0]?.taken);
+    expect(at(pressed.route)[1]?.taken).toBe(at(pressed.route)[1]?.ways[0]?.edge.id);
+    expect(at(pressed.route)[1]?.taken).not.toBe(at(plain.route)[1]?.taken);
+    // Read back through the grade: nothing moved that reads no further than
+    // the 2nd junction (ADR 0087 D-6.1: the grade at `s` reads to `s + 80 m`).
+    for (let on = rider - 100; on <= second - JUNCTION_LOCK_METRES; on += 10) {
+      expect(readAt(pressed.route, on).grade, `grade at ${on} m`).toBe(
+        readAt(plain.route, on).grade,
+      );
+    }
+  });
+
+  it('stays on the junction last shown once its choice is final too, with none not final within reach', () => {
+    const { route, choice, junctions } = denseRide();
+    const fifth = junctions[4] as number;
+    const sixth = junctions[5] as number;
+    expect(sixth - fifth).toBeGreaterThan(JUNCTION_PROMPT_METRES - JUNCTION_LOCK_METRES);
+    // Inside the 5th's lock, with the 4th still ahead and the 6th out of reach.
+    const rider = fifth - 95;
+    expect((junctions[3] as number) > rider).toBe(true);
+    for (let at = 0; at < rider; at += 5) {
+      route.advance(at);
+      choice.prompt(at);
+    }
+    route.advance(rider);
+    const shown = choice.prompt(rider);
+
+    expect(shown?.distance).toBe(fifth);
+    expect(shown?.ordinal).toBe(2);
+    expect(shown?.locked).toBe(true);
+    expect(shown?.tooClose).toBe(false);
+  });
+});
+
+describe('too close to the last junction to choose — #3129, the owner’s Q4 ruling', () => {
+  it('is said of a junction whose choice was final on the first frame it was prompted', () => {
+    const { route, choice } = newRide();
+    const junction = theJunction(route);
+    route.advance(junction.distance - 150);
+    choice.press('right', junction.distance - 150);
+    const rider = junction.distance + 60;
+    route.advance(rider);
+    choice.press('u-turn', rider);
+    const shown = choice.prompt(rider);
+    expect(shown?.locked).toBe(true);
+    expect(shown?.tooClose).toBe(true);
+    // And still, frame after frame, until it is passed.
+    expect(choice.prompt(rider + 30)?.tooClose).toBe(true);
+  });
+
+  it('is not said of a junction that was offered before its choice became final', () => {
+    const { route, choice } = newRide();
+    const junction = theJunction(route);
+    for (let rider = junction.distance - 250; rider < junction.distance - 75; rider += 5) {
+      route.advance(rider);
+      const shown = choice.prompt(rider);
+      expect(shown?.distance).toBe(junction.distance);
+      expect(shown?.tooClose, `at ${rider} m`).toBe(false);
+    }
+    expect(choice.prompt(junction.distance - 80)?.locked).toBe(true);
+  });
+});
+
+describe('a U-turn just past a junction rides back onto the street came along — #3129, ADR 0088 as amended', () => {
+  it('within the lock, the junction ridden back to takes the way back by default, and no press changes it', () => {
+    const { route, choice } = newRide();
+    const junction = theJunction(route);
+    const cameAlong = route.legs.find((leg) => leg.end === junction.distance)?.edge.id;
+    route.advance(junction.distance - 150);
+    choice.press('right', junction.distance - 150);
+    const rider = junction.distance + 60;
+    route.advance(rider);
+    choice.press('u-turn', rider);
+    const shown = choice.prompt(rider);
+    expect(shown?.chosen).toBe(cameAlong);
+    expect(shown?.defaultWay).toBe(cameAlong);
+    choice.press('left', rider + 5);
+    choice.press('straight', rider + 5);
+    expect(choice.prompt(rider + 5)?.chosen).toBe(cameAlong);
+    // Read back through the road ridden: past the junction, where the rider was before it.
+    const back = shown?.distance as number;
+    for (const on of [20, 80]) {
+      expect(
+        distanceBetween(
+          readAt(route, back + on).position,
+          readAt(route, junction.distance - on).position,
+        ),
+      ).toBeLessThan(0.5);
+    }
   });
 });

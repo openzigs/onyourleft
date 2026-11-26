@@ -288,7 +288,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         link, which left the app in the Android WebView
     src/demo/           the demo's scripted bot riders (#1646, epic #1643): authored
                         power, cadence and heart-rate scripts (`script.ts`), three
-                        presets (`presets.ts`: climb, sprint, group) and a runner
+                        presets (`presets.ts`: climb, sprint, group, hill) and a runner
                         that moves every rider through physics' own `advance`
                         (`runner.ts`). Pure, no DOM. ⚠️ AUTHORED, never derived from a
                         recorded ride (ADR 0007 D4): `SyntheticScript` fails

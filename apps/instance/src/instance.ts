@@ -46,6 +46,8 @@ import {
 import type { ModelConnection } from './analysis/model-turn.ts';
 import { hostedForPictures, SIDE_POSE_PICTURE_QUESTION } from './camera/hosted-pictures.ts';
 import { createSidePose } from './camera/side-pose.ts';
+import { createRouting, type InstanceRouting } from './routing/routing.ts';
+import { createValhalla } from './routing/valhalla.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
@@ -345,6 +347,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let hostedSettings: HostedSettings | undefined;
   let tactics: Tactics | undefined;
   let sidePose: SidePose | undefined;
+  let routing: InstanceRouting | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
@@ -679,6 +682,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         ? { state: 'on' }
         : { state: 'off', code: options.config.pictures.code },
     );
+    // The routing engine (#2008): off unless the operator named one. Never its address.
+    logEvent(
+      log,
+      'routing',
+      options.config.routing.kind === 'on'
+        ? { state: 'on' }
+        : { state: 'off', code: options.config.routing.code },
+    );
     // The hosted model key (#1097): whether one is held, and whether this
     // secret opens it. A key that will not open — a restore onto a box with
     // another secret — is SAID, never a crash: the hosted source is then
@@ -988,6 +999,21 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
       });
       sidePose = looks;
+      // #2008: the route planner's roads and heights, from the routing engine
+      // the operator named. With none, every request is `routing_off` and the
+      // rider's planner draws straight lines. Handed no store: nothing is kept.
+      const routingSettings = options.config.routing;
+      routing = createRouting({
+        engine:
+          routingSettings.kind === 'on'
+            ? createValhalla({
+                endpoint: routingSettings.endpoint,
+                resolve: options.resolve ?? systemResolver,
+              })
+            : undefined,
+        log,
+        now,
+      });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
@@ -1218,6 +1244,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
             ...(tactics === undefined ? {} : { tactics }),
             ...(sidePose === undefined ? {} : { sidePose }),
+            ...(routing === undefined ? {} : { routing }),
           }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).

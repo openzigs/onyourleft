@@ -130,6 +130,8 @@ function alongside(path: PathFeature): boolean {
 const READ = 1;
 const RIGHT = 2;
 const LEFT = 4;
+/** That a place's code has been worked out: its other bits are then its answer. @see pavementSides */
+const KNOWN = 8;
 
 /** The side of a code. */
 function sideOf(code: number): PavementSide {
@@ -257,15 +259,15 @@ export function pavementSides(
   }
   const cached = byProfile.get(profile);
   if (cached !== undefined) return cached;
-  const grid = segmentGrid(corridor.paths);
   const length: number = profile.totalDistance;
   const count = Math.max(1, Math.floor(length / PAVEMENT_SIDES_STEP_METRES) + 1);
+  // #3107: each place's code is worked out the first time it is asked for, and
+  // kept. Worked out for the whole road at once, every view of an open-world
+  // ride's road, and of each way out of each junction, read its whole length
+  // against the corridor on the frame it appeared; a frame asks for the
+  // stretch in view. The answer at a place is the same either way.
   const codes = new Uint8Array(count);
-  for (let index = 0; index < count; index += 1) {
-    const frame = drawnRoadFrame(profile, origin, index * PAVEMENT_SIDES_STEP_METRES);
-    if (frame === undefined || !corridor.covered(frame.x, frame.z)) continue;
-    codes[index] = READ | sidesHere(grid, frame.x, frame.z, frame.normalX, frame.normalZ);
-  }
+  let grid: ReturnType<typeof segmentGrid> | undefined;
   const sides: PavementSides = {
     sideAt(along) {
       const wrapped: number = distanceOnRoute(profile, along);
@@ -273,7 +275,17 @@ export function pavementSides(
         count - 1,
         Math.max(0, Math.round(wrapped / PAVEMENT_SIDES_STEP_METRES)),
       );
-      return sideOf(codes[index] ?? 0);
+      let code = codes[index] ?? 0;
+      if ((code & KNOWN) === 0) {
+        code = KNOWN;
+        const frame = drawnRoadFrame(profile, origin, index * PAVEMENT_SIDES_STEP_METRES);
+        if (frame !== undefined && corridor.covered(frame.x, frame.z)) {
+          grid ??= segmentGrid(corridor.paths);
+          code |= READ | sidesHere(grid, frame.x, frame.z, frame.normalX, frame.normalZ);
+        }
+        codes[index] = code;
+      }
+      return sideOf(code);
     },
   };
   byProfile.set(profile, sides);

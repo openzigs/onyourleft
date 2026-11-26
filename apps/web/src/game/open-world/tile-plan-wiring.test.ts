@@ -15,6 +15,7 @@
  * its worker, is red here.
  */
 
+import { columnAtLongitude, rowAtLatitude, type TileId } from '@onyourleft/map-features';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { corridorArchiveFrom } from '../../world-data/corridor-source';
@@ -28,13 +29,14 @@ import {
   START_ROW,
 } from './fixture-testing';
 import { graphWorkerCore } from './graph-build';
-import { createOpenWorldSession } from './session';
+import { createOpenWorldSession, TILE_ASK_METRES } from './session';
 import { openWorldStreetCorridor } from './street-corridor';
-import type { TileBlockFeatures } from './tile-plan';
+import { planTile, type TileBlockFeatures, type TilePlan } from './tile-plan';
 import {
   createTilePlanner,
   describeTilePlanFailure,
   tilePlanWorkerCore,
+  type TilePlanner,
   type TilePlanRequest,
 } from './tile-planner';
 
@@ -95,6 +97,9 @@ function stubWorkers(options: { tileWorkerErrors?: boolean } = {}): Made[] {
 async function openRide(
   log?: (line: string) => void,
   held?: ReadonlyMap<string, TileBlockFeatures>[],
+  wrap?: (planner: TilePlanner) => TilePlanner,
+  /** #3105: plans the planner holds beside its own, as if a tile of the map had held them. */
+  beside?: () => readonly TilePlan[],
 ) {
   const archive = corridorArchiveFrom(countingSource(await openWorldFixtureArchive()));
   const session = createOpenWorldSession({
@@ -104,7 +109,8 @@ async function openRide(
     yieldToIdle: () => Promise.resolve(),
     random: () => 0,
     log,
-    // The real planner, with what each `hold` was handed recorded.
+    // The real planner, with what each `hold` was handed recorded, and
+    // wrapped where a case asks.
     tilePlanner: (options) => {
       const planner = createTilePlanner(options);
       const hold = planner.hold.bind(planner);
@@ -112,7 +118,11 @@ async function openRide(
         held?.push(blocks);
         hold(blocks);
       };
-      return planner;
+      if (beside !== undefined) {
+        const plans = planner.plans.bind(planner);
+        planner.plans = () => [...plans(), ...beside()][Symbol.iterator]();
+      }
+      return wrap === undefined ? planner : wrap(planner);
     },
   });
   const ready = await session.ready;
@@ -143,9 +153,10 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     );
     expect(plans.length).toBeGreaterThan(0);
     // #2902: once tiles are planned, the buildings round the rider are, and
-    // the road hands them on (the fixture's block has no footprints).
+    // the road hands them on (the fixture's block has no footprints) — at a
+    // standing start, with the rider not yet moved.
     expect(road.buildings()).toBeUndefined();
-    road.follow(30);
+    road.follow(0);
     await settle();
     const asked = (tiles[0]?.asked ?? []).map((each) => (each as TilePlanRequest).kind);
     expect(asked).toContain('buildings');
@@ -191,6 +202,91 @@ describe('the open-world session makes the tile planner’s worker — #2901', (
     // One corridor per change of what is held, and the road hands on the last.
     expect(built).toHaveBeenCalledTimes(changes.length);
     expect(road.streets()).toBe(built.mock.results.at(-1)?.value);
+    session.stop();
+  });
+
+  it('hands the road the planned tiles’ real water as one land mask — #3105', async () => {
+    stubWorkers();
+    // A tile of the session's own frame with a pond 100 m across on the start.
+    const start = fixtureStart(START_COLUMN, START_ROW).position;
+    const frame = { latitude: start.latitude, longitude: start.longitude };
+    const tile = {
+      z: 15 as const,
+      x: Math.floor(columnAtLongitude(start.longitude)),
+      y: Math.floor(rowAtLatitude(start.latitude)),
+    };
+    const pond = planTile(
+      frame,
+      {
+        buildings: [],
+        landUse: [
+          {
+            layer: 'water',
+            kind: 'pond',
+            rings: [Float32Array.from([-50, -50, 50, -50, 50, 50, -50, 50])],
+          },
+        ],
+        tiles: [{ tile, streets: [] }],
+      },
+      tile,
+      'reduced',
+    );
+    let beside: TilePlan[] = [];
+    const held: ReadonlyMap<string, TileBlockFeatures>[] = [];
+    const { session, road } = await openRide(undefined, held, undefined, () => beside);
+    // Every block is held with its water lines, which each tile plans its own of
+    // (`real-water.test.ts`); the fixture's map has none, and says so as a list.
+    expect(held.length).toBeGreaterThan(0);
+    for (const blocks of held) {
+      for (const features of blocks.values()) expect(features.waterLines).toStrictEqual([]);
+    }
+    // Before any tile is planned there is no water, and the road says so.
+    expect(road.water()).toBeUndefined();
+    beside = [pond];
+    road.follow(0);
+    await settle();
+    const mask = road.water();
+    expect(mask?.classAt(0, 0)).toBe('water');
+    expect(mask?.covered(0, 150)).toBe(true);
+    // The same object frame after frame, and after more tiles with no water are planned.
+    expect(road.water()).toBe(mask);
+    road.follow(30);
+    await settle();
+    expect(road.water()).toBe(mask);
+    session.stop();
+  });
+
+  it('hands the road no water mask where no tile planned holds water — #3105', async () => {
+    stubWorkers();
+    const { session, road } = await openRide();
+    road.follow(0);
+    await settle();
+    // Control: tiles were planned, and the fixture's map has no water on it.
+    expect(road.buildings()).toBeUndefined();
+    road.follow(30);
+    await settle();
+    expect(road.buildings()).toBeDefined();
+    expect(road.water()).toBeUndefined();
+    session.stop();
+  });
+
+  it('asks again once the rider has ridden on, so the tiles past the start are planned', async () => {
+    stubWorkers();
+    const wants: (readonly TileId[])[] = [];
+    const { session, road } = await openRide(undefined, undefined, (planner) => ({
+      ...planner,
+      want: (tiles) => {
+        wants.push(tiles);
+        planner.want(tiles);
+      },
+    }));
+    road.follow(0);
+    expect(wants).toHaveLength(1);
+    // Within TILE_ASK_METRES on the same view: the same answer, not asked again.
+    road.follow(TILE_ASK_METRES / 2);
+    expect(wants).toHaveLength(1);
+    road.follow(TILE_ASK_METRES * 2);
+    expect(wants).toHaveLength(2);
     session.stop();
   });
 

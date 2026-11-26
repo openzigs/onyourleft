@@ -22,13 +22,20 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   JUNCTION_LOCK_METRES,
   RollingRoute,
+  distanceBetween,
   metres,
+  type GeographicPosition,
   type RollingEdge,
   type RollingJunction,
   type RouteProfile,
 } from '@onyourleft/domain';
 import { gridGraph, roughGround, type SyntheticGround } from '@onyourleft/domain/rolling-testing';
 
+import {
+  JUNCTION_HEADING_METRES,
+  TURNED_JUNCTION_DEGREES,
+  junctionWayWidth,
+} from '../junction-surface';
 import { NO_LAND_CLASS, countrysideWithout } from '../land-class';
 import { ROAD_CLEARANCE_METRES, standingOnGround } from '../landform';
 import { distanceToDrawnRoad } from '../road-grid';
@@ -68,6 +75,7 @@ import {
   WAYS_OUT_LOOK_METRES,
   type OpenWorldWayOut,
 } from './road';
+import { TURNED_OFF_REACH_METRES } from '../way-roads';
 
 const COLUMNS = [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450];
 const ROWS = [0, 230, 400, 650, 820, 1_090, 1_280, 1_510, 1_700, 1_960, 2_150];
@@ -177,7 +185,8 @@ describe('the ways out of the junctions in view — #3051', () => {
     const first = junction.ways.filter((way) => way.edge.id !== junction.taken);
     // The grid's first crossroads is 140 m ahead: two ways not taken there.
     expect(first).toHaveLength(2);
-    const seed = sceneryAnchor(road.view.profile)?.seed;
+    // #3065: and the ride's elevation range, as the road's own view has it.
+    const { seed, band } = sceneryAnchor(road.view.profile) ?? {};
     for (const way of first) {
       // The view the choice gives, sample for sample.
       const { road: chosen } = grid();
@@ -194,10 +203,17 @@ describe('the ways out of the junctions in view — #3051', () => {
       expect(out.profile.positions.slice(0, count)).toEqual(swapped.positions.slice(0, count));
     }
     for (const out of ways) {
-      // The ride's seed and this view's origin, and the ride's frame; #3094:
-      // and the ride's held streets and the frame its places are read in.
+      // The ride's seed, elevation range and this view's origin, and the ride's
+      // frame; #3094: and the ride's held streets and the frame its places are
+      // read in.
       const { levels } = sceneryAnchor(road.view.profile) ?? {};
-      expect(sceneryAnchor(out.profile)).toEqual({ seed, origin: road.view.origin, levels, frame });
+      expect(sceneryAnchor(out.profile)).toEqual({
+        seed,
+        origin: road.view.origin,
+        levels,
+        frame,
+        band,
+      });
       expect(sceneryAnchor(out.profile)?.levels).toBe(levels);
       expect(corridorOrigin(out.profile)).toBe(frame);
     }
@@ -355,6 +371,175 @@ describe('the ways out of the junctions in view — #3051', () => {
     expect(turned.every((way) => way.fromMetres + road.view.origin > rider)).toBe(true);
     expect(road.waysOut(Number.NaN)).toHaveLength(0);
     expect(road.waysOut(Number.POSITIVE_INFINITY)).toHaveLength(0);
+  });
+
+  it('hands on a junction turned off at, with the way the route would have taken, until the fog is past it — #3123', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    // Ridden straight on, no junction is one turned off at.
+    expect(road.turnedOff(rider)).toHaveLength(0);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    const turned = road.turnedOff(rider);
+    expect(turned).toHaveLength(1);
+    const [only] = turned;
+    expect(only?.junction).toBe(junction.distance);
+    // Its way is the road the route left, on past the junction: the way out handed on for it.
+    const origin = road.view.origin;
+    expect(road.waysOut(rider)).toContain(only?.way);
+    const at = junction.distance + 40;
+    const way = only?.way;
+    if (way === undefined) throw new Error('no way');
+    expect(junction.ways.find((each) => each.edge.id === junction.defaultWay)?.edge.id).not.toBe(
+      other,
+    );
+    expect(placeOn(way.profile, origin, at)).not.toEqual(placeOn(road.view.profile, origin, at));
+    // The same array while nothing changes, through the junction and on.
+    expect(road.turnedOff(rider + 1)).toBe(turned);
+    for (const past of [junction.distance + 1, junction.distance + TURNED_OFF_REACH_METRES - 1]) {
+      road.follow(past);
+      expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toStrictEqual(
+        turned,
+      );
+    }
+    // Dropped once the rider is the reach past it.
+    const gone = junction.distance + TURNED_OFF_REACH_METRES + WAYS_OUT_LOOK_METRES + 1;
+    road.follow(gone);
+    expect(road.turnedOff(gone)).toHaveLength(0);
+    expect(road.turnedOff(Number.NaN)).toHaveLength(0);
+  });
+
+  it('drops a junction turned off at on a U-turn: the road under the rider changed — #3123', () => {
+    const { road } = grid();
+    const { junction, other } = nextJunction(road, 40);
+    expect(road.route.choose(junction.distance, other, 40)).toBe('swapped');
+    road.follow(40);
+    expect(road.turnedOff(40)).toHaveLength(1);
+    const rider = junction.distance + 30;
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(1);
+    road.route.uTurn(rider);
+    expect(road.follow(rider)?.turned).toBe(true);
+    expect(road.turnedOff(rider)).toHaveLength(0);
+  });
+
+  it('drops a junction turned off at when the turn is undone before the lock, and through the junction on — #3123', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    const straight = junction.defaultWay;
+    expect(junction.distance - rider).toBeGreaterThan(JUNCTION_LOCK_METRES);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(1);
+    // A straight press before the lock takes the road on again: nothing was turned off.
+    expect(road.route.choose(junction.distance, straight, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(road.turnedOff(rider)).toHaveLength(0);
+    // And it stays so as the rider rides through the junction and on.
+    for (const past of [junction.distance + 1, junction.distance + 100]) {
+      road.follow(past);
+      expect(road.turnedOff(past), `${String(past - junction.distance)} m past`).toHaveLength(0);
+    }
+  });
+
+  it('hands on a junction the route is turned through, with its node and every way on, until the fog is past it — #3133', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    // Ridden straight on, it is not one.
+    expect(road.junctionsTurned(rider).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    const turned = road.junctionsTurned(rider);
+    const found = turned.find((each) => each.junction === junction.distance);
+    if (found === undefined) throw new Error('not handed on');
+    const taken = junction.ways.find((way) => way.edge.id === other);
+    if (taken === undefined) throw new Error('no such way');
+    expect(Math.abs(taken.turnDegrees)).toBeGreaterThanOrEqual(TURNED_JUNCTION_DEGREES);
+    // Its node is where every way on leaves, and each way is read along its own street.
+    expect(found.position).toEqual(taken.edge.points[0]?.position);
+    const along = (toward: GeographicPosition, way: RollingJunction['ways'][number]): boolean =>
+      way.edge.points.some((point) => point.position === toward);
+    expect(along(found.taken.toward, taken)).toBe(true);
+    expect(found.taken.width).toBe(junctionWayWidth(taken.edge.roadClass));
+    const others = junction.ways.filter((way) => way.edge.id !== other);
+    expect(found.ways).toHaveLength(others.length);
+    found.ways.forEach((way, index) => {
+      const street = others[index] as RollingJunction['ways'][number];
+      expect(along(way.toward, street)).toBe(true);
+      expect(way.width).toBe(junctionWayWidth(street.edge.roadClass));
+      // Read far enough along to give the street's heading past the corner, or at its end.
+      expect(
+        (distanceBetween(found.position, way.toward) as number) >= JUNCTION_HEADING_METRES ||
+          way.toward === street.edge.points.at(-1)?.position,
+      ).toBe(true);
+    });
+    // The same array while nothing changes, through the junction and on.
+    expect(road.junctionsTurned(rider + 1)).toBe(turned);
+    for (const past of [junction.distance + 1, junction.distance + TURNED_OFF_REACH_METRES - 1]) {
+      road.follow(past);
+      expect(
+        road.junctionsTurned(past).find((each) => each.junction === junction.distance),
+        `${String(past - junction.distance)} m past`,
+      ).toBe(found);
+    }
+    // Dropped once the rider is the reach past it.
+    const gone = junction.distance + TURNED_OFF_REACH_METRES + WAYS_OUT_LOOK_METRES + 1;
+    road.follow(gone);
+    expect(road.junctionsTurned(gone).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
+    expect(road.junctionsTurned(Number.NaN)).toHaveLength(0);
+  });
+
+  it('hands on exactly the junctions ahead whose way taken turns, the default ones too — #3133', () => {
+    const { road } = grid();
+    let defaults = 0;
+    for (let rider = 0; rider <= 4_000; rider += 50) {
+      road.follow(rider);
+      const listed = new Set(road.junctionsTurned(rider).map((each) => each.junction));
+      for (const junction of road.route.junctionsAfter(rider)) {
+        if (junction.distance - rider > WAYS_OUT_AHEAD_METRES) break;
+        const taken = junction.ways.find((way) => way.edge.id === junction.taken);
+        const turns = Math.abs(taken?.turnDegrees ?? 0) >= TURNED_JUNCTION_DEGREES;
+        if (turns && junction.taken === junction.defaultWay) defaults += 1;
+        expect(
+          listed.has(junction.distance),
+          `${String(junction.distance)} from ${String(rider)}`,
+        ).toBe(turns);
+      }
+    }
+    // Not vacuous: the ride east meets the grid's edge and turns there by default.
+    expect(defaults).toBeGreaterThan(0);
+  });
+
+  it('drops a junction turned through when the turn is undone before the lock, and on a U-turn — #3133', () => {
+    const { road } = grid();
+    const rider = 40;
+    const { junction, other } = nextJunction(road, rider);
+    const at = (): number[] => road.junctionsTurned(rider).map((each) => each.junction);
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).toContain(junction.distance);
+    expect(road.route.choose(junction.distance, junction.defaultWay, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).not.toContain(junction.distance);
+    // Turned again, ridden past, and turned round: the road under the rider changed.
+    expect(road.route.choose(junction.distance, other, rider)).toBe('swapped');
+    road.follow(rider);
+    expect(at()).toContain(junction.distance);
+    const past = junction.distance + 30;
+    road.follow(past);
+    expect(road.junctionsTurned(past).map((each) => each.junction)).toContain(junction.distance);
+    road.route.uTurn(past);
+    expect(road.follow(past)?.turned).toBe(true);
+    expect(road.junctionsTurned(past).map((each) => each.junction)).not.toContain(
+      junction.distance,
+    );
   });
 
   it('without a frame, makes a way again once the trim has moved the view’s first point: both are drawn about it', () => {

@@ -31,6 +31,8 @@
  * with [#7](https://github.com/openzigs/onyourleft/issues/7), not before.
  */
 
+import { TURN_LIMITS_HELP } from '../game/open-world/turn-limits';
+
 /** The identity of a view. Stable; the path is not. */
 export type RouteId =
   | 'home'
@@ -519,6 +521,8 @@ export const OPEN_WORLD_ROUTE: RouteDefinition = {
   help: [
     'An open-world ride follows the streets from where you start, and the map is read as you ' +
       'ride. Your start stays on this device.',
+    // #3124: where a turn is not offered, and why — drafts for the owner.
+    TURN_LIMITS_HELP,
   ],
 };
 
