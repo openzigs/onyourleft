@@ -521,8 +521,10 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
   // ruling, read over the first hazard and the houses before it. On seed 7 the
   // HUD settles the 1st house on frame 101 and the 2nd on 137, and the parked
   // car is said on 145 (the first case, announcements on, says the 1st house
-  // on 102).
-  it('says the parked car or bin ahead with announcements off, the default, and no house, miss or crash', async () => {
+  // on 102). The ride stops before any crash, so this case does not read
+  // crashes; `announce.test.ts` pins `ALWAYS_SPOKEN` and holds
+  // `delivery-crash` out of it.
+  it('says the parked car or bin ahead with announcements off, the default, and no house delivered or missed', async () => {
     localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
     expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
     stubSeed(7);
@@ -554,7 +556,7 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
     expect(settledOn).toBeDefined();
     const said = [...heard];
     expect(said.some((each) => hazard.test(each))).toBe(true);
-    expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);
+    expect(said.filter((each) => /^(Delivered to|Missed)/.test(each))).toEqual([]);
   });
 });
 
