@@ -65,7 +65,9 @@ import {
 } from '../level-progress';
 import type { WeekProgress } from '../round';
 
-import { LEVEL_CATALOGUE } from './catalogue';
+import { noDeliveryCount } from '../targets';
+
+import { LEVEL_CATALOGUE, levelHousesText } from './catalogue';
 import { parseLevelFile, type LevelFile } from './level-file';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -559,6 +561,77 @@ describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
   });
 });
 
+describe('a level’s houses agree from the picker to the HUD, and its round is not the week’s — #2970', () => {
+  /** A Delivery field on the HUD, as `delivery-wiring.test.tsx` reads one: its value and the phrase under it. */
+  const hudField = (label: string): { value: string; detail: string } | undefined => {
+    const found = [...document.querySelectorAll('.oyl-hud__field--delivery')].find((each) =>
+      (each.textContent ?? '').startsWith(label),
+    );
+    return found === undefined
+      ? undefined
+      : {
+          value: found.querySelector('.oyl-hud__value')?.firstChild?.textContent ?? '',
+          detail: (found.querySelector('.oyl-hud__detail')?.textContent ?? '').trim(),
+        };
+  };
+
+  it('lists Evening Round’s houses as the ones to deliver to and the ones to skip', async () => {
+    writeLevelProgress(localStorage, ALL_OPEN);
+    await openPicker();
+    const evening = SHIPPED_LEVELS.list().find((level) => level.id === 'evening-round');
+    expect(evening).toMatchObject({ houses: 10, noDelivery: 3 });
+    const card = document.querySelector('[data-level="evening-round"]')?.textContent ?? '';
+    expect(card).toContain('10 houses on the round: 7 to deliver to, 3 to skip');
+    // A level with none to skip says its houses as before.
+    expect(document.querySelector(`[data-level="${FIRST.id}"]`)?.textContent).toContain(
+      `${String(FIRST.houses)} houses on the round`,
+    );
+  });
+
+  it('counts as left on the HUD the houses the setup says to deliver to, with no “Day N of 7” in the setup or under the score', async () => {
+    // Level 1 as a level whose round asks for houses that get no parcel, as Evening Round's does.
+    const skipping = parseLevelFile(
+      {
+        ...FIXTURE_JSON,
+        id: FIRST.id,
+        name: FIRST.name,
+        round: { ...fixtureAs(FIRST.id).round, noDeliveryShare: 0.5 },
+      },
+      FIRST.id,
+    );
+    const houses = skipping.round.houses;
+    const skip = noDeliveryCount(houses, 0.5);
+    expect(skip).toBeGreaterThan(0);
+    stubSeed(7);
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)), {
+      port: { ...port(), loadDeliveryLevel: () => Promise.resolve(skipping) },
+    });
+    // The setup says the level's round, not the week's day (WEEK is on day 3 here).
+    expect(text()).toContain(levelHousesText({ houses, noDelivery: skip }));
+    expect(text()).toContain(`${String(houses - skip)} to deliver to, ${String(skip)} to skip`);
+    expect(text()).not.toMatch(/Day \d of 7/u);
+    // The card's own course line is the level's own counts, agreeing with the setup's (#2970).
+    const card = document.querySelector('.oyl-chooser__card')?.textContent ?? '';
+    expect(card).toContain(`Delivery: ${levelHousesText({ houses, noDelivery: skip })}`);
+    expect(card).not.toContain('up to');
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    await pump();
+    // Left on the HUD: the houses the setup said to deliver to.
+    expect(hudField('Houses')).toStrictEqual({
+      value: String(houses - skip),
+      detail: '0\u00a0delivered, 0\u00a0missed',
+    });
+    // And under the score, no day of the week the level is kept apart from (ADR 0065 D-9.3).
+    const score = hudField('Score');
+    expect(score?.value).toBe('0');
+    expect(score?.detail).toBe('');
+    expect(text()).not.toMatch(/Day \d of 7/u);
+    // The week itself is as it was.
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+  });
+});
+
 describe('a level is refused where it is not a solo round — ADR 0065 D-8.1', () => {
   it('starts no ride from a level’s Ride button while the shell holds a room', async () => {
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)), { roomId: 'room-1' });
@@ -611,7 +684,7 @@ describe('a level rides in the realistic world whatever Settings chose — the o
         );
       const houses = fixtureAs(FIRST.id).round.houses;
       expect(card(levelRouteId(FIRST.id))?.querySelector('.oyl-chooser__course')?.textContent).toBe(
-        `Delivery: up to ${String(houses)} houses on the round`,
+        `Delivery: ${String(houses)} houses on the round`,
       );
       // A saved route says nothing in the standard world, where it offers no round.
       if (!realistic) {

@@ -49,6 +49,7 @@ import {
   readLevelProgress,
   type LevelStanding,
 } from '../game/delivery/level-progress';
+import { levelHousesText } from '../game/delivery/levels/catalogue';
 import type { ListedLevel } from '../game/delivery/levels/levels';
 import { deviceStorage } from '../game/hud/announce-preference';
 import {
@@ -84,8 +85,6 @@ export const GAME_COURSES_TEXT = {
   openRoutes: 'Open Routes',
   // #2362: the built-in levels' heading and their one line each, for the owner's approval.
   levelsHeading: 'Built-in rounds',
-  levelHouses: (houses: number): string =>
-    `${String(houses)} ${houses === 1 ? 'house' : 'houses'} on the round`,
   // #2363: a level's place in the unlock order, in words, for the owner's approval.
   levelLocked: (before: string): string => `Locked. Finish ${before} to open this round.`,
   levelFinished: 'Finished. Ride it again any time.',
@@ -352,7 +351,7 @@ function LevelEntry(props: {
       </h3>
       <p className="oyl-muted">
         {measurementText(formatDistance(metres(level.lengthMetres), units))} ·{' '}
-        {GAME_COURSES_TEXT.levelHouses(level.houses)}
+        {levelHousesText(level)}
       </p>
       {state === undefined ? null : (
         <p id={stateId} className="oyl-game-courses__holds">

@@ -86,6 +86,7 @@ import type { PacerChoice } from './pacer-choice';
 import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
+import { levelHousesText } from './delivery/levels/catalogue';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
@@ -420,6 +421,12 @@ export interface LevelOffer {
    * never one of the rider's routes' counts (review of PR #2378, round 3).
    */
   readonly houses: number;
+  /**
+   * #2970: how many of {@link houses} get no parcel, the level's own count
+   * (`catalogue.ts` §`LevelListing.noDelivery`), so the setup says the houses
+   * the HUD will count as left.
+   */
+  readonly noDelivery: number;
 }
 
 /**
@@ -713,9 +720,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       : undefined;
   const courseOf = (route: RidableRoute): CourseLine | undefined => {
     if (route.id === levelId) {
-      return levelCourse === undefined || deliveryOffer === undefined
-        ? undefined
-        : deliveryCourseLine(levelCourse, deliveryOffer.week);
+      if (levelCourse === undefined || props.level === undefined) return undefined;
+      // #2970: a level's round is its own houses, whatever the week holds, said as
+      // the setup says them below: never the week's smaller count, never "up to".
+      const line = deliveryCourseLine(levelCourse, { houses: props.level.houses });
+      return line.holds === true
+        ? { ...line, text: `Delivery: ${levelHousesText(props.level)}` }
+        : line;
     }
     return courses === undefined
       ? undefined
@@ -985,6 +996,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           <DeliveryControl
             offer={deliveryOffer}
             onLevel={onLevel}
+            level={onLevel ? props.level : undefined}
             // #2294: said beside the switch too, for the route chosen.
             chosenCourse={courseOf(chosen)}
           />
@@ -1783,6 +1795,8 @@ function DeliveryControl(props: {
   readonly chosenCourse?: CourseLine | undefined;
   /** #2362: the chosen card is a built-in level, whose round is its own houses. */
   readonly onLevel?: boolean;
+  /** #2970: and that level's houses, said in place of the week's day. */
+  readonly level?: Pick<LevelOffer, 'houses' | 'noDelivery'> | undefined;
 }): JSX.Element {
   const noRound = props.chosenCourse?.holds === false ? props.chosenCourse : undefined;
   return (
@@ -1809,7 +1823,10 @@ function DeliveryControl(props: {
         </p>
       )}
       <p id={DELIVERY_WEEK_ID} className="tw:m-0">
-        {deliveryWeekText(props.offer.week)}
+        {/* #2970: a level's round is not the week's: its houses, with no day of the week. */}
+        {props.level === undefined
+          ? deliveryWeekText(props.offer.week)
+          : levelHousesText(props.level)}
       </p>
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
         {props.onLevel === true ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}

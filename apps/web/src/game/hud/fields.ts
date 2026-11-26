@@ -492,6 +492,12 @@ export interface DeliveryHud {
    * §`deliveryEvents`', as before. Absent is not crashed.
    */
   readonly crashed?: boolean | undefined;
+  /**
+   * #2970: a built-in level's round, which is kept apart from the week (ADR
+   * 0065 D-9.3), so the Score field says no "Day N of 7" under it. Absent is
+   * the week's round.
+   */
+  readonly onLevel?: boolean | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -1355,10 +1361,13 @@ function deliveryReadings(
       value: String(delivery.score),
       unit: '',
       stale: false,
+      // #2970: a level's round is not the week's, so it has no day under it.
       detail:
         delivery.crashed === true
           ? CRASHED_TEXT
-          : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+          : delivery.onLevel === true
+            ? undefined
+            : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
     },
   ];
 }

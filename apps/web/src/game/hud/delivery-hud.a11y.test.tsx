@@ -203,6 +203,20 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(field('Score')).toBe('Score 1 Day 2 of 7');
   });
 
+  it('on a level, says no day of the week under the score, and “Crashed” as any round does, and audits clean — #2970', async () => {
+    const round = startRound(7);
+    mounted = await mount(panel({ round, week: { ...WEEK, day: 1 }, onLevel: true }));
+    expect(field('Houses')).toBe('Houses 7 left 0 delivered, 0 missed');
+    expect(field('Score')).toBe('Score 0');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    // Down, "Crashed" under the score as on any round.
+    await mounted.rerender(panel({ round, week: WEEK, onLevel: true, crashed: true }));
+    expect(field('Score')).toBe('Score 0 Crashed');
+    // The week's own round still has its day.
+    await mounted.rerender(panel({ round, week: WEEK, onLevel: false }));
+    expect(field('Score')).toBe('Score 0 Day 2 of 7');
+  });
+
   it('is absent from an ordinary ride, whose HUD is unchanged', async () => {
     const labels = (): string[] =>
       [...document.querySelectorAll('.oyl-hud__field dt')].map((each) => text(each));

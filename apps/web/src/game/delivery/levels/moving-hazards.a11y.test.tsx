@@ -60,6 +60,7 @@ const port: GamePort = {
         name: 'Fixture level',
         lengthMetres: LEVEL.lengthMetres,
         houses: LEVEL.round.houses,
+        noDelivery: 0,
         routeId: levelRouteId(LEVEL.id),
       },
     ]),

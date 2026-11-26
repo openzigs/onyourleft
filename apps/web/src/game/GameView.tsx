@@ -308,6 +308,7 @@ import {
 import { eyeLateralBesideParkedCars } from './delivery/camera-clear';
 import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
+import { noDeliveryCount } from './delivery/targets';
 import { layNameTags, nameTags } from './name-tags';
 import {
   HUD_PANELS_SELECTOR,
@@ -5464,6 +5465,11 @@ function GameScreen({
                   routeId: level.route.id,
                   credit: OSM_ATTRIBUTION,
                   houses: level.file.round.houses,
+                  // #2970: how many of them get no parcel, so the setup says the round the HUD counts.
+                  noDelivery: noDeliveryCount(
+                    level.file.round.houses,
+                    level.file.round.noDeliveryShare,
+                  ),
                 }
           }
           releaseNotice={trainerNow?.releaseFault}
@@ -5908,6 +5914,8 @@ function GameScreen({
                 crashed: crashShownRef.current !== undefined,
                 // #2453: where the next house is, so the rider knows where to throw.
                 next: nextHouse(deliveryRef.current),
+                // #2970: a level's round is not the week's, so no day under the score.
+                onLevel: deliveryRef.current.onLevel,
               },
               throwing: throwPortRef.current,
               steering: steerPortRef.current,
