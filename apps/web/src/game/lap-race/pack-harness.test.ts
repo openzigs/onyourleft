@@ -17,6 +17,8 @@
  *   bike box, a bike length along and a place across, on any tick or on the
  *   frames drawn between ticks;
  * - **a run replays identically**;
+ * - **the rider is part of it** (#2517): on the flat a bot sits on the
+ *   rider's wheel, directly behind them within a wheel, for seconds on end;
  * - **with items on** (#2636), the same fields still draw no two racers inside
  *   each other, on ticks or between them, and every bot's speed smoothly,
  *   read against its race speed with an item's push in it.
@@ -542,4 +544,50 @@ describe('faders drop off on the hills (#2545)', () => {
     const faded = SEEDS.flatMap((seed) => faders(field('hilly', seed)));
     expect(faded.length).toBeGreaterThan(0);
   });
+});
+
+describe('the rider is part of the pack: a bot sits on their wheel (#2517)', () => {
+  /**
+   * How long a bot rides on the flat directly behind the rider, a wheel or
+   * less back, before it lets them go, seconds: **5**. With the wheel held
+   * (#2542) a bot stays on the rider for 7.65 s to 10.45 s at a time in these
+   * fields; a bot that cannot hold the rider's wheel and only passes through
+   * stays 3.05 s to 3.1 s (measured on #2517's branch with the physics'
+   * wheel never the rider's).
+   */
+  const ON_THE_WHEEL_SECONDS = 5;
+
+  /** The longest run of ticks on which some bot is directly behind the rider within a wheel, seconds. */
+  function longestOnTheRidersWheel(ticks: readonly Tick[]): number {
+    let run = 0;
+    let longest = 0;
+    for (const tick of ticks) {
+      const rider = tick.at.get(LAP_RACE_RIDER_ID) as number;
+      const sitting = [...tick.at].some(([id, at]) => {
+        const gap = rider - at;
+        return (
+          id !== LAP_RACE_RIDER_ID &&
+          gap > 0 &&
+          gap <= BOT_TACTIC_WHEEL_FURTHEST_METRES &&
+          gapAhead(tick, id) === gap
+        );
+      });
+      run = sitting ? run + 1 : 0;
+      longest = Math.max(longest, run);
+    }
+    return longest * LAP_RACE_TICK_SECONDS;
+  }
+
+  // The flat only: this harness's rider holds 8 m/s whatever the road, so on
+  // the hills a bot's own pace takes it past them or away on every climb and
+  // descent, wheel or no wheel. The rider taking a bot's draft is
+  // `ride-race.test.ts`' (#2461): here the rider's speed is fixed.
+  it.each(SEEDS)(
+    `has a bot hold the rider’s wheel for ${String(ON_THE_WHEEL_SECONDS)} s or more on the flat (seed %i)`,
+    (seed) => {
+      expect(longestOnTheRidersWheel(field('flat', seed))).toBeGreaterThanOrEqual(
+        ON_THE_WHEEL_SECONDS,
+      );
+    },
+  );
 });
