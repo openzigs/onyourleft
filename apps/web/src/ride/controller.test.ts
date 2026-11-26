@@ -10376,16 +10376,24 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
 
 /** What a directed game ride hands beside each record — #2712's review. */
 const PACER_RIDE: PacerRideFacts = {
+  gameRide: 1,
   pacerWPerKg: 2.9,
   routeId: 'route-rolling',
   position: 'hoods',
 };
 const WINDY_RIDE: PacerRideFacts = {
+  gameRide: 2,
   pacerWPerKg: 3.4,
   routeId: 'route-hilly',
   position: 'drops',
   wind: wind(4.5, 270),
 };
+
+/** A ride's facts as its saved log carries them: all but which game ride it was (#2727). */
+function savedFacts(ride: PacerRideFacts): Omit<PacerRideFacts, 'gameRide'> {
+  const { pacerWPerKg, routeId, position, wind } = ride;
+  return { pacerWPerKg, routeId, position, ...(wind === undefined ? {} : { wind }) };
+}
 
 describe('#1042 — the saved ride the result card states, and the game’s outcome it carries', () => {
   it('states the activity the save WROTE, and nothing for a save that failed', async () => {
@@ -10715,7 +10723,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(read?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [applied, { askedAtS: 10, arrivedAtS: 16, outcome: 'late' }],
-      ...PACER_RIDE,
+      ...savedFacts(PACER_RIDE),
       startedAt: read!.startedAt + 2 - 6.5,
     });
 
@@ -10739,7 +10747,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(after?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'refused' }],
-      ...WINDY_RIDE,
+      ...savedFacts(WINDY_RIDE),
       startedAt: after!.startedAt + 1 - 1,
     });
 
@@ -10752,6 +10760,41 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     const plain = rig.controller.getSnapshot().savedRide?.activityId;
     const none = await harness.read(async (store) => store.getActivity(ATHLETE_A, plain!));
     expect(none?.rideFacts?.pacerModel).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('keeps the last directed ride’s log alone when its first ask is at the last ride’s last — #2727', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }, PACER_RIDE);
+    rig.controller.notePacerDecision(
+      { askedAtS: 30, arrivedAtS: 31, outcome: 'invalid' },
+      PACER_RIDE,
+    );
+    await ride(rig, 4);
+    // A second directed game ride in the same recording, four seconds on,
+    // whose first ask is at exactly the first ride's last: no clock going
+    // backwards says it is another ride; only the number it hands does.
+    const second = { askedAtS: 30, arrivedAtS: 32, outcome: 'refused' } as const;
+    const later = { askedAtS: 60, arrivedAtS: 61, outcome: 'late' } as const;
+    rig.controller.notePacerDecision(second, WINDY_RIDE);
+    rig.controller.notePacerDecision(later, WINDY_RIDE);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    // The second ride's records, route, position and wind alone, placed at
+    // ITS start: five seconds into the recording, less the 32 s ridden its
+    // first record arrived at, and never the first ride's start.
+    expect(read?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [second, later],
+      ...savedFacts(WINDY_RIDE),
+      startedAt: read!.startedAt + 5 - 32,
+    });
     rig.controller.dispose();
   });
 
@@ -10769,7 +10812,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(first?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }],
-      ...PACER_RIDE,
+      ...savedFacts(PACER_RIDE),
       startedAt: first!.startedAt + 3 - 1,
     });
 

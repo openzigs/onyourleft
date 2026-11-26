@@ -1345,9 +1345,9 @@ export interface RideController {
   /**
    * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept for the
    * recording in progress, so the saved ride carries the pacer's decision
-   * log (`RideFacts.pacerModel`). A record asked earlier than the last one
-   * kept begins a new game ride's log, which replaces it: a recording keeps
-   * its LAST directed game ride's log. Ignored unless a ride is recording or
+   * log (`RideFacts.pacerModel`). A record whose `ride.gameRide` is not the
+   * last one kept begins a new game ride's log, which replaces it (#2727): a
+   * recording keeps its LAST directed game ride's log. Ignored unless a ride is recording or
    * paused. A closed-list record and no text. Decides no write to the trainer.
    *
    * `ride` (#2712's review) is what the log replays with beside it: the
@@ -4583,8 +4583,10 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void {
       if (phase !== 'recording' && phase !== 'paused') return;
-      const last = pacerDecisions.at(-1);
-      if (last !== undefined && record.askedAtS < last.askedAtS) {
+      // #2727: a new directed game ride is told apart by the number it hands,
+      // never by its ask clock — a second ride whose first ask is at the
+      // first's last would otherwise be appended to it.
+      if (pacerRide !== undefined && ride.gameRide !== pacerRide.gameRide) {
         pacerDecisions = [];
         pacerRide = undefined;
       }
@@ -5624,7 +5626,14 @@ export function createRideController(options: RideControllerOptions): RideContro
  * review: what its log replays with (`@onyourleft/store` §`PacerModelFact`)
  * but the start, which the controller works out on the recording's clock.
  */
-export type PacerRideFacts = Omit<PacerModelFact, 'version' | 'decisions' | 'startedAt'>;
+export type PacerRideFacts = Omit<PacerModelFact, 'version' | 'decisions' | 'startedAt'> & {
+  /**
+   * Which directed game ride this is — #2727: a number no other directed
+   * game ride in the page has had, the same on every record of one. A record
+   * with another begins a new ride's log. Never saved: the log is one ride's.
+   */
+  readonly gameRide: number;
+};
 
 /**
  * The pacer's log as it is saved, or `undefined`: none for a ride with no

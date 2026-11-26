@@ -429,6 +429,15 @@ import {
 // #940: the chooser's own module now; re-exported so every caller keeps one import.
 export type { RidableRoute } from './StageChooser';
 
+/**
+ * How many directed pacer rides this page has begun — #2727: each hands the
+ * ride controller its own count (`PacerRideFacts.gameRide`), which is how a
+ * second directed ride in one recording begins a log of its own. The page's
+ * and not a view's: a view left and opened again in one recording would
+ * otherwise count from nought again and hand the number the last ride had.
+ */
+let directedGameRides = 0;
+
 /** What asking for another rider's ghost came to — #331. */
 export type RiderGhostLoad =
   | { readonly kind: 'ghost'; readonly rider: string; readonly track: GhostTrack }
@@ -3211,7 +3220,9 @@ function GameScreen({
       ) {
         // #2712's review: what the log replays with beside it, the same
         // values this simulation was built with, so a replay is this ride's.
+        directedGameRides += 1;
         const replayedWith = {
+          gameRide: directedGameRides,
           pacerWPerKg: pacer.intensityWattsPerKilogram,
           routeId: route.id,
           position: sitting,
