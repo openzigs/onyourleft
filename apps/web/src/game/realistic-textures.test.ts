@@ -111,6 +111,7 @@ import {
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { treeSlots } from './tree-levels';
+import { RIDER_SKIN_TONES } from './rider-body';
 import {
   albedoBytes,
   toldApartFaults,
@@ -1369,6 +1370,102 @@ describe('the dressed rider — #623', () => {
     const helmet = riders.helmets;
     expect(helmet.geometry.getAttribute('color')).toBeDefined();
     expect((helmet.material as unknown as { vertexColors: boolean }).vertexColors).toBe(true);
+    // #3214: but for the face — the lenses and the eyes — which the shader
+    // draws as the file paints it, untinted (`oylKit` 4), where the shell and
+    // the straps, every grey, keep the tint (0).
+    const colour = helmet.geometry.getAttribute('color');
+    const role = helmet.geometry.getAttribute('oylKit');
+    expect(role.count).toBe(colour.count);
+    const hueOf = (at: number): number => {
+      const channels = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+      return Math.max(...channels) - Math.min(...channels);
+    };
+    const roles = { bare: 0, tinted: 0, shell: 0 };
+    for (let at = 0; at < role.count; at += 1) {
+      const bare = role.getX(at) === 4;
+      expect([0, 4]).toContain(role.getX(at));
+      if (bare) roles.bare += 1;
+      else roles.tinted += 1;
+      // A grey is tinted and a hue is not: the lens leads with its blue by 0.04.
+      expect(bare, String(at)).toBe(hueOf(at) > 0.015);
+      // The pale shell, the helmet itself, is never bare.
+      if (colour.getX(at) > 0.6 && hueOf(at) < 0.01) {
+        roles.shell += 1;
+        expect(bare).toBe(false);
+      }
+    }
+    console.log(`#3214: the helmet mesh is ${JSON.stringify(roles)} vertices`);
+    expect(roles.bare).toBeGreaterThan(20);
+    expect(roles.shell).toBeGreaterThan(100);
+    // And its material reads the mark, which a helmet that lost it would not.
+    const material = helmet.material as unknown as {
+      customProgramCacheKey(): string;
+      onBeforeCompile(shader: unknown, renderer: unknown): void;
+    };
+    expect(material.customProgramCacheKey()).toContain('oyl-bare');
+    // ⚠️ The file's colour is a vec4, so three declares `color` a vec4 and a
+    // splice that hands it on as it is does not compile — the helmet is then
+    // not drawn at all, which #3214's first capture showed and the browser
+    // gate's "compiles every shader" did not. Hand on its rgb.
+    expect(colour.itemSize).toBe(4);
+    const shader = {
+      vertexShader: [
+        '#include <common>',
+        '#include <fog_pars_vertex>',
+        'void main() {',
+        '#include <begin_vertex>',
+        '#include <color_vertex>',
+        '#include <fog_vertex>',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        '#include <common>',
+        '#include <fog_pars_fragment>',
+        'void main() {',
+        '#include <clipping_planes_fragment>',
+        '#include <opaque_fragment>',
+        '#include <fog_fragment>',
+        '}',
+      ].join('\n'),
+      uniforms: {},
+      defines: {},
+    };
+    material.onBeforeCompile(shader, undefined);
+    expect(shader.vertexShader).toContain(
+      'vColor.rgb = oylRiderColour(oylKit, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);',
+    );
+    expect(shader.vertexShader.split('vec3 oylRiderColour(')).toHaveLength(2);
+    // #3214: each body's skin is its own marker's tone, as a share of the
+    // maps' — 1 for the first tone, which the maps are drawn in.
+    const at = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0, bodyLean: 0, crankAngle: 0 };
+    riders.place([
+      { ...at, kind: 'rider' },
+      { ...at, kind: 'bot', skin: 4 },
+      { ...at, kind: 'ghost', skin: 2 },
+    ] as never);
+    const [own, bot, ghost] = riders.skinShares;
+    for (const channel of [own?.r, own?.g, own?.b]) expect(channel).toBeCloseTo(1, 9);
+    const shareOf = (hex: number): number[] => {
+      const linear = (byte: number): number => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      const first = RIDER_SKIN_TONES[0] as number;
+      return [16, 8, 0].map(
+        (shift) => linear((hex >> shift) & 0xff) / linear((first >> shift) & 0xff),
+      );
+    };
+    for (const [drawn, tone] of [
+      [bot, 4],
+      [ghost, 2],
+    ] as const) {
+      const wanted = shareOf(RIDER_SKIN_TONES[tone] as number);
+      [drawn?.r, drawn?.g, drawn?.b].forEach((channel, at) =>
+        expect(channel).toBeCloseTo(wanted[at] ?? Number.NaN, 5),
+      );
+      // Darker than the maps' own skin in every channel, never brighter.
+      for (const each of wanted) expect(each).toBeLessThan(1);
+    }
   }, 120_000);
 
   it('holds the body, the helmet and the glasses together inside the rider’s 9 000 triangles', async () => {

@@ -17,8 +17,12 @@ import {
   captureEventsFile,
   captureEventsName,
   captureRequestsName,
+  frameProblem,
   servedFile,
+  WARM_UP_LIMIT_MS,
+  warmUp,
 } from './render-capture';
+import type { CaptureSnapshot } from '../../src/game/capture-scene';
 
 const DIST = mkdtempSync(join(tmpdir(), 'oyl-capture-dist-'));
 mkdirSync(join(DIST, 'assets'));
@@ -133,5 +137,72 @@ describe('the archive URL a capture answers — PR #3169', () => {
       rmSync(root, { recursive: true, force: true });
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe('the warm-up: no frame is shot before the realistic world has arrived — #3175', () => {
+  const at = (drawn: number, world?: 'realistic' | 'stylised'): CaptureSnapshot => ({
+    drawn,
+    distance: 0,
+    elapsed: 0,
+    world,
+  });
+
+  /** A ride that publishes `frames` in turn, one a warm-up frame, on a clock moved by `wait`. */
+  function ride(frames: readonly (CaptureSnapshot | undefined)[], msAWait = 50) {
+    let ran = 0;
+    let ms = 0;
+    return {
+      frame: () => Promise.resolve(frames[Math.min(ran++, frames.length - 1)]),
+      wait: () => {
+        ms += msAWait;
+        return Promise.resolve();
+      },
+      now: () => ms,
+      ran: () => ran,
+    };
+  }
+
+  it('runs warm-up frames through the stylised world until the realistic one is drawn', async () => {
+    const asked = ride([
+      undefined,
+      at(0),
+      at(1, 'stylised'),
+      at(2, 'stylised'),
+      at(3, 'realistic'),
+      at(4, 'realistic'),
+    ]);
+    const first = await warmUp(asked.frame, asked.wait, asked.now);
+    // The warm-up ends on the first realistic frame; every frame before it was the warm-up's.
+    expect(first).toEqual(at(3, 'realistic'));
+    expect(asked.ran()).toBe(5);
+  });
+
+  it('gives up once the warm-up has run its time, saying which wait it was', async () => {
+    const never = ride([undefined]);
+    await expect(warmUp(never.frame, never.wait, never.now)).rejects.toThrow(
+      'capture: the ride never drew its first frame',
+    );
+    const stylised = ride([at(1, 'stylised')]);
+    await expect(warmUp(stylised.frame, stylised.wait, stylised.now)).rejects.toThrow(
+      'capture: the realistic world did not arrive within the warm-up',
+    );
+    expect(stylised.now()).toBeGreaterThan(WARM_UP_LIMIT_MS);
+  });
+
+  it('refuses a counted frame drawn in the stylised world, or not drawn once', () => {
+    expect(frameProblem(7, 1, 3, at(4, 'realistic'))).toBeUndefined();
+    expect(frameProblem(7, 1, 3, at(4, 'stylised'))).toBe(
+      'capture: frame 7 was drawn in the stylised world, not the realistic one',
+    );
+    expect(frameProblem(7, 1, 3, at(4))).toBe(
+      'capture: frame 7 was drawn in the stylised world, not the realistic one',
+    );
+    expect(frameProblem(7, 1, 3, at(3, 'realistic'))).toBe(
+      'capture: frame 7 ran 1 animation frames and drew the world 0 times, not once',
+    );
+    expect(frameProblem(7, 2, 3, at(4, 'realistic'))).toBe(
+      'capture: frame 7 ran 2 animation frames and drew the world 1 times, not once',
+    );
   });
 });

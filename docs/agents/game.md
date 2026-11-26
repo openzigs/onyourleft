@@ -2633,6 +2633,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PreviewControl`): a power and a 1–8× speed-up, ridden
                         on a NEW screen `GameView` mounts with none of those
                         ports; ending it mounts an ordinary picker again.
+                        Since #3210 (owner ruling 2026-11-25) it invents a
+                        cadence and heart rate, live and paired, so the HUD
+                        shows both and the legs turn (`&cadence=`, `&hr=`
+                        fix them); they reach no recording, by the same
+                        absent ports.
+    src/game/simulated-body.ts
+                        the invented cadence and heart rate (#3210): ~86–94
+                        rpm on the flat, 70–80 on a steep climb, a spin-up on
+                        a surge, nought within 2 s of no power; heart rate
+                        from 70 bpm at rest, lagging power by tens of seconds
+                        and settling a step up in 2–3 min (#3215) towards the
+                        rider's own thresholds (else 250 W / 170
+                        bpm). Seeded wobble, no jumps; `simulated-body.test.ts`
+                        pins the curves.
     src/game/capture-scene.ts
                         capture mode (#3152): `#/game?capture=<scene>` is a
                         simulated ride whose power, cadence and heart rate

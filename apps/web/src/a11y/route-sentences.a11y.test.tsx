@@ -271,6 +271,11 @@
  * dropped. They are the terrain credit under *Map data* (`CreditsView.tsx`
  * §`data-credit="terrain"`): Mapterhorn's own line, the three sources of the
  * terrain archive, and the notices two of them ask for, word for word.
+ *
+ * ⚠️ **Re-recorded by #3185**, on the route planner's two walks only: four
+ * lines added on each and none dropped. They are the summary strip above the
+ * map (`RouteBuilderView.tsx` §"The numbers beside the map"): "Distance" and
+ * "Climbing" and their two figures.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';

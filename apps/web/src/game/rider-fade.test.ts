@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CAMERA_BEHIND_METRES, cameraRig } from './camera';
 import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from './lap-race/pack-layout';
+import { nearPyramid } from './near-field';
 import type { CameraPose, RiderMarker } from './port';
 import {
   RIDER_FADE_METRES,
@@ -21,6 +22,7 @@ import {
   riderFaded,
   type RiderFadeLine,
 } from './rider-fade';
+import { riderBoxCut } from './rider-box-testing';
 import { northRoute } from './route-fixtures-testing';
 import { sceneFrame, type SceneInput } from './scene';
 import { atStartLine } from './simulation';
@@ -70,13 +72,15 @@ describe('riderFaded — the rule (#2596)', () => {
     expect(riderFaded(marker('bot', -PACK_ABREAST_METRES, -HELD_BEHIND), line)).toBe(0);
   });
 
-  it('fades out a rider in the lane at the camera’s eye, and draws one beside the eye whole', () => {
+  it('fades out a rider at the camera’s eye, in the lane or beside it — #3198', () => {
     const eye = -CAMERA_BEHIND_METRES;
     const line = lineFor();
     expect(riderFaded(marker('bot', 0, eye), line)).toBe(1);
     expect(riderFaded(marker('remote', -0.05, eye - 0.3), line)).toBe(1);
-    // The ruling: beside is whole, even beside the eye.
-    expect(riderFaded(marker('bot', PACK_ABREAST_METRES, eye), line)).toBe(0);
+    // Until #3198 the ruling's "beside is whole" held here too, and the near
+    // plane cut the bot passing the lens.
+    expect(riderFaded(marker('bot', PACK_ABREAST_METRES, eye), line)).toBe(1);
+    expect(riderFaded(marker('bot', -PACK_ABREAST_METRES, eye + 0.6), line)).toBe(1);
   });
 
   it('never fades a bot one place across, at any place from 3 m behind the rider to level — the owner’s ruling of 2026-11-15', () => {
@@ -236,6 +240,60 @@ describe('riderFaded — the rule (#2596)', () => {
 
   it('draws every rider whole with no line — the control', () => {
     expect(riderFaded(marker('bot', 0, -HELD_BEHIND), undefined)).toBe(0);
+  });
+});
+
+describe('a rider the near plane would cut is faded out — #3198', () => {
+  /**
+   * The frames a device draws: an upright phone, the owner's 16 : 10 tablet,
+   * the demo video's 16 : 9 and a landscape phone. Not 6 : 1, a desktop window
+   * no device draws (`camera.ts` §`WORST_CASE_ASPECT`), whose 4.2 m-wide
+   * near plane reaches a bot a place across 3 m behind the rider, which the
+   * owner's ruling of 2026-11-15 keeps whole.
+   */
+  const ASPECTS = [9 / 19.5, 16 / 10, 16 / 9, 19.5 / 9] as const;
+  /** Level, onto a climb, and onto a descent, which pitches the near plane down. */
+  const ROADS = [
+    [0, 0],
+    [0, 2.5],
+    [0, -2.5],
+  ] as const;
+
+  it('fades out every rider whose box meets the solid between the eye and the near plane, wherever it is about the eye', () => {
+    let cut = 0;
+    for (const aspect of ASPECTS) {
+      for (const [eyeRoadY, targetRoadY] of ROADS) {
+        const pose: CameraPose = { ...POSE, eyeRoadY, targetRoadY };
+        const line = lineFor(pose);
+        const pyramid = nearPyramid(cameraRig(pose), aspect);
+        for (let across = -2; across <= 2 + 1e-9; across += 0.05) {
+          for (let along = -3; along <= 3 + 1e-9; along += 0.05) {
+            const bot = marker('bot', across, -CAMERA_BEHIND_METRES + along);
+            if (!riderBoxCut(bot, pyramid)) continue;
+            cut += 1;
+            expect(
+              riderFaded(bot, line),
+              `${aspect.toFixed(2)}, road ${String(targetRoadY)}: ${across.toFixed(2)} across, ${along.toFixed(2)} past the eye`,
+            ).toBe(1);
+          }
+        }
+      }
+    }
+    // Not vacuous: the sweep found riders the plane cuts.
+    expect(cut).toBeGreaterThan(100);
+  });
+
+  it('fades it in and out over its ramp, never in one step, as it passes the eye beside the rider', () => {
+    const line = lineFor();
+    let before = riderFaded(marker('bot', PACK_ABREAST_METRES, 0), line);
+    expect(before).toBe(0);
+    for (let back = 0.05; back <= 2 * CAMERA_BEHIND_METRES + 1e-9; back += 0.05) {
+      const now = riderFaded(marker('bot', PACK_ABREAST_METRES, -back), line);
+      expect(Math.abs(now - before), `${back.toFixed(2)} back`).toBeLessThanOrEqual(
+        0.05 / (RIDER_FADE_METRES.eye.whole - RIDER_FADE_METRES.eye.gone) + 1e-9,
+      );
+      before = now;
+    }
   });
 });
 

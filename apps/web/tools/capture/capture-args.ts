@@ -44,6 +44,7 @@ const OPTIONS = [
   '--start',
   '--archive',
   '--script',
+  '--music',
 ] as const;
 
 /** `<lat>,<lon>`, each a decimal number of degrees. */
@@ -155,6 +156,9 @@ export function parseCaptureArgs(
   if (values.has('--script')) {
     return { ok: false, message: 'capture: --script is a whole video: parseScriptArgs reads it' };
   }
+  if (values.has('--music')) {
+    return { ok: false, message: 'capture: --music is a bed under a whole video, with --script' };
+  }
   const scene = values.get('--scene') ?? 'route-hud';
   if (!Object.hasOwn(CAPTURE_SCENES, scene)) {
     return {
@@ -206,6 +210,97 @@ export interface ScriptRequest {
   /** The start and archive of the script's free-ride scenes, when it has one. */
   readonly start?: string | undefined;
   readonly archive?: string | undefined;
+  /**
+   * #3223: the music bed mixed under the whole video, a name in
+   * {@link SCRIPT_MUSIC}; absent, the video is silent.
+   */
+  readonly music?: string | undefined;
+}
+
+/** #3223: a track a script's video may carry, and how its description credits it. */
+export interface ScriptMusic {
+  /** The file, under `apps/web/public/`: a track the app itself ships. */
+  readonly file: string;
+  /** The line the video's description credits it with. */
+  readonly credit: string;
+}
+
+/**
+ * #3223: the music a script's video may carry, by the name `--music` takes.
+ * Only the app's own CC0 menu loop (#2057, `src/shell/menu-music.ts`
+ * §`MENU_MUSIC_FILE`; its `ASSETS.toml` row is the record the credit is held
+ * to), so a render can only carry a track whose licence this repository
+ * already records. The YouTube cut's alone: the Pages demo's renders
+ * (`tools/demo/`) stay silent.
+ */
+export const SCRIPT_MUSIC: Readonly<Record<string, ScriptMusic>> = {
+  'aurora-ride': {
+    file: 'audio/upbeat-game-loop-aurora-ride.ogg',
+    credit:
+      'Music: “Upbeat Game Loop - Aurora Ride” by Venus17, Freesound sound 841299, ' +
+      'CC0 1.0: https://freesound.org/people/Venus17/sounds/841299/',
+  },
+};
+
+/**
+ * #3223: how the bed sits under the picture. The loop is mastered at about
+ * −14 LUFS integrated (measured with `ffmpeg -af ebur128`); 4 dB down puts it
+ * near −18, under YouTube's −14 reference, so it carries the video without
+ * overwhelming it. It fades in from the first frame and out to the last.
+ */
+export const MUSIC_GAIN_DB = -4;
+export const MUSIC_FADE_IN_SECONDS = 2;
+export const MUSIC_FADE_OUT_SECONDS = 3;
+
+/**
+ * #3223: `ffmpeg`'s arguments to mix `music` under `video`, `seconds` long,
+ * into `out`: the picture copied as it was encoded, never re-encoded; the
+ * track looped (`aloop`, which repeats the decoded samples, so the 16-bar
+ * loop joins with no gap), cut to the video's length, at
+ * {@link MUSIC_GAIN_DB}, faded in and out, as 48 kHz stereo AAC, the audio
+ * YouTube asks for in an MP4.
+ */
+export function musicMuxArgs(video: string, music: string, seconds: number, out: string): string[] {
+  const fadeOut = Math.max(0, seconds - MUSIC_FADE_OUT_SECONDS);
+  const bed = [
+    // The whole track in memory, then repeated: INT32_MAX is aloop's own most.
+    'aloop=loop=-1:size=2147483647',
+    `atrim=duration=${String(seconds)}`,
+    `volume=${String(MUSIC_GAIN_DB)}dB`,
+    `afade=t=in:st=0:d=${String(MUSIC_FADE_IN_SECONDS)}`,
+    `afade=t=out:st=${String(fadeOut)}:d=${String(MUSIC_FADE_OUT_SECONDS)}`,
+    'aresample=48000',
+  ].join(',');
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    video,
+    '-i',
+    music,
+    '-filter_complex',
+    `[1:a]${bed}[music]`,
+    '-map',
+    '0:v',
+    '-map',
+    '[music]',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-ac',
+    '2',
+    '-shortest',
+    '-movflags',
+    '+faststart',
+    '-map_metadata',
+    '-1',
+    out,
+  ];
 }
 
 /** #3156: the scene scripts `--script` renders, by name. */
@@ -245,7 +340,23 @@ export function parseScriptArgs(
     `--script ${name}`,
   );
   if (refused(openWorld)) return openWorld;
-  return { ok: true, request: { script: name, ...frame, out: values.get('--out'), ...openWorld } };
+  const music = values.get('--music');
+  if (music !== undefined && !Object.hasOwn(SCRIPT_MUSIC, music)) {
+    return {
+      ok: false,
+      message: `capture: --music is one of ${Object.keys(SCRIPT_MUSIC).join(', ')}, not ${music}`,
+    };
+  }
+  return {
+    ok: true,
+    request: {
+      script: name,
+      ...frame,
+      out: values.get('--out'),
+      ...openWorld,
+      ...(music === undefined ? {} : { music }),
+    },
+  };
 }
 
 /** How many frames a capture writes: its seconds times its frames a second, exactly. */
@@ -340,11 +451,27 @@ export function captureRideName(scene: string): string {
 /** What the capture's route is called on the picker: a placeholder, never a real place's name. */
 export const CAPTURE_ROUTE_NAME = 'Capture loop';
 
+/** How high each rise of {@link captureRouteGpx} climbs, metres — #3223. */
+export const CAPTURE_RISE_METRES = 90;
+
 /**
- * The route the capture rides, as GPX: eight kilometres from 0° 0°, bending
- * gently east and back, over two rises — invented, so no real street or place
- * is on screen (the epic's rule), with a gradient that changes for the HUD to
- * show. A point every ten metres.
+ * The route the capture rides, as GPX: eight kilometres north from 0° 0°,
+ * swinging 1.2 km east and then as far west, about 9.5 km of road over two
+ * rises — invented, so no real street or place is on screen (the epic's
+ * rule), with a gradient that changes for the HUD to show. A point every ten
+ * metres north.
+ *
+ * Each rise is {@link CAPTURE_RISE_METRES} high over two kilometres, so it is
+ * a climb a rider feels: steepest, about 5.7 %, half way up, and over 4 % for
+ * its middle kilometre, where the `climb` scene rides (#3223, the owner's
+ * review of the final render: a road of 1 % is not one to say "feel every
+ * climb" over).
+ *
+ * The swing is the route's shape on the HUD's map (`hud/plan.ts`), fitted
+ * whole into its panel: the demo's "The whole route, and where you are on it"
+ * is said over it, and a route that only bends 120 m in 8 km is drawn there as
+ * a straight line (the owner's review of #3177, 2026-11-25). Its bends are
+ * over a kilometre in radius, so the ride itself still reads as a gentle road.
  */
 export function captureRouteGpx(): string {
   const points: string[] = [];
@@ -353,8 +480,8 @@ export function captureRouteGpx(): string {
   const COUNT = 800;
   for (let index = 0; index <= COUNT; index += 1) {
     const along = index * SPACING;
-    const east = 120 * Math.sin((along / 4000) * Math.PI);
-    const elevation = 40 + 18 * (1 - Math.cos((along / 2000) * Math.PI));
+    const east = 1_200 * Math.sin((along / 4000) * Math.PI);
+    const elevation = 40 + (CAPTURE_RISE_METRES / 2) * (1 - Math.cos((along / 2000) * Math.PI));
     points.push(
       `<trkpt lat="${(along / METRES_PER_DEGREE).toFixed(7)}" lon="${(east / METRES_PER_DEGREE).toFixed(7)}">` +
         `<ele>${elevation.toFixed(1)}</ele></trkpt>`,

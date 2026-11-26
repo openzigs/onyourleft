@@ -2,7 +2,8 @@
 
 /**
  * #1992: the simulated rider's query, its sensors, its clock and its mark.
- * `simulated-rider-wiring.test.tsx` rides it through the real game screen.
+ * `simulated-rider-wiring.test.tsx` rides it through the real game screen;
+ * `simulated-body.test.ts` pins the curves of its invented readings (#3210).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -14,8 +15,8 @@ import {
   simulatedRideText,
   simulatedRiderFromHash,
   simulatedRiderKey,
-  simulatedSensors,
   simulatedStartMetres,
+  SimulatedRiderSensors,
 } from './simulated-rider';
 
 describe('simulatedRiderFromHash', () => {
@@ -62,6 +63,33 @@ describe('simulatedRiderFromHash', () => {
     expect(simulatedRiderFromHash('#/game?simulate=200&at=x')?.startMetres).toBeUndefined();
     expect(simulatedRiderFromHash('#/game?simulate=200&at=0')?.startMetres).toBe(0);
   });
+
+  it('reads a fixed cadence and heart rate — #3210', () => {
+    expect(simulatedRiderFromHash('#/game?simulate=200&cadence=92&hr=141')).toEqual({
+      watts: 200,
+      speedup: 1,
+      startMetres: undefined,
+      cadence: 92,
+      heartRate: 141,
+    });
+    expect(simulatedRiderFromHash('#/game?simulate=200&cadence=0')?.cadence).toBe(0);
+    expect(simulatedRiderFromHash('#/game?simulate=200&cadence=200&hr=30')).toMatchObject({
+      cadence: 200,
+      heartRate: 30,
+    });
+    expect(simulatedRiderFromHash('#/game?simulate=200&hr=230')?.heartRate).toBe(230);
+  });
+
+  it('leaves a cadence or heart rate it cannot take invented — #3210', () => {
+    for (const hash of [
+      '#/game?simulate=200&cadence=-1&hr=29',
+      '#/game?simulate=200&cadence=201&hr=231',
+      '#/game?simulate=200&cadence=fast&hr=',
+    ]) {
+      const rider = simulatedRiderFromHash(hash);
+      expect(rider, hash).toEqual({ watts: 200, speedup: 1, startMetres: undefined });
+    }
+  });
 });
 
 describe('simulatedRiderKey', () => {
@@ -72,18 +100,86 @@ describe('simulatedRiderKey', () => {
     expect(simulatedRiderKey(undefined)).toBe(simulatedRiderKey(undefined));
     const keys = new Set([simulatedRiderKey(undefined), ...[a, b, c].map(simulatedRiderKey)]);
     expect(keys.size).toBe(4);
+    // #3210: a fixed reading is a choice of its own.
+    const fixed = [
+      simulatedRiderFromHash('#/game?simulate=200&cadence=90'),
+      simulatedRiderFromHash('#/game?simulate=200&hr=140'),
+      simulatedRiderFromHash('#/game?simulate=200&cadence=90&hr=140'),
+    ].map(simulatedRiderKey);
+    expect(new Set([...keys, ...fixed]).size).toBe(7);
     expect(simulatedRiderKey(simulatedRiderFromHash('#/game?route=x&simulate=200'))).toBe(
       simulatedRiderKey(a),
     );
   });
 });
 
-describe('simulatedSensors', () => {
-  it('rides the chosen power, live, and invents no cadence or heart rate', () => {
-    const sensors = simulatedSensors({ watts: 250, speedup: 1, startMetres: undefined });
+describe('SimulatedRiderSensors — #3210', () => {
+  const rider = { watts: 250, speedup: 1, startMetres: undefined };
+  const START = 50_000;
+
+  it('rides the chosen power, and a body at rest before the ride starts, all live and paired', () => {
+    const sensors = new SimulatedRiderSensors(rider).read(START + 60_000);
     expect(sensors.rider).toEqual({ power: 250, live: true, paired: true });
-    expect(sensors.cadence).toEqual({ value: undefined, live: false, paired: false });
-    expect(sensors.heartRate).toEqual({ value: undefined, live: false, paired: false });
+    expect(sensors.cadence).toEqual({ value: 0, live: true, paired: true });
+    expect(sensors.heartRate.live).toBe(true);
+    expect(sensors.heartRate.paired).toBe(true);
+    expect(sensors.heartRate.value).toBeGreaterThanOrEqual(65);
+    expect(sensors.heartRate.value).toBeLessThanOrEqual(75);
+  });
+
+  it('invents a cadence and heart rate on the ride’s clock from its start', () => {
+    const sensors = new SimulatedRiderSensors(rider);
+    sensors.start(START, () => 0, {});
+    expect(sensors.read(START).cadence.value).toBe(0);
+    for (let ms = 100; ms <= 300_000; ms += 100) sensors.read(START + ms);
+    const after = sensors.read(START + 300_000);
+    expect(after.cadence.value).toBeGreaterThanOrEqual(85);
+    expect(after.cadence.value).toBeLessThanOrEqual(95);
+    expect(after.heartRate.value).toBeGreaterThanOrEqual(160);
+    expect(after.heartRate.value).toBeLessThanOrEqual(180);
+  });
+
+  it('reads the gradient it was handed, and slows the legs on a climb', () => {
+    const cadenceOn = (grade: number): number | undefined => {
+      const sensors = new SimulatedRiderSensors(rider);
+      sensors.start(START, () => grade, {});
+      for (let ms = 100; ms <= 60_000; ms += 100) sensors.read(START + ms);
+      return sensors.read(START + 60_000).cadence.value;
+    };
+    expect(cadenceOn(10)).toBeLessThanOrEqual(80);
+    expect(cadenceOn(0)).toBeGreaterThanOrEqual(85);
+  });
+
+  it('scales the heart rate to the thresholds it was handed', () => {
+    const heartAt = (own: { power?: number; heartRate?: number }): number | undefined => {
+      const sensors = new SimulatedRiderSensors(rider);
+      sensors.start(START, () => 0, own);
+      for (let ms = 1_000; ms <= 600_000; ms += 1_000) sensors.read(START + ms);
+      return sensors.read(START + 600_000).heartRate.value;
+    };
+    expect(heartAt({ power: 250, heartRate: 150 })).toBeLessThanOrEqual(152);
+    expect(heartAt({})).toBeGreaterThanOrEqual(165);
+  });
+
+  it('starts at rest again on the next ride', () => {
+    const sensors = new SimulatedRiderSensors(rider);
+    sensors.start(START, () => 0, {});
+    for (let ms = 1_000; ms <= 120_000; ms += 1_000) sensors.read(START + ms);
+    sensors.start(START + 200_000, () => 0, {});
+    expect(sensors.read(START + 200_000).cadence.value).toBe(0);
+    expect(sensors.read(START + 200_000).heartRate.value).toBeLessThanOrEqual(75);
+  });
+
+  it('reads the fixed cadence and heart rate it was asked for in place of invented ones', () => {
+    const sensors = new SimulatedRiderSensors({ ...rider, cadence: 0, heartRate: 141 });
+    sensors.start(START, () => 0, {});
+    for (let ms = 100; ms <= 30_000; ms += 100) sensors.read(START + ms);
+    expect(sensors.read(START + 30_000).cadence).toEqual({ value: 0, live: true, paired: true });
+    expect(sensors.read(START + 30_000).heartRate).toEqual({
+      value: 141,
+      live: true,
+      paired: true,
+    });
   });
 });
 

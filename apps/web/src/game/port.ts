@@ -354,6 +354,18 @@ export interface RiderMarker {
    */
   readonly body?: RiderBody | undefined;
   /**
+   * Which skin tone this rider is drawn with — #3214: an index into
+   * `rider-body.ts` §`RIDER_SKIN_TONES`, which a lap race's bot is seeded
+   * from its id (`rider-body.ts` §`botSkinFor`). Absent draws the first tone,
+   * every rider's before #3214. The skin is drawn untinted: the kind's tint
+   * colours the kit, the helmet and the bicycle only (owner, 2026-11-25).
+   *
+   * ⚠️ **Drawing only**, mapped through `riderSkinFor` by the renderer, so
+   * anything that is not an index of the list draws the first tone. Only the
+   * realistic world draws skin; the stylised rider wears long sleeves.
+   */
+  readonly skin?: number | undefined;
+  /**
    * How this rider's lap-race hit effect looks on this frame — #1902, only
    * while an item's slow-down runs on them (`lap-race/in-view.ts`
    * §`hitLook`). Carried on the marker so the effect is drawn exactly where
@@ -794,6 +806,16 @@ export interface GameView {
    * argument for a chart that throws.
    */
   readonly hasContext: boolean;
+  /**
+   * Which world the view draws now — #3175: `three-renderer.ts`
+   * §`drawnWorld`, read by a capture ride, which tells the capture tool so it
+   * shoots no frame drawn in the stylised world.
+   *
+   * Optional, unlike its neighbours, because only a capture reads it, and a
+   * view without it is read as `'stylised'`: a capture refuses every frame of
+   * such a view, so the member nobody supplies fails rather than passes.
+   */
+  readonly drawnWorld?: QualitySettings['world'] | undefined;
 }
 
 /** Creates views. The one thing `three-renderer.ts` exports. */

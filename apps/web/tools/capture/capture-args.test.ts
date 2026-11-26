@@ -19,6 +19,10 @@ import {
   captureName,
   captureRouteGpx,
   MAX_CAPTURE_FRAMES,
+  MUSIC_FADE_IN_SECONDS,
+  MUSIC_FADE_OUT_SECONDS,
+  MUSIC_GAIN_DB,
+  musicMuxArgs,
   parseCaptureArgs,
   parseScriptArgs,
 } from './capture-args';
@@ -91,7 +95,7 @@ describe('capture’s arguments — #3152', () => {
     [['--scene', 'x', '--scene', 'y'], /given twice/u],
     [
       ['--scene', 'gravel'],
-      /--scene is one of route-hud, delivery, lap-race, workout, pacer, free-ride, not gravel/u,
+      /--scene is one of route-hud, climb, delivery, lap-race, workout, pacer, free-ride, not gravel/u,
     ],
     // #3154: a free ride's start and archive, both, and only a free ride's.
     [['--scene', 'free-ride'], /rides the open world, so it needs --start and --archive/u],
@@ -183,6 +187,19 @@ describe('what the capture rides — #3152', () => {
     expect(Math.max(...elevations) - Math.min(...elevations)).toBeGreaterThan(30);
   });
 
+  it('gives the route a shape the HUD’s map can show, not a straight line (#3177)', () => {
+    const points = [...captureRouteGpx().matchAll(/lat="([-\d.]+)" lon="([-\d.]+)"/gu)];
+    const north = points.map((point) => Number(point[1]));
+    const east = points.map((point) => Number(point[2]));
+    const span = (values: number[]): number => Math.max(...values) - Math.min(...values);
+    // At 0° a degree is as long east as north, so the spans compare as drawn,
+    // north-up and fitted whole (`hud/plan.ts`): a quarter as wide as it is long.
+    expect(span(east) / span(north)).toBeGreaterThan(0.25);
+    // And it bends both ways: east of its start, then west of it.
+    expect(Math.max(...east)).toBeGreaterThan(0);
+    expect(Math.min(...east)).toBeLessThan(0);
+  });
+
   it('stands its clock on a midsummer morning', () => {
     expect(new Date(CAPTURE_DATE_MS).toISOString()).toBe('2026-06-20T10:30:00.000Z');
   });
@@ -237,5 +254,56 @@ describe('capture -- --script — #3156', () => {
       ok: false,
       message: 'capture: --script is a whole video: parseScriptArgs reads it',
     });
+  });
+
+  it('takes a music bed by name, for a whole script only — #3223', () => {
+    expect(parseScriptArgs(['--script', 'youtube', '--music', 'aurora-ride', ...where])).toEqual({
+      ok: true,
+      request: {
+        script: 'youtube',
+        fps: 60,
+        width: 1920,
+        height: 1080,
+        out: undefined,
+        start: '40.1,-75.25',
+        archive: '/tmp/basemap.pmtiles',
+        music: 'aurora-ride',
+      },
+    });
+    // Without it, silent: no music in the request at all.
+    expect(parseScriptArgs(['--script', 'youtube', ...where])).not.toHaveProperty('request.music');
+    expect(parseScriptArgs(['--script', 'youtube', '--music', 'song.mp3', ...where])).toEqual({
+      ok: false,
+      message: 'capture: --music is one of aurora-ride, not song.mp3',
+    });
+    expect(parseScriptArgs(['--script', 'youtube', '--music', 'toString', ...where])).toEqual({
+      ok: false,
+      message: 'capture: --music is one of aurora-ride, not toString',
+    });
+    expect(parseCaptureArgs(['--scene', 'route-hud', '--music', 'aurora-ride'])).toEqual({
+      ok: false,
+      message: 'capture: --music is a bed under a whole video, with --script',
+    });
+  });
+
+  it('mixes the bed under the picture as encoded: looped, cut to length, faded, quieter — #3223', () => {
+    const args = musicMuxArgs('in.mp4', 'loop.ogg', 132, 'out.mp4');
+    const after = (flag: string, from = 0): string | undefined =>
+      args[args.indexOf(flag, from) + 1];
+    expect(after('-i')).toBe('in.mp4');
+    expect(after('-i', args.indexOf('-i') + 1)).toBe('loop.ogg');
+    expect(after('-filter_complex')).toBe(
+      '[1:a]aloop=loop=-1:size=2147483647,atrim=duration=132,' +
+        `volume=${String(MUSIC_GAIN_DB)}dB,` +
+        `afade=t=in:st=0:d=${String(MUSIC_FADE_IN_SECONDS)},` +
+        `afade=t=out:st=${String(132 - MUSIC_FADE_OUT_SECONDS)}:d=${String(MUSIC_FADE_OUT_SECONDS)},` +
+        'aresample=48000[music]',
+    );
+    // The picture as it was encoded, and the bed as the only audio.
+    expect(args.join(' ')).toContain('-map 0:v -map [music] -c:v copy -c:a aac');
+    expect(MUSIC_GAIN_DB).toBeLessThan(0);
+    expect(after('-movflags')).toBe('+faststart');
+    expect(args).toContain('-shortest');
+    expect(args.at(-1)).toBe('out.mp4');
   });
 });

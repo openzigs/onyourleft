@@ -26,10 +26,17 @@
  * A frame where a callout's panel is missing, or where no place keeps the
  * caption off the panel it explains, the map credit and the title-safe
  * margin, stops the render: a video that breaks the epic's rules is not made.
+ *
+ * #3175: so does a captioned frame where any panel the scene's mode draws
+ * (`video-script.ts` §`scenePanels`) is missing or faded — the owner's "make
+ * sure the video shows all of the hud" — and the opening title is drawn under
+ * the project's logo ({@link installLogo}).
  */
 
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
@@ -37,6 +44,7 @@ import { CAPTURE_SCENES } from '../../src/game/capture-scene';
 import { encoders, startEncoder } from '../demo/render-video';
 import { hasEncoder } from '../demo/video';
 import {
+  balancedWidth,
   placeCaption,
   inside,
   intersects,
@@ -44,20 +52,61 @@ import {
   type Box,
   type Point,
 } from './caption-layout';
-import { captureMp4Args, VIDEO_SCRIPTS, type ScriptRequest } from './capture-args';
+import { overlayStyle, type CaptionKind, type OverlayStyle } from './caption-style';
+import {
+  captureMp4Args,
+  musicMuxArgs,
+  SCRIPT_MUSIC,
+  VIDEO_SCRIPTS,
+  type ScriptMusic,
+  type ScriptRequest,
+} from './capture-args';
 import { renderCapture } from './render-capture';
 import {
   CALLOUT_PANELS,
   captionAt,
   CREDIT_SELECTOR,
   scriptChapters,
+  scriptDescription,
   scriptProblems,
   scriptSeconds,
+  sceneFade,
+  scenePanels,
   scriptSrt,
   shownLines,
   type CalloutPanel,
+  type VideoCaption,
   type VideoScene,
 } from './video-script';
+
+/**
+ * #3175: the project's logo, as the app ships it (`src/brand/`, the owner's
+ * art, CC-BY-4.0): the dark palette's, which is the capture's. It is drawn no
+ * larger than its own 512 × 408 pixels, so it is sharp at 1080p without a
+ * scaled copy.
+ */
+export const LOGO_FILE = fileURLToPath(new URL('../../src/brand/logo-dark.webp', import.meta.url));
+
+/** The logo as a `data:` address, so the page draws it without a request. */
+export function logoDataUrl(file: string = LOGO_FILE): string {
+  return `data:image/webp;base64,${readFileSync(file).toString('base64')}`;
+}
+
+/**
+ * In the page: add the logo's `<img>`, hidden, and wait until it is decoded,
+ * so the frame it is first drawn on has it. Once a page; a second call is
+ * nothing.
+ */
+async function installLogo(src: string): Promise<void> {
+  if (document.getElementById('oyl-capture-logo') !== null) return;
+  const img = document.createElement('img');
+  img.id = 'oyl-capture-logo';
+  img.alt = '';
+  img.style.display = 'none';
+  img.src = src;
+  document.body.append(img);
+  await img.decode();
+}
 
 /** The HUD's panels, every one of which a caption keeps off where the frame has room. */
 export const PANEL_SELECTOR = '.oyl-hud__panel, .oyl-hud__junction-prompt';
@@ -83,12 +132,13 @@ export interface ScriptResult {
   readonly mp4: string;
   readonly srt: string;
   readonly chapters: string;
+  /** #3223: the description's draft: the chapters and the credits, the music's among them. */
+  readonly description: string;
   /** Frames written, every scene's. */
   readonly frames: number;
 }
 
-/** How a caption is drawn: a callout beside its panel, or its own placement. */
-type Kind = 'title' | 'lower-third' | 'callout' | 'card';
+type Kind = CaptionKind;
 
 /** What {@link measureOverlay} reads off the page. */
 export interface Measured {
@@ -96,6 +146,8 @@ export interface Measured {
   readonly target: Box | undefined;
   readonly credit: Box | undefined;
   readonly panels: readonly Box[];
+  /** #3175: the names of the panels asked for that are not drawn, or are faded. */
+  readonly missing: readonly string[];
 }
 
 /**
@@ -105,11 +157,22 @@ export interface Measured {
  */
 function measureOverlay(arg: {
   readonly lines: readonly string[];
-  readonly kind: Kind;
   readonly selector: string | undefined;
   readonly label: string | undefined;
   readonly credit: string;
   readonly panels: string;
+  /** #3175: draw the logo above the words. */
+  readonly logo: boolean;
+  /** How it is drawn (`caption-style.ts`). */
+  readonly style: OverlayStyle;
+  /** The width to lay it out at, in pixels; its own where there is none. */
+  readonly width?: number | undefined;
+  /** #3175: the panels the frame must show, by name, selector and label. */
+  readonly want: readonly {
+    readonly name: string;
+    readonly selector: string;
+    readonly label: string | undefined;
+  }[];
 }): Measured {
   const ID = 'oyl-capture-overlay';
   let root = document.getElementById(ID);
@@ -138,52 +201,43 @@ function measureOverlay(arg: {
   const svg = root.querySelector('svg');
   if (card === null || svg === null) throw new Error('the capture overlay lost its parts');
   svg.style.visibility = 'hidden';
-  const title = arg.kind === 'title';
-  const whole = arg.kind === 'card';
+  // #3175: the logo is kept out of the caption between frames, so a caption
+  // that has none does not take it away with its own lines.
+  const logo = document.getElementById('oyl-capture-logo') as HTMLImageElement | null;
+  if (logo !== null) {
+    logo.style.display = 'none';
+    document.body.append(logo);
+  }
+  if (arg.logo && logo === null) throw new Error('the capture logo was not installed');
+  if (arg.logo && logo !== null) {
+    Object.assign(logo.style, {
+      display: 'block',
+      // Never larger than its own pixels, so never scaled up and blurred;
+      // and small enough that the title sits between the HUD's top panels
+      // and the rider at 1080p (`caption-style.ts` §`LOGO_VH`).
+      height: `min(${String(arg.style.logoVh)}vh, ${String(logo.naturalHeight)}px)`,
+      width: 'auto',
+      margin: '0 auto 0.2em',
+      order: '-1',
+    });
+  }
   card.replaceChildren(
+    ...(arg.logo && logo !== null ? [logo] : []),
     ...arg.lines.map((line, index) => {
       const p = document.createElement('p');
       p.textContent = line;
-      Object.assign(p.style, {
-        margin: '0',
-        ...(whole && index > 0
-          ? { fontFamily: 'inherit', fontSize: '2.2vh', fontWeight: '400', maxWidth: '70%' }
-          : {}),
-      });
+      Object.assign(p.style, arg.style.lines[index]);
       return p;
     }),
   );
   card.removeAttribute('style');
-  Object.assign(card.style, {
-    position: 'absolute',
-    left: '0',
-    top: '0',
-    visibility: 'hidden',
-    boxSizing: 'border-box',
-    background: 'var(--oyl-color-hud-surface)',
-    color: 'var(--oyl-color-hud-ink)',
-    fontFamily: 'var(--oyl-font-family-display)',
-    fontWeight: title ? '800' : '700',
-    fontSize: title ? '6.5vh' : whole ? '5.5vh' : arg.kind === 'callout' ? '3.4vh' : '4.2vh',
-    lineHeight: '1.2',
-    textAlign: arg.kind === 'callout' ? 'left' : 'center',
-    borderRadius: whole ? '0' : 'var(--oyl-radius)',
-    padding: whole ? '0' : '0.35em 0.7em',
-    ...(whole
-      ? {
-          width: '100vw',
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '1.6vh',
-        }
-      : {
-          width: 'max-content',
-          maxWidth: title ? '80vw' : arg.kind === 'callout' ? '34vw' : '64vw',
-        }),
-  });
+  Object.assign(card.style, arg.style.card);
+  // A wrapped caption is drawn at the width that balances its lines
+  // (`caption-layout.ts` §`balancedWidth`), not at its widest.
+  if (arg.width !== undefined) {
+    Object.assign(card.style, { width: `${String(arg.width)}px`, maxWidth: 'none' });
+  }
+  Object.assign(svg.style, arg.style.marks);
   const boxOf = (element: Element): Box => {
     const rect = element.getBoundingClientRect();
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
@@ -208,18 +262,15 @@ function measureOverlay(arg: {
     }
     return opacity >= 0.5;
   };
-  const target =
-    arg.selector === undefined
-      ? undefined
-      : [...document.querySelectorAll(arg.selector)].find(
-          (element) =>
-            shown(boxOf(element)) &&
-            drawn(element) &&
-            (arg.label === undefined ||
-              (element.querySelector('.oyl-hud__label')?.textContent ?? '')
-                .trim()
-                .startsWith(arg.label)),
-        );
+  const find = (selector: string, label: string | undefined): Element | undefined =>
+    [...document.querySelectorAll(selector)].find(
+      (element) =>
+        shown(boxOf(element)) &&
+        drawn(element) &&
+        (label === undefined ||
+          (element.querySelector('.oyl-hud__label')?.textContent ?? '').trim().startsWith(label)),
+    );
+  const target = arg.selector === undefined ? undefined : find(arg.selector, arg.label);
   const credit = document.querySelector(arg.credit);
   const creditBox = credit === null ? undefined : boxOf(credit);
   const size = boxOf(card);
@@ -228,6 +279,9 @@ function measureOverlay(arg: {
     target: target === undefined ? undefined : boxOf(target),
     credit: creditBox !== undefined && shown(creditBox) ? creditBox : undefined,
     panels: [...document.querySelectorAll(arg.panels)].map(boxOf).filter(shown),
+    missing: arg.want
+      .filter((panel) => find(panel.selector, panel.label) === undefined)
+      .map((panel) => panel.name),
   };
 }
 
@@ -296,6 +350,29 @@ function drawOverlay(arg: {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
+/**
+ * In the page: black over the whole frame at `opacity`, under any caption: a
+ * scene's fade from and to black (`video-script.ts` §`sceneFade`).
+ */
+function drawFade(opacity: number): void {
+  const ID = 'oyl-capture-fade';
+  let fade = document.getElementById(ID);
+  if (fade === null) {
+    fade = document.createElement('div');
+    fade.id = ID;
+    fade.setAttribute('aria-hidden', 'true');
+    Object.assign(fade.style, {
+      position: 'fixed',
+      inset: '0',
+      pointerEvents: 'none',
+      background: '#000',
+      zIndex: '2147483646',
+    });
+    document.body.append(fade);
+  }
+  fade.style.opacity = String(opacity);
+}
+
 /** In the page: no caption on this frame. */
 function hideOverlay(): void {
   const root = document.getElementById('oyl-capture-overlay');
@@ -333,12 +410,24 @@ export function drawnProblems(
   return problems;
 }
 
+/**
+ * #3175: what is wrong with a captioned frame's HUD: a panel its scene's mode
+ * draws (`video-script.ts` §`scenePanels`) that is not in the frame, or is
+ * faded. A card covers the whole frame, so it is not asked.
+ */
+export function hudProblems(missing: readonly string[], kind: Kind): string[] {
+  if (kind === 'card' || missing.length === 0) return [];
+  return [`the HUD does not show ${missing.join(', ')}, drawn and unfaded`];
+}
+
 /** Draw `scene`'s caption at `second` of it over the page, or none; throws on a frame that breaks the rules. */
 async function drawCaption(
   page: Page,
   scene: VideoScene,
   second: number,
   frame: { readonly width: number; readonly height: number },
+  logo: string,
+  widths: WeakMap<VideoCaption, number>,
 ): Promise<void> {
   const shown = captionAt(scene, second);
   if (shown === undefined) {
@@ -350,17 +439,40 @@ async function drawCaption(
   const panel: CalloutPanel | undefined =
     caption.callout === undefined ? undefined : CALLOUT_PANELS[caption.callout];
   const kind: Kind = panel === undefined ? (caption.placement ?? 'lower-third') : 'callout';
-  const measured = await page.evaluate(measureOverlay, {
-    lines: shownLines(caption),
-    kind,
+  if (caption.logo === true) await page.evaluate(installLogo, logo);
+  const capture = CAPTURE_SCENES[scene.capture];
+  const lines = shownLines(caption);
+  const asked = {
+    lines,
     selector: panel?.selector,
     label: panel?.label,
     credit: CREDIT_SELECTOR,
     panels: PANEL_SELECTOR,
-  });
+    logo: caption.logo === true,
+    style: overlayStyle(kind, lines.length, caption.lines?.length ?? 0),
+    want: (capture === undefined ? [] : scenePanels(capture)).map((name) => {
+      const wanted: CalloutPanel = CALLOUT_PANELS[name];
+      return { name, selector: wanted.selector, label: wanted.label };
+    }),
+  };
+  // A callout or a lower third that wraps is drawn at the least width that
+  // keeps its lines, so they are even and the box holds no empty side. Found
+  // once a caption: the words and the frame do not change under it.
+  let width = widths.get(caption);
+  if (width === undefined && (kind === 'callout' || kind === 'lower-third')) {
+    const natural = (await page.evaluate(measureOverlay, asked)).size;
+    width = await balancedWidth(
+      natural,
+      async (at) => (await page.evaluate(measureOverlay, { ...asked, width: at })).size.height,
+    );
+    widths.set(caption, width);
+  }
+  const measured = await page.evaluate(measureOverlay, { ...asked, width });
   if (panel !== undefined && measured.target === undefined) {
     throw new Error(`${where}: the ${String(caption.callout)} panel is not in the frame`);
   }
+  const hud = hudProblems(measured.missing, kind);
+  if (hud.length > 0) throw new Error(`${where}: ${hud.join('; ')}`);
   const place = placeCaption({
     frame,
     size: measured.size,
@@ -392,18 +504,58 @@ export function partialName(mp4: string): string {
   return mp4.replace(/\.mp4$/u, '.partial.mp4');
 }
 
+/** #3223: the file a {@link ScriptMusic} track is, in the app's own `public/`. */
+export function musicFile(music: ScriptMusic): string {
+  return fileURLToPath(new URL(`../../public/${music.file}`, import.meta.url));
+}
+
+/**
+ * #3223: mix `music` under the silent `video` into `out` with `ffmpeg`
+ * (`capture-args.ts` §`musicMuxArgs`); throws when it fails, so no video
+ * is named whole that is not.
+ */
+export function muxMusic(
+  ffmpeg: string,
+  video: string,
+  music: string,
+  seconds: number,
+  out: string,
+): void {
+  const run = spawnSync(ffmpeg, musicMuxArgs(video, music, seconds, out), { encoding: 'utf8' });
+  if (run.error !== undefined || run.status !== 0) {
+    throw new Error(`capture: mixing the music failed: ${String(run.error ?? run.stderr)}`);
+  }
+}
+
 /**
  * Give the encoded `partial` its final name `mp4`, only if it holds every
  * frame the script asks for. A render that stopped part-way leaves its
  * partial file, and an earlier whole video under `mp4` stays as it was.
+ *
+ * #3223: with `mix`, the music is mixed under `partial` first, into a file of
+ * its own beside it, and that is what is named `mp4`; a mix that fails leaves
+ * `partial` and the earlier `mp4` as they were.
  */
-export function finishVideo(partial: string, mp4: string, frames: number, expected: number): void {
+export function finishVideo(
+  partial: string,
+  mp4: string,
+  frames: number,
+  expected: number,
+  mix?: (video: string, out: string) => void,
+): void {
   if (frames !== expected) {
     throw new Error(
       `capture: wrote ${String(frames)} frames, not the script’s ${String(expected)}`,
     );
   }
-  renameSync(partial, mp4);
+  if (mix === undefined) {
+    renameSync(partial, mp4);
+    return;
+  }
+  const mixed = partial.replace(/\.partial\.mp4$/u, '.mixed.partial.mp4');
+  mix(partial, mixed);
+  renameSync(mixed, mp4);
+  rmSync(partial);
 }
 
 /** Render `request`'s script into one MP4, with its `.srt` and chapters beside it. */
@@ -421,15 +573,30 @@ export async function renderScript(
   if (!hasEncoder(encoders(ffmpeg), 'libx264')) {
     throw new Error('capture: this ffmpeg has no libx264, which the H.264 output needs');
   }
+  // #3223: the bed is looked for before a frame is rendered, not after.
+  const music = request.music === undefined ? undefined : SCRIPT_MUSIC[request.music];
+  if (request.music !== undefined && music === undefined) {
+    throw new Error(`capture: there is no music ${request.music}`);
+  }
+  const track = music === undefined ? undefined : musicFile(music);
+  if (track !== undefined && !existsSync(track)) {
+    throw new Error(`capture: the music file ${track} is not there`);
+  }
   mkdirSync(options.out, { recursive: true });
   const mp4 = join(options.out, scriptName(request, '.mp4'));
   const partial = partialName(mp4);
   const frame = { width: request.width, height: request.height };
   const encoder = startEncoder(ffmpeg, captureMp4Args(request.fps, partial));
+  const logo = logoDataUrl();
+  const widths = new WeakMap<VideoCaption, number>();
   let frames = 0;
   try {
     for (const scene of script.scenes) {
       const from = scene.from ?? 0;
+      const edges = {
+        first: scene === script.scenes[0],
+        last: scene === script.scenes.at(-1),
+      };
       const openWorld = CAPTURE_SCENES[scene.capture]?.openWorld === true;
       const result = await renderCapture(
         {
@@ -448,7 +615,10 @@ export async function renderScript(
           ffmpeg,
           encoder: { into: encoder, mp4: partial },
           skipFrames: from * request.fps,
-          beforeShot: (page, second) => drawCaption(page, scene, second - from, frame),
+          beforeShot: async (page, second) => {
+            await page.evaluate(drawFade, sceneFade(second - from, scene.seconds, edges));
+            await drawCaption(page, scene, second - from, frame, logo, widths);
+          },
           onFrame: (at, of) => options.onFrame?.(scene.id, at, of),
         },
       );
@@ -461,10 +631,23 @@ export async function renderScript(
   }
   await encoder.end();
   // The video is every scene, end to end: the captions' times say so.
-  finishVideo(partial, mp4, frames, scriptSeconds(script) * request.fps);
+  const seconds = scriptSeconds(script);
+  finishVideo(
+    partial,
+    mp4,
+    frames,
+    seconds * request.fps,
+    track === undefined
+      ? undefined
+      : (video, out) => {
+          muxMusic(ffmpeg, video, track, seconds, out);
+        },
+  );
   const srt = join(options.out, scriptName(request, '.srt'));
   writeFileSync(srt, scriptSrt(script));
   const chapters = join(options.out, scriptName(request, '.chapters.txt'));
   writeFileSync(chapters, scriptChapters(script));
-  return { mp4, srt, chapters, frames };
+  const description = join(options.out, scriptName(request, '.description.txt'));
+  writeFileSync(description, scriptDescription(script, music?.credit));
+  return { mp4, srt, chapters, description, frames };
 }

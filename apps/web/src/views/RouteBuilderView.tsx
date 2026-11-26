@@ -25,6 +25,7 @@ import {
 import type { RouteId } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
+import { RenderBoundary } from '../design/ChartSlot';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -93,9 +94,12 @@ import {
   elevationSentence,
   GRADE_BANDS,
   profileRows,
+  routeSummary,
+  ROUTING_TEXT,
   surfaceSummary,
   unresolvedSentence,
 } from '../routing/present';
+import { ProfileChart } from '../routing/ProfileChart';
 import { ScrollTable } from '../design/ScrollTable';
 import {
   FLAT_DRAWN_ROUTE_TEXT,
@@ -188,6 +192,16 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * **Nothing on this screen is carried by colour.** Every gradient band has a
  * name and the table prints it — #72's last criterion and `AnalysisView.tsx`'s
  * standing rule.
+ *
+ * ## The numbers beside the map — #3185
+ *
+ * A rider drags a waypoint to make a route 40 km or to miss a climb, so the
+ * distance and the climbing are in a strip directly above the map, with
+ * *Routing…* while a leg is out, rather than two screens down under the legs.
+ * Under the map the profile is drawn (`routing/ProfileChart.tsx`), and the
+ * gradient table that was the only profile is behind a disclosure under it:
+ * the chart's non-visual equivalent, one press away, and on its own, open, if
+ * the chart throws (`design/ChartSlot.tsx` §`RenderBoundary`).
  */
 
 export interface RouteBuilderViewProps {
@@ -262,6 +276,12 @@ export const PLANNER_MAP_TEXT =
 /** What the save says of a route saved as a loop (#2102): where it is offered. */
 export const SAVED_LOOP_TEXT =
   'It is a loop: choose it on the game’s route picker to race laps on it, or make a room on it.';
+
+/** The gradient table's disclosure under the profile chart (#3185). */
+export const GRADIENT_TABLE_SUMMARY = 'The gradient along the route, as a table';
+
+/** The name of the summary strip above the map (#3185). */
+export const ROUTE_SUMMARY_LABEL = 'This route so far';
 
 /** A profile, and the draft it was worked out for — see `routeFromDraft`'s `elevation`. */
 interface ElevationFor {
@@ -577,6 +597,60 @@ export function RouteBuilderView({
   const unresolved = unresolvedSentence(draft.legs);
   const risk = strandingRisk(preferences.surface);
   const loop = loopReadout(draft, loopTarget, units);
+  const summary = routeSummary(draft, elevation, units);
+
+  /**
+   * The profile's non-visual equivalent, as a table — under the chart behind a
+   * disclosure, or on its own if the chart throws (#3185).
+   */
+  const gradientTable =
+    elevation === undefined ? null : (
+      <ScrollTable
+        caption={
+          <>
+            The gradient along the route. Each row names its band, so nothing here is carried by
+            colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
+          </>
+        }
+      >
+        {/*
+          ⚠️ **The unit is in the column heading, not beside every number,
+          and that is a decision rather than a side effect of the #238
+          refactor.** #238's third criterion reads *"the unit is always
+          shown beside the number, never implied"*, and a review asked
+          whether this is a step away from it. It is not, for a reason
+          specific to a table: `scope="col"` is the association HTML
+          provides, so a screen reader announces "From (km), 0.0" for the
+          cell — the unit is *carried* rather than implied, which a caption
+          or a paragraph above the table would not do. Repeating it on
+          every row of a twenty-row gradient table would also be read out
+          twenty times. The library table and the laps table already work
+          this way; a number outside a table — the elevation sentence,
+          every reading on the ride screen — still carries its own unit,
+          which is where the criterion bites.
+        */}
+        <thead>
+          <tr>
+            <th scope="col">From ({distanceUnit(units)})</th>
+            <th scope="col">To ({distanceUnit(units)})</th>
+            <th scope="col">Gradient</th>
+            <th scope="col">Steepest</th>
+            <th scope="col">Measured</th>
+          </tr>
+        </thead>
+        <tbody>
+          {profileRows(elevation, units).map((row) => (
+            <tr key={`${row.from}-${row.to}`}>
+              <th scope="row">{row.from}</th>
+              <td>{row.to}</td>
+              <td>{row.band}</td>
+              <td>{`${String(row.steepest)}%`}</td>
+              <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </ScrollTable>
+    );
 
   return (
     <>
@@ -702,15 +776,47 @@ export function RouteBuilderView({
             </StatusMessage>
           ) : null}
 
+          {/* Only over a map there is to tap: with no basemap, or offline with
+              tiles on, the panel says why there is none instead. */}
+          {map !== undefined &&
+          engine.kind === 'ready' &&
+          basemap !== undefined &&
+          (online || !tiles) ? (
+            <p>{PLANNER_MAP_TEXT}</p>
+          ) : null}
+
+          {/*
+            #3185: the two numbers a rider plans by, directly above the map,
+            so a drag and its result are on the screen together. Not a live
+            region: they change on every tap, drag and nudge, and the legs'
+            own warning says when a leg has no route.
+
+            ⚠️ On the page from the start, and *Routing…* in a slot that is
+            always there: the strip is above the map, so a strip that appeared
+            with the first leg, or grew a line while a leg was out, would move
+            the map under the rider's finger mid-edit. The browser gate's #3134
+            drag caught the first: a waypoint dragged from where it had been.
+          */}
+          <div className="oyl-planner__summary" role="group" aria-label={ROUTE_SUMMARY_LABEL}>
+            <dl>
+              <div>
+                <dt>Distance</dt>
+                <dd>{summary.distance}</dd>
+              </div>
+              <div>
+                <dt>Climbing</dt>
+                <dd>{summary.climbing}</dd>
+              </div>
+            </dl>
+            <p className="oyl-planner__routing">{summary.routing ? ROUTING_TEXT : ''}</p>
+          </div>
+
           {map === undefined ? null : engine.kind === 'failed' ? (
             <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
           ) : engine.kind === 'loading' || startView === undefined ? (
             <p className="oyl-muted">Loading the map…</p>
           ) : (
             <>
-              {/* Only over a map there is to tap: with no basemap, or offline with
-              tiles on, the panel says why there is none instead. */}
-              {basemap !== undefined && (online || !tiles) ? <p>{PLANNER_MAP_TEXT}</p> : null}
               <MapPanel
                 port={engine.port}
                 basemap={basemap}
@@ -726,6 +832,17 @@ export function RouteBuilderView({
                 }}
               />
             </>
+          )}
+
+          {/* #3185: the profile under the map, and its table one press away. */}
+          {elevation === undefined ? null : (
+            <RenderBoundary fallback={gradientTable}>
+              <ProfileChart planned={elevation} units={units} />
+              <details className="oyl-details oyl-chart-table">
+                <summary>{GRADIENT_TABLE_SUMMARY}</summary>
+                {gradientTable}
+              </details>
+            </RenderBoundary>
           )}
 
           {isEmpty(draft) ? (
@@ -923,55 +1040,7 @@ export function RouteBuilderView({
           {elevation === undefined ? (
             <p>No elevation profile yet.</p>
           ) : (
-            <>
-              <p>{elevationSentence(elevation, units)}</p>
-              <ScrollTable
-                caption={
-                  <>
-                    The gradient along the route. Each row names its band, so nothing here is
-                    carried by colour alone. Bands:{' '}
-                    {GRADE_BANDS.map((band) => band.name).join(', ')}.
-                  </>
-                }
-              >
-                {/*
-              ⚠️ **The unit is in the column heading, not beside every number,
-              and that is a decision rather than a side effect of the #238
-              refactor.** #238's third criterion reads *"the unit is always
-              shown beside the number, never implied"*, and a review asked
-              whether this is a step away from it. It is not, for a reason
-              specific to a table: `scope="col"` is the association HTML
-              provides, so a screen reader announces "From (km), 0.0" for the
-              cell — the unit is *carried* rather than implied, which a caption
-              or a paragraph above the table would not do. Repeating it on
-              every row of a twenty-row gradient table would also be read out
-              twenty times. The library table and the laps table already work
-              this way; a number outside a table — the elevation sentence
-              above, every reading on the ride screen — still carries its own
-              unit, which is where the criterion bites.
-            */}
-                <thead>
-                  <tr>
-                    <th scope="col">From ({distanceUnit(units)})</th>
-                    <th scope="col">To ({distanceUnit(units)})</th>
-                    <th scope="col">Gradient</th>
-                    <th scope="col">Steepest</th>
-                    <th scope="col">Measured</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {profileRows(elevation, units).map((row) => (
-                    <tr key={`${row.from}-${row.to}`}>
-                      <th scope="row">{row.from}</th>
-                      <td>{row.to}</td>
-                      <td>{row.band}</td>
-                      <td>{`${String(row.steepest)}%`}</td>
-                      <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </ScrollTable>
-            </>
+            <p>{elevationSentence(elevation, units)}</p>
           )}
 
           {/* #2102: a short loop for a lap race, its length against a target. */}

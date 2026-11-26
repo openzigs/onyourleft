@@ -32,12 +32,14 @@ import {
 } from '@onyourleft/domain';
 
 import { installCaptureClock, type CaptureClockControl } from '../../tools/capture/capture-clock';
+import { captureDeviceSettings } from '../../tools/capture/capture-device';
 import { riderMassFor } from '../athlete/mass';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { CAPTURE_MODE, CAPTURE_SCENES, CaptureSensors, type CaptureTarget } from './capture-scene';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer } from './port';
+import type { QualitySettings } from './quality';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { NO_SENSORS } from './sensors';
 import { GameSimulation } from './simulation';
@@ -161,12 +163,12 @@ function field(label: string): string | undefined {
  * run frames at the instant of the press until one drew the world — what
  * `render-capture.ts` does before its first counted frame.
  */
-async function startCapture(hash: string): Promise<void> {
+async function startCapture(hash: string, drawing: GameRenderer = renderer()): Promise<void> {
   globalThis.location.hash = hash;
   mounted = await mount(
     <GameView
       port={gamePort()}
-      renderer={() => Promise.resolve(renderer())}
+      renderer={() => Promise.resolve(drawing)}
       now={on.now}
       riderMass={kilograms(RIDER_KG)}
     />,
@@ -188,11 +190,11 @@ async function startCapture(hash: string): Promise<void> {
 }
 
 /** Step the clock once; how many animation frames it ran and how many drew the world. */
-async function step(): Promise<{ readonly ran: number; readonly drew: number }> {
+async function step(ms = STEP_MS): Promise<{ readonly ran: number; readonly drew: number }> {
   const before = published()?.drawn ?? 0;
   let ran = 0;
   await act(async () => {
-    ran = on.clock.step(STEP_MS);
+    ran = on.clock.step(ms);
     await Promise.resolve();
   });
   await settle();
@@ -290,7 +292,123 @@ describe('capture mode shows the HUD a rider sees — #3152', () => {
     await startCapture('#/game?simulate=200');
     for (let frame = 1; frame <= 3 * FPS; frame += 1) await step();
     expect(mounted?.container.querySelector('.oyl-hud__simulated')).not.toBeNull();
-    expect(field('Cadence')).not.toMatch(/\d/u);
+    // #3210: its cadence is invented since the owner's ruling of 2026-11-25
+    // (`simulated-body.ts`), so it is a number; its recorder figures are not.
+    expect(field('Cadence')).toMatch(/^\d+ rpm$/u);
     expect(field('Moving')).not.toMatch(/\d/u);
+  });
+});
+
+/**
+ * #3175: a renderer whose realistic world arrives when {@link arrive} is
+ * called, and whose views draw it as `three-renderer.ts` §`#applyWorld` does:
+ * realistic only on a realistic rung given once the world is loaded.
+ */
+function realisticRenderer(): {
+  readonly drawing: GameRenderer;
+  readonly asked: () => number;
+  readonly arrive: () => void;
+  readonly rungs: QualitySettings['world'][];
+} {
+  let loaded = false;
+  let asked = 0;
+  let arrive = (): void => undefined;
+  const rungs: QualitySettings['world'][] = [];
+  const drawing: GameRenderer = {
+    loadRealisticWorld: () => {
+      asked += 1;
+      return new Promise((resolve) => {
+        arrive = () => {
+          loaded = true;
+          resolve({ loaded: true });
+        };
+      });
+    },
+    create: (_canvas, settings) => {
+      let drawn: QualitySettings['world'] =
+        settings.world === 'realistic' && loaded ? 'realistic' : 'stylised';
+      rungs.push(settings.world);
+      return {
+        hasContext: true,
+        get drawnWorld() {
+          return drawn;
+        },
+        prepare: () => Promise.resolve(),
+        render: () => undefined,
+        setQuality: (next) => {
+          rungs.push(next.world);
+          drawn = next.world === 'realistic' && loaded ? 'realistic' : 'stylised';
+        },
+        setRiderKit: () => undefined,
+        setSeason: () => undefined,
+        resize: () => undefined,
+        destroy: () => undefined,
+      };
+    },
+  };
+  return { drawing, asked: () => asked, arrive: () => arrive(), rungs };
+}
+
+/**
+ * The realistic world arrives; then warm-up frames at the same instant, as
+ * `render-capture.ts` §`warmUp` runs them, while the view is prepared again
+ * (#2663) and draws nothing, until one is drawn realistic.
+ */
+async function arriveAndWarm(arrive: () => void): Promise<void> {
+  await act(async () => {
+    arrive();
+    await Promise.resolve();
+  });
+  await settle();
+  for (let tries = 0; tries < 20 && published()?.world !== 'realistic'; tries += 1) {
+    await act(async () => {
+      on.clock.frame();
+      await Promise.resolve();
+    });
+    await settle();
+  }
+}
+
+describe('capture mode rides the realistic world the capture’s device chose — #3175', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('reads the capture tool’s settings as a rider’s: a scene with no opt-out asks for the realistic world', async () => {
+    for (const { name, value } of captureDeviceSettings()) localStorage.setItem(name, value);
+    const world = realisticRenderer();
+    await startCapture('#/game?capture=route-hud', world.drawing);
+    expect(world.asked()).toBe(1);
+    // Drawn while the world arrives: the stylised one, and said to be.
+    expect(published()?.world).toBe('stylised');
+    await arriveAndWarm(world.arrive);
+    expect(published()?.world).toBe('realistic');
+    await step();
+    expect(published()?.world).toBe('realistic');
+  });
+
+  it('asks for no realistic world on a fresh device — the control', async () => {
+    const world = realisticRenderer();
+    await startCapture('#/game?capture=route-hud', world.drawing);
+    for (let frame = 1; frame <= 5; frame += 1) await step();
+    expect(world.asked()).toBe(0);
+    expect(published()?.world).toBe('stylised');
+  });
+
+  it('holds the realistic world’s top rung on a slow step: the ladder is not fed on a capture', async () => {
+    for (const { name, value } of captureDeviceSettings()) localStorage.setItem(name, value);
+    const world = realisticRenderer();
+    await startCapture('#/game?capture=route-hud', world.drawing);
+    await arriveAndWarm(world.arrive);
+    // 5 fps: every frame 200 ms, which an ordinary ride reads as a device far too slow.
+    for (let frame = 1; frame <= 150; frame += 1) {
+      const { drew } = await step(200);
+      expect({ frame, drew }).toEqual({ frame, drew: 1 });
+      expect({ frame, world: published()?.world }).toEqual({ frame, world: 'realistic' });
+    }
+    expect(world.rungs.every((rung) => rung === 'realistic')).toBe(true);
   });
 });

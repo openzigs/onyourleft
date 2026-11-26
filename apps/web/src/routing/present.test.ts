@@ -18,8 +18,10 @@ import {
   bandFor,
   elevationSentence,
   GRADE_BANDS,
+  NO_CLIMBING_TEXT,
   PROFILE_ROWS,
   profileRows,
+  routeSummary,
   surfaceSummary,
   UNKNOWN_BAND,
   unresolvedSentence,
@@ -261,5 +263,65 @@ describe('the sentence follows the rider\u2019s units (#238)', () => {
       'metric',
     );
     expect(rows.map((row) => row.to)).not.toEqual(metricRows.map((row) => row.to));
+  });
+});
+
+describe('the summary strip beside the map (#3185)', () => {
+  // 41 samples 30 m apart, rising 2 m each: 80 m of climbing over 1.2 km.
+  const climb = (): PlannedElevation => planned(Array.from({ length: 41 }, (_, i) => 100 + i * 2));
+
+  it('says the distance and the climbing of a routed route, with their units', async () => {
+    const draft = await drawn(3);
+    const summary = routeSummary(draft, climb(), 'metric');
+    expect(summary).toEqual({ distance: '2.0 km', climbing: '80 m', routing: false });
+  });
+
+  it('reads in miles and feet for a rider who reads in them', async () => {
+    const summary = routeSummary(await drawn(3), climb(), 'imperial');
+    expect(summary.distance).toBe('1.2 mi');
+    expect(summary.climbing).toBe('262 ft');
+  });
+
+  it('says routing while a leg is out, and adds no floor for it, so the strip keeps its width', async () => {
+    const routed = await drawn(3);
+    const pending = addWaypoint(
+      routed,
+      geographicPosition(degreesLatitude(51.52), degreesLongitude(-0.12)),
+    ).draft;
+    expect(pending.legs.at(-1)?.state).toBe('pending');
+    const summary = routeSummary(pending, climb(), 'metric');
+    expect(summary.routing).toBe(true);
+    expect(summary.distance).toBe('2.0 km');
+    expect(summary.climbing).toBe('80 m');
+  });
+
+  it('calls a total with a leg that failed a floor, and is not routing', async () => {
+    const routed = await drawn(3);
+    const broken = {
+      ...routed,
+      legs: routed.legs.map((leg, index) =>
+        index === 0 ? { ...leg, state: 'failed' as const } : leg,
+      ),
+    };
+    const summary = routeSummary(broken, climb(), 'metric');
+    expect(summary.routing).toBe(false);
+    expect(summary.distance).toMatch(/^At least /);
+    expect(summary.climbing).toMatch(/^At least /);
+  });
+
+  it('calls a freehand total a floor, as the sentence below the map does', async () => {
+    const freehand = setLegMode(await drawn(2), 0, 'freehand').draft;
+    expect(freehand.legs[0]?.state).toBe('routed');
+    expect(routeSummary(freehand, undefined, 'metric').distance).toMatch(/^At least /);
+  });
+
+  it('calls the climbing a floor where the dataset had a hole', async () => {
+    const holed = planned([100, 120, undefined, undefined, 160, 180, 200]);
+    expect(holed.coverage.complete).toBe(false);
+    expect(routeSummary(await drawn(3), holed, 'metric').climbing).toMatch(/^At least \d+ m$/);
+  });
+
+  it('says the climbing is not known with no profile, rather than zero', async () => {
+    expect(routeSummary(await drawn(3), undefined, 'metric').climbing).toBe(NO_CLIMBING_TEXT);
   });
 });

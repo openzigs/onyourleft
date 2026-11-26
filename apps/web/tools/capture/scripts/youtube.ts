@@ -24,7 +24,7 @@
  * - a word for a feature only an instance runs ("AI", "instance") anywhere
  *   but a line of the closing card that begins "Optional on your own
  *   instance:";
- * - a caption up for under 3 or over 6 seconds, run past its scene, or less
+ * - a caption up for under 3 or over 6 seconds (a card, over 10), run past its scene, or less
  *   than a second from the next; a scene under 6 seconds; a chapter under 10.
  *
  * A scene is a capture scene (`src/game/capture-scene.ts`) ridden from its
@@ -37,6 +37,12 @@
  * The epic's scenes 9 (group ride) and 11 (after the ride, the AI write-up)
  * need a self-hosted instance and come from #3155, which the owner holds;
  * they are left out here, where the comments mark them.
+ *
+ * #3223, the owner's rulings of 2026-11-25 on the final render: the workouts
+ * scene is out; the trainer scene rides a real climb (the `climb` capture
+ * scene, over 4 %), with the readings callout over it, where they move with
+ * the effort; the HUD tour is 16 s; and the video opens in the open world,
+ * on real streets, not on the synthetic route's empty road.
  */
 
 import type { VideoScript } from '../video-script';
@@ -44,90 +50,77 @@ import type { VideoScript } from '../video-script';
 export const YOUTUBE_SCRIPT: VideoScript = {
   id: 'youtube',
   scenes: [
-    // 1. Cold open: the world at speed, then the title.
+    // 1. Cold open: the world at speed, then the logo and the title.
     {
       id: 'opening',
       chapter: 'On Your Left',
-      capture: 'route-hud',
-      from: 4,
+      // #3223: on real streets, with buildings and land use, not the
+      // synthetic route's empty road; from after the seconds the free-ride
+      // scene films, so no frame of it is shown twice.
+      capture: 'free-ride',
+      from: 20,
       seconds: 10,
       captions: [
         {
           at: 1,
           seconds: 6,
           placement: 'title',
-          text: 'On Your Left — free, open-source indoor and outdoor cycling',
+          // Owner ruling 2026-11-25 on #3175: the logo, centred, with the
+          // platforms line beneath it. The logo names the app, so the title
+          // does not (the owner's wording, the same day).
+          logo: true,
+          text: 'Free, open-source indoor and outdoor cycling',
+          lines: ['On Android, and in Chrome or Edge on your computer. iOS coming soon.'],
         },
       ],
     },
-    // 2. The HUD, one panel at a time.
+    // 2. The HUD, one panel at a time. #3223: 16 s, not 31; the readings and
+    // the gradient are called out over the climb, where they move.
     {
       id: 'hud',
       chapter: 'The HUD',
       capture: 'route-hud',
       from: 14,
-      seconds: 31,
+      seconds: 16,
       captions: [
         {
-          at: 1,
-          seconds: 5,
-          callout: 'readings',
-          text: 'Power, cadence and heart rate, live from your sensors',
-        },
-        { at: 7, seconds: 5, callout: 'gradient', text: 'The gradient under your wheels' },
-        {
-          at: 13,
+          at: 0.5,
           seconds: 5,
           callout: 'elevation',
           text: 'The climb profile ahead, and how far along the route you are',
         },
-        { at: 19, seconds: 5, callout: 'map', text: 'The whole route, and where you are on it' },
+        { at: 6.5, seconds: 4, callout: 'map', text: 'The whole route, and where you are on it' },
         {
-          at: 25,
-          seconds: 5,
+          at: 11.5,
+          seconds: 4,
           callout: 'calories',
           text: 'Ride totals, with calories estimated from your power',
         },
       ],
     },
-    // 3. Smart trainer.
+    // 3. Smart trainer, on a real climb (#3223): over 4 % from the first frame.
     {
       id: 'trainer',
       chapter: 'Smart trainer',
-      capture: 'route-hud',
-      from: 60,
-      seconds: 12,
-      captions: [
-        {
-          at: 2,
-          seconds: 6,
-          callout: 'gradient',
-          text: 'Controls your smart trainer over Bluetooth: feel every climb',
-        },
-      ],
-    },
-    // 4. Workouts.
-    {
-      id: 'workout',
-      chapter: 'Workouts',
-      capture: 'workout',
-      from: 4,
+      capture: 'climb',
+      from: 2,
       seconds: 14,
       captions: [
         {
           at: 1,
           seconds: 6,
-          callout: 'workout',
-          text: 'Structured workouts: tailor the length and intensity',
+          callout: 'gradient',
+          text: 'Controls your smart trainer over Bluetooth: feel every climb',
         },
         {
           at: 8,
           seconds: 5,
-          feature: 'workout',
-          text: 'The trainer holds each target power for you',
+          callout: 'readings',
+          text: 'Power, cadence and heart rate, live from your sensors',
         },
       ],
     },
+    // 4. Workouts: out, the owner's ruling of 2026-11-25 (#3223).
     // 5. Pacer and ghost.
     {
       id: 'pacer',
@@ -145,6 +138,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'free-ride',
       chapter: 'Free ride',
       capture: 'free-ride',
+      // Past the pull-off from a stop and the post beside the start.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -161,6 +156,8 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'delivery',
       chapter: 'Delivery',
       capture: 'delivery',
+      // Under way, not pulling off from a stop.
+      from: 2,
       seconds: 16,
       captions: [
         {
@@ -192,7 +189,11 @@ export const YOUTUBE_SCRIPT: VideoScript = {
           at: 8,
           seconds: 5,
           callout: 'standings',
-          text: 'Bots race with tactics that read the race',
+          // The tactics they ride include attack, chase and sit-in
+          // (`packages/domain/src/lap-race/tactics.ts` §`BotTactic`).
+          // The owner's wording of 2026-11-25 on #3177. #3198: a bot attacks
+          // from Go and is still away, in frame, while this is up.
+          text: 'Bots that attack, chase and sit in',
         },
         { at: 14, seconds: 5, callout: 'item', text: 'Pick up items around the lap, and use them' },
       ],
@@ -219,21 +220,28 @@ export const YOUTUBE_SCRIPT: VideoScript = {
       id: 'closing',
       chapter: 'Free and open',
       capture: 'route-hud',
-      seconds: 12,
+      // Under way, not pulling off from a stop.
+      from: 3,
+      seconds: 15,
       captions: [
         {
           at: 0.5,
-          seconds: 4.5,
-          text: 'No subscription. Your rides are kept on your device; self-hosting is optional',
+          seconds: 5.5,
+          text: 'No subscription. Your rides stay on your device.',
         },
         {
-          at: 6,
-          seconds: 6,
+          at: 7,
+          seconds: 8,
           placement: 'card',
+          logo: true,
           text: 'Free and open source',
           // Owner ruling 2026-11-25: they exist but are not filmed, as each
           // needs an instance; only the closing card may say so, and only so.
-          lines: ['Optional on your own instance: an AI pacer and AI bots'],
+          // #3175, the owner's the same day: the platforms line, as on the opening.
+          lines: [
+            'On Android, and in Chrome or Edge on your computer. iOS coming soon.',
+            'Optional on your own instance: an AI pacer and AI bots',
+          ],
         },
       ],
     },

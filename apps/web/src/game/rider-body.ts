@@ -90,3 +90,54 @@ export function pacerBodyFor(routeId: string): RiderBody {
   }
   return seededRiderBody(hash, 0);
 }
+
+/**
+ * The skin tones a rider may be drawn with — #3214, as sRGB, lightest first.
+ * The owner ruled on 2026-11-25 that bots get natural skin: the team tint
+ * (`three-renderer.ts` §`RIDER_TINTS`) colours the kit, the helmet and the
+ * bicycle, and never the skin.
+ *
+ * ⚠️ **The first is the tone both realistic-world riders were drawn in
+ * before #3214** — `bicycle.ts` §`STAND_IN_PALETTE`'s `skin`, matched by eye
+ * to the realistic body's own maps (#3211) — and every other is darker than
+ * it in all three channels. The realistic body's skin is its colour map's,
+ * so a tone is drawn there as its ratio to this first one; no channel's ratio
+ * passes 1, so no tone lights a skin brighter than the maps already do.
+ * `rider-body.test.ts` holds both. Chosen here, from nothing: no person's,
+ * product's or palette's.
+ */
+export const RIDER_SKIN_TONES: readonly number[] = [
+  0xd3bcae, 0xc59f87, 0xa8805f, 0x8a6044, 0x6c4632,
+];
+
+/**
+ * The tone a rider is drawn with, from a marker's `skin` — #3214: an index
+ * into {@link RIDER_SKIN_TONES}. ⚠️ **The one place an absent or unknown
+ * index becomes the first tone**, for {@link riderBodyFor}'s reason: anything
+ * that is not a whole index of the list draws the tone every rider had
+ * before #3214, so nothing else can reach a shader.
+ */
+export function riderSkinFor(chosen: unknown): number {
+  return typeof chosen === 'number' &&
+    Number.isInteger(chosen) &&
+    chosen >= 0 &&
+    chosen < RIDER_SKIN_TONES.length
+    ? (RIDER_SKIN_TONES[chosen] as number)
+    : (RIDER_SKIN_TONES[0] as number);
+}
+
+/**
+ * Which of {@link RIDER_SKIN_TONES} a lap race's bot is drawn with — #3214:
+ * deterministic per bot id, so a bot keeps one skin in every race and on
+ * every device, and spread over the list, so a pack is not all one shade.
+ * `id` is only hashed (FNV-1a, then {@link mixed}, so `bot-1` and `bot-2`
+ * do not share a tone for differing in one letter); nothing of it is kept.
+ * Drawing only: nothing a bot decides or rides reads it.
+ */
+export function botSkinFor(id: string): number {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < id.length; at += 1) {
+    hash = Math.imul(hash ^ id.charCodeAt(at), 0x01000193);
+  }
+  return mixed(hash) % RIDER_SKIN_TONES.length;
+}
