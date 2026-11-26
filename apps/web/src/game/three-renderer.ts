@@ -9832,11 +9832,10 @@ const MESH_AUTUMN_LINE = 'diffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAu
  * The line a mapped building's facade adds its lit windows' dusk glow by —
  * #2968, after the normals, to three's `totalEmissiveRadiance` (the
  * material's own emissive, black, and no emissive map follows to scale it):
- * `oylGlow` is the share of the
- * fragment that is a lit room's window (#1581's one in five), and
- * `oylWindowGlow` the dusk's light, nought by day.
- *
- * @test-facing `weather-look.test.ts` reads it in the facade program
+ * `oylGlow` is the share of the fragment that is a room's window lit at dusk
+ * (`weather-look.ts` §`DUSK_LIT_ROOM_SHARE`, on #1581's hash), and
+ * `oylWindowGlow` the dusk's light, nought by day. `mapped-building-belt.test.ts`
+ * reads it in the facade program.
  */
 export const WINDOW_GLOW_LINE = 'totalEmissiveRadiance += oylWindowGlow * oylGlow;';
 
