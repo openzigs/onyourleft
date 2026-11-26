@@ -13,13 +13,17 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { parseAssetManifest } from '../../src/credits/manifest';
+import { MENU_MUSIC_FILE } from '../../src/shell/menu-music';
 import type { Box } from './caption-layout';
+import { SCRIPT_MUSIC } from './capture-args';
 import {
   drawnProblems,
   finishVideo,
   hudProblems,
   LOGO_FILE,
   logoDataUrl,
+  musicFile,
   partialName,
   scriptName,
 } from './render-script';
@@ -91,6 +95,67 @@ describe('the script’s video, named only when whole — #3156', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the YouTube cut’s music bed — #3223', () => {
+  it('mixes the music under the whole video, and names only the mixed video whole', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oyl-render-script-'));
+    try {
+      const mp4 = join(dir, 'youtube-1920x1080-60fps.mp4');
+      const partial = partialName(mp4);
+      writeFileSync(partial, 'silent');
+      const mixed: string[] = [];
+      finishVideo(partial, mp4, 10, 10, (video, out) => {
+        mixed.push(video, out);
+        writeFileSync(out, `${readFileSync(video, 'utf8')} with music`);
+      });
+      expect(mixed).toEqual([partial, join(dir, 'youtube-1920x1080-60fps.mixed.partial.mp4')]);
+      expect(readFileSync(mp4, 'utf8')).toBe('silent with music');
+      expect(existsSync(partial)).toBe(false);
+      expect(existsSync(mixed[1] ?? '')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the silent partial and an earlier whole video as they were when the mix fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oyl-render-script-'));
+    try {
+      const mp4 = join(dir, 'youtube-1920x1080-60fps.mp4');
+      const partial = partialName(mp4);
+      writeFileSync(mp4, 'an earlier whole render');
+      writeFileSync(partial, 'silent');
+      expect(() => {
+        finishVideo(partial, mp4, 10, 10, () => {
+          throw new Error('capture: mixing the music failed');
+        });
+      }).toThrow('capture: mixing the music failed');
+      expect(readFileSync(mp4, 'utf8')).toBe('an earlier whole render');
+      expect(readFileSync(partial, 'utf8')).toBe('silent');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('carries only the app’s own CC0 menu loop, credited as ASSETS.toml records it', () => {
+    expect(Object.keys(SCRIPT_MUSIC)).toEqual(['aurora-ride']);
+    const music = SCRIPT_MUSIC['aurora-ride'];
+    if (music === undefined) throw new Error('no aurora-ride');
+    // The file the menus play (#2057), from the app's own public/.
+    expect(music.file).toBe(MENU_MUSIC_FILE);
+    expect(musicFile(music).replaceAll('\\', '/')).toMatch(
+      /\/apps\/web\/public\/audio\/upbeat-game-loop-aurora-ride\.ogg$/u,
+    );
+    expect(existsSync(musicFile(music))).toBe(true);
+    const repository = join(LOGO_FILE, '..', '..', '..', '..', '..');
+    const manifest = parseAssetManifest(readFileSync(join(repository, 'ASSETS.toml'), 'utf8'));
+    const row = manifest.entries.find((entry) => entry.path === `apps/web/public/${music.file}`);
+    expect(row).toMatchObject({ licence: 'CC0-1.0', creator: 'Venus17' });
+    expect(music.credit).toContain('Upbeat Game Loop - Aurora Ride');
+    expect(music.credit).toContain(`by ${String(row?.creator)}`);
+    expect(music.credit).toContain('CC0 1.0');
+    expect(music.credit).toContain(String(row?.url));
   });
 });
 

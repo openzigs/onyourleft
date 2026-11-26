@@ -7,11 +7,12 @@
  * it before it renders.
  */
 
-import { BOT_TACTICS, type BotTactic } from '@onyourleft/domain';
+import { BOT_TACTICS, gradeAt, type BotTactic } from '@onyourleft/domain';
+import { decodeGpxRoute } from '@onyourleft/fit';
 import { describe, expect, it } from 'vitest';
 
-import { CAPTURE_SCENES } from '../../src/game/capture-scene';
-import { VIDEO_SCRIPTS } from './capture-args';
+import { CAPTURE_SCENES, captureReadingAt } from '../../src/game/capture-scene';
+import { captureRouteGpx, SCRIPT_MUSIC, VIDEO_SCRIPTS } from './capture-args';
 import {
   CALLOUT_PANELS,
   captionAt,
@@ -23,6 +24,7 @@ import {
   sceneFade,
   scenePanels,
   scriptChapters,
+  scriptDescription,
   scriptProblems,
   scriptSeconds,
   scriptSrt,
@@ -57,9 +59,21 @@ describe('the demo video’s scene script — #3156', () => {
     expect(scriptProblems(script, CAPTURE_SCENES)).toEqual([]);
   });
 
-  it('rides every mode a capture scene has, and leaves the instance scenes to #3155', () => {
+  it('rides every mode a capture scene has but the workout, and leaves the instance scenes to #3155', () => {
     const ridden = new Set(YOUTUBE_SCRIPT.scenes.map((scene) => scene.capture));
-    expect([...ridden].sort()).toEqual(Object.keys(CAPTURE_SCENES).sort());
+    // #3223, the owner's ruling of 2026-11-25: the workouts scene is out.
+    const unridden = ['workout'];
+    expect([...ridden].sort()).toEqual(
+      Object.keys(CAPTURE_SCENES)
+        .filter((name) => !unridden.includes(name))
+        .sort(),
+    );
+    expect(YOUTUBE_SCRIPT.scenes.map((scene) => scene.chapter)).not.toContain('Workouts');
+    expect(
+      YOUTUBE_SCRIPT.scenes
+        .flatMap((scene) => scene.captions)
+        .some((c) => c.feature === 'workout' || c.callout === 'workout'),
+    ).toBe(false);
     expect(
       YOUTUBE_SCRIPT.scenes
         .flatMap((scene) => scene.captions)
@@ -68,6 +82,91 @@ describe('the demo video’s scene script — #3156', () => {
     // About the epic's two and a half to three minutes, less the two instance scenes.
     expect(scriptSeconds(YOUTUBE_SCRIPT)).toBeGreaterThanOrEqual(120);
     expect(scriptSeconds(YOUTUBE_SCRIPT)).toBeLessThanOrEqual(180);
+  });
+
+  it('films the trainer scene on a climb of 4 % or more, for the whole scene — #3223', () => {
+    const scene = YOUTUBE_SCRIPT.scenes.find((s) => s.id === 'trainer');
+    const capture = scene === undefined ? undefined : CAPTURE_SCENES[scene.capture];
+    if (scene === undefined || capture?.startMetres === undefined) {
+      throw new Error('the trainer scene rides no scene with a start');
+    }
+    expect(scene.captions.find((c) => c.callout === 'gradient')?.text).toMatch(/feel every climb/u);
+    // The road as the app reads it: the GPX through the Routes page's decoder
+    // (`routes/save.ts`), and the grade the ride and its HUD read off it.
+    const { profile } = decodeGpxRoute(captureRouteGpx());
+    // From rest, no rider is past this far by the scene's last frame: 15 m/s
+    // is 54 km/h, which no power in the scene holds up 4 %.
+    const furthest = capture.startMetres + 15 * ((scene.from ?? 0) + scene.seconds);
+    const grades: number[] = [];
+    for (let at = capture.startMetres; at <= furthest; at += 5) grades.push(gradeAt(profile, at));
+    expect(Math.min(...grades)).toBeGreaterThanOrEqual(4);
+  });
+
+  /** Each reading's distinct values over `caption`'s time on screen, read twice a second. */
+  function readingsUnder(scene: VideoScene, caption: VideoCaption): Record<string, Set<number>> {
+    const capture = CAPTURE_SCENES[scene.capture];
+    if (capture === undefined) throw new Error(`no capture scene ${scene.capture}`);
+    const seen = {
+      power: new Set<number>(),
+      cadence: new Set<number>(),
+      heartRate: new Set<number>(),
+    };
+    const start = (scene.from ?? 0) + caption.at;
+    for (let at = start; at <= start + caption.seconds; at += 0.5) {
+      const reading = captureReadingAt(capture, at);
+      seen.power.add(reading.watts);
+      seen.cadence.add(reading.cadence);
+      seen.heartRate.add(reading.heartRate);
+    }
+    return seen;
+  }
+
+  it('films no caption over a HUD whose readings all hold — #3223', () => {
+    // 2:15–2:23 of the final render: a scene from two minutes into a script
+    // that held its last key from 40 s, so all three readings stood still.
+    for (const scene of YOUTUBE_SCRIPT.scenes) {
+      for (const caption of scene.captions) {
+        const moving = Object.entries(readingsUnder(scene, caption))
+          .filter(([, values]) => values.size > 1)
+          .map(([name]) => name);
+        expect(moving, `${scene.id}, “${caption.text}”`).not.toEqual([]);
+      }
+    }
+  });
+
+  it('rides the climb harder as it bites: every reading moves under each caption — #3223', () => {
+    const scene = YOUTUBE_SCRIPT.scenes.find((s) => s.id === 'trainer');
+    const capture = scene === undefined ? undefined : CAPTURE_SCENES[scene.capture];
+    if (scene === undefined || capture === undefined) throw new Error('no trainer scene');
+    for (const caption of scene.captions) {
+      const seen = readingsUnder(scene, caption);
+      for (const [name, values] of Object.entries(seen)) {
+        expect(values.size, `“${caption.text}”: ${name}`).toBeGreaterThan(1);
+      }
+    }
+    // Power and heart rate up, cadence down: the effort a climb asks for.
+    const first = captureReadingAt(capture, scene.from ?? 0);
+    const last = captureReadingAt(capture, (scene.from ?? 0) + scene.seconds);
+    expect(last.watts).toBeGreaterThan(first.watts);
+    expect(last.heartRate).toBeGreaterThan(first.heartRate);
+    expect(last.cadence).toBeLessThan(first.cadence);
+  });
+
+  it('keeps the HUD tour to 18 seconds, and opens on the open world’s streets — #3223', () => {
+    const hud = YOUTUBE_SCRIPT.scenes.find((scene) => scene.id === 'hud');
+    expect(hud?.seconds).toBeLessThanOrEqual(18);
+    // Every panel the tour named before is still called out, here or over the climb.
+    const called = YOUTUBE_SCRIPT.scenes.flatMap((scene) =>
+      scene.captions.map((caption) => caption.callout),
+    );
+    expect(called).toEqual(
+      expect.arrayContaining(['readings', 'gradient', 'elevation', 'map', 'calories']),
+    );
+    const opening = YOUTUBE_SCRIPT.scenes[0];
+    expect(opening?.capture).toBe('free-ride');
+    // After the free-ride scene's own seconds, so no frame is shown twice.
+    const free = YOUTUBE_SCRIPT.scenes.find((scene) => scene.id === 'free-ride');
+    expect(opening?.from ?? 0).toBeGreaterThanOrEqual((free?.from ?? 0) + (free?.seconds ?? 0));
   });
 
   // One row a claim: the scene that rides the mode, where it is accepted, and
@@ -497,6 +596,17 @@ describe('the demo video’s scene script — #3156', () => {
     expect(scriptChapters(scriptOf({ seconds: 75 }, []))).toBe('0:00 One\n1:15 Two\n1:25 Three\n');
     expect(chapterTime(3_725)).toBe('1:02:05');
     expect(scriptChapters(YOUTUBE_SCRIPT).split('\n')[0]).toBe('0:00 On Your Left');
+  });
+
+  it('drafts the description: the chapters, the card’s credits, and the music’s with a bed — #3223', () => {
+    const credit = SCRIPT_MUSIC['aurora-ride']?.credit;
+    expect(scriptDescription(YOUTUBE_SCRIPT, credit)).toBe(
+      `${scriptChapters(YOUTUBE_SCRIPT)}\n${[...cardLines(), String(credit)].join('\n')}\n`,
+    );
+    expect(scriptDescription(YOUTUBE_SCRIPT)).toBe(
+      `${scriptChapters(YOUTUBE_SCRIPT)}\n${cardLines().join('\n')}\n`,
+    );
+    expect(scriptDescription(YOUTUBE_SCRIPT)).not.toContain('Music');
   });
 
   it('puts the map credit and the project’s address on the closing card', () => {

@@ -37,6 +37,12 @@
  * The epic's scenes 9 (group ride) and 11 (after the ride, the AI write-up)
  * need a self-hosted instance and come from #3155, which the owner holds;
  * they are left out here, where the comments mark them.
+ *
+ * #3223, the owner's rulings of 2026-11-25 on the final render: the workouts
+ * scene is out; the trainer scene rides a real climb (the `climb` capture
+ * scene, over 4 %), with the readings callout over it, where they move with
+ * the effort; the HUD tour is 16 s; and the video opens in the open world,
+ * on real streets, not on the synthetic route's empty road.
  */
 
 import type { VideoScript } from '../video-script';
@@ -48,8 +54,11 @@ export const YOUTUBE_SCRIPT: VideoScript = {
     {
       id: 'opening',
       chapter: 'On Your Left',
-      capture: 'route-hud',
-      from: 4,
+      // #3223: on real streets, with buildings and land use, not the
+      // synthetic route's empty road; from after the seconds the free-ride
+      // scene films, so no frame of it is shown twice.
+      capture: 'free-ride',
+      from: 20,
       seconds: 10,
       captions: [
         {
@@ -65,74 +74,53 @@ export const YOUTUBE_SCRIPT: VideoScript = {
         },
       ],
     },
-    // 2. The HUD, one panel at a time.
+    // 2. The HUD, one panel at a time. #3223: 16 s, not 31; the readings and
+    // the gradient are called out over the climb, where they move.
     {
       id: 'hud',
       chapter: 'The HUD',
       capture: 'route-hud',
       from: 14,
-      seconds: 31,
+      seconds: 16,
       captions: [
         {
-          at: 1,
-          seconds: 5,
-          callout: 'readings',
-          text: 'Power, cadence and heart rate, live from your sensors',
-        },
-        { at: 7, seconds: 5, callout: 'gradient', text: 'The gradient under your wheels' },
-        {
-          at: 13,
+          at: 0.5,
           seconds: 5,
           callout: 'elevation',
           text: 'The climb profile ahead, and how far along the route you are',
         },
-        { at: 19, seconds: 5, callout: 'map', text: 'The whole route, and where you are on it' },
+        { at: 6.5, seconds: 4, callout: 'map', text: 'The whole route, and where you are on it' },
         {
-          at: 25,
-          seconds: 5,
+          at: 11.5,
+          seconds: 4,
           callout: 'calories',
           text: 'Ride totals, with calories estimated from your power',
         },
       ],
     },
-    // 3. Smart trainer.
+    // 3. Smart trainer, on a real climb (#3223): over 4 % from the first frame.
     {
       id: 'trainer',
       chapter: 'Smart trainer',
-      capture: 'route-hud',
-      from: 60,
-      seconds: 12,
-      captions: [
-        {
-          at: 2,
-          seconds: 6,
-          callout: 'gradient',
-          text: 'Controls your smart trainer over Bluetooth: feel every climb',
-        },
-      ],
-    },
-    // 4. Workouts.
-    {
-      id: 'workout',
-      chapter: 'Workouts',
-      capture: 'workout',
-      from: 4,
+      capture: 'climb',
+      from: 2,
       seconds: 14,
       captions: [
         {
           at: 1,
           seconds: 6,
-          callout: 'workout',
-          text: 'Structured workouts: tailor the length and intensity',
+          callout: 'gradient',
+          text: 'Controls your smart trainer over Bluetooth: feel every climb',
         },
         {
           at: 8,
           seconds: 5,
-          feature: 'workout',
-          text: 'The trainer holds each target power for you',
+          callout: 'readings',
+          text: 'Power, cadence and heart rate, live from your sensors',
         },
       ],
     },
+    // 4. Workouts: out, the owner's ruling of 2026-11-25 (#3223).
     // 5. Pacer and ghost.
     {
       id: 'pacer',

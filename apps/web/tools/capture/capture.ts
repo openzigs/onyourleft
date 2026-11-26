@@ -15,7 +15,8 @@
  * #3156: `-- --script youtube` renders a whole scene script instead
  * (`render-script.ts`): every scene into one MP4, with the captions and HUD
  * callouts drawn in the frames, and beside it an `.srt` of every caption and
- * the chapter list for the description.
+ * the chapter list for the description. #3223: `--music aurora-ride` mixes
+ * the app's own CC0 menu loop under it, and a description draft credits it.
  *
  * Needs `ffmpeg` with `libx264` on the PATH and the pinned Chromium
  * (`playwright install chromium`). Neither is shipped.
@@ -52,6 +53,7 @@ if (argv.includes('--script')) {
   console.log(`capture: ${video.mp4}`);
   console.log(`capture: ${video.srt}`);
   console.log(`capture: ${video.chapters}`);
+  console.log(`capture: ${video.description}`);
   console.log(`capture: ${String(video.frames)} frames`);
   process.exit(0);
 }

@@ -533,3 +533,17 @@ export function scriptChapters(script: VideoScript): string {
     .map((chapter) => `${chapterTime(chapter.at)} ${chapter.title}\n`)
     .join('');
 }
+
+/**
+ * #3223: the draft of the video's description, for the owner to finish: the
+ * chapter list, then what the closing card credits ({@link cardLines}), then
+ * the music's credit (`capture-args.ts` §`SCRIPT_MUSIC`) when the video
+ * carries a bed. No words of its own: the owner writes the rest.
+ */
+export function scriptDescription(script: VideoScript, musicCredit?: string): string {
+  return [
+    scriptChapters(script),
+    [...cardLines(), ...(musicCredit === undefined ? [] : [musicCredit])].join('\n'),
+    '',
+  ].join('\n');
+}

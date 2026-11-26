@@ -33,7 +33,8 @@
  * the project's logo ({@link installLogo}).
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,13 +53,21 @@ import {
   type Point,
 } from './caption-layout';
 import { overlayStyle, type CaptionKind, type OverlayStyle } from './caption-style';
-import { captureMp4Args, VIDEO_SCRIPTS, type ScriptRequest } from './capture-args';
+import {
+  captureMp4Args,
+  musicMuxArgs,
+  SCRIPT_MUSIC,
+  VIDEO_SCRIPTS,
+  type ScriptMusic,
+  type ScriptRequest,
+} from './capture-args';
 import { renderCapture } from './render-capture';
 import {
   CALLOUT_PANELS,
   captionAt,
   CREDIT_SELECTOR,
   scriptChapters,
+  scriptDescription,
   scriptProblems,
   scriptSeconds,
   sceneFade,
@@ -123,6 +132,8 @@ export interface ScriptResult {
   readonly mp4: string;
   readonly srt: string;
   readonly chapters: string;
+  /** #3223: the description's draft: the chapters and the credits, the music's among them. */
+  readonly description: string;
   /** Frames written, every scene's. */
   readonly frames: number;
 }
@@ -493,18 +504,58 @@ export function partialName(mp4: string): string {
   return mp4.replace(/\.mp4$/u, '.partial.mp4');
 }
 
+/** #3223: the file a {@link ScriptMusic} track is, in the app's own `public/`. */
+export function musicFile(music: ScriptMusic): string {
+  return fileURLToPath(new URL(`../../public/${music.file}`, import.meta.url));
+}
+
+/**
+ * #3223: mix `music` under the silent `video` into `out` with `ffmpeg`
+ * (`capture-args.ts` §`musicMuxArgs`); throws when it fails, so no video
+ * is named whole that is not.
+ */
+export function muxMusic(
+  ffmpeg: string,
+  video: string,
+  music: string,
+  seconds: number,
+  out: string,
+): void {
+  const run = spawnSync(ffmpeg, musicMuxArgs(video, music, seconds, out), { encoding: 'utf8' });
+  if (run.error !== undefined || run.status !== 0) {
+    throw new Error(`capture: mixing the music failed: ${String(run.error ?? run.stderr)}`);
+  }
+}
+
 /**
  * Give the encoded `partial` its final name `mp4`, only if it holds every
  * frame the script asks for. A render that stopped part-way leaves its
  * partial file, and an earlier whole video under `mp4` stays as it was.
+ *
+ * #3223: with `mix`, the music is mixed under `partial` first, into a file of
+ * its own beside it, and that is what is named `mp4`; a mix that fails leaves
+ * `partial` and the earlier `mp4` as they were.
  */
-export function finishVideo(partial: string, mp4: string, frames: number, expected: number): void {
+export function finishVideo(
+  partial: string,
+  mp4: string,
+  frames: number,
+  expected: number,
+  mix?: (video: string, out: string) => void,
+): void {
   if (frames !== expected) {
     throw new Error(
       `capture: wrote ${String(frames)} frames, not the script’s ${String(expected)}`,
     );
   }
-  renameSync(partial, mp4);
+  if (mix === undefined) {
+    renameSync(partial, mp4);
+    return;
+  }
+  const mixed = partial.replace(/\.partial\.mp4$/u, '.mixed.partial.mp4');
+  mix(partial, mixed);
+  renameSync(mixed, mp4);
+  rmSync(partial);
 }
 
 /** Render `request`'s script into one MP4, with its `.srt` and chapters beside it. */
@@ -521,6 +572,15 @@ export async function renderScript(
   const ffmpeg = options.ffmpeg ?? 'ffmpeg';
   if (!hasEncoder(encoders(ffmpeg), 'libx264')) {
     throw new Error('capture: this ffmpeg has no libx264, which the H.264 output needs');
+  }
+  // #3223: the bed is looked for before a frame is rendered, not after.
+  const music = request.music === undefined ? undefined : SCRIPT_MUSIC[request.music];
+  if (request.music !== undefined && music === undefined) {
+    throw new Error(`capture: there is no music ${request.music}`);
+  }
+  const track = music === undefined ? undefined : musicFile(music);
+  if (track !== undefined && !existsSync(track)) {
+    throw new Error(`capture: the music file ${track} is not there`);
   }
   mkdirSync(options.out, { recursive: true });
   const mp4 = join(options.out, scriptName(request, '.mp4'));
@@ -571,10 +631,23 @@ export async function renderScript(
   }
   await encoder.end();
   // The video is every scene, end to end: the captions' times say so.
-  finishVideo(partial, mp4, frames, scriptSeconds(script) * request.fps);
+  const seconds = scriptSeconds(script);
+  finishVideo(
+    partial,
+    mp4,
+    frames,
+    seconds * request.fps,
+    track === undefined
+      ? undefined
+      : (video, out) => {
+          muxMusic(ffmpeg, video, track, seconds, out);
+        },
+  );
   const srt = join(options.out, scriptName(request, '.srt'));
   writeFileSync(srt, scriptSrt(script));
   const chapters = join(options.out, scriptName(request, '.chapters.txt'));
   writeFileSync(chapters, scriptChapters(script));
-  return { mp4, srt, chapters, frames };
+  const description = join(options.out, scriptName(request, '.description.txt'));
+  writeFileSync(description, scriptDescription(script, music?.credit));
+  return { mp4, srt, chapters, description, frames };
 }
