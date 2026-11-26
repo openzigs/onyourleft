@@ -146,13 +146,23 @@ describe('the Games tab — #2292', () => {
     expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on');
   });
 
-  it('shows the rider’s best time round a loop, the fastest over every loop and no other route', async () => {
-    const fast = { ...LOOP_B, bestSeconds: 754 };
-    const slow = { ...LOOP_A, bestSeconds: 900 };
-    // A route that is not a loop is no lap race, however fast the rider was on it.
-    const out = { ...OUT, bestSeconds: 60 };
+  it('shows the rider’s best lap round a loop, the fastest over every loop and no other route — #2319', async () => {
+    const fast = { ...LOOP_B, bestLapSeconds: 245 };
+    const slow = { ...LOOP_A, bestLapSeconds: 300 };
+    // A route that is not a loop is no lap race, however fast a lap kept on it.
+    const out = { ...OUT, bestLapSeconds: 60 };
     await open('/games', [slow, out, fast]);
-    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain('2 loops to race on · your best 12:34');
+    expect(card(GAMES_TEXT.lapRace)?.textContent).toContain(
+      '2 loops to race on · your best lap 4:05',
+    );
+  });
+
+  it('says the best lap is the loops’ when the circuits are counted beside them — #2319', async () => {
+    await open('/games', [{ ...LOOP_A, bestLapSeconds: 245 }, LOOP_B], [RING]);
+    const standing = card(GAMES_TEXT.lapRace)?.querySelector('.oyl-games__standing');
+    expect(standing?.textContent).toBe(
+      '1 built-in circuit, 2 of your loops · your best lap on your loops 4:05',
+    );
   });
 
   it('counts the built-in circuits the port lists beside several of the rider’s loops', async () => {
@@ -213,6 +223,23 @@ describe('a game’s course picker — #2292', () => {
     expect(gamePlayFromHash(href)).toBe('lap-race');
     await activateWithKeyboard(choose as HTMLAnchorElement);
     expect(document.querySelector('h1')?.textContent).toBe('Trainer game');
+  });
+
+  it('says each loop’s best lap on its entry, and none on a circuit or a loop with no lap — #2319', async () => {
+    await open('/games/lap-race', [{ ...LOOP_A, bestLapSeconds: 245 }, LOOP_B], [RING]);
+    const entries = [...document.querySelectorAll('.oyl-game-courses__course')];
+    const holds = (name: string): string | null | undefined =>
+      entries
+        .find((each) => each.querySelector('h3')?.textContent === name)
+        ?.querySelector('.oyl-game-courses__holds')?.textContent;
+    expect(entries.map((each) => each.querySelector('h3')?.textContent)).toEqual([
+      LOOP_A.name,
+      LOOP_B.name,
+      RING.name,
+    ]);
+    expect(holds(LOOP_A.name)).toBe('Your best lap 4:05');
+    expect(holds(LOOP_B.name)).toBeUndefined();
+    expect(holds(RING.name)).toBeUndefined();
   });
 
   it('draws a route that is not a loop with the reason, and nothing to choose it by', async () => {
@@ -509,8 +536,9 @@ describe('the cards’ words', () => {
     expect(lapRaceCoursesText(4, 1)).toBe('4 built-in circuits, 1 of your loops');
     expect(lapRaceCoursesText(4, 3)).toBe('4 built-in circuits, 3 of your loops');
     expect(lapRaceCoursesText(4, 3, 754)).toBe(
-      '4 built-in circuits, 3 of your loops · your best 12:34',
+      '4 built-in circuits, 3 of your loops · your best lap on your loops 12:34',
     );
+    expect(lapRaceCoursesText(0, 3, 754)).toBe('3 loops to race on · your best lap 12:34');
     expect(lapRaceCoursesText(0, 2)).toBe('2 loops to race on');
     expect(lapRaceCoursesText(0, 0)).toBe('No loops to race on yet');
   });

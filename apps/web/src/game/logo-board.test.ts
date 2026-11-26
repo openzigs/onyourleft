@@ -2,7 +2,7 @@
 
 /**
  * `logo-board.ts` and `three-renderer.ts` §`LogoBelt` — the wordmark's board
- * on the start gate and on the billboards, #966.
+ * on every gate (the finish's too since #978) and on the billboards, #966.
  */
 
 import { metres, type RouteProfile } from '@onyourleft/domain';
@@ -10,13 +10,20 @@ import { describe, expect, it } from 'vitest';
 
 import type { Billboard } from './billboards';
 import { cameraRig } from './camera';
-import { GANTRY_BEAM_HEIGHT_METRES, GANTRY_BEAM_UNDERSIDE_METRES, standBoxes } from './gantry';
+import {
+  GANTRY_BEAM_HEIGHT_METRES,
+  GANTRY_BEAM_UNDERSIDE_METRES,
+  LINE_DRAW_AHEAD_METRES,
+  LINE_DRAW_BEHIND_METRES,
+  standBoxes,
+} from './gantry';
 import {
   BILLBOARD_BOARD_BOTTOM_METRES,
   LOGO_BOARD_HEIGHT_METRES,
   LOGO_BOARD_WIDTH_METRES,
   carriesTheLogo,
   gateLogoPlace,
+  gateLogoPlaces,
   logoBoxes,
 } from './logo-board';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
@@ -103,6 +110,39 @@ describe('the wordmark’s board — #966', () => {
     expect(z[2]).toBeCloseTo(-finish.headingZ, 6);
     expect(foot(belt, 1)).toBe(BILLBOARD_BOARD_BOTTOM_METRES);
     belt.dispose();
+  });
+
+  it('draws one board, not two crossed, where a closed route not ticked as a loop starts and finishes — #976', () => {
+    // #984's review measured it: on a closed circuit under the reach that the
+    // rider did not tick as a loop, the start's and the finish's gates stand
+    // on the same point, and their boards crossed there in an X, about 18°
+    // apart, their lettering z-fighting where they met.
+    for (const radius of [40, 55]) {
+      const closed = circuitRoute(radius, () => 0, 'left', false);
+      expect(closed.loop).toBe(false);
+      expect(closed.totalDistance).toBeLessThan(LINE_DRAW_AHEAD_METRES + LINE_DRAW_BEHIND_METRES);
+      for (const distance of [0, 20]) {
+        const frame = frameAt(closed, distance);
+        // Non-vacuity: both gates are in the frame, a board's width apart at most.
+        const gates = frame.lines.filter(carriesTheLogo).map(gateLogoPlace);
+        expect(gates).toHaveLength(2);
+        expect(Math.hypot(gates[0]!.x - gates[1]!.x, gates[0]!.z - gates[1]!.z)).toBeLessThan(
+          LOGO_BOARD_WIDTH_METRES,
+        );
+        expect(gateLogoPlaces(frame.lines)).toEqual([gates[0]]);
+        const belt = new LogoBelt(undefined, 'stylised');
+        belt.update(frame.lines, []);
+        expect(belt.mesh.count, `r = ${String(radius)} m at ${String(distance)} m`).toBe(1);
+        belt.dispose();
+      }
+    }
+    // And two gates that are apart keep a board each: a 300 m point-to-point
+    // route's start and finish, both in reach.
+    const apart = frameAt(
+      northRoute(300, () => 0),
+      0,
+    ).lines;
+    expect(gateLogoPlaces(apart)).toHaveLength(2);
   });
 
   it('sits on the gate’s beam, over the road’s middle, its posts folded away', () => {

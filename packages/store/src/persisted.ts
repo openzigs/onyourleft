@@ -57,6 +57,7 @@ import type {
   Wind,
   ReplanRecord,
   RouteProfile,
+  Seconds,
   Workout,
   WorkoutBlock,
 } from '@onyourleft/domain';
@@ -301,6 +302,8 @@ export interface PersistedRoute {
   elevationResolution?: number;
   elevationInterval?: number;
   elevationMissing?: number;
+  /** #2319: the rider's fastest lap of this loop, seconds. Absent: no lap yet. */
+  bestLap?: number;
   visibility: string;
   createdAt: number;
   updatedAt: number;
@@ -1679,6 +1682,8 @@ export function toPersistedRoute(record: RouteRecord): PersistedRoute {
           elevationInterval: record.elevation.interval,
           elevationMissing: record.elevation.missing,
         }),
+    // #2319: written only where there is one; absent is "no lap yet".
+    ...(record.bestLap === undefined ? {} : { bestLap: record.bestLap }),
     visibility: record.visibility,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -1743,6 +1748,8 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
     name: decodedString('route.name', row.name),
     profile,
     elevation: elevationRecordFrom(row),
+    // #2319: absent stays absent, never a lap of nought.
+    ...(row.bestLap === undefined ? {} : { bestLap: decodedBestLap(row.bestLap) }),
     // ⚠️ The one place in this package where an ABSENT field is substituted
     // rather than read faithfully, and the exception is narrow on purpose.
     //
@@ -1772,6 +1779,20 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
       unixSeconds,
     ),
   };
+}
+
+/**
+ * A route's best lap off the disk — #2319: a lap of some time, never nought,
+ * never a negative or an infinite one.
+ *
+ * @throws {StoreDecodeError} naming the field, for anything else.
+ */
+function decodedBestLap(value: unknown): Seconds {
+  const lap = decodedNumber('route.bestLap', value);
+  if (!Number.isFinite(lap) || lap <= 0) {
+    throw new StoreDecodeError('route.bestLap: must be a finite time over nought');
+  }
+  return decoded('route.bestLap', lap, seconds);
 }
 
 /**

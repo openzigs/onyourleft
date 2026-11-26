@@ -49,7 +49,10 @@ is the **one** module under `src/` that reaches the SDK, by a dynamic `import()`
 (`tools/valhalla/stays-out.test.ts`); it is a `departing` boundary, because the SDK's worker fetches
 the graph's 0.25° tiles from the tile host. A leg the engine cannot route here (off the graph, too
 large, too slow, not loadable, map tiles off) comes back as a `FreehandFallback` and the draft draws
-it straight with the reason on it (`draft.ts`); the next edit that touches that leg asks again. The SDK takes no hills or surface option and has no
+it straight with the reason on it (`draft.ts`); the next edit that touches that leg asks again. So
+does a leg, from either tier, whose line starts or ends more than 300 m from its waypoint (#3179,
+`routing/reach.ts`): Valhalla moves a waypoint with no road near it to the nearest road, however far,
+and answers as if routed. The SDK takes no hills or surface option and has no
 heights, so its legs' surface is `'unknown'`, the terrain archive measures them, and the planner says
 under its surface choice that the choice is not applied (`tiers.ts` §`ridingChoicesNote`). The
 adapter routes one leg at a time, and the planner releases its worker as it closes. Its contract is

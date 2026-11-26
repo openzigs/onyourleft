@@ -58,6 +58,10 @@
 #   ASSET008 every vector or animation file under apps/ or packages/ -- an
 #           `.svg`, `.lottie` or `.riv`, or a Lottie `.json` -- is named in
 #           ASSETS.toml, text or not (#937)
+#   ASSET009 a 3D MODEL under apps/ or packages/ is named in ASSETS.toml,
+#           text or not, with an https link to where it came from, and under
+#           apps/ its licence is CC0-1.0 or CC-BY-4.0 and no other (#3250,
+#           ADR 0049 D-10, ADR 0099 D-5)
 #   AGENT001 every topic file under docs/agents/ is named in the root
 #           CLAUDE.md, so no agent instruction sits where the index cannot
 #           send anybody
@@ -1430,11 +1434,11 @@ check_no_pipe_into_grep_quiet
 #     ⚠️ Since #937 the vector and animation half of that IS discovered, by
 #     ASSET008 below -- an `.svg`, `.lottie`, `.riv` or Lottie `.json` under
 #     `apps/` or `packages/` -- and a reviewer who remembers this line saying
-#     an `.svg` is undiscovered is reading the old file. A `.gltf` or an `.obj`
-#     still is not: those are no worse off than before (LIC001's extension
-#     list never covered them either), the manifest may name one voluntarily,
-#     which buys ASSET002/ASSET003/ASSET004 over it, and #937 deliberately did
-#     not reopen them.
+#     an `.svg` is undiscovered is reading the old file. ⚠️ Since #3250 a
+#     text-format 3D MODEL is discovered too, by ASSET009 below -- a `.gltf`,
+#     an `.obj` and the rest of ASSET009's list -- and a reviewer who remembers
+#     this line saying a `.gltf` or an `.obj` is undiscovered is reading the
+#     old file. Any other text format still is not.
 #   * A zero-byte file carries no NUL and is therefore text by this rule. It
 #     also carries nothing to licence. `packages/fit/fixtures/corpus/
 #     zero-length.fit` is named in the manifest anyway, because naming it is
@@ -1603,7 +1607,8 @@ asset_is_binary() {
 # thing ASSET001 exists to avoid, and it is one for a reason: a text file
 # carries no signal that it is somebody else's work, so what a rule can key on
 # is what KIND of file it is. It therefore fails open against a format it does
-# not name -- `.gltf` and `.obj` are still not discovered, on purpose (#937).
+# not name. `.gltf` and `.obj` were left undiscovered by #937, on purpose, and
+# since #3250 they are ASSET009's, below.
 #
 #   * `.svg`, `.lottie` and `.riv`, matched case-insensitively, whatever their
 #     content. A `.lottie` is a ZIP and a `.riv` is a binary, so this runs
@@ -1678,6 +1683,55 @@ asset_is_vector() {
   esac
 }
 
+# --- ASSET009: a 3D model is an asset, text or not, under one of two licences --
+#
+# #3250, ADR 0099 D-5. Three things no rule above holds for a MODEL:
+#
+#   * A TEXT-format model -- a `.gltf` with its buffers beside it, an `.obj` --
+#     carries no NUL byte, so ASSET001 never saw it, and ASSET008 names vector
+#     and animation formats only. An unnamed one is reported here. A BINARY
+#     model nobody named is still ASSET001's: one file, one finding, and that
+#     rule already says the true thing about it.
+#   * ASSET004 admits a committed file under any licence ADR 0015 D-2 admits
+#     for a dependency, so a model under MIT or Apache-2.0 passed it. A model
+#     is CC0-1.0 or CC-BY-4.0 and nothing else (ADR 0026 D-4, ADR 0049 D-10,
+#     ADR 0099 D-2), and ASSET_MODEL_LICENCES is that sentence. It is reported
+#     only for a licence ASSET004 has just PERMITTED, for ASSET006's reason:
+#     the licence is fine for a file and wrong for a model, and one finding
+#     says which. Under `apps/` ONLY: under `packages/` ASSET004 already
+#     admits a permissive licence and nothing else (CLAUDE.md section 3), so no
+#     model from any of those sources can land there, and a fixture this
+#     repository makes itself is Apache-2.0 like everything beside it.
+#   * `source` is free prose and ASSET005 asks only that it is not empty. A
+#     model's row must carry an `https://` link in its `source`, `url` or
+#     `input`, so that where it came from can be opened and read again.
+#
+# An extension list, for ASSET008's reason, and it fails open in the same way:
+# a model format it does not name is not a model to this rule. Under `apps/`
+# and `packages/` only, as ASSET008 is.
+ASSET_MODEL_LICENCES="CC0-1.0 CC-BY-4.0"
+
+asset_is_model() {
+  case "$1" in
+    apps/* | packages/*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *.[gG][lL][bB] | *.[gG][lL][tT][fF] | *.[oO][bB][jJ] | *.[fF][bB][xX] | *.[dD][aA][eE] | \
+      *.[bB][lL][eE][nN][dD] | *.[sS][tT][lL] | *.[pP][lL][yY] | *.3[dD][sS] | \
+      *.[uU][sS][dD] | *.[uU][sS][dD][aA] | *.[uU][sS][dD][cC] | *.[uU][sS][dD][zZ]) return 0 ;;
+  esac
+  return 1
+}
+
+asset_model_licence_permitted() {
+  local candidate
+  for candidate in ${ASSET_MODEL_LICENCES}; do
+    [ "${candidate}" = "$1" ] && return 0
+  done
+  return 1
+}
+
 # --- Reading ASSETS.toml ------------------------------------------------------
 #
 # A deliberately small subset of TOML: whole-line `#` comments, `[[asset]]`
@@ -1699,11 +1753,14 @@ asset_is_vector() {
 #
 # Emits tab-separated records on stdout:
 #   E <line> <message>                     a structural problem  (ASSET005)
-#   A <line> <path> <licence> <sha256> <absent>
+#   A <line> <path> <licence> <sha256> <absent> <derived> <linked> <script>
 #                                          one entry; licence and digest
 #                                          possibly empty for ASSET004/ASSET003,
-#                                          and <absent> the attribution keys it
-#                                          does not carry, for ASSET006
+#                                          <absent> the attribution keys it
+#                                          does not carry, for ASSET006, and
+#                                          <linked> whether its source, url or
+#                                          input carries an https link, for
+#                                          ASSET009
 asset_manifest_records() {
   awk -v SEP='|' '
     function reset() {
@@ -1765,7 +1822,8 @@ asset_manifest_records() {
         print "E" SEP startline SEP "the entry for " k_path " records no read date in the form YYYY-MM-DD"
         reset(); return
       }
-      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha SEP absentAttribution() SEP derivation() SEP k_script
+      linked = (index(k_source, "https://") > 0 || index(k_url, "https://") > 0 || index(k_input, "https://") > 0) ? "linked" : "unlinked"
+      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha SEP absentAttribution() SEP derivation() SEP linked SEP k_script
       reset()
     }
 
@@ -1920,9 +1978,9 @@ asset_attribution_required() {
 }
 
 check_assets() {
-  local record kind line rest path licence sha absent derived script got relative errors=0
+  local record kind line rest path licence sha absent derived linked script got relative errors=0
   local -a asset_paths=() asset_lines=()
-  local i named vector
+  local i named vector model
 
   # ⚠️ ASSET005 first, and it returns. A manifest that is not there is not "no
   # entries": it is the gate removed. `check-env-example.sh` sets the precedent
@@ -1979,6 +2037,8 @@ check_assets() {
         absent="${rest%%|*}"
         rest="${rest#*|}"
         derived="${rest%%|*}"
+        rest="${rest#*|}"
+        linked="${rest%%|*}"
         script="${rest#*|}"
         asset_paths[${#asset_paths[@]}]="${path}"
         asset_lines[${#asset_lines[@]}]="${line}"
@@ -2010,6 +2070,18 @@ check_assets() {
           # screen #358 generates ever drops this asset, the app is shipping it
           # unlicensed -- so the data it is generated FROM is checked here.
           report ASSET006 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} requires attribution wherever the work is shared, and this entry records no ${absent}; CC BY 4.0 §3(a)(1) wants the creator and a link to the material, §3(a)(1)(B) wants any modification indicated, and #358 generates the in-app credits from exactly these keys (ADR 0023 D-3)"
+        fi
+
+        # ASSET009 -- what a MODEL's row owes beyond any other file's.
+        if asset_is_model "${path}"; then
+          if [ -n "${licence}" ] && [ "${path#apps/}" != "${path}" ] \
+            && asset_licence_permitted "${licence}" "${path}" \
+            && ! asset_model_licence_permitted "${licence}"; then
+            report ASSET009 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not one a 3D model may be committed under; a model is ${ASSET_MODEL_LICENCES// / or } and nothing else, whatever ASSET004 admits for another kind of file (ADR 0049 D-10, ADR 0099 D-2)"
+          fi
+          if [ "${linked}" != "linked" ]; then
+            report ASSET009 "${ASSET_MANIFEST_NAME}:${line}: ${path}: a 3D model's entry carries no https link in its source, url or input; where a model came from is recorded as an address that can be opened and read again (ADR 0099 D-5)"
+          fi
         fi
 
         # ASSET007 -- a derived file's record is its reproduction recipe, so an
@@ -2060,10 +2132,13 @@ check_assets() {
     [ -n "${file}" ] || continue
     relative="${file#"${ROOT}"/}"
     vector=0
+    model=0
     if asset_is_vector "${relative}"; then
       vector=1
     elif ! asset_is_binary "${file}"; then
-      continue
+      # A text file is an asset to this walk only when it is a 3D model.
+      asset_is_model "${relative}" || continue
+      model=1
     fi
     named=0
     for (( i = 0; i < ${#asset_paths[@]}; i++ )); do
@@ -2072,6 +2147,10 @@ check_assets() {
     [ "${named}" -eq 1 ] && continue
     if [ "${vector}" -eq 1 ]; then
       report ASSET008 "${relative}: a vector or animation file that ${ASSET_MANIFEST_NAME} does not name; an illustration or animation is somebody's work until a row there says whose, under what licence, and with what digest (#937)"
+      continue
+    fi
+    if [ "${model}" -eq 1 ]; then
+      report ASSET009 "${relative}: a 3D model that ${ASSET_MANIFEST_NAME} does not name; a model in a text format carries no SPDX header and is no binary, so its source, its licence and its digest are recorded there or nowhere (#3250, ADR 0099 D-5)"
       continue
     fi
     report ASSET001 "${relative}: a committed binary that ${ASSET_MANIFEST_NAME} does not name; no SPDX header can be put in it, so its licence, its source and its integrity are recorded there or nowhere (#339)"

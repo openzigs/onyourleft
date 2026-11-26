@@ -186,6 +186,9 @@ function race(
     bots = next.bots;
     // The spy keeps every call; a whole race of them is most of what a run costs.
     vi.mocked(advance).mockClear();
+    vi.mocked(decideTactic).mockClear();
+    vi.mocked(fieldDraftFactors).mockClear();
+    vi.mocked(botRacePlan).mockClear();
     races.push(state);
     all.push(bots);
   }
@@ -204,6 +207,20 @@ function race(
  * whole second a sub-step was not the same race (83 to 67), so it is not used.
  */
 const RACE_INTEGRATION_STEP_SECONDS = 0.25;
+
+/**
+ * Seeds 1 to 100 in four cases of 25, for the hilly loop's whole-race cases
+ * (#3167): every seed still raced, and none of the four near a case's 5 s.
+ * The nightly's coverage half on CI ran each hundred in 5.1 to 5.4 s, against
+ * 1.2 to 1.4 s on this Mac with `--coverage`. A case keeps its name as the
+ * `describe` the four are in, so ADR 0067's list still finds it.
+ */
+const SEED_QUARTERS = [
+  [1, 25],
+  [26, 50],
+  [51, 75],
+  [76, 100],
+] as const;
 
 describe('a lap-race bot is the #92 bot, on the one physics', () => {
   it('rides on whatever advance returns, so it cannot be on separate maths', () => {
@@ -987,23 +1004,26 @@ describe('the race plan (#1960, ADR 0061 D-8)', () => {
     expect(heldAtCp).toBeGreaterThan(0);
   });
 
-  it('finishes fierce, hard, brisk and steady in that order with items off, every seed of 100', () => {
+  describe('finishes fierce, hard, brisk and steady in that order with items off, every seed of 100', () => {
     // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
     // average of 15 to 26: at the 10 ms default 16.2 s, and 14.4 s under
     // --coverage (one run each, with a 60 s timeout); at the quarter-second
-    // sub-step 0.55 to 0.68 s, and 1.13 to 2.03 s under --coverage (three runs each).
-    for (let seed = 1; seed <= 100; seed += 1) {
-      // A seed moves the sprint's opening here, on a hilly loop where it matters.
-      const run = race(HILLY, ALL_TIERS, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
-      const last = run.races[run.races.length - 1] as ItemRaceState;
-      expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
-      expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
-        'f',
-        'h',
-        'b',
-        's',
-      ]);
-    }
+    // sub-step 0.55 to 0.68 s, and 1.13 to 2.03 s under --coverage (three runs
+    // each). In quarters since #3167.
+    it.each(SEED_QUARTERS)('seeds %i to %i', (from, to) => {
+      for (let seed = from; seed <= to; seed += 1) {
+        // A seed moves the sprint's opening here, on a hilly loop where it matters.
+        const run = race(HILLY, ALL_TIERS, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        expect(last.racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+          'f',
+          'h',
+          'b',
+          's',
+        ]);
+      }
+    });
   });
 
   it('surges on the climbs and eases on the descents of a seeded hilly loop', () => {
@@ -1108,23 +1128,26 @@ describe('each bot its own pace (#2455)', () => {
     }
   });
 
-  it('keeps the tiers in order with every bot on a pace the field dealt it, every seed of 100', () => {
+  describe('keeps the tiers in order with every bot on a pace the field dealt it, every seed of 100', () => {
     // #2523, Apple M4 Pro, Node 26, this file alone, on a machine at a load
     // average of 15 to 26: at the 10 ms default 10.8 s, and 18.9 s under
     // --coverage (one run each, with a 60 s timeout); at the quarter-second
-    // sub-step 0.53 to 2.04 s, and 0.93 to 1.98 s under --coverage (three runs each).
-    for (let seed = 1; seed <= 100; seed += 1) {
-      const paces = botFieldPaces(seed, ALL_TIERS.length);
-      const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
-      const run = race(HILLY, field, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
-      const last = run.races[run.races.length - 1] as ItemRaceState;
-      expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
-        'f',
-        'h',
-        'b',
-        's',
-      ]);
-    }
+    // sub-step 0.53 to 2.04 s, and 0.93 to 1.98 s under --coverage (three runs
+    // each). In quarters since #3167.
+    it.each(SEED_QUARTERS)('seeds %i to %i', (from, to) => {
+      for (let seed = from; seed <= to; seed += 1) {
+        const paces = botFieldPaces(seed, ALL_TIERS.length);
+        const field = ALL_TIERS.map((entrant, index) => ({ ...entrant, pace: paces[index] }));
+        const run = race(HILLY, field, seed, false, undefined, RACE_INTEGRATION_STEP_SECONDS);
+        const last = run.races[run.races.length - 1] as ItemRaceState;
+        expect(standings(last.racers.map((entry) => entry.racer)), `seed ${String(seed)}`).toEqual([
+          'f',
+          'h',
+          'b',
+          's',
+        ]);
+      }
+    });
   });
 
   it('spreads a field of one tier into a race: apart at the line, and the order changes on the way', () => {

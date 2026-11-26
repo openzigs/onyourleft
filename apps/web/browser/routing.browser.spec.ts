@@ -14,7 +14,8 @@
  * - dragging one of five waypoints asks the SDK's router for two legs,
  *   counted at the router, not at a double;
  * - a leg the engine cannot route here is drawn straight with a sentence that
- *   names no coordinate, and a leg with no road stays a failed leg;
+ *   names no coordinate, so is a leg to a point inside the graph's coverage
+ *   with no road near it (#3179), and a leg with no road stays a failed leg;
  * - with no network, the planner draws four waypoints as three straight legs
  *   and saves them, read back from the store; with the network on, the same
  *   clicks follow the grid's roads (the control).
@@ -134,6 +135,10 @@ test.describe('in-browser routing in a real engine — #2734', () => {
     expect(refusals?.offTheGraph.mode).toBe('freehand');
     expect(refusals?.offTheGraph.message).toContain('outside the area');
     expect(refusals?.offTheGraph.message).not.toMatch(/\d\.\d/);
+    // #3179: the engine snaps this one to a road kilometres away; the line is not a road to it.
+    expect(refusals?.farFromRoads.mode).toBe('freehand');
+    expect(refusals?.farFromRoads.message).toContain('too far from any road');
+    expect(refusals?.farFromRoads.message).not.toMatch(/\d\.\d/);
     expect(refusals?.unconnected.state).toBe('failed');
     expect(refusals?.unconnected.message).toContain('No route by road');
     expect(refusals?.unconnected.message).not.toMatch(/\d\.\d/);

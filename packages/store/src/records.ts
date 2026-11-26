@@ -1326,6 +1326,22 @@ export interface RouteRecord {
    */
   readonly elevation?: RouteElevationRecord | undefined;
   /**
+   * The rider's fastest lap of this loop in a lap race on this device, moving
+   * time — #2319, ADR 0060's amendment of 2026-11-26. Written only by
+   * `ActivityStore.recordBestLap`, which keeps the faster of the two.
+   *
+   * **A lap time and nothing else**: no place, no bot, no race (ADR 0060
+   * D-12.2 stands). On the route, so it goes where the route goes: in the
+   * export's manifest with it, erased with it and with the rider, and never
+   * synced, as no route is. A rename keeps it; a new line for the route is a
+   * different lap, and `routing/route-edit.ts` §`replaceRouteLine` drops it.
+   *
+   * ⚠️ **Optional, so it is not a migration** (README §"An optional field is
+   * not a migration"): a route saved before #2319, or never raced, reads back
+   * with it absent, and absent is "no lap yet", never a lap of nought.
+   */
+  readonly bestLap?: Seconds | undefined;
+  /**
    * ADR 0004 decision A's default applies here too, and it matters more.
    *
    * #73 puts it plainly: *"An activity trace can be truncated at both ends

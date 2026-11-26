@@ -449,3 +449,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `sources.ts` §`ADMITTED_SOURCES` carries it last. The entry of 2026-11-12 above now records
   history: Kenney's row keeps its page among its addresses, and no Kenney file is drawn in the
   realistic world. ([#2847](https://github.com/openzigs/onyourleft/issues/2847))
+- **2026-11-26** — **D-10's In table gains two rows, by
+  [ADR 0099](0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md).** Under D-11, a
+  new source is a superseding ADR and not an amendment. ADR 0099 D-1 admits **Quaternius, a kit
+  whose own page states CC0** (`CC0-1.0`), for urban building pieces and railway track pieces, and
+  **an individual model under CC0-1.0** (`CC0-1.0`), verified per asset, on the owner's approval of
+  2026-11-26 recorded on pull request #3256. No asset is adopted by it. The tables above are
+  unedited. `admitted-sources.test.ts` reads ADR 0099's rows after ADR 0085's, and `sources.ts`
+  §`ADMITTED_SOURCES` carries them last. ([#3250](https://github.com/openzigs/onyourleft/issues/3250))
