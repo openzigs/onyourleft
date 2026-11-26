@@ -149,8 +149,15 @@ const COMPACT = PARAMS.get('route') === 'compact';
 const LAYOUT = { hidden: [], textSize: 'normal', route: COMPACT ? 'compact' : 'full' } as const;
 /** #2419: what a real ride changes, changed on every frame (see the module note). */
 const REAL = PARAMS.get('ride') === 'real';
+/**
+ * #2416: `?at=38000`, the rider that many metres along the 40 km route
+ * rather than {@link START}, so the spec can put the mark where it likes on
+ * the route outline: the north route runs from the bottom of the box (0 m)
+ * to its top (40 km), and the east route along its middle.
+ */
+const AT_ASKED = Number(PARAMS.get('at') ?? Number.NaN);
 /** Five kilometres in, so every field has something to say. */
-const START = 5_000;
+const START = Number.isFinite(AT_ASKED) ? AT_ASKED : 5_000;
 /** #2419: the rider's threshold, so a real ride has a zone field and a zone bar. */
 const THRESHOLD = 250;
 

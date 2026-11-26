@@ -111,11 +111,13 @@ async function open(
   map: 'street' | 'outline',
   route: 'full' | 'compact' = 'full',
   town: 'north' | 'east' = 'north',
+  extra: readonly string[] = [],
 ): Promise<void> {
   const query = [
     ...(map === 'outline' ? ['map=outline'] : []),
     ...(route === 'compact' ? ['route=compact'] : []),
     ...(town === 'east' ? ['town=east'] : []),
+    ...extra,
   ].join('&');
   const response = await page.goto(
     `${HARNESS_ORIGIN}/street-map.html${query === '' ? '' : `?${query}`}`,
@@ -667,6 +669,110 @@ test('#2385 the compact tile’s gradient changes without painting the map again
       `${String(map)} paints of the street map (${String(all)} paints in all)`,
   );
 });
+
+/**
+ * #2416 — ON THE ROUTE OUTLINE THE LABEL NEVER HIDES THE RIDER'S MARK. With
+ * no street map the compact tile draws the route outline (`PlanTrace`), and
+ * the mark is wherever the rider is on it. At every viewport above and the
+ * upright tablet, the rider is put:
+ *
+ * - near the north route's end, 38 km of 40, at the top of the box and under
+ *   the label's top start corner, where `main` drew the label over it (the
+ *   case checks the mark is in the band the label covers at the top, so it
+ *   cannot pass by the mark being elsewhere);
+ * - either side of the middle, 19.9 and 20.1 km, where the label moves;
+ * - 2 km in, at the bottom; and on the east route, along the middle.
+ *
+ * Each time the label is whole on the tile and over no part of the mark.
+ */
+const OUTLINE_VIEWPORTS = [
+  ...VIEWPORTS,
+  { name: 'an upright tablet', width: 800, height: 1280, grows: false },
+] as const;
+
+const OUTLINE_PLACES = [
+  { name: 'under the label’s corner', at: 38_000, town: 'north', top: true },
+  { name: 'just above the middle', at: 20_100, town: 'north', top: false },
+  { name: 'just below the middle', at: 19_900, town: 'north', top: false },
+  { name: 'at the bottom', at: 2_000, town: 'north', top: false },
+  { name: 'on the middle line', at: 20_000, town: 'east', top: false },
+] as const;
+
+for (const viewport of OUTLINE_VIEWPORTS) {
+  test(`#2416 on the route outline the tile's label never hides the rider's mark — ${viewport.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const seen: string[] = [];
+    for (const place of OUTLINE_PLACES) {
+      await open(page, 'outline', 'compact', place.town, [`at=${String(place.at)}`]);
+      const measured = await page.evaluate(() => {
+        const box = (element: Element | null | undefined) => {
+          if (element === null || element === undefined) return undefined;
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        };
+        return {
+          outline: document.querySelector('.oyl-hud__tile .oyl-hud__street-map') === null,
+          label: box(document.querySelector('.oyl-hud__tile-grade')),
+          tile: box(document.querySelector('.oyl-hud__tile .oyl-hud__plan-svg')),
+          mark: box(document.querySelector('.oyl-hud__tile [data-testid="oyl-hud-plan-here"]')),
+        };
+      });
+      const { label, tile, mark: disc } = measured;
+      if (label === undefined || tile === undefined || disc === undefined) {
+        throw new Error(`no label, tile or mark ${place.name}: ${JSON.stringify(measured)}`);
+      }
+      // The mark with the outer half of its ring (`plan.ts`: a 2-unit stroke
+      // of a 100-unit box, which `meet` scales to the tile's height), so a
+      // label over the ring alone is a red case too.
+      const ring = (tile.bottom - tile.top) / 100;
+      const mark = {
+        left: disc.left - ring,
+        top: disc.top - ring,
+        right: disc.right + ring,
+        bottom: disc.bottom + ring,
+      };
+      expect(measured.outline, 'the tile draws the route outline').toBe(true);
+      const height = label.bottom - label.top;
+      seen.push(
+        `${place.name} (${place.town} ${String(place.at)} m): mark at ` +
+          `${(mark.top - tile.top).toFixed(1)}–${(mark.bottom - tile.top).toFixed(1)} px down a ` +
+          `${(tile.bottom - tile.top).toFixed(0)} px tile, label ${height.toFixed(0)} px at ` +
+          `${(label.top - tile.top).toFixed(1)}`,
+      );
+      // The place is the one named: under the label's corner, the mark is in
+      // the band a label at the top of the tile covers.
+      if (place.top) {
+        expect(mark.top, `${place.name}: the mark is in the label's band`).toBeLessThan(
+          tile.top + height,
+        );
+      }
+      // The label is whole on the tile…
+      expect(label.left, `${place.name}: left`).toBeGreaterThanOrEqual(tile.left - 0.5);
+      expect(label.top, `${place.name}: top`).toBeGreaterThanOrEqual(tile.top - 0.5);
+      expect(label.right, `${place.name}: right`).toBeLessThanOrEqual(tile.right + 0.5);
+      expect(label.bottom, `${place.name}: bottom`).toBeLessThanOrEqual(tile.bottom + 0.5);
+      // …and over no part of the mark.
+      const clear =
+        label.bottom <= mark.top ||
+        label.top >= mark.bottom ||
+        label.right <= mark.left ||
+        label.left >= mark.right;
+      expect(
+        clear,
+        `${place.name}: the label [${label.left.toFixed(1)},${label.top.toFixed(1)} → ` +
+          `${label.right.toFixed(1)},${label.bottom.toFixed(1)}] is over the mark ` +
+          `[${mark.left.toFixed(1)},${mark.top.toFixed(1)} → ${mark.right.toFixed(1)},` +
+          `${mark.bottom.toFixed(1)}]`,
+      ).toBe(true);
+    }
+    console.log(
+      `#2416 the outline tile at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
+        seen.join('; '),
+    );
+  });
+}
 
 test('#2290 what a paced ride costs the engine, map and outline — published, not asserted', async ({
   page,

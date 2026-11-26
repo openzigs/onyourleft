@@ -121,7 +121,14 @@ export function PlanTrace(props: PlanTraceProps): JSX.Element {
   const split = useMemo(() => splitPlan(plan, cut), [plan, cut]);
 
   return (
-    <div className="oyl-hud__plan">
+    <div
+      className="oyl-hud__plan"
+      // #2416: which half of the box the rider's mark is in, so that the
+      // compact tile can print its gradient in the other one
+      // (`theme.css` §"#2416"). It changes only when the mark crosses the
+      // middle, not once a frame.
+      data-oyl-mark-half={markHalf(mark.y)}
+    >
       <svg
         className="oyl-hud__plan-svg"
         viewBox={`0 0 ${String(PLAN_SIZE)} ${String(PLAN_SIZE)}`}
@@ -164,6 +171,24 @@ export function PlanTrace(props: PlanTraceProps): JSX.Element {
       </svg>
     </div>
   );
+}
+
+/**
+ * The half of the plan's box the rider's mark is in, by its centre: `top`
+ * above the middle and `bottom` from it down — #2416.
+ *
+ * The compact tile (`HudCore.tsx` §`RouteTile`) prints the gradient across
+ * the top of the box, over the route outline, where the mark can be anywhere.
+ * With the mark in the top half the label goes to the bottom. One line in the
+ * middle is enough, with no band either side: every tile is at least as wide
+ * as it is tall, so `meet` fills its height and a fraction of the viewBox is
+ * that fraction of the tile; the label is under 40 % of the tile's height at
+ * every size (`street-map.browser.spec.ts` §"#2416"), and the mark, ring
+ * included, is {@link RIDER_MARK_RADIUS} + 1 of {@link PLAN_SIZE}. So a label
+ * in the half the mark is not in clears it wherever the mark is.
+ */
+function markHalf(y: number): 'top' | 'bottom' {
+  return y < PLAN_SIZE / 2 ? 'top' : 'bottom';
 }
 
 /** One run of the road, ridden or to come. @see PLAN_PAINTS */

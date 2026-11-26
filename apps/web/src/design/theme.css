@@ -14723,6 +14723,24 @@ html:has(.oyl-open-world__go) {
   white-space: nowrap;
 }
 
+/* #2416: ON THE ROUTE OUTLINE THE LABEL TAKES THE HALF THE MARK IS NOT IN.
+   On the street map the rider's mark is always in the middle and the label
+   is clear of it; on the outline (a ride with no street map, `PlanTrace`)
+   the mark is wherever the rider is on the route, and under the label it
+   was hidden: the label covers 86 × 26 px of a 96 × 80 tile upright on a
+   phone. `PlanTrace` says which half of its box the mark is in, and with the
+   mark in the top half the label stands in the bottom start corner instead.
+   It moves when the mark crosses the middle, not once a frame. The street
+   map says no half, so its label stays at the top.
+   `street-map.browser.spec.ts` §"#2416" puts the mark under the label's
+   corner and on either side of the middle at every viewport it lays out. */
+.oyl-hud__tile:has(> .oyl-hud__plan[data-oyl-mark-half='top']) > .oyl-hud__tile-grade {
+  top: auto;
+  bottom: 0;
+  border-bottom-right-radius: 0;
+  border-top-right-radius: var(--oyl-radius);
+}
+
 .oyl-hud__tile-unit {
   font-size: var(--oyl-font-size-sm);
 }
