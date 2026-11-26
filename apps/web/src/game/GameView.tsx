@@ -225,6 +225,7 @@ import {
 } from './course-laps';
 import type { CueOutput } from './audio-port';
 import { RideCues } from './audio-cues';
+import { GameEffects } from './game-effects';
 import {
   DEFAULT_CUES,
   readCuePreference,
@@ -238,7 +239,8 @@ import {
   type RecordingOffer,
   type RidableRoute,
 } from './StageChooser';
-import { sharedCueOutput } from './web-audio';
+import { deviceAudioMix, sharedCueOutput } from './web-audio';
+import { deliverySounds } from './delivery/delivery-sounds';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import {
   describeOpenWorldRefusal,
@@ -2118,6 +2120,8 @@ function GameScreen({
    * find the context awake.
    */
   const cuesRef = useRef<RideCues | undefined>(undefined);
+  /** #3012: this ride's game sounds, on the effects bus; begun only on a ride that runs a round. */
+  const effectsRef = useRef<GameEffects | undefined>(undefined);
   /** What the rider chose for sound, read at the start of each ride. */
   const [sound, setSound] = useState<CuePreference>(DEFAULT_CUES);
   const soundsOut = props.sounds;
@@ -2771,12 +2775,17 @@ function GameScreen({
     // expects to find awake. Read NOW, not at the start of the ride: the
     // workout may have finished meanwhile. @see trainerPortRef
     const cues = cuesRef.current;
-    if (cues !== undefined) {
+    // #3012: the game sounds let go of the audio on the same terms.
+    const effects = effectsRef.current;
+    effectsRef.current = undefined;
+    if (cues !== undefined || effects !== undefined) {
       const live = trainerPortRef.current?.readTrainer();
       if (live?.kind === 'workout' && live.workoutFinished !== true) {
-        cues.end();
+        cues?.end();
+        effects?.end();
       } else {
-        cues.release();
+        cues?.release();
+        effects?.release();
       }
     }
     void lockRef.current.release();
@@ -2992,6 +3001,21 @@ function GameScreen({
       cuesRef.current?.end();
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
+      // #3012: and, in the same press, the game sounds of a ride that asks
+      // for a round, on the effects bus at the rider's effects volume and mute.
+      // Whether it asks is decided here, as the round below reads it: a level
+      // always, never a circuit or the open world (#2293), else the switch.
+      const deliveryWanted =
+        onLevel ||
+        (!onCircuit &&
+          !onOpenWorld &&
+          (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash))));
+      effectsRef.current?.end();
+      effectsRef.current = new GameEffects(
+        soundsOut ?? sharedCueOutput(),
+        deviceAudioMix(deviceStorage),
+      );
+      if (deliveryWanted) effectsRef.current.begin();
       ghostRiderRef.current = undefined;
       if (captureScene !== undefined) {
         // #3153: a capture races a bundled synthetic best, or nobody — never
@@ -3010,6 +3034,7 @@ function GameScreen({
           // The ride does not start: a rider who chose a race is told why on
           // the picker, rather than being given a ride alone.
           cuesRef.current?.end();
+          effectsRef.current?.end();
           setRiderGhostProblem(RIDER_GHOST_REFUSAL_TEXT[asked.kind]);
           return;
         }
@@ -3068,11 +3093,7 @@ function GameScreen({
       // HERE, before the trainer is asked or a session made, as an ordinary
       // ride rather than a throw from a ride already begun.
       // #2293: never on a built-in circuit, whatever the address says.
-      const deliveryWanted =
-        onLevel ||
-        (!onCircuit &&
-          !onOpenWorld &&
-          (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash))));
+      // (`deliveryWanted` is read at the top of the press, for its sounds: #3012.)
       // #784: the room entered on the picker's panel — but only for a ride
       // started from the panel, on the room's own road: a rider in a room who
       // presses *Ride* on one of their own routes rides it alone. Else the
@@ -4694,6 +4715,9 @@ function GameScreen({
         });
         throwAskedRef.current = undefined;
         deliveryRef.current = stepped.ride;
+        // #3012: the round's game sounds, each beside what the screen and the
+        // words already say of it. Sound only: nothing here reaches the trainer.
+        for (const name of deliverySounds(delivery, stepped)) effectsRef.current?.play(name);
         if (stepped.ride.score !== delivery.score) {
           captureLogRef.current?.note({ kind: 'score', score: stepped.ride.score });
         }

@@ -71,7 +71,11 @@ import { ManualClock, ScriptedRoom } from '../net/testing';
 import { createRideController } from '../ride/controller';
 import { createSteeringController, STEERING_CONTROLLER_BUTTONS } from '../ride/steering-controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
+import { writeMenuSoundPreference } from '../shell/menu-sound-preference';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import type { GameEffectName } from './audio-port';
+import { recordingOutput, type RecordingOutput } from './audio-testing';
+import { GAME_EFFECT_LEVEL } from './game-effects';
 
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/assist-preference';
 import type { ControllerPort } from './delivery/controller-port';
@@ -600,6 +604,8 @@ async function rideTheTrace(options: {
   readonly controller?: ControllerPort | undefined;
   /** Filled with the distance each frame's input drew the rider at, by frame index (#3021). */
   readonly drawnAlong?: Map<number, number | undefined> | undefined;
+  /** The audio output the ride plays through (#3012); the app's own, silent in jsdom, unless given. */
+  readonly sounds?: RecordingOutput | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
@@ -607,6 +613,7 @@ async function rideTheTrace(options: {
       port={port()}
       {...(options.trainer === undefined ? {} : { trainer: options.trainer })}
       {...(options.controller === undefined ? {} : { controller: options.controller })}
+      {...(options.sounds === undefined ? {} : { sounds: options.sounds })}
       renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
       delivery={options.delivery}
@@ -729,6 +736,77 @@ const without = (): Promise<RideResult> => (withoutRide ??= rideOnce(false));
  * every other such case 1 450 ms or less with `--coverage`. They carried a 16 s per-case limit; the
  * removal changes nothing they run. A filtered run of one case rides both.
  */
+
+describe('the round’s game sounds — #3012', () => {
+  /** The game sounds the ride asked the port for, in order. */
+  const effectsOf = (output: RecordingOutput): readonly GameEffectName[] =>
+    output.calls.flatMap((call) =>
+      call.kind === 'playCue' && GAME_EFFECTS.includes(call.cue as GameEffectName)
+        ? [call.cue as GameEffectName]
+        : [],
+    );
+  const GAME_EFFECTS: readonly string[] = [
+    'delivery-throw',
+    'delivery-delivered',
+    'delivery-missed',
+    'delivery-crash',
+    'hazard-dog',
+    'hazard-car',
+    'hazard-rider',
+    'car-engine',
+  ];
+
+  it('plays a throw, a delivery, a miss and a crash through the ride’s output, at one level', async () => {
+    // The effects bus on: Settings' *Menu sounds* switch.
+    writeMenuSoundPreference(localStorage, { enabled: true, volume: 0.5 });
+    const sounds = recordingOutput();
+    await rideTheTrace({ delivery: true, sounds });
+    const played = effectsOf(sounds);
+    for (const name of [
+      'delivery-throw',
+      'delivery-delivered',
+      'delivery-missed',
+      'delivery-crash',
+    ] as const) {
+      expect(played, name).toContain(name);
+    }
+    // As many throws as the script pressed and the round took.
+    expect(played.filter((name) => name === 'delivery-throw').length).toBeGreaterThan(0);
+    for (const call of sounds.calls) {
+      if (call.kind === 'playCue' && GAME_EFFECTS.includes(call.cue)) {
+        expect(call.gain).toBe(GAME_EFFECT_LEVEL);
+      }
+    }
+  });
+
+  it('wakes the audio for them at the press, and lets it go at End ride (#447’s reason)', async () => {
+    writeMenuSoundPreference(localStorage, { enabled: true, volume: 0.5 });
+    const sounds = recordingOutput();
+    await rideTheTrace({ delivery: true, sounds, frames: 20 });
+    // The ride's own cues are off by default: the one resume is the game sounds'.
+    expect(sounds.count('resume')).toBe(1);
+    expect(sounds.calls[0]?.kind).toBe('resume');
+    expect(sounds.count('suspend')).toBe(0);
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    expect(sounds.count('suspend')).toBe(1);
+  });
+
+  it('plays none of them with the effects bus muted, the default', async () => {
+    const muted = recordingOutput();
+    await rideTheTrace({ delivery: true, sounds: muted });
+    expect(effectsOf(muted)).toEqual([]);
+  });
+
+  it('plays none of them, and wakes no audio for them, on a ride with no round, the effects bus on', async () => {
+    writeMenuSoundPreference(localStorage, { enabled: true, volume: 0.5 });
+    const plain = recordingOutput();
+    await rideTheTrace({ delivery: false, sounds: plain, frames: 60 });
+    expect(effectsOf(plain)).toEqual([]);
+    // And wakes no audio for them: the ride's own cues are off by default too.
+    expect(plain.count('resume')).toBe(0);
+  });
+});
 
 describe('a Delivery round inside a game ride — #1816', () => {
   it('runs the round the script predicts: every house settled, a delivery, a miss and a crash', async () => {

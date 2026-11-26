@@ -31,6 +31,13 @@
  * - **distance**: one short low note — a mark passed.
  * - **select**, **confirm** and **back** (#946): the menus' sounds — one
  *   short high note; two rising; two falling. Each is over in 130 ms.
+ * - Delivery's sounds (#3012), on the effects bus: **delivery-throw**, a
+ *   quick rising flick; **delivery-delivered**, three rising bright notes;
+ *   **delivery-missed**, two falling soft ones; **delivery-crash**, a low
+ *   buzzing thud; **hazard-dog**, two short high yaps; **hazard-car**, a
+ *   two-note horn; **hazard-rider**, a bell rung twice; and **car-engine**, a
+ *   low rumble climbing as a car pulls out (#2992). Each but the engine is
+ *   over within half a second, the engine within a second.
  *
  * Designed here, from nothing; ADR 0009 forbids deriving them from a product
  * and none was consulted. Each note has a 10 ms attack and a short release so
@@ -106,11 +113,12 @@ export type AudioContextLike = Pick<
   | 'createMediaElementSource'
 >;
 
-/** One note of a short sound: its pitch, when it starts, how long it lasts. */
+/** One note of a short sound: its pitch, when it starts, how long it lasts, and its wave (a sine unless given). */
 interface Note {
   readonly hz: number;
   readonly at: number;
   readonly seconds: number;
+  readonly wave?: OscillatorType;
 }
 
 const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
@@ -132,15 +140,62 @@ const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
     { hz: 587.33, at: 0, seconds: 0.05 },
     { hz: 440, at: 0.06, seconds: 0.06 },
   ],
+  // #3012: Delivery's sounds, this project's own. Each has its equivalent on
+  // the screen or in words (`delivery/delivery-sounds.ts`).
+  'delivery-throw': [
+    { hz: 440, at: 0, seconds: 0.05, wave: 'triangle' },
+    { hz: 740, at: 0.04, seconds: 0.06, wave: 'triangle' },
+  ],
+  'delivery-delivered': [
+    { hz: 783.99, at: 0, seconds: 0.08 },
+    { hz: 987.77, at: 0.08, seconds: 0.08 },
+    { hz: 1318.51, at: 0.16, seconds: 0.16 },
+  ],
+  'delivery-missed': [
+    { hz: 392, at: 0, seconds: 0.12, wave: 'triangle' },
+    { hz: 311.13, at: 0.13, seconds: 0.2, wave: 'triangle' },
+  ],
+  'delivery-crash': [
+    { hz: 98, at: 0, seconds: 0.18, wave: 'square' },
+    { hz: 73.42, at: 0.04, seconds: 0.24, wave: 'sawtooth' },
+    { hz: 196, at: 0.02, seconds: 0.06, wave: 'square' },
+  ],
+  'hazard-dog': [
+    { hz: 880, at: 0, seconds: 0.05, wave: 'square' },
+    { hz: 987.77, at: 0.1, seconds: 0.06, wave: 'square' },
+  ],
+  'hazard-car': [
+    { hz: 349.23, at: 0, seconds: 0.3, wave: 'square' },
+    { hz: 440, at: 0, seconds: 0.3, wave: 'square' },
+  ],
+  'hazard-rider': [
+    { hz: 2093, at: 0, seconds: 0.08 },
+    { hz: 2093, at: 0.14, seconds: 0.22 },
+  ],
+  'car-engine': [
+    { hz: 55, at: 0, seconds: 0.24, wave: 'sawtooth' },
+    { hz: 61.74, at: 0.22, seconds: 0.24, wave: 'sawtooth' },
+    { hz: 69.3, at: 0.44, seconds: 0.24, wave: 'sawtooth' },
+    { hz: 82.41, at: 0.66, seconds: 0.3, wave: 'sawtooth' },
+  ],
 };
 
-/** Which bus each short sound plays on: the menus' on effects, the ride's on cues. */
+/** Which bus each short sound plays on: the menus' and the games' on effects, the ride's on cues. */
 const BUS_OF: Readonly<Record<CueName, 'effects' | 'cues'>> = {
   interval: 'cues',
   distance: 'cues',
   select: 'effects',
   confirm: 'effects',
   back: 'effects',
+  // #3012: the games' sounds, at the rider's effects volume and mute.
+  'delivery-throw': 'effects',
+  'delivery-delivered': 'effects',
+  'delivery-missed': 'effects',
+  'delivery-crash': 'effects',
+  'hazard-dog': 'effects',
+  'hazard-car': 'effects',
+  'hazard-rider': 'effects',
+  'car-engine': 'effects',
 };
 
 /**
@@ -417,7 +472,7 @@ export function webAudioOutput(
         const gain = context.createGain();
         const from = start + note.at;
         const until = from + note.seconds;
-        oscillator.type = 'sine';
+        oscillator.type = note.wave ?? 'sine';
         oscillator.frequency.value = note.hz;
         gain.gain.setValueAtTime(0, from);
         gain.gain.linearRampToValueAtTime(level, from + NOTE_ATTACK_SECONDS);

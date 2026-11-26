@@ -62,7 +62,7 @@ import {
   type PreferenceStorage,
 } from './hud/announce-preference';
 import type { GameRenderer } from './port';
-import { SoundControls } from './SoundControls';
+import { SOUND_CONTROLS_MUTES_TEXT, SoundControls } from './SoundControls';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { deviceAudioMix, webAudioOutput } from './web-audio';
 import { endRideAnswer } from './end-ride-testing';
@@ -291,6 +291,11 @@ describe('the game — #400', () => {
     const mute = button('Mute sounds');
     expect(mute?.getAttribute('aria-pressed')).toBe('false');
     expect(document.querySelector('.oyl-hud input[type="range"]')).not.toBeNull();
+    // #3012: it says which sounds it mutes, and where the game sounds are set.
+    const says = document.getElementById(mute?.getAttribute('aria-describedby') ?? '');
+    expect(says?.textContent).toBe(SOUND_CONTROLS_MUTES_TEXT);
+    expect(SOUND_CONTROLS_MUTES_TEXT).toContain('cues');
+    expect(SOUND_CONTROLS_MUTES_TEXT).toContain('Menu sounds in Settings');
 
     await press(mute);
     expect(button('Mute sounds')?.getAttribute('aria-pressed')).toBe('true');
