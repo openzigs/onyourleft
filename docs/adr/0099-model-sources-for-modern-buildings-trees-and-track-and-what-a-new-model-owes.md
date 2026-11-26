@@ -1,16 +1,16 @@
 # ADR 0099: Model sources for modern buildings, trees and railway track, and what a new model owes
 
-- **Status**: **Proposed, 2026-11-26.** D-1's list of sources is a **recommendation to the owner**
-  and admits nothing. [#3250](https://github.com/openzigs/onyourleft/issues/3250)'s second
-  acceptance criterion is *"The owner approves the list of admitted sources"*, and that approval
-  has not been given. Until it is, [ADR 0049](0049-open-asset-sources-for-the-realistic-world.md)
-  D-10 with [ADR 0085](0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md)'s row is
-  the whole list, `apps/web/tools/realistic/sources.ts` is unchanged, and the pipeline refuses
-  every host D-1 proposes. D-7 says what acceptance changes
+- **Status**: **Accepted, 2026-11-26**, by the owner, 2026-11-26, on its pull request
+  [#3256](https://github.com/openzigs/onyourleft/pull/3256)
+  ([comment](https://github.com/openzigs/onyourleft/pull/3256#issuecomment-7201681825), quoted in
+  Context): approved as proposed, the sources (D-1) and the budget rule (D-4). It was **Proposed**
+  earlier the same day, and that wording was only ever on the pull request's branch. **No model is
+  added by this ADR**: each adoption is its own issue under
+  [#3249](https://github.com/openzigs/onyourleft/issues/3249)
 - **Date**: 2026-11-26
-- **Deciders**: **the owner**, who has not yet ruled. **The author** read each source's own pages on
-  2026-11-26, wrote the survey and the recommendation, and marks each point that is the author's
-  own as *the author's proposal*
+- **Deciders**: **the owner**, in the ruling above. **The author** read each source's own pages on
+  2026-11-26, wrote the survey and the wording, and marks each point the ruling accepted from the
+  author as *the author's proposal, approved*
 - **Issue**: [#3250](https://github.com/openzigs/onyourleft/issues/3250), under epic
   [#3249](https://github.com/openzigs/onyourleft/issues/3249). The models themselves are
   [#3251](https://github.com/openzigs/onyourleft/issues/3251) (modern buildings),
@@ -31,15 +31,15 @@
   superseding ADR"*, and [ADR 0013](0013-adr-amendments.md) D-3 says an amendment records a fact
   and never a decision. So this is a new ADR, and ADR 0022 gains no entry: nothing in it has become
   newly false
-- **Would supersede, in part, once accepted**: ADR 0049 **D-10's In table**, by the rows D-1 below
-  proposes. Nothing is superseded while this is Proposed, so ADR 0049 gains no pointer in this
-  change (D-7)
+- **Supersedes, in part**: ADR 0049 **D-10's In table**. D-1 below adds two rows to it, after
+  ADR 0085's, and nothing else in D-10 changes. ADR 0049 gains one dated `## Amendments` entry
+  pointing here, and its body is not edited (ADR 0013)
 - **Leaves standing**: ADR 0049 D-2 (what "AI-generated" means), D-9 and D-10's **Out** table, and
   D-11 (how the list is held and what an adoption owes); ADR 0085;
   [ADR 0023](0023-cc-by-assets-and-attribution.md) in full; ADR 0026 D-3 (no rung mixes the two
   worlds), D-5 (a derived asset is reproducible) and D-6 (the budget); ADR 0022 D-5 (a row in
   `ASSETS.toml` before the file is committed)
-- **Changes no licence rule**: every source proposed is `CC0-1.0` or `CC-BY-4.0`, which
+- **Changes no licence rule**: every source admitted is `CC0-1.0` or `CC-BY-4.0`, which
   [ADR 0015](0015-dependency-licences.md), ADR 0023 and `ASSET004` already admit under `apps/`
 
 ## Context
@@ -60,7 +60,13 @@ community cyclist poses and GGBotNet's PSX Style Cars. A source not on that list
 So the question #3250 really puts is narrower than its title: **which sources, beyond those ten
 rows, do #3251 to #3253 need, and what must a new model hold to?** Three parts of the answer are
 already decided and are restated below with where they were decided (D-2, D-3 and most of D-4).
-Two are new and are proposed: the sources (D-1) and the rule about raising a ceiling (D-4).
+Two are new: the sources (D-1) and the rule about raising a ceiling (D-4).
+
+Both were put to the owner as proposals on pull request #3256. The ruling, verbatim, as the
+maintainer session recorded it there on 2026-11-26:
+
+> **Owner, 2026-11-26:** ADR 0099 is approved as proposed: the sources (D-1) and the budget rule
+> (D-4). Make the accepting change on this PR (D-7). Relayed by the maintainer session.
 
 ### What the survey found
 
@@ -112,21 +118,31 @@ crawlers, data mining tools, or the like to download data from the Services"*.
 
 ## Decision
 
-D-1 is proposed and waits for the owner. D-2 and D-3 restate rules already decided, so that #3251
-to #3253 find them in one place. D-4 is proposed where it says so. D-5 is a gate this change
-lands, which enforces rules already decided. D-6 is what stays out. D-7 is what acceptance changes.
+D-1 and D-4 are the two decisions the owner approved. D-2 and D-3 restate rules already decided,
+so that #3251 to #3253 find them in one place. D-5 is a gate, which enforces rules already
+decided. D-6 is what stays out. D-7 is what acceptance changed.
 
-### D-1 — Proposed: two changes to the list, and nothing else
+### D-1 — Two rows are added to the list, and nothing else
 
-*The author's proposal, for the owner to approve, change or refuse.* These rows would be added to
-ADR 0049 D-10's **In** table. They are not on it today.
+*The author's proposal, approved.* These rows are added to ADR 0049 D-10's **In** table, after
+ADR 0085's. They are the whole of what D-10 gains:
 
-| Proposed source | Licence | For | Why |
+| Source | Licence | Decided by | For |
 |---|---|---|---|
-| **Quaternius, a kit whose own page states CC0** | `CC0-1.0` | urban building pieces (#3251) and railway track pieces (#3253), per kit, each kit named in the pull request that takes it | The only source surveyed with whole modern buildings and track under CC0. Never a kit under QAL |
-| **An individual model under CC0-1.0, verified per asset** | `CC0-1.0` | one model from its author's own page or public record, as the `CC-BY-4.0` row already allows | The list admits an individual model under `CC-BY-4.0` and not under the licence that asks for less. This is the row a CC0 house on Sketchfab would need |
+| **Quaternius, a kit whose own page states CC0** | `CC0-1.0` | ADR 0099 D-1 | urban building pieces (#3251) and railway track pieces (#3253), per kit, each kit named in the pull request that takes it |
+| **An individual model under CC0-1.0** | `CC0-1.0` | ADR 0099 D-1 | one model, verified per asset on its author's own page or public record, as the `CC-BY-4.0` row already allows |
 
-What the proposal leaves as it is, with the reason:
+- **Quaternius is the only source surveyed with whole modern buildings and track under CC0.** The
+  row admits a kit whose own page was read on the day and states CC0. **Never a kit under QAL.**
+  The pipeline's addresses for it are the kit pages, `https://quaternius.com/packs/`, where each
+  kit's licence line is. No archive address is admitted: an adoption adds the one it downloaded
+  from, or pins an archive the owner placed (ADR 0049 D-11).
+- **The individual CC0 row closes a gap.** The list admitted an individual model under `CC-BY-4.0`
+  and not under the licence that asks for less. It is the row a CC0 house on Sketchfab needs. It
+  has no address yet: Sketchfab's record and page addresses belong to the `CC-BY-4.0` row, and an
+  adoption adds the page it read (ADR 0049 D-11).
+
+What the decision leaves as it is, with the reason:
 
 - **The individual `CC-BY-4.0` model row already covers Sketchfab.** The thirteen committed houses
   came in under it. A modern house by a Sketchfab author under `by` needs no new row: it needs the
@@ -199,7 +215,7 @@ inside 11 MiB on the GPU and 3 MiB in the build (`REALISTIC_HOUSE_MODEL_SURFACES
 `REALISTIC_TEXTURE_MEMORY_BYTES` 160 MiB, `REALISTIC_BUILD_BYTES` 47 MiB, and the draw-call
 ceilings beside them.
 
-*The author's proposal*, the rule #3250 asks for:
+*The author's proposal, approved*, the rule #3250 asks for:
 
 1. **A new model takes a class that exists and holds that class's ceiling.** A model for which no
    class fits gets a class and a ceiling in `realistic-budget.ts`, with a test, in the pull request
@@ -254,27 +270,22 @@ Unchanged from ADR 0049 D-9 and D-10, and named here because the survey met them
 
 - **Poly Pizza, as a source.** It is an aggregator. Its `CC-BY 3.0` models are out by D-2. Its CC0
   models are copies of work whose authors have their own pages, and the author's page is where a
-  grant is read. It may be used to **find** a model. *The author's proposal.*
+  grant is read. It may be used to **find** a model. *The author's proposal, approved with D-1.*
 - **Any Quaternius kit under QAL**, and any kit whose page was not read on the day.
 - **Sketchfab's Standard, Free Standard and Editorial licences**, and every Creative Commons
   licence there other than `cc0` and `by`.
 - **Kenney in the realistic world** (D-1).
 
-### D-7 — What acceptance changes, and what this change does not do
+### D-7 — What acceptance changed
 
-When the owner approves D-1, as written or changed, one pull request:
+This ADR was opened as Proposed, with `sources.ts` untouched, so that a row in code could not come
+before the owner's ruling. On the ruling, the same pull request:
 
-1. sets this file's `Status` to Accepted with the date and the ruling quoted;
-2. appends a dated pointer to ADR 0049's `## Amendments`, as ADR 0085 did;
-3. adds the approved rows to `sources.ts` §`ADMITTED_SOURCES`, with each source's addresses, and
-   has `admitted-sources.test.ts` read this ADR's table after ADR 0085's;
-4. updates the index row in `docs/architecture.md`.
-
-Until then none of those is done, on purpose: the list in code is what the pipeline obeys, and a
-row there before the owner has ruled would be an admission.
-
-D-2, D-3 and D-5 do not wait, because they decide nothing new. D-4's three numbered proposals wait
-with D-1.
+1. set this file's `Status` to Accepted, with the date and the ruling quoted;
+2. appended a dated pointer to ADR 0049's `## Amendments`, as ADR 0085 did;
+3. added the two rows to `sources.ts` §`ADMITTED_SOURCES`, last, with Quaternius's kit pages as
+   its address, and had `admitted-sources.test.ts` read this ADR's table after ADR 0085's;
+4. updated the index row in `docs/architecture.md`.
 
 ## Consequences
 
@@ -287,8 +298,8 @@ with D-1.
 
 ### What this costs, stated plainly
 
-- **Nothing is unblocked until the owner rules.** #3251 can start today only with an individual
-  `CC-BY-4.0` model, which the list already admits.
+- **Admitted is not adopted.** No kit and no model is taken by this ADR. Each is its own pull
+  request under #3251 to #3253, with its page read on the day and the tablet rows before it stays.
 - **The modern suburban house is not found.** The survey found urban blocks under CC0
   (Quaternius) and no modern detached house under CC0 anywhere. #3251 will most likely take
   `CC-BY-4.0` models from Sketchfab authors, each downloaded by the owner, and each a credit this
@@ -314,10 +325,10 @@ with D-1.
 
 - A source changes its licence for new downloads. The row then admits only what was taken and
   recorded before the change.
-- The owner refuses stylised buildings in the realistic world on sight. D-1's first row then
-  admits nothing #3251 can use, and the individual-model rows carry the whole of it.
+- The owner refuses stylised buildings in the realistic world on sight, in #3251. D-1's first row
+  then admits nothing #3251 can use, and the individual-model rows carry the whole of it.
 - Procedural track does not look real. #3253 then needs a downloaded piece, which D-1's first row
-  would allow.
+  allows.
 
 ## What was read, and when
 

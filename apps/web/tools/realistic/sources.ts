@@ -124,7 +124,7 @@ import {
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
 
-/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0085). */
+/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0085, ADR 0099). */
 export interface AdmittedSource {
   /** The source, as the ADR's table names it. */
   readonly name: string;
@@ -263,6 +263,26 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     kind: 'files',
     // The author's own itch.io pages: the pack's page states its licence.
     prefixes: ['https://ggbot.itch.io/'],
+  },
+  {
+    // #3250: ADR 0099 D-1 adds this row and the next. Per kit: the kit's OWN
+    // page has to read CC0, never QAL. Its kit pages are its address; no
+    // archive address is admitted until an adoption adds the one it used.
+    name: 'Quaternius, a kit whose own page states CC0',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0099 D-1',
+    kind: 'files',
+    prefixes: ['https://quaternius.com/packs/'],
+  },
+  {
+    // Verified per asset, as the CC-BY-4.0 row is. No address yet: Sketchfab's
+    // record and page addresses are that row's, and the pull request that
+    // adopts a CC0 model adds the page it read (ADR 0049 D-11).
+    name: 'An individual model under CC0-1.0',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0099 D-1',
+    kind: 'files',
+    prefixes: [],
   },
 ];
 
