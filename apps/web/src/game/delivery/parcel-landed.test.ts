@@ -19,6 +19,7 @@ import { deliveryInView } from './in-view';
 import {
   LANDING_SHOWN_SECONDS,
   LANDING_SHOWN_TICKS,
+  landingCue,
   startDeliveryRide,
   stepDeliveryRide,
   type DeliveryRide,
@@ -198,9 +199,12 @@ describe('a parcel’s landing, shown — #2577', () => {
   it('reports a parcel at a house that must not get one with the point it cost, and marks that house a miss', () => {
     const plain = started();
     const target = plain.throwTargets[0] as ThrowTarget;
-    const house = plain.targets[0];
-    if (house === undefined) throw new Error('no house');
-    // The round's first house, as a house that must not get a parcel; a score of 2 to take one off.
+    // The round's second house, as a house that must not get a parcel; a score of 2 to take one off.
+    // It is position 1 in the round but place 0 in the no-delivery list: the two index spaces differ.
+    const house = plain.targets[1];
+    const first = plain.targets[0];
+    if (house === undefined || first === undefined) throw new Error('no house');
+    expect(first.x === house.x && first.z === house.z).toBe(false);
     const ride: DeliveryRide = {
       ...plain,
       throwTargets: plain.throwTargets.slice(1),
@@ -226,6 +230,7 @@ describe('a parcel’s landing, shown — #2577', () => {
     const marks = marksOf(landed, 'missed');
     expect(marks).toHaveLength(1);
     expect(marks[0]).toMatchObject({ x: house.x, z: house.z });
+    expect(marks[0]).not.toMatchObject({ x: first.x, z: first.z });
     // With the score at nought it costs nothing, and says so: never below nought.
     const atNought = untilLanded(
       rideTo(
@@ -254,5 +259,24 @@ describe('a parcel’s landing, shown — #2577', () => {
     expect(landings).toHaveLength(1);
     expect(landings[0]?.points).toBe(0);
     expect(landed.score).toBe(over.score);
+  });
+});
+
+describe('a landing’s sound — #2577', () => {
+  const at = (kind: ParcelLanded['kind']): ParcelLanded => ({
+    kind,
+    tick: 0,
+    points: 0,
+    along: 0,
+    across: 0,
+    side: 'right',
+  });
+
+  it('is the hit’s for a delivery, the miss’s for a miss or a no-delivery, and none for no landing', () => {
+    expect(landingCue([at('delivered')])).toBe('delivered');
+    expect(landingCue([at('missed')])).toBe('missed');
+    expect(landingCue([at('no-delivery')])).toBe('missed');
+    expect(landingCue([at('missed'), at('delivered')])).toBe('delivered');
+    expect(landingCue([])).toBeUndefined();
   });
 });

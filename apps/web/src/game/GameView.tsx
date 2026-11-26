@@ -321,6 +321,7 @@ import {
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
+  landingCue,
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
@@ -4642,11 +4643,8 @@ function GameScreen({
         // on the same step and the Score field shows it, so the sound is never
         // the only carrier (`audio-cues.ts`).
         for (const landed of stepped.landed) owed = oweLanded(owed, landed);
-        if (stepped.landed.length > 0) {
-          cuesRef.current?.cue(
-            stepped.landed.some((landed) => landed.kind === 'delivered') ? 'delivered' : 'missed',
-          );
-        }
+        const landingSound = landingCue(stepped.landed);
+        if (landingSound !== undefined) cuesRef.current?.cue(landingSound);
         // #2454: and drawn — the rider goes down where they are and gets back
         // up. A drawing only: nothing here is read by the simulation above.
         if (stepped.crashes > 0) {

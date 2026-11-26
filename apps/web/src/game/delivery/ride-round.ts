@@ -271,6 +271,15 @@ export interface ParcelLanded {
 }
 
 /**
+ * The sound for the parcels that came down on one frame (#2577): the hit's if
+ * any of them was a delivery, else the miss's, and none for no landing.
+ */
+export function landingCue(landed: readonly ParcelLanded[]): 'delivered' | 'missed' | undefined {
+  if (landed.length === 0) return undefined;
+  return landed.some((each) => each.kind === 'delivered') ? 'delivered' : 'missed';
+}
+
+/**
  * How long a crash stops the drawn rider, in seconds — ADR 0094 D-3.1: the
  * crash's drawn length, `crash-look.ts` §`CRASH_SECONDS` (**1.8 s**), so the
  * rider is held for as long as they are drawn down and getting back up.
