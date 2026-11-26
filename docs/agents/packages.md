@@ -81,6 +81,11 @@ packages/             Apache-2.0, without exception
                         at 0.25 m/s, never past it. Since #1900 the bots'
                         W/kg tiers and seeded decisions; their effort is
                         physics' `stepBotRace`
+    group-ride/         the AI group ride's rules (epic #3296, ADR 0101
+                        proposed): since #3299 the line's phases and roles
+                        and the paceline rotation, one seeded step per 1 s
+                        decision window; roles, bot speeds and facts out,
+                        nothing that reaches a trainer
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

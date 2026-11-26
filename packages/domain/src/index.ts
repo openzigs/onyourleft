@@ -1034,3 +1034,10 @@ export { formatModerationItem, parseModerationItem, type ModerationItem } from '
 // event reaches the trainer (ADR 0060 D-2): nothing here imports a trainer.
 
 export * from './lap-race';
+
+// --- The AI group ride (epic #3296, ADR 0101 proposed) -----------------------
+//
+// The paceline's rules: a seeded line stepped once per decision window, roles
+// and speeds out. Nothing here imports a trainer, and nothing writes to one.
+
+export * from './group-ride';
