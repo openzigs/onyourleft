@@ -514,6 +514,14 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
   // #2528: this case carried a 30 s per-case limit and carries none; the
   // removal changes nothing it runs. On this Mac, Node 26, at a load average
   // near 3: 691 ms without coverage, 1 736 ms with `--coverage`.
+  //
+  // #3167: it rode all 480 frames, and ran 5.0 s in the nightly's coverage
+  // half on CI. It now rides until a hazard is said and a house has been
+  // settled on the HUD a few frames before, with nothing said of it: the same
+  // ruling, read over the first hazard and the houses before it. On seed 7 the
+  // HUD settles the 1st house on frame 101 and the 2nd on 137, and the parked
+  // car is said on 145 (the first case, announcements on, says the 1st house
+  // on 102).
   it('says the parked car or bin ahead with announcements off, the default, and no house, miss or crash', async () => {
     localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
     expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
@@ -521,18 +529,31 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
     await click(rideButton());
     await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    const hazard = /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/;
+    const housesLeft = (): string =>
+      [...document.querySelectorAll('.oyl-hud__field--delivery')]
+        .find((each) => (each.textContent ?? '').startsWith('Houses'))
+        ?.querySelector('.oyl-hud__value')?.firstChild?.textContent ?? '';
+    const atStart = housesLeft();
     const heard = new Set<string>();
-    // As long as the first case rides, which hears the first house said with announcements on.
+    let settledOn: number | undefined;
     for (let frame = 0; frame < 480; frame += 1) {
       await pump();
       heard.add(region());
+      if (settledOn === undefined && housesLeft() !== atStart) settledOn = frame;
+      if (
+        settledOn !== undefined &&
+        frame >= settledOn + 4 &&
+        [...heard].some((each) => hazard.test(each))
+      ) {
+        break;
+      }
     }
+    // Not vacuous: a house was settled while the case listened.
+    expect(atStart).not.toBe('');
+    expect(settledOn).toBeDefined();
     const said = [...heard];
-    expect(
-      said.some((each) =>
-        /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
-      ),
-    ).toBe(true);
+    expect(said.some((each) => hazard.test(each))).toBe(true);
     expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);
   });
 });
