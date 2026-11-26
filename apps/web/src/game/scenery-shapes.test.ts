@@ -487,7 +487,7 @@ describe('the realistic stone wall is a drystone wall — #3252', () => {
   });
 });
 
-describe('the timber fence and the noise barrier, each a fence variant with a mesh of its own — #3252', () => {
+describe('the timber fence and the noise barrier, the fence’s second variant in one mesh — #3252', () => {
   const facts = chainLinkFacts(join(SHIPPED, REALISTIC_CHAIN_LINK.model));
   const chainLink = { geometry: facts, wire: aTexture() };
   const fence = (z: number, extra: Partial<ScatterItem>): ScatterItem => ({
@@ -509,94 +509,103 @@ describe('the timber fence and the noise barrier, each a fence variant with a me
   };
   const partsOf = (geometry: Geometry): number[] =>
     Array.from(geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array);
+  const TIMBER = { boundary: 'timber-fence', variant: 1 } as const;
+  const BARRIER = { boundary: 'noise-barrier', variant: 1 } as const;
 
   it('builds the timber fence head-high in boards and the barrier 3 m in panels, on the fence’s line', () => {
     const like = field();
-    const timber = builtFenceGeometry('timber-fence', like);
-    const barrier = builtFenceGeometry('noise-barrier', like);
-    expect(trianglesOf(timber)).toBe(96);
-    expect(trianglesOf(barrier)).toBe(120);
+    const built = builtFenceGeometry(like);
+    const parts = partsOf(built);
+    const timber = (at: number): boolean => parts[at] === 0;
+    const barrier = (at: number): boolean => parts[at] === 1;
+    expect(parts.filter((part) => part === 0)).toHaveLength(96 * 3);
+    expect(parts.filter((part) => part === 1)).toHaveLength(120 * 3);
+    expect(parts).toHaveLength(built.getAttribute('position').count);
+    // An instance submits both: inside one structure's triangles.
+    expect(trianglesOf(built)).toBe(216);
+    expect(trianglesOf(built)).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+    // Every attribute the field fence's mesh carries, so one material draws both meshes.
+    expect(Object.keys(built.attributes).sort()).toEqual(Object.keys(like.attributes).sort());
     const footprint = STRUCTURE_FOOTPRINTS.fence;
-    for (const geometry of [timber, barrier]) {
-      expect(span(geometry, 2).low).toBeCloseTo(footprint.back, 6);
-      expect(span(geometry, 2).high).toBeCloseTo(footprint.front, 6);
-      expect(span(geometry, 0).high).toBeLessThanOrEqual(footprint.x + 1e-6);
-      expect(span(geometry, 0).low).toBeGreaterThanOrEqual(-footprint.x - 1e-6);
+    for (const which of [timber, barrier]) {
+      expect(span(built, 2, which).low).toBeCloseTo(footprint.back, 6);
+      expect(span(built, 2, which).high).toBeCloseTo(footprint.front, 6);
+      expect(span(built, 0, which).high).toBeLessThanOrEqual(footprint.x + 1e-6);
+      expect(span(built, 0, which).low).toBeGreaterThanOrEqual(-footprint.x - 1e-6);
       // Set into the ground, as every field boundary is.
-      expect(span(geometry, 1).low).toBeLessThanOrEqual(-0.4);
-      expect(trianglesOf(geometry)).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
-      // Every attribute the field fence's mesh carries, so one material draws all three.
-      expect(Object.keys(geometry.attributes).sort()).toEqual(Object.keys(like.attributes).sort());
+      expect(span(built, 1, which).low).toBeLessThanOrEqual(-0.4);
     }
-    expect(span(timber, 1).high).toBeCloseTo(1.8, 6);
-    expect(span(barrier, 1).high).toBeCloseTo(NOISE_BARRIER_METRES + 0.1, 6);
-    // The timber fence is the planks' photograph; the barrier its own
-    // colours, a colour a vertex: grey panels, a tinted band and steel posts.
-    expect(new Set(partsOf(timber))).toEqual(new Set([0]));
-    expect(new Set(partsOf(barrier))).toEqual(new Set([1]));
-    const colour = barrier.getAttribute('color');
+    expect(span(built, 1, timber).high).toBeCloseTo(1.8, 6);
+    expect(span(built, 1, barrier).high).toBeCloseTo(NOISE_BARRIER_METRES + 0.1, 6);
+    // The barrier is drawn in its own colours, a colour a vertex: two greys
+    // of panel, a tinted band and steel posts.
+    const colour = built.getAttribute('color');
     const greens = new Set<string>();
-    for (let at = 0; at < colour.count; at += 1) greens.add(colour.getY(at).toFixed(3));
+    for (let at = 0; at < colour.count; at += 1) {
+      if (barrier(at)) greens.add(colour.getY(at).toFixed(3));
+    }
     expect(greens.size).toBe(4);
-    for (const geometry of [like, timber, barrier]) geometry.dispose();
+    like.dispose();
+    built.dispose();
   });
 
-  it('draws each in its own fence mesh, and only where one stands', () => {
+  it('draws both in the built fences’ ONE mesh, and only where one stands', () => {
     const belts = new RealisticStructureBelts(new Map(), chainLink);
     const meshes = belts.beltOf('planks')?.meshesOf('fence') ?? [];
-    // The field fence with the chain-link folded in, the timber fence, the barrier.
-    expect(meshes).toHaveLength(3);
-    expect(meshes.map((mesh) => trianglesOf(mesh.geometry)).slice(1)).toEqual([96, 120]);
+    // The field fence with the chain-link folded in, and the built fences.
+    expect(meshes).toHaveLength(2);
+    const [fields, built] = meshes as [(typeof meshes)[number], (typeof meshes)[number]];
+    expect(trianglesOf(built.geometry)).toBe(216);
     belts.update(
       [
         fence(20, {}),
         fence(30, { chainLink: true }),
-        fence(40, { boundary: 'timber-fence', variant: 1 }),
-        fence(50, { boundary: 'noise-barrier', variant: 2 }),
-        fence(60, { boundary: 'noise-barrier', variant: 2 }),
+        fence(40, TIMBER),
+        fence(50, BARRIER),
+        fence(60, BARRIER),
       ],
       POSE,
     );
-    expect(meshes.map((mesh) => mesh.count)).toEqual([2, 1, 2]);
-    // What each instance's material is told: its own vertices' colours, or the planks.
+    expect([fields.count, built.count]).toEqual([2, 3]);
+    // What each instance's material is told: 1, its own vertices' colours
+    // (the chain-link, the barrier), or 0, the planks (the field fence, the timber).
     const told = (mesh: (typeof meshes)[number], instance: number): number =>
       mesh.geometry.getAttribute(CHAIN_LINK_SHAPE_ATTRIBUTE).getX(instance);
-    expect([told(meshes[0] as never, 0), told(meshes[0] as never, 1)]).toEqual([0, 1]);
-    expect(told(meshes[1] as never, 0)).toBe(0);
-    expect([told(meshes[2] as never, 0), told(meshes[2] as never, 1)]).toEqual([1, 1]);
-    // A frame of field fences alone submits neither: no instance, so no call and no triangle.
+    expect([told(fields, 0), told(fields, 1)]).toEqual([0, 1]);
+    expect([told(built, 0), told(built, 1), told(built, 2)]).toEqual([0, 1, 1]);
+    // A frame of field fences alone draws none of it: no instance, so no call and no triangle.
     belts.update([fence(20, {}), fence(30, {})], POSE);
-    expect(meshes.map((mesh) => mesh.count)).toEqual([2, 0, 0]);
-    expect(meshes.map((mesh) => mesh.visible)).toEqual([true, false, false]);
-    // And the field fence's own mesh is what it was: the chain-link's parts and no other.
-    expect(new Set(partsOf((meshes[0] as (typeof meshes)[number]).geometry))).toEqual(
-      new Set([0, 1, 2]),
-    );
+    expect([fields.count, built.count]).toEqual([2, 0]);
+    expect([fields.visible, built.visible]).toEqual([true, false]);
+    // And the field fence's own mesh is what it was: its triangles, and the chain-link's.
+    expect(trianglesOf(fields.geometry)).toBe(trianglesOf(field()));
     belts.dispose();
   });
 
-  it('keeps each built fence’s every vertex through the fold its material runs', () => {
+  it('shows the fence an instance is and folds the other away, by the fold its material runs', () => {
     const program = new GlslProgram(
       `vec3 fold(float ${CHAIN_LINK_PART_ATTRIBUTE}, float ${CHAIN_LINK_SHAPE_ATTRIBUTE}, vec3 transformed) { float vOylChain = 0.0; ${CHAIN_LINK_FOLD_GLSL} return transformed; }`,
     );
     const at = [0.3, 0.8, -1.2];
-    // The timber fence: part 0, told 0. The barrier: part 1, told 1.
-    expect(program.call('fold', 0, fenceFoldOf({ boundary: 'timber-fence' }), at)).toEqual(at);
-    expect(program.call('fold', 1, fenceFoldOf({ boundary: 'noise-barrier' }), at)).toEqual(at);
-    // CONTROL: told the other, either is folded to a point and not drawn.
-    expect(program.call('fold', 1, 0, at)).toEqual([0, 0, 0]);
-    expect(program.call('fold', 0, 1, at)).toEqual([0, 0, 0]);
+    const timber = fenceFoldOf({ boundary: 'timber-fence' });
+    const barrier = fenceFoldOf({ boundary: 'noise-barrier' });
+    // The timber's vertices are part 0, the barrier's part 1.
+    expect(program.call('fold', 0, timber, at)).toEqual(at);
+    expect(program.call('fold', 1, timber, at)).toEqual([0, 0, 0]);
+    expect(program.call('fold', 1, barrier, at)).toEqual(at);
+    expect(program.call('fold', 0, barrier, at)).toEqual([0, 0, 0]);
   });
 
-  it('CONTROL: with no chain-link loaded the variants are still drawn, in plain geometry', () => {
+  it('CONTROL: with no chain-link loaded nothing folds, and a built fence is the timber fence alone', () => {
     const belts = new RealisticStructureBelts(new Map());
     const meshes = belts.beltOf('planks')?.meshesOf('fence') ?? [];
-    expect(meshes).toHaveLength(3);
+    expect(meshes).toHaveLength(2);
     for (const mesh of meshes) {
       expect(mesh.geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE)).toBeUndefined();
     }
-    belts.update([fence(20, { boundary: 'noise-barrier', variant: 2 })], POSE);
-    expect(meshes.map((mesh) => mesh.count)).toEqual([0, 0, 1]);
+    expect(trianglesOf((meshes[1] as (typeof meshes)[number]).geometry)).toBe(96);
+    belts.update([fence(20, BARRIER)], POSE);
+    expect(meshes.map((mesh) => mesh.count)).toEqual([0, 1]);
     belts.dispose();
   });
 });

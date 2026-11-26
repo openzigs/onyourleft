@@ -337,9 +337,10 @@ export const REALISTIC_TRIANGLES: Readonly<
    * ⚠️ **#3252's timber fence and noise barrier are NOT in this mesh.**
    * Folded here as first written, every fence instance submitted 216
    * triangles more and the Delivery village's frame went 1 708 over
-   * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}. Each is a variant of the fence
-   * with a mesh of its own (96 and 120 triangles), drawn only where one
-   * stands: `three-renderer.ts` §`builtFenceGeometry`.
+   * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}. They share ONE mesh of their
+   * own, the fence's second variant (96 and 120 triangles, folded as these
+   * are), drawn only where one stands: `three-renderer.ts`
+   * §`builtFenceGeometry`, {@link REALISTIC_STRUCTURE_MESHES}.
    */
   'chain-link': 180,
 };
@@ -875,7 +876,8 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * of §`REALISTIC_BOUNDARY_PARTS`: a house 4 surfaces (brick, tiles, timber,
  * glass), a church 4 (stone, slate, timber, glass), a row of shops 4 (brick,
  * slate, timber, glass), a barn 2 (timber, iron) and a shed 1, each in two
- * shapes — 30 — and a wall, a hedge and a fence 1 each and a signpost 2.
+ * shapes — 30 — and a wall, a hedge and a fence 1 each and a signpost 2;
+ * and since #3252 a fence 2 (below).
  *
  * ⚠️ **15 → 35 with #500, deliberately, and what it costs is not 20 draw
  * calls.** A mesh with no instance this frame is not drawn (three's
@@ -902,10 +904,32 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * is a red test and an edit here, rather than a draw call nobody decided to
  * spend.
  *
+ * ## 35 → 36 with #3252, and ⚠️ this edit is the pull request's own
+ *
+ * The fence has a second shape: the built fences, a close-board timber fence
+ * and a highway noise barrier, in one mesh between them (`three-renderer.ts`
+ * §`builtFenceGeometry`). It is one mesh and not none because the other way
+ * to draw them, folded into the field fence's mesh as the chain-link is, put
+ * 216 triangles on every fence in every frame and took the Delivery village
+ * over {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}; and one and not two because
+ * the two fold into each other. What it costs a frame is ONE draw call where
+ * a built fence stands — beside mapped allotments or a garden, or along a
+ * mapped highway past built-up land — and nothing anywhere else: the named
+ * views' ceilings ({@link REALISTIC_WOODED_DRAW_CALLS},
+ * {@link REALISTIC_VILLAGE_DRAW_CALLS}, {@link DELIVERY_VILLAGE_DRAW_CALLS})
+ * are untouched, and the frames they are held at draw none.
+ *
+ * ADR 0099 D-4 item 3 says no draw-call ceiling is raised for a model without
+ * a tablet measurement first. This figure is, in its own words above, "a
+ * statement of what is built" that an added shape is meant to grow by an
+ * edit here; but it does bound draw calls, so **whether it may stand at 36
+ * is the owner's to rule on**, with #3252's tablet frame check. No tablet
+ * measurement was taken for it.
+ *
  * @test-facing held by `three-renderer.test.ts` §"#482", which counts the
  * meshes `RealisticStructureBelts` actually builds against it
  */
-export const REALISTIC_STRUCTURE_MESHES = 35;
+export const REALISTIC_STRUCTURE_MESHES = 36;
 
 /**
  * The triangles the realistic structures may spend in a frame, procedural and

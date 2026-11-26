@@ -756,9 +756,9 @@ describe('the chain-link fence is drawn inside the field fence’s own draw — 
     const plainBelts = new RealisticStructureBelts(new Map());
     const meshes = belts.beltOf('planks')?.meshesOf('fence') ?? [];
     // The first is the field fence's, and the chain-link's with it. Since
-    // #3252 two more follow, the timber fence's and the noise barrier's, each
-    // drawn only where one stands (`scenery-shapes.test.ts`).
-    expect(meshes).toHaveLength(3);
+    // #3252 one more follows, the built fences', drawn only where one stands
+    // (`scenery-shapes.test.ts`).
+    expect(meshes).toHaveLength(2);
     // The same meshes, so the same calls, as a world with no chain-link.
     expect(meshes).toHaveLength(plainBelts.beltOf('planks')?.meshesOf('fence').length ?? -1);
     belts.update([fence(20, false), fence(30, true), fence(40, false)], POSE);

@@ -478,20 +478,19 @@ export function boundaryFor(setting: BoundarySetting): BoundaryType {
 
 /**
  * The shapes the realistic world draws a `fence` item as, by its `variant`:
- * the field's post-and-rail, the timber fence, the noise barrier. The
- * chain-link is not here: it is folded into the first's mesh
- * (`three-renderer.ts` §`chainLinkFenceGeometry`, #1274). The stylised world
- * has one fence, and folds every variant into it.
+ * the field's post-and-rail, with the chain-link folded into its mesh
+ * (`three-renderer.ts` §`chainLinkFenceGeometry`, #1274), and the BUILT
+ * fences, the timber fence with the noise barrier folded into its mesh
+ * (§`builtFenceGeometry`). The stylised world has one fence, and folds every
+ * variant into it.
  */
-export const FENCE_VARIANTS = [
-  'post-and-rail',
-  'timber-fence',
-  'noise-barrier',
-] as const satisfies readonly BoundaryType[];
+export const FENCE_VARIANTS = ['field', 'built'] as const;
 
-/** The `variant` a `fence` item of a boundary type carries: 0 for the field's and the chain-link. */
+/** The `variant` a `fence` item of a boundary type carries: 1 for a built fence, 0 for every other. */
 export function fenceVariantOf(type: BoundaryType): number {
-  return Math.max(0, (FENCE_VARIANTS as readonly BoundaryType[]).indexOf(type));
+  return type === 'timber-fence' || type === 'noise-barrier'
+    ? FENCE_VARIANTS.indexOf('built')
+    : FENCE_VARIANTS.indexOf('field');
 }
 
 /**

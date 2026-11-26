@@ -254,8 +254,8 @@ export interface ScatterItem {
    * A `fence` that is a close-board timber fence or a highway noise barrier —
    * #3252, `chain-link.ts` §`timberFencePieces` and §`noiseBarrierPieces`.
    * Its `variant` is the shape the realistic world draws it as
-   * (`scenery-plan.ts` §`FENCE_VARIANTS`), a mesh of its own; the stylised
-   * world has one fence and draws that. Like the variant it changes what
+   * (`scenery-plan.ts` §`FENCE_VARIANTS`), the built fences' one mesh; the
+   * stylised world has one fence and draws that. Like the variant it changes what
    * stands somewhere, never where.
    */
   readonly boundary?: 'timber-fence' | 'noise-barrier';

@@ -318,12 +318,12 @@ describe('which boundary a setting gets — #3252', () => {
     expect(new Set(Object.values(BOUNDARY_PLAN)).size).toBe(6);
   });
 
-  it('gives each built fence a variant of its own, and the chain-link the field fence’s', () => {
-    expect([...FENCE_VARIANTS]).toEqual(['post-and-rail', 'timber-fence', 'noise-barrier']);
+  it('gives the built fences the fence’s second variant, and the chain-link the field fence’s', () => {
+    expect([...FENCE_VARIANTS]).toEqual(['field', 'built']);
     expect(fenceVariantOf('post-and-rail')).toBe(0);
     expect(fenceVariantOf('chain-link')).toBe(0);
     expect(fenceVariantOf('timber-fence')).toBe(1);
-    expect(fenceVariantOf('noise-barrier')).toBe(2);
+    expect(fenceVariantOf('noise-barrier')).toBe(1);
     expect(fenceVariantOf('hedge')).toBe(0);
   });
 

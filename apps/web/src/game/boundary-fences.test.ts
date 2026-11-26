@@ -118,8 +118,8 @@ describe('the highway noise barrier — #3252', () => {
       );
       expect(piece.item.kind).toBe('fence');
       expect(piece.item.boundary).toBe('noise-barrier');
-      // The variant the realistic world draws a barrier as: a mesh of its own.
-      expect(piece.item.variant).toBe(2);
+      // The variant the realistic world draws a built fence as: their one mesh.
+      expect(piece.item.variant).toBe(1);
       expect(piece.item.chainLink).toBeUndefined();
       expect(piece.item.scale).toBe(1);
       // Along the highway, which runs along the road: its length up +z.

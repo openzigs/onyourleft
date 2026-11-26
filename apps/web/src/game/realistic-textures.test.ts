@@ -4963,10 +4963,10 @@ describe('the litter and the chain-link, loaded by the productâ€™s own loader â€
         }
       }
       // The field fence's ONE mesh, folded with the committed piece and taught it:
-      // the first of three since #3252, whose timber fence and noise barrier
-      // are fence variants with a mesh each.
+      // the first of two since #3252, whose timber fence and noise barrier
+      // are the fence's second variant, in one mesh between them.
       const meshes = drawing.structures.beltOf('planks')?.meshesOf('fence') ?? [];
-      expect(meshes).toHaveLength(3);
+      expect(meshes).toHaveLength(2);
       const mesh = meshes[0] as (typeof meshes)[number];
       const parts = Array.from(
         mesh.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,
