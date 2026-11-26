@@ -39,7 +39,13 @@ describe('the demo offers its source — AGPL-3.0 §6, #1645', () => {
 describe('the demo links its two-minute video — #3225', () => {
   it('links the video by name, as a link to YouTube and not an embed', () => {
     expect(DEMO_VIDEO_URL).toBe('https://www.youtube.com/watch?v=lgpE-VbyFa0');
-    expect(linkText(DEMO_VIDEO_URL)).toBe('Watch the two-minute demo on YouTube');
+    // The lead is its own span, which `demo.css` leaves to a screen reader in a small frame.
+    const link = new RegExp(
+      `<a class="oyl-demo__video-link" href="${DEMO_VIDEO_URL.replaceAll('?', '\\?')}"[^>]*>(.*?)</a>`,
+    ).exec(markup);
+    expect(link?.[1]).toBe(
+      '<span class="oyl-demo__video-lead">Watch the two-minute </span>demo on YouTube',
+    );
     expect(markup).not.toMatch(/<iframe/);
   });
 });
