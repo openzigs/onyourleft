@@ -446,7 +446,15 @@ import {
   type HouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
-import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
+import {
+  frontOf,
+  HOUSE_MODELS,
+  houseModelsFitting,
+  houseStyleOf,
+  placeHouseModel,
+  type HouseModel,
+  type HousePlacement,
+} from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import {
   insidePark,
@@ -1798,6 +1806,8 @@ const STREAM_STOREYS = 32;
 const STREAM_ROOF_VARIANT = 33;
 /** #2021: which end a steeple stands at, where the street cannot tell. */
 const STREAM_STEEPLE = 34;
+/** #3251: whether a footprint beside a village stretch keeps the traditional style. */
+const STREAM_HOUSE_STYLE = 35;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -5703,6 +5713,8 @@ export function footprintPlans(
         startYear: options.mappedStartYear ?? true,
         churches: options.landmarkChurches ?? true,
         civicLandmarks: options.landmarkCivic ?? true,
+        houseStyles: options.houseStyles ?? true,
+        houseModels: options.houseModels,
       },
     );
     plans.push(plan);
@@ -7105,6 +7117,22 @@ export interface FootprintPlanOptions {
    */
   readonly landmarkCivic?: boolean;
   /**
+   * #3251: a footprint's house model chosen by its setting — a modern one
+   * beside a village, town or city-centre stretch, a traditional one on
+   * farmland and beside a rural or unclassed stretch (`house-models.ts`
+   * §`houseStyleOf`); `true` by default. Off, a footprint takes any model
+   * that fits it, as before (`?levers=-house-styles`).
+   */
+  readonly houseStyles?: boolean;
+  /**
+   * The models a footprint may be drawn as; absent, `house-models.ts`
+   * §`HOUSE_MODELS`, which is what the renderer draws a plan's model from.
+   *
+   * @test-facing a test's own set, so the choice by setting (#3251) is held
+   * with a model of each style while the committed set has one style only
+   */
+  readonly houseModels?: readonly HouseModel[];
+  /**
    * #2848: a paved apron before a mapped commercial footprint's front, from
    * its wall to the kerb, where no footway is mapped before it
    * (`shop-aprons.ts`); `true` by default. Off, no plan has one and every
@@ -7174,6 +7202,10 @@ interface ArchetypeChoice {
   readonly churches?: boolean;
   /** #1795: whether a mapped town hall or school is drawn as one (`-landmark-civic` off). */
   readonly civicLandmarks?: boolean;
+  /** #3251: whether its house model is chosen by its setting (`-house-styles` off). */
+  readonly houseStyles?: boolean;
+  /** #3251: the models it may be drawn as; absent, `HOUSE_MODELS`. */
+  readonly houseModels?: readonly HouseModel[] | undefined;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -8521,17 +8553,31 @@ function planFootprint(
   // #1585: a house model, where one fits the footprint (`house-models.ts`) — and since
   // #1635 never on a terraced one, which a detached model would stand apart from its row;
   // since #1791 nor on a mapped garage or shed, which no house model is.
+  // #3251: and only a model of the style its setting calls for — modern beside a village,
+  // town or city-centre stretch, traditional on farmland and beside a rural or unclassed one.
+  const houseModels = choice.houseModels ?? HOUSE_MODELS;
   const fitting =
     part || terraced || frontFrame === undefined || outbuilding
       ? []
-      : houseModelsFitting({
-          long: 2 * rectangle.halfLong,
-          short: 2 * rectangle.halfShort,
-          rectangularity,
-          storeys,
-          use,
-          front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
-        });
+      : houseModelsFitting(
+          {
+            long: 2 * rectangle.halfLong,
+            short: 2 * rectangle.halfShort,
+            rectangularity,
+            storeys,
+            use,
+            front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
+            style:
+              choice.houseStyles === true
+                ? houseStyleOf({
+                    urban: urbanClass,
+                    farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
+                    share: share(STREAM_HOUSE_STYLE),
+                  })
+                : undefined,
+          },
+          houseModels,
+        );
   const model =
     fitting.length === 0
       ? undefined
@@ -8541,6 +8587,7 @@ function planFootprint(
           frontFrame?.nx ?? 0,
           frontFrame?.nz ?? 0,
           base,
+          houseModels,
         );
   const wallMaterialSurface =
     wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];

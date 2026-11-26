@@ -27,10 +27,36 @@
  * - its **use** is the model's: a house on residential land, the shop on
  *   commercial;
  * - its **front door** is where the model's is: on an END of the long axis
- *   for most of the set, on a long SIDE for one ({@link HouseModel.front}).
+ *   for most of the set, on a long SIDE for one ({@link HouseModel.front});
+ * - its **style** is the one its setting calls for ({@link houseStyleOf}).
  *
  * Of the fits, one is chosen, seeded per footprint. A model is never
  * stretched upward: its storeys are its own.
+ *
+ * ## By setting — #3251
+ *
+ * The owner's ruling of 2026-11-26: houses and buildings are modern, unless
+ * the road is in a farm or rural setting. Every model has a
+ * {@link HouseModel.style}, and {@link houseStyleOf} says which a footprint
+ * is drawn in, from the urban class of the street it stands beside
+ * (`urban-class.ts`, #1633) and the land under it:
+ *
+ * | where | style |
+ * |---|---|
+ * | on farmland, whatever the street's class | `traditional` |
+ * | beside a `rural` stretch, or one with no class (`unknown`) | `traditional` |
+ * | beside a `village` stretch, which is also what a suburb reads as | `modern`, but {@link TRADITIONAL_SHARE_IN_A_SUBURB} of its footprints, seeded, `traditional` |
+ * | beside a `town` or `city-centre` stretch | `modern` |
+ *
+ * A footprint is drawn as a model of its style or as none: where no model of
+ * that style fits, it keeps its extrusion, and is never given a model of the
+ * other style in its place.
+ *
+ * ⚠️ **Every model committed today is `traditional`.** No modern model is in
+ * the set yet, so a modern footprint is drawn as its extrusion. A modern
+ * model joins by a row in {@link HOUSE_MODELS} with `style: 'modern'`, and
+ * nothing else here changes. A village's plots in the world with no map data
+ * ({@link VILLAGE_HOUSE_MODELS}) have no class and keep the traditional set.
  *
  * ⚠️ **A model is drawn only at the near level**: past
  * `realistic-budget.ts` §`MAPPED_BUILDING_NEAR_METRES` a modelled plan is
@@ -43,15 +69,21 @@
  */
 
 import type { HouseModelId } from './realistic-assets';
+import type { UrbanClass } from './urban-class';
 
 /** Where a model's front door is: an end of its long axis (+X), or its long side (+Z). */
 export type HouseFront = 'end' | 'side';
+
+/** What a model looks like, and so the setting it is drawn in — #3251. @see houseStyleOf */
+export type HouseStyle = 'traditional' | 'modern';
 
 /** One house model, as its GLB is: metres, long axis X, standing on y = 0. */
 export interface HouseModel {
   readonly id: HouseModelId;
   /** The land it stands on: a house on residential land, the shop on commercial. */
   readonly use: 'residential' | 'commercial';
+  /** #3251: the setting it is drawn in. The thirteen of #1585 are all `traditional`. */
+  readonly style: HouseStyle;
   readonly front: HouseFront;
   /** Its footprint's extent along X and Z, and its height, metres. */
   readonly length: number;
@@ -73,6 +105,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'old_american_brick_shop',
     use: 'commercial',
+    style: 'traditional',
     front: 'end',
     length: 24.2278,
     depth: 7.2447,
@@ -83,6 +116,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_01a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 20.4499,
     depth: 6.6,
@@ -93,6 +127,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_02a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 20.6003,
     depth: 7.4,
@@ -103,6 +138,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_02b',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 20.6003,
     depth: 7.4,
@@ -113,6 +149,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_03a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 19.5499,
     depth: 7.4,
@@ -123,6 +160,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_03c',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 19.5499,
     depth: 7.4,
@@ -133,6 +171,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_04a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 20.6,
     depth: 7.4,
@@ -143,6 +182,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_detached_house_04b',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 20.6,
     depth: 7.4,
@@ -153,6 +193,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_duplex_01a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 18.4,
     depth: 7.4,
@@ -163,6 +204,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_duplex_01b',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 18.4,
     depth: 7.4,
@@ -173,6 +215,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_duplex_02a',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 18.4,
     depth: 7.4,
@@ -183,6 +226,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_duplex_02b',
     use: 'residential',
+    style: 'traditional',
     front: 'end',
     length: 18.4,
     depth: 7.4,
@@ -193,6 +237,7 @@ export const HOUSE_MODELS: readonly HouseModel[] = [
   {
     id: 'rva_house_01_brick_alternate',
     use: 'residential',
+    style: 'traditional',
     front: 'side',
     length: 18.9608,
     depth: 14.996,
@@ -222,6 +267,51 @@ export const HOUSE_FIT = {
  */
 export const END_FRONT_COSINE = Math.SQRT1_2;
 
+/**
+ * The urban classes whose footprints are drawn in the modern style — #3251:
+ * a `village`, which is also what a suburb reads as (#1633's classes have no
+ * suburb), a `town` and a `city-centre`. A `rural` stretch and one with no
+ * class keep the traditional style.
+ */
+export const MODERN_URBAN_CLASSES: ReadonlySet<UrbanClass> = new Set([
+  'village',
+  'town',
+  'city-centre',
+]);
+
+/**
+ * The share of a `village` stretch's footprints that keep the traditional
+ * style — #3251, *"a small seeded share of traditional houses can stay on
+ * suburban streets, so a street does not look like one development"*:
+ * **0.15**, about one house in seven. The issue names no figure; this one is
+ * a sketch, to be tuned on the owner's look pair (`levers=-house-styles`).
+ */
+export const TRADITIONAL_SHARE_IN_A_SUBURB = 0.15;
+
+/** What {@link houseStyleOf} reads of a footprint. */
+export interface HouseSetting {
+  /** The urban class of the stretch of route it stands beside. */
+  readonly urban: UrbanClass;
+  /** Whether the land under it is farmland. */
+  readonly farmland: boolean;
+  /** Its own seeded draw for this choice, in `[0, 1)`. */
+  readonly share: number;
+}
+
+/**
+ * The style a footprint's model is drawn in, by its setting — #3251, the
+ * module's table: traditional on farmland and beside a rural or unclassed
+ * stretch, modern beside a village, town or city-centre stretch, but for
+ * {@link TRADITIONAL_SHARE_IN_A_SUBURB} of a village's.
+ */
+export function houseStyleOf(setting: HouseSetting): HouseStyle {
+  if (setting.farmland || !MODERN_URBAN_CLASSES.has(setting.urban)) return 'traditional';
+  if (setting.urban === 'village' && setting.share < TRADITIONAL_SHARE_IN_A_SUBURB) {
+    return 'traditional';
+  }
+  return 'modern';
+}
+
 /** What the fit reads of a plan. */
 export interface HouseFitInput {
   /** The minimum-area rectangle's long and short sides, metres. */
@@ -232,6 +322,11 @@ export interface HouseFitInput {
   readonly use: string;
   /** Where its front door is, or `undefined` for a plan with none. */
   readonly front: HouseFront | undefined;
+  /**
+   * #3251: the style its setting calls for ({@link houseStyleOf}), or
+   * `undefined` to take a model of either, as before #3251.
+   */
+  readonly style?: HouseStyle | undefined;
 }
 
 /** Whether `model` fits a plan, by every one of {@link HOUSE_FIT}'s terms. */
@@ -242,6 +337,7 @@ export function houseModelFits(model: HouseModel, plan: HouseFitInput): boolean 
   return (
     plan.front === model.front &&
     plan.use === model.use &&
+    (plan.style === undefined || plan.style === model.style) &&
     plan.rectangularity >= HOUSE_FIT.rectangularity &&
     Math.abs(plan.storeys - model.storeys) <= HOUSE_FIT.storeys &&
     along >= least &&
@@ -376,19 +472,37 @@ export function placedPoint(
  * neighbours' gardens, so it is drawn on mapped footprints only. Eleven, a
  * prime, which `settlements.ts` §`everyVillagePlot` steps through so that no
  * neighbour shares one.
+ *
+ * #3251: and `traditional`. A village's plots stand in the world with no map
+ * data, which has no urban class, so they keep the traditional set whatever
+ * joins {@link HOUSE_MODELS}: a modern model added there is never a plot's.
  */
-export const VILLAGE_HOUSE_MODELS: readonly number[] = HOUSE_MODELS.flatMap((model, index) =>
-  model.use === 'residential' && model.front === 'end' ? [index] : [],
-);
+export function villageHouseModels(models: readonly HouseModel[] = HOUSE_MODELS): number[] {
+  return models.flatMap((model, index) =>
+    model.style === 'traditional' && model.use === 'residential' && model.front === 'end'
+      ? [index]
+      : [],
+  );
+}
+
+/** {@link villageHouseModels} of the committed set. */
+export const VILLAGE_HOUSE_MODELS: readonly number[] = villageHouseModels();
+
+/**
+ * The model a village's main-street block is drawn as, of `models` — #1566:
+ * the first commercial one, and since #3251 the first TRADITIONAL commercial
+ * one, for {@link villageHouseModels}' reason.
+ */
+export function mainStreetModel(models: readonly HouseModel[] = HOUSE_MODELS): number {
+  return models.findIndex((model) => model.style === 'traditional' && model.use === 'commercial');
+}
 
 /**
  * The model a village's main-street block is drawn as — #1566: Orzechu's
  * three-storey brick building with its shop, by its place in
  * {@link HOUSE_MODELS}.
  */
-export const MAIN_STREET_MODEL: number = HOUSE_MODELS.findIndex(
-  (model) => model.use === 'commercial',
-);
+export const MAIN_STREET_MODEL: number = mainStreetModel();
 
 /** A model's ground on a plot, in the plot item's own frame. @see plotModelFootprint */
 export interface PlotModelFootprint {

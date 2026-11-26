@@ -257,7 +257,10 @@ describe('#1791: a church is never a house', () => {
     }
     const off = plannedStreet({ buildingTypes: false });
     // The lock-ups, untyped, are drawn as a house model; the low apartment block has a garage.
-    expect(rowOf(off, 'garages-long').every((plan) => plan.model !== undefined)).toBe(true);
+    // #3251: where a model of either style may be taken. The street is a village's, whose
+    // footprints take a modern model, and every committed model is traditional.
+    const anyStyle = plannedStreet({ buildingTypes: false, houseStyles: false });
+    expect(rowOf(anyStyle, 'garages-long').every((plan) => plan.model !== undefined)).toBe(true);
     expect(rowOf(off, 'apartments-low').some((plan) => plan.garage)).toBe(true);
     // A large house untyped is a garden apartment.
     expect(rowOf(off, 'house-large').every((plan) => plan.buildingArchetype !== 'unknown')).toBe(

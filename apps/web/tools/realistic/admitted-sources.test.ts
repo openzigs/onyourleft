@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ADMITTED_SOURCES,
+  QUATERNIUS_KIT_PAGES,
   admission,
   ambientCgArchive,
   BARRED_SOURCES,
@@ -223,9 +224,17 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
       // #2847, ADR 0085 D-1: the author's own itch.io pages, the pack's among them.
       'GGBotNet’s PSX Style Cars': ['https://ggbot.itch.io/'],
       // #3250, ADR 0099 D-1: Quaternius's kit pages, where each kit's licence
-      // line is; and an individual CC0 model, which has no address until one
-      // is adopted.
-      'Quaternius, a kit whose own page states CC0': ['https://quaternius.com/packs/'],
+      // line is — since #3251 each page read, by its whole address, and never
+      // the directory; and an individual CC0 model, which has no address
+      // until one is adopted.
+      'Quaternius, a kit whose own page states CC0': [
+        'https://quaternius.com/packs/buildings.html',
+        'https://quaternius.com/packs/downtowncitymegakit.html',
+        'https://quaternius.com/packs/farmbuildings.html',
+        'https://quaternius.com/packs/modulartrain.html',
+        'https://quaternius.com/packs/simplebuildings.html',
+        'https://quaternius.com/packs/ultimatetexturedbuildings.html',
+      ],
       'An individual model under CC0-1.0': [],
     });
   });
@@ -466,6 +475,42 @@ describe('ADR 0099’s two rows — #3250', () => {
     expect(admission('https://quaternius.com/license.html')).toMatchObject({ admitted: false });
     expect(admission('https://quaternius.com/')).toMatchObject({ admitted: false });
     expect(admission('https://quaternius.com.example/packs/x.html')).toMatchObject({
+      admitted: false,
+    });
+  });
+
+  it('admits each kit page that was read by its whole address, and refuses an archive beside it — #3251', () => {
+    expect(QUATERNIUS_KIT_PAGES.length).toBeGreaterThan(0);
+    for (const page of QUATERNIUS_KIT_PAGES) {
+      // A page's whole address, under the kits' directory: never the directory itself.
+      expect(page).toMatch(/^https:\/\/quaternius\.com\/packs\/[a-z0-9]+\.html$/);
+      expect(admission(page), page).toMatchObject({
+        admitted: true,
+        source: { name: 'Quaternius, a kit whose own page states CC0' },
+      });
+      expect(admission(page, 'licence'), page).toMatchObject({ admitted: true });
+      // The page alone: not what its address begins, nor the page with a query.
+      expect(admission(`${page}.zip`), page).toMatchObject({ admitted: false });
+      expect(admission(`${page}?download=1`), page).toMatchObject({ admitted: false });
+      expect(admission(page.replace(/\.html$/, '.zip')), page).toMatchObject({ admitted: false });
+    }
+    // ADR 0099 D-1: "No archive address is admitted". An archive under the kits'
+    // directory was admitted while the row's address was the directory.
+    for (const archive of [
+      'https://quaternius.com/packs/simplebuildings.zip',
+      'https://quaternius.com/packs/archives/downtowncitymegakit.zip',
+      'https://quaternius.com/packs/downtowncitymegakit/DowntownCityMegaKit.zip',
+      'https://quaternius.com/packs/',
+    ]) {
+      const refused = admission(archive);
+      expect(refused, archive).toMatchObject({ admitted: false });
+      if (!refused.admitted) expect(refused.reason, archive).toContain('is not from a source');
+    }
+    // Nor a kit whose page nobody read: a page is admitted by name, one at a time.
+    expect(admission('https://quaternius.com/packs/ultimatenature.html')).toMatchObject({
+      admitted: false,
+    });
+    expect(admission('https://quaternius.com/packs/notakit.html')).toMatchObject({
       admitted: false,
     });
   });

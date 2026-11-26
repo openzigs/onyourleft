@@ -2131,7 +2131,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its triangles pooled in the 23 040. ⚠️ Textures are
                         admitted on the model's grant (ADR 0049's 2026-10-23
                         amendment); the shop's interior photo and door sign are
-                        painted over in `blender/process_house_models.py`
+                        painted over in `blender/process_house_models.py`.
+                        Since #3251 each model has a `style`, and a footprint
+                        takes only a model of the style its setting calls for
+                        (`houseStyleOf`): `modern` beside a `village`, `town` or
+                        `city-centre` stretch, `traditional` on farmland and
+                        beside a `rural` or unclassed one, and a seeded 0.15 of
+                        a village stretch's traditional. ⚠️ All thirteen are
+                        `traditional` and NO modern model is committed, so a
+                        modern footprint is drawn as its extrusion: a modern
+                        model joins as a row with `style: 'modern'`, held to
+                        `realistic-budget.ts` §`REALISTIC_BUILDING_MODEL_TRIANGLES`
+                        (3 000, ADR 0099 D-4.2). A village's plots with no map
+                        data keep the traditional set. The look pair is
+                        `town=richmond` against `levers=-house-styles`
     src/game/facade.ts  a mapped building's windows and front door, laid out in
                         a bay and a storey (#1581), and since #1588 its US sash
                         windows, shutters, reveal and cladding — drawn by the shader

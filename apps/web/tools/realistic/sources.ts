@@ -152,6 +152,30 @@ export interface AdmittedSource {
 }
 
 /**
+ * The Quaternius kit pages the pipeline may read — #3251, ADR 0099 D-1: the
+ * building and railway kits it names for #3251 and #3253, each page read on
+ * 2026-11-26 with *"License CC0"* in its details panel and a link to the CC0
+ * 1.0 deed. Each is a page's whole address: {@link admission} matches an
+ * address ending `.html` exactly, never as a prefix, so an archive beside a
+ * page, a page with a query, and a kit not listed here are all refused.
+ *
+ * ⚠️ **A page here is admitted to be READ, not adopted.** No file of any of
+ * these kits is in the repository. Each kit's download is a folder on another
+ * host, which this list does not admit, and which answered an anonymous
+ * request *"Quota exceeded"* on 2026-11-26: a kit is taken as an archive the
+ * owner places, pinned by its digest, as the house models' and the cars' are.
+ * Adding a kit is reading its page on the day and adding its address here.
+ */
+export const QUATERNIUS_KIT_PAGES: readonly string[] = [
+  'https://quaternius.com/packs/buildings.html',
+  'https://quaternius.com/packs/downtowncitymegakit.html',
+  'https://quaternius.com/packs/farmbuildings.html',
+  'https://quaternius.com/packs/modulartrain.html',
+  'https://quaternius.com/packs/simplebuildings.html',
+  'https://quaternius.com/packs/ultimatetexturedbuildings.html',
+];
+
+/**
  * Every source a realistic asset may come from — ADR 0049 D-10's **In** table,
  * which supersedes ADR 0026 D-4's. ⚠️ **Admitted is not adopted**: #1275 added
  * no asset, and each adoption is its own issue, measured on the tablet.
@@ -266,13 +290,20 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
   },
   {
     // #3250: ADR 0099 D-1 adds this row and the next. Per kit: the kit's OWN
-    // page has to read CC0, never QAL. Its kit pages are its address; no
-    // archive address is admitted until an adoption adds the one it used.
+    // page has to read CC0, never QAL.
+    //
+    // #3251: its address is each kit page that was READ, by its whole
+    // address, and nothing else under `/packs/` (`QUATERNIUS_KIT_PAGES`).
+    // The row was first written as that directory, which also admitted an
+    // archive placed in it and every kit nobody had read. D-1 admits *"a kit
+    // whose own page was read on the day and states CC0"* and says *"no
+    // archive address is admitted"*: an adoption adds the one it downloaded
+    // from, or pins an archive the owner placed (ADR 0049 D-11).
     name: 'Quaternius, a kit whose own page states CC0',
     licence: 'CC0-1.0',
     decidedBy: 'ADR 0099 D-1',
     kind: 'files',
-    prefixes: ['https://quaternius.com/packs/'],
+    prefixes: QUATERNIUS_KIT_PAGES,
   },
   {
     // Verified per asset, as the CC-BY-4.0 row is. No address yet: Sketchfab's

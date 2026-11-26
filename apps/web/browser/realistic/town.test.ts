@@ -21,7 +21,9 @@
  * Since #1794 `-landmark-churches`: the street of churches' naves under their
  * steep gables without it, and every one planned as before with it. Since
  * #1795 `-landmark-civic`: the town halls' and schools' odd-bayed brick fronts
- * without it, and every one planned as before with it.
+ * without it, and every one planned as before with it. Since #3251
+ * `-house-styles`: the model street, a town's, drawn with none of #1585's
+ * traditional models without it, and with them, as before, with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -47,6 +49,7 @@ import {
   neighbourhoodFixture,
   planFingerprint,
   poiStreetFixture,
+  richmondStreetFixture,
   typedStreetFixture,
   untaggedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
@@ -216,6 +219,70 @@ describe('the realistic page’s `start-year` lever — #1793', () => {
     }).plans;
     expect(planFingerprint(plans)).toBe(planFingerprint(off));
     expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
+  });
+});
+
+describe('the realistic page’s `house-styles` lever — #3251', () => {
+  const street = richmondStreetFixture();
+  const modelled = (plans: readonly FootprintPlan[]): number =>
+    plans.filter((plan) => plan.model !== undefined).length;
+
+  it('draws the model street’s village stretch with few of #1585’s models and its rural stretch with all of them', () => {
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    ).plans;
+    expect(on.length).toBe(off.length);
+    const drawn = { village: { on: 0, off: 0 }, rural: { on: 0, off: 0 } };
+    on.forEach((plan, index) => {
+      const before = off[index];
+      if (before?.model === undefined) {
+        // The style never gives a footprint a model it did not have.
+        expect(plan.model).toBeUndefined();
+        return;
+      }
+      // The page classes this street a village's and then a rural stretch, and nothing else.
+      if (plan.urban !== 'village' && plan.urban !== 'rural') throw new Error(plan.urban);
+      drawn[plan.urban].on += plan.model === undefined ? 0 : 1;
+      drawn[plan.urban].off += 1;
+      // Every committed model is traditional: beside the rural stretch, the model it had.
+      if (plan.urban === 'rural') expect(plan.model?.model).toBe(before.model.model);
+    });
+    expect(drawn.rural.off).toBeGreaterThan(5);
+    expect(drawn.rural.on).toBe(drawn.rural.off);
+    // The village stretch: only the seeded traditional share keeps a model.
+    expect(drawn.village.off).toBeGreaterThan(10);
+    expect(drawn.village.on).toBeLessThan(drawn.village.off / 2);
+  });
+
+  it('plans the street, with `levers=-house-styles`, as the planner with them off does, its models back', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { houseStyles: false },
+    ).plans;
+    expect(plans.map((plan) => plan.model?.model)).toEqual(off.map((plan) => plan.model?.model));
+    // Not vacuous: on, the street has fewer models.
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    expect(modelled(plans)).toBeGreaterThan(30);
+    expect(modelled(on)).toBeLessThan(modelled(plans));
+  });
+
+  it('draws every footprint traditional with `levers=-urban-class`, which gives the street no class', () => {
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-urban-class').leversOff,
+    );
+    expect(modelled(plans)).toBe(54);
   });
 });
 

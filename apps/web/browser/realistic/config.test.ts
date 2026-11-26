@@ -24,6 +24,7 @@ import {
   inferredOutbuildingsWithLevers,
   mappedPaintWithLevers,
   landmarkChurchesWithLevers,
+  houseStylesWithLevers,
   landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
@@ -668,6 +669,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(configQuery(parseConfig('?town=churches&levers=-landmark-churches'))).toBe(
       `?levers=${encodeURIComponent('-landmark-churches')}&town=churches`,
+    );
+  });
+
+  it('chooses each footprint’s house model by its setting, as the product does, unless #3251’s lever takes it out', () => {
+    expect(LEVERS).toContain('house-styles');
+    expect(houseStylesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(houseStylesWithLevers(LEVERS.filter((lever) => lever !== 'house-styles'))).toBe(true);
+    expect(houseStylesWithLevers(parseConfig('?levers=-house-styles').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=richmond&levers=-house-styles'))).toBe(
+      `?levers=${encodeURIComponent('-house-styles')}&town=richmond`,
     );
   });
 
