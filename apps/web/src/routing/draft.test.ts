@@ -11,9 +11,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addWaypoint,
+  adoptAnswers,
   clear,
   deleteWaypoint,
   draftDistance,
+  FreehandFallback,
   emptyDraft,
   insertWaypoint,
   isEmpty,
@@ -313,6 +315,31 @@ describe('a leg that could not be routed', () => {
     expect(draftDistance(settled)).toBe(1_000);
   });
 
+  it('draws a leg the engine falls back on as a straight freehand leg that keeps the reason, and asks again when the rider says so (#2734)', async () => {
+    const { draft, provider } = await routed(3);
+    provider.failNextRoute(new FreehandFallback('This leg is outside the road map.'));
+    const settled = await resolveDraft(draft, [1], provider, RIDING_DEFAULTS);
+    const leg = settled.legs[1];
+    expect(leg?.mode).toBe('freehand');
+    expect(leg?.state).toBe('routed');
+    expect(leg?.shape).toStrictEqual([draft.waypoints[1]?.position, draft.waypoints[2]?.position]);
+    expect(leg?.distance).toBeGreaterThan(0);
+    expect(leg?.surface).toBe('unknown');
+    expect(leg?.failure).toStrictEqual({
+      message: 'This leg is outside the road map.',
+      retryable: true,
+    });
+    // Nothing is left unresolved: the route can be saved as it stands.
+    expect(unresolvedLegs(settled)).toStrictEqual([]);
+    expect(settled.legs[0]?.mode).toBe('snapped');
+    // "Follow roads" on it makes it stale, and the next answer clears the mark.
+    const again = setLegMode(settled, 1, 'snapped');
+    expect(again.stale).toStrictEqual([1]);
+    const back = await resolveDraft(again.draft, again.stale, provider, RIDING_DEFAULTS);
+    expect(back.legs[1]?.mode).toBe('snapped');
+    expect(back.legs[1]?.failure).toBeUndefined();
+  });
+
   it('recovers when the leg is routed again', async () => {
     const { draft, provider } = await routed(2);
     provider.failNextRoute(new RoutingError('unavailable', 'the engine is down'));
@@ -320,5 +347,134 @@ describe('a leg that could not be routed', () => {
     const up = await resolveDraft(down, [0], provider, RIDING_DEFAULTS);
     expect(up.legs[0]?.state).toBe('routed');
     expect(up.legs[0]?.failure).toBeUndefined();
+  });
+});
+
+describe('an answer that arrives after the next edit (#2734)', () => {
+  const place = (latitude: number) =>
+    geographicPosition(degreesLatitude(latitude), degreesLongitude(0.05));
+
+  it('is kept for the leg the newer draft still waits for, and the newer edit is kept too', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    // The rider places a third waypoint before the first leg's answer is back.
+    const next = addWaypoint(first.draft, place(0.07), 'snapped');
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    const adopted = adoptAnswers(next.draft, first.draft, answered, first.stale);
+    expect(adopted.waypoints).toBe(next.draft.waypoints);
+    expect(adopted.legs[0]?.state).toBe('routed');
+    expect(adopted.legs[0]).toBe(answered.legs[0]);
+    // The new leg is the newer edit's to ask about.
+    expect(adopted.legs[1]?.state).toBe('pending');
+  });
+
+  it('is dropped where the newer draft moved either end, and the draft is returned as it was', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    const moved = moveWaypoint(first.draft, first.draft.waypoints[1]!.id, place(0.065));
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(adoptAnswers(moved.draft, first.draft, answered, first.stale)).toBe(moved.draft);
+  });
+
+  it('is dropped for a leg the rider has since drawn freehand', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    const freehand = setLegMode(first.draft, 0, 'freehand');
+    const answered = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(adoptAnswers(freehand.draft, first.draft, answered, first.stale)).toBe(freehand.draft);
+  });
+
+  it('is dropped for a leg the newer draft has already settled, so an older answer never overwrites it', async () => {
+    const provider = scriptedProvider();
+    const first = addWaypoint(
+      addWaypoint(emptyDraft(), place(0.05), 'snapped').draft,
+      place(0.06),
+      'snapped',
+    );
+    // The older ask was refused; a newer ask for the same leg has been answered already.
+    provider.failNextRoute(new RoutingError('unavailable', 'the engine is down'));
+    const older = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(older.legs[0]?.state).toBe('failed');
+    const newer = await resolveDraft(first.draft, first.stale, provider, RIDING_DEFAULTS);
+    expect(newer.legs[0]?.state).toBe('routed');
+    expect(adoptAnswers(newer, first.draft, older, first.stale)).toBe(newer);
+  });
+});
+
+describe('a leg the engine drew straight, touched by the next edit (#2734)', () => {
+  // Synthetic points off Null Island: no road, no place.
+  const place = (latitude: number) =>
+    geographicPosition(degreesLatitude(latitude), degreesLongitude(0.05));
+
+  /** Four waypoints, three legs, and leg 1 drawn straight by a fallback. */
+  async function withFallback(): Promise<{
+    draft: RouteDraft;
+    provider: ReturnType<typeof scriptedProvider>;
+  }> {
+    const provider = scriptedProvider();
+    let draft = emptyDraft();
+    for (const latitude of [0.05, 0.06, 0.07, 0.08]) {
+      draft = addWaypoint(draft, place(latitude), 'snapped').draft;
+    }
+    draft = await resolveDraft(draft, [0, 2], provider, RIDING_DEFAULTS);
+    provider.failNextRoute(new FreehandFallback('This leg is outside the road map.'));
+    draft = await resolveDraft(draft, [1], provider, RIDING_DEFAULTS);
+    expect(draft.legs[1]?.mode).toBe('freehand');
+    provider.routeCalls.length = 0;
+    return { draft, provider };
+  }
+
+  it('is asked again when an end is moved, and the answer replaces the straight line', async () => {
+    const { draft, provider } = await withFallback();
+    const moved = moveWaypoint(draft, draft.waypoints[2]!.id, place(0.071));
+    expect(moved.stale).toStrictEqual([1, 2]);
+    expect(moved.draft.legs[1]).toMatchObject({ mode: 'snapped', state: 'pending' });
+    const settled = await resolveDraft(moved.draft, moved.stale, provider, RIDING_DEFAULTS);
+    expect(provider.routeCalls).toHaveLength(2);
+    expect(settled.legs[1]).toMatchObject({ mode: 'snapped', state: 'routed', failure: undefined });
+  });
+
+  it('keeps its reason when the engine falls back again', async () => {
+    const { draft, provider } = await withFallback();
+    const moved = moveWaypoint(draft, draft.waypoints[2]!.id, place(0.071));
+    provider.failNextRoute(new FreehandFallback('This leg is outside the road map.'));
+    const settled = await resolveDraft(moved.draft, moved.stale, provider, RIDING_DEFAULTS);
+    expect(settled.legs[1]?.mode).toBe('freehand');
+    expect(settled.legs[1]?.failure?.message).toBe('This leg is outside the road map.');
+  });
+
+  it('is asked again in both halves when a waypoint is inserted into it', async () => {
+    const { draft } = await withFallback();
+    const inserted = insertWaypoint(draft, 1, place(0.065));
+    expect(inserted.stale).toStrictEqual([1, 2]);
+    expect(inserted.draft.legs[1]?.mode).toBe('snapped');
+    expect(inserted.draft.legs[2]?.mode).toBe('snapped');
+  });
+
+  it('is asked again as the rejoined leg when the waypoint after it is deleted', async () => {
+    const { draft } = await withFallback();
+    const deleted = deleteWaypoint(draft, draft.waypoints[2]!.id);
+    expect(deleted.stale).toStrictEqual([1]);
+    expect(deleted.draft.legs[1]).toMatchObject({ mode: 'snapped', state: 'pending' });
+  });
+
+  it('is not what a leg the rider drew freehand becomes: that one stays freehand and is not asked', async () => {
+    const { draft } = await withFallback();
+    const freehand = setLegMode(draft, 0, 'freehand').draft;
+    const moved = moveWaypoint(freehand, freehand.waypoints[0]!.id, place(0.049));
+    expect(moved.stale).toStrictEqual([]);
+    expect(moved.draft.legs[0]).toMatchObject({ mode: 'freehand', failure: undefined });
   });
 });

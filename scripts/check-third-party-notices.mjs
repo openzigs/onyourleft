@@ -147,6 +147,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -176,6 +177,23 @@ export const DOCUMENT = 'apps/web/public/licences/third-party.txt';
  * output and NOT006 compares both, so they cannot drift apart.
  */
 export const CONTENTS = 'apps/web/src/credits/third-party-contents.txt';
+
+/**
+ * Where a vendored work's notices may be written instead of into
+ * {@link DOCUMENT}, relative to `apps/web/public`: a `.txt` one directory deep,
+ * never the document itself (#2734).
+ *
+ * ⚠️ **For a work whose licence texts are far larger than the files a rider
+ * usually downloads.** The in-browser routing engine's WebAssembly carries
+ * about 2.1 MB of them (Boost's alone is 2.1 MB), against a document of about
+ * 200 KB that every web rider's service worker precaches with the Credits
+ * chunk that imports it. Written beside the file it covers, under a directory
+ * the precache leaves out (`apps/web/tools/precache/precache.ts`), it is
+ * downloaded with that file, the Android app carries it like every other file,
+ * and the document names it. Nothing is dropped: every text is in one file or
+ * the other, and NOT006 holds both to what this generator writes.
+ */
+const SEPARATE_DOCUMENT = /^[a-z0-9-]+\/[a-z0-9.-]+\.txt$/;
 
 /** The reviewed inputs for the web half. */
 export const WEB_INPUTS = 'apps/web/third-party-notices.json';
@@ -786,10 +804,25 @@ export function renderNotices(root) {
   // MIT `three` — carries its own notice, rendered once per work however many
   // of its files are copied. Its package's own licence field cannot say it.
   const vendoredEntries = new Map();
+  // #2734: the notices of a work whose entry names its own `document`.
+  const separateDocuments = new Map();
   /** One notice per vendored work, however many of its files ship. */
   function noticeVendored(label, source, vendored) {
     const key = `${vendored.name}@${vendored.version}`;
     if (vendoredEntries.has(key)) return;
+    if (
+      vendored.document !== undefined &&
+      (!SEPARATE_DOCUMENT.test(vendored.document) ||
+        `apps/web/public/${vendored.document}` === DOCUMENT ||
+        separateDocuments.has(vendored.document))
+    ) {
+      problems.push(
+        `NOT005 ${label} is ${key}, whose notices are to be written to ${vendored.document}, ` +
+          'which is not a .txt one directory deep under apps/web/public, is the document ' +
+          "itself, or is another work's.",
+      );
+      return;
+    }
     const sections = [{ heading: 'What the build carries', text: vendored.what }];
     for (const upstream of vendored.upstream ?? []) {
       sections.push({
@@ -818,6 +851,45 @@ export function renderNotices(root) {
       );
       return;
     }
+    if (vendored.document === undefined) {
+      vendoredEntries.set(
+        key,
+        entry({
+          name: vendored.name,
+          version: vendored.version,
+          licence: vendored.licence,
+          part: 'copied',
+          sections,
+        }),
+      );
+      return;
+    }
+    const texts = sections.length - 1;
+    separateDocuments.set(vendored.document, {
+      file: `apps/web/public/${vendored.document}`,
+      text: [
+        'THIRD-PARTY NOTICES IN ON YOUR LEFT: THE LICENCE TEXTS OF ONE FILE',
+        '',
+        "Part of this app's third-party notices (licences/third-party.txt),",
+        'which name the file these texts travel with:',
+        '',
+        `  ${label}`,
+        '',
+        'This document reproduces them word for word, as its package ships',
+        'them. It is served beside that file, and the Android app carries it.',
+        '',
+        'Generated from the installed dependency tree by',
+        'scripts/check-third-party-notices.mjs. Do not edit it by hand.',
+        '',
+        entry({
+          name: vendored.name,
+          version: vendored.version,
+          licence: vendored.licence,
+          part: 'copied',
+          sections,
+        }),
+      ].join('\n'),
+    });
     vendoredEntries.set(
       key,
       entry({
@@ -825,7 +897,20 @@ export function renderNotices(root) {
         version: vendored.version,
         licence: vendored.licence,
         part: 'copied',
-        sections,
+        sections: [
+          sections[0],
+          {
+            heading: 'Its licence texts',
+            text:
+              `All ${String(texts)} of them are reproduced in full, word for word, in ` +
+              `${vendored.document}, which the app serves beside the file they cover and ` +
+              'the Android app carries:\n' +
+              sections
+                .slice(1)
+                .map((section) => `  ${section.heading}`)
+                .join('\n'),
+          },
+        ],
       }),
     );
   }
@@ -1061,6 +1146,7 @@ export function renderNotices(root) {
     problems,
     document,
     contents,
+    separate: [...separateDocuments.values()],
     packages: union.length,
     bundled: bundlerEntries.length,
     libraries: nativeLibraries.length,
@@ -1121,10 +1207,14 @@ export function thirdPartyNotices({ root, write = false, assumeInstalled = false
   const outputs = [
     { file: DOCUMENT, text: `${rendered.document}\n` },
     { file: CONTENTS, text: `${rendered.contents}\n` },
+    ...rendered.separate.map((separate) => ({ file: separate.file, text: `${separate.text}\n` })),
     ...servers.map((server) => ({ file: server.server.document, text: `${server.document}\n` })),
   ];
   if (write) {
-    for (const output of outputs) writeFileSync(join(root, output.file), output.text);
+    for (const output of outputs) {
+      mkdirSync(dirname(join(root, output.file)), { recursive: true });
+      writeFileSync(join(root, output.file), output.text);
+    }
     return {
       problems: [],
       summary: `wrote ${outputs.map((output) => output.file).join(', ')}: ${summary}`,

@@ -10,8 +10,9 @@ file's authority: read the file the map names before working in its area.
 
 ## 1. What this is
 
-**On Your Left** — a free, open alternative to Strava + Zwift for cycling: ride tracking, indoor
-smart-trainer control, and live sensor capture over **Bluetooth Low Energy**.
+**On Your Left** — free, open-source indoor and outdoor cycling: ride tracking, indoor
+smart-trainer control (ride any imported route on the trainer), and live sensor capture over
+**Bluetooth Low Energy**.
 
 Since ADR 0036 there is a self-hostable server, `apps/instance`; **no issue may take a paid service
 as a prerequisite** (ADR 0036 D-7). The rest of §1 is in [`docs/agents/layout.md`](docs/agents/layout.md).

@@ -80,12 +80,13 @@ import { hrefFor, matchHash, routeById } from './shell/routes';
 import { createOpenWorldEntry } from './game/open-world/entry';
 import { lazyOpenWorldSessions } from './game/open-world/session-lazy';
 import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
+import { ridingPlace } from './routing/riding-place';
 import { startCoverage } from './game/open-world/start';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
-import type { GhostTrack, UnixSeconds } from '@onyourleft/domain';
+import type { GhostTrack, RoutingProvider, UnixSeconds } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
@@ -201,6 +202,9 @@ import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
 import { createRoutingPort, type RoutingPort } from './instance/routing-port';
+import { browserRoutingGraphConfig } from './routing/browser-graph';
+import { routingTiers } from './routing/tiers';
+import { valhallaBrowserProvider } from './routing/valhalla-browser-provider';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -1370,6 +1374,24 @@ function buildRoutingPort(): RoutingPort | undefined {
 }
 
 /**
+ * The route planner's engine (#2734, ADR 0097 D-1): the rider's instance when
+ * this device can seal to one, else Valhalla in the browser on the graph the
+ * build names, else nothing and straight lines. The in-browser engine is made
+ * on the first leg it is asked for, so with an instance that answers it is
+ * never loaded and its graph never fetched; with map tiles off it fetches
+ * nothing and every leg is drawn straight.
+ */
+function buildRouting(): RoutingProvider | undefined {
+  const graph = browserRoutingGraphConfig();
+  const mapTilesOn = (): boolean => readMapTilesChoice(deviceStorage());
+  return routingTiers({
+    instance: buildRoutingPort(),
+    browser: graph === undefined ? undefined : () => valhallaBrowserProvider({ graph, mapTilesOn }),
+    heights: buildRouteHeights(),
+  });
+}
+
+/**
  * The trainer game's way to another rider's ghost (#331): the ONE production
  * place a ghost port is built, so `check:wiring` reports `createGhostPort` if
  * this goes. Over the sealed session the Connect screen keeps, through the one
@@ -2095,11 +2117,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           segments={buildSegmentPort()}
           match={buildMatchPort()}
           routes={buildRoutePort(worldCorridorPort)}
-          // #2008: roads from the rider's instance, or none and straight lines.
-          routing={buildRoutingPort()}
+          // #2008, #2734: roads from the rider's instance, else from the
+          // in-browser engine, else none and straight lines.
+          routing={buildRouting()}
           heights={buildRouteHeights()}
           terrain={browserTerrainConfig()}
           openWorld={buildOpenWorldStartPort()}
+          // #3184: read on the device only when a new route is opened.
+          ridingPlace={async () => ridingPlace(localStore(), LOCAL_ATHLETE)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
           boards={buildLeaderboardPort()}

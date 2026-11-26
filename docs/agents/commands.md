@@ -298,6 +298,20 @@ node scripts/check-cost-model.mjs --print
 # compared against anything. Needs Node, so also not in `check:repo`.
 bash scripts/check-cost-model.test.sh
 
+# Commit identity (#3205). Fails when a commit in the range carries a private
+# term in its author or committer name or email, a trailer, or its message,
+# and names only the SHA and the field. The list is never in the repository:
+# CI passes the PRIVATE_TERMS secret; locally, point PRIVATE_TERMS_FILE at your
+# copy. With no list it skips (REQUIRE_PRIVATE_TERMS=true makes that a
+# failure). No --base: the last 50 commits. CI runs it before the install,
+# after fetching the history (section 4c "Commit identity -- #3205").
+PRIVATE_TERMS_FILE=/path/to/list node scripts/check-commit-identity.mjs --base origin/main --head HEAD
+
+# Its own suite: throwaway git repositories and invented terms, one case per
+# field, the match rules, the 50-commit fallback, and no list. Needs Node and
+# git, so not in `check:repo`.
+bash scripts/check-commit-identity.test.sh
+
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
 # from, so run this before claiming a change compiles.

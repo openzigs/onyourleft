@@ -34,6 +34,7 @@ import {
 } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
+import { FreehandFallback } from './draft';
 import { newHistory, record, redo, undo } from './history';
 import { RIDING_DEFAULTS } from './preferences';
 import {
@@ -395,6 +396,25 @@ describe('drawing a stretch', () => {
     );
     expect(stretch.points).toHaveLength(2);
     expect(stretch.measured).toBe(false);
+  });
+
+  it('is the straight line when the engine falls back on one, and is not refused (#2734)', async () => {
+    const provider = scriptedProvider();
+    provider.failNextRoute(new FreehandFallback('This leg is outside the road map.'));
+    const stretch = await drawStretch(
+      at(0, 0),
+      at(500, 0),
+      { from: altitudeMetres(100), to: altitudeMetres(110) },
+      provider,
+      RIDING_DEFAULTS,
+    );
+    expect(stretch.points).toHaveLength(2);
+    expect(stretch.measured).toBe(false);
+    // Any other refusal still refuses the stretch, and the screen says why.
+    provider.failNextRoute(new RoutingError('no-route', 'No road.'));
+    await expect(
+      drawStretch(at(0, 0), at(500, 0), {}, provider, RIDING_DEFAULTS),
+    ).rejects.toMatchObject({ code: 'no-route' });
   });
 
   it('follows the roads and measures its heights with one, keeping the ends’ heights', async () => {

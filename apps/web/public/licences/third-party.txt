@@ -15,7 +15,7 @@ is the fonts this app's source repository commits and the app serves.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (74 packages)
+Part 1 — in the app (75 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.3 — MIT
@@ -90,6 +90,7 @@ Part 1 — in the app (74 packages)
   uqr 0.1.3 — MIT
   use-callback-ref 1.3.3 — MIT
   use-sidecar 1.1.3 — MIT
+  valhalla-browser 0.2.1 — MIT
 
 Part 2 — in the Android app only (50 libraries)
   androidx.activity:activity:1.11.0 — Apache-2.0
@@ -153,6 +154,7 @@ Part 3 — files copied out of a package into the build
   pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.1.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
   realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
   realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
+  routing/valhalla-browser-CMUO9kvo.wasm — from valhalla-browser 0.2.1 (apps/web/src/routing/valhalla-browser-provider.ts: the SDK names its WebAssembly with new URL(..., import.meta.url), so the bundler emits it, and apps/web/tools/routing/runtime-assets.ts puts it under routing/ (#2734)); it is Valhalla and the libraries compiled with it into valhalla-browser's WebAssembly valhalla-browser 0.2.1, Valhalla 3.8.3, vendored there — MIT AND BSL-1.0 AND BSD-3-Clause AND BSD-2-Clause AND Zlib AND (MIT OR NCSA) AND Apache-2.0 WITH LLVM-exception, with the IANA time-zone data in the public domain
 
   Bundled into the app's own code, out of a package that vendors them:
   examples/jsm/libs/ktx-parse.module.js — in three 0.185.1, bundled into the game renderer chunk (assets/three-renderer-*.js), imported by three's KTX2Loader; it is KTX-Parse 1.1.0, vendored there — MIT
@@ -3201,6 +3203,65 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================
+Name: valhalla-browser
+Version: 0.2.1
+Licence: MIT
+Part: app
+
+--- LICENSE (from the package) ---
+
+MIT License
+
+Copyright (c) 2026 Tobi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- NOTICE.md (from the package) ---
+
+# Notices
+
+This repository is MIT licensed; see `LICENSE`.
+
+The npm distribution includes the compiled runtime and dependency license texts
+under `dist/licenses/`. It excludes graph datasets, native tools and MinIO.
+
+The generated runtime incorporates [Valhalla](https://github.com/valhalla/valhalla) (MIT; full license in the pinned checkout's `COPYING`) and its pinned dependencies. Retain upstream notices when redistributing artifacts: Boost Software License 1.0, Protobuf BSD-3-Clause, zlib license, RapidJSON MIT, Howard Hinnant date MIT, unordered_dense MIT, cpp-statsd-client MIT, and notices in the submodule directories. The IANA timezone database carries its upstream public-domain and individual-file notices. Emscripten/LLVM components carry their applicable upstream MIT/University of Illinois and Apache-2.0-with-LLVM-exception notices.
+
+`fixtures/development.osm` is synthetic data authored for this SDK under this repository's MIT license. Its coordinates do not describe a surveyed road network. The demo loads no third-party map tiles. A real OpenStreetMap dataset requires its own OpenStreetMap contributor attribution and ODbL compliance; this synthetic fixture notice is not a substitute.
+
+`ecc521/valhalla-wasm` was reviewed as a community reference. Its prebuilt runtime and route results are not used.
+
+The optional Liechtenstein benchmark uses OpenStreetMap data from July 27, 2015,
+included in the pinned Valhalla source. © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
+licensed under ODbL 1.0. The native road graph is derived from that database.
+The input is reproducible from the pinned source and checksum in `scripts/region_data.py`.
+The `timezone-boundary-builder` 2026c polygon input is also ODbL 1.0 and derives
+from OpenStreetMap. Its URL and checksum accompany each regional release.
+The demo displays attribution; retain it and the data license when distributing
+regional graphs. These historical roads are benchmark fixtures, not navigation data.
+
+MinIO Server and MinIO Client are separate local testing tools, pinned by image
+digest in `versions.json`, licensed under GNU AGPLv3. They are not bundled into
+the browser runtime. Image source versions and upstream links are recorded in
+`docs/minio.md`.
+
+========================================================================
 Name: Basis Universal transcoder
 Version: 1.50
 Licence: Apache-2.0 AND BSD-3-Clause
@@ -3257,6 +3318,36 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --- Apache-2.0 ---
 
 The full text of Apache-2.0 is reproduced once, at the end of this document.
+
+========================================================================
+Name: Valhalla and the libraries compiled with it into valhalla-browser's WebAssembly
+Version: valhalla-browser 0.2.1, Valhalla 3.8.3
+Licence: MIT AND BSL-1.0 AND BSD-3-Clause AND BSD-2-Clause AND Zlib AND (MIT OR NCSA) AND Apache-2.0 WITH LLVM-exception, with the IANA time-zone data in the public domain
+Part: copied
+
+--- What the build carries ---
+
+valhalla-browser.wasm, in routing/: the Valhalla 3.8.3 routing engine compiled to WebAssembly by Emscripten, with the libraries it links, as valhalla-browser 0.2.1 ships it. The app's route planner runs it on the device to follow roads when no instance routes a leg (#2734, ADR 0097). The package's licence field says MIT and cannot say what the WebAssembly carries, so the package's own dist/licenses/ is reproduced below, file by file and verbatim: the SDK, Valhalla, Boost (BSL-1.0), Protobuf (BSD-3-Clause), protozero and vtzero (BSD-2-Clause), zlib, RapidJSON, Howard Hinnant's date, unordered_dense, cpp-statsd-client, cxxopts, musl, Emscripten (MIT or the University of Illinois/NCSA licence, with LLVM's Apache-2.0 WITH LLVM-exception parts), the IANA time-zone data, and the package's NOTICE.md for them. None is copyleft (spike 0035).
+
+--- Its licence texts ---
+
+All 16 of them are reproduced in full, word for word, in routing/third-party.txt, which the app serves beside the file they cover and the Android app carries:
+  from valhalla-browser@0.2.1/dist/licenses/SDK.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/Valhalla.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/Boost.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/Protobuf.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/protozero.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/vtzero.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/zlib.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/RapidJSON.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/date.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/unordered_dense.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/cpp-statsd-client.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/cxxopts.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/musl.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/Emscripten.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/IANA-tz.txt, read 2026-11-24
+  from valhalla-browser@0.2.1/dist/licenses/NOTICE.md, read 2026-11-24
 
 ========================================================================
 Name: KTX-Parse

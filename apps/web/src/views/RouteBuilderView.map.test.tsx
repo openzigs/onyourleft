@@ -26,9 +26,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import type { MapPointerHandlers } from '../map/port';
 import { STUB_MAP_CENTRE, stubMapPort, type RecordedMap, type StubMapPort } from '../map/testing';
-import type { RouteDraft } from '../routing/draft';
+import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
-import { EMPTY_PLANNER_VIEW } from '../routing/map-edit';
+import { EMPTY_PLANNER_VIEW, viewAround } from '../routing/map-edit';
 import { scriptedProvider } from '../routing/testing';
 import { routeStub, type RouteStub } from '../routes/testing';
 import {
@@ -83,10 +83,17 @@ interface Planner {
 }
 
 async function open(
-  options: { provider?: boolean; map?: 'stub' | 'failing'; now?: () => number } = {},
+  options: {
+    provider?: boolean;
+    map?: 'stub' | 'failing';
+    now?: () => number;
+    ridingPlace?: () => Promise<GeographicPosition | undefined>;
+    draft?: RouteDraft;
+  } = {},
 ): Promise<Planner> {
   const engine = stubMapPort();
   const storage = isolatedStorage();
+  if (options.draft !== undefined) storage.write(options.draft);
   const routes = routeStub(ATHLETE);
   mounted = await mount(
     <main>
@@ -103,6 +110,7 @@ async function open(
         preferences={undefined}
         routes={routes}
         now={options.now}
+        ridingPlace={options.ridingPlace}
       />
     </main>,
   );
@@ -191,6 +199,62 @@ describe('the map is on the planner — #2006', () => {
     await activateWithKeyboard(buttonNamed(planner.view, 'Add a waypoint'));
     await settle();
     expect(waypoints(planner)).toHaveLength(1);
+  });
+});
+
+describe('a new route opens where the rider rides — #3184', () => {
+  const DENVER = at(39.74, -104.99);
+
+  it('opens around the place the device holds, fitted there once', async () => {
+    const planner = await open({ ridingPlace: () => Promise.resolve(DENVER) });
+    expect(planner.map().bounds).toEqual([viewAround(DENVER)]);
+    expect(planner.map().fits).toEqual([true]);
+  });
+
+  it('waits for the place before it draws the map, which fits its view only once', async () => {
+    let answer: ((place: GeographicPosition | undefined) => void) | undefined;
+    const planner = await open({
+      ridingPlace: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    expect(planner.engine.created).toHaveLength(0);
+    expect(planner.view.container.textContent).toContain('Loading the map…');
+    await act(async () => {
+      answer?.(DENVER);
+      await Promise.resolve();
+    });
+    await settle();
+    expect(planner.map().bounds).toEqual([viewAround(DENVER)]);
+  });
+
+  it('keeps the whole-country view when the device holds no place', async () => {
+    const planner = await open({ ridingPlace: () => Promise.resolve(undefined) });
+    expect(planner.map().bounds).toEqual([EMPTY_PLANNER_VIEW]);
+  });
+
+  it('keeps the whole-country view when the store cannot be read', async () => {
+    const planner = await open({ ridingPlace: () => Promise.reject(new Error('no store')) });
+    expect(planner.map().bounds).toEqual([EMPTY_PLANNER_VIEW]);
+  });
+
+  it('does not ask for a kept draft, which opens on its own line', async () => {
+    let asked = 0;
+    const kept = [at(51.5, -0.12), at(51.51, -0.12)].reduce(
+      (draft, point) => addWaypoint(draft, point, 'freehand').draft,
+      emptyDraft(),
+    );
+    const planner = await open({
+      draft: kept,
+      ridingPlace: () => {
+        asked += 1;
+        return Promise.resolve(DENVER);
+      },
+    });
+    expect(asked).toBe(0);
+    expect(planner.map().bounds[0]).not.toEqual(viewAround(DENVER));
+    expect(planner.map().bounds[0]).not.toEqual(EMPTY_PLANNER_VIEW);
   });
 });
 

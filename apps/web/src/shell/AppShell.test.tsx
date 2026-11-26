@@ -47,6 +47,8 @@ import { KIT_SAVED, MASS_CLEARED, MASS_SAVED, RIDER_BODY_SAVED } from '../views/
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { stubMapPort } from '../map/testing';
 import { routeStub, stubRouteId } from '../routes/testing';
+import { DRAFT_STORAGE_KEY } from '../routing/draft-storage';
+import { viewAround } from '../routing/map-edit';
 
 import { AppShell } from './AppShell';
 import {
@@ -314,6 +316,31 @@ describe('the router', () => {
       'pmtiles://https://tiles.example.org/basemap.pmtiles',
     );
     expect(document.querySelector('main .oyl-map')).not.toBeNull();
+  });
+
+  it('hands the route planner where the rider rides, so a new route opens there — #3184', async () => {
+    // One optional prop passed through the shell: left out, a new route opens
+    // on the whole country again, and nothing else would notice.
+    globalThis.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    const engine = stubMapPort();
+    const place = geographicPosition(degreesLatitude(39.74), degreesLongitude(-104.99));
+    globalThis.location.hash = '#/routes/new';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        map={() => Promise.resolve(engine)}
+        basemap={{
+          archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+          attribution: OSM_ATTRIBUTION,
+        }}
+        ridingPlace={() => Promise.resolve(place)}
+      />,
+    );
+    await settle();
+    await settle();
+    await settle();
+    expect(engine.created).toHaveLength(1);
+    expect(engine.created[0]?.bounds[0]).toEqual(viewAround(place));
   });
 
   it('hands About the platform and the rider’s instance, for where the rides are — #1450', async () => {

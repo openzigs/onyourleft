@@ -283,6 +283,25 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'routing/valhalla-browser-provider.ts',
+    what: 'the routing graph’s tiles a drawn leg crosses, fetched by the in-browser engine from the graph’s host when no instance routes the leg (#2734, ADR 0097 D-4)',
+    // ⚠️ Departing, and like the terrain read its payload carries NO
+    // coordinate and is still a location: the SDK fetches each level-2 tile a
+    // leg's search reaches as a file of its own, `tiles/2/…/<id>.gph`, so the
+    // host can tell which 0.25° squares (about 28 × 22 km at mid-US
+    // latitudes) a route crossed, and the request's path names the square.
+    // The waypoints never leave the device: the engine runs in a worker here.
+    // What protects the rider: a square is far coarser than the map on the
+    // same screen, from the same host; the fetch is a function of the squares
+    // the search reaches, so it reads inside a privacy zone the same way as
+    // outside one and shows no hole; and with map tiles off nothing is fetched
+    // at all (`valhalla-browser-provider.test.ts` §"with map tiles off").
+    // `browser/routing.browser.spec.ts` holds that the engine asks no host but
+    // the graph's. `docs/privacy-policy.md` and
+    // `apps/mobile/src/android/data-safety.ts` say what it sends.
+    direction: 'departing',
+  },
+  {
     module: 'transfer/export-activity.ts',
     what: "the athlete's own ride, written to a file they asked for",
     // ⚠️ Not a mistake, and the one entry in this table worth reading twice.
@@ -329,7 +348,10 @@ function boundaryModulesOnDisk(): readonly string[] {
       // basemap archive for a route's corridor.
       // ⚠️ And `terrain-source.ts` since #2013: the one module that asks the
       // terrain archive for a height tile.
+      // ⚠️ And `valhalla-browser-provider.ts` since #2734: the one module that
+      // starts the in-browser routing engine, which fetches the graph's tiles.
       if (
+        entry === 'valhalla-browser-provider.ts' ||
         entry === 'corridor-source.ts' ||
         entry === 'terrain-source.ts' ||
         entry === 'instance-pose.ts' ||

@@ -2,10 +2,13 @@
 
 Spike 0035 measured in-browser Valhalla (`valhalla-browser`, MIT) on a desktop
 only, with a graph, server and harness it threw away. This directory makes the
-same graph again, reproducibly, and the page the owner runs on the tablet for
+same graph again, and the page the owner runs on the tablet for
 [#2009](https://github.com/openzigs/onyourleft/issues/2009). **Nothing here is
-product code**: snapping a drawn route ships later, as its own change, if the
-tablet's numbers hold.
+product code.** Since #2734 the route planner routes on a release this
+directory builds ([ADR 0097](../../../../docs/adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)):
+`src/routing/browser-graph.ts` §`PUBLISHED_ROUTING_GRAPH_URL` names it, and
+`src/routing/valhalla-browser-provider.ts` is the one product module that
+loads the SDK. A new release reaches riders only when that constant moves.
 
 ⚠️ **The state is never named** in public text, code or commits (owner ruling,
 2026-11-06). It is chosen by giving the build a local extract; it is never an
@@ -20,6 +23,7 @@ box the tiles cover. No fixture here holds a real coordinate.
 | `release-objects.ts`   | What `upload.sh` uploads and checks, manifest last.                                                                                                                                                                                            |
 | `measure/`             | The dev-only page, built by `vite.valhalla.config.ts`, never by the product's `vite.config.ts`. `stays-out.test.ts` holds that line.                                                                                                           |
 | `graph-tar-testing.ts` | A `graph.tar` of Valhalla's shape with three filler tiles, for the tests.                                                                                                                                                                      |
+| `synthetic-grid.ts`    | A road grid off Null Island as an `.osm.pbf`, the input of the routable graph the browser gate routes on (`browser/valhalla-grid/`, #2734). |
 
 ## 1. Build the graph
 
@@ -175,11 +179,12 @@ it), and any route the 128 MiB budget cannot hold.
 
 - **valhalla-browser** is MIT, and its WebAssembly compiles in Valhalla (MIT),
   Boost (BSL-1.0), Protobuf (BSD-3-Clause), zlib and the rest: fifteen texts in
-  its `dist/licenses/`, none copyleft (spike 0035). It is a devDependency of
-  `apps/web` and in no product build, so it is not in
-  `public/licences/third-party.txt`. The page redistributes the runtime, so it
-  serves `licences/valhalla-browser.txt`: the package's `LICENSE`, `NOTICE.md`
-  and every `dist/licenses/` text, verbatim (`measure/notices-plugin.ts`).
+  its `dist/licenses/`, none copyleft (spike 0035). Since #2734 it is a
+  dependency of `apps/web` and in the product build, so
+  `public/licences/third-party.txt` carries its `LICENSE` and `NOTICE.md`, and
+  `third-party-notices.json` §`copiedIntoBuild` names its WebAssembly with every
+  `dist/licenses/` text, verbatim. This page also serves
+  `licences/valhalla-browser.txt`, the same texts (`measure/notices-plugin.ts`).
 - **The graph is ODbL-1.0**, derived from OpenStreetMap: `docs/odbl.md`
   §"The routing graph for the in-browser measurement" says what is published
   and why share-alike is met.

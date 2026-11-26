@@ -41,9 +41,11 @@ import type { BasemapConfig } from '../map/basemap';
 import { MapPanel } from '../map/MapPanel';
 import { useOnline } from '../map/online';
 import type { MapPointerHandlers, MapPort, MapView } from '../map/port';
+import type { TrackBounds } from '../map/track';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import {
   addWaypoint,
+  adoptAnswers,
   clear,
   deleteWaypoint,
   draftDistance,
@@ -57,6 +59,12 @@ import {
   type LegMode,
   type RouteDraft,
 } from '../routing/draft';
+import {
+  heightIntervalOf,
+  releaseRouting,
+  ridingChoicesNote,
+  ridingChoicesOf,
+} from '../routing/tiers';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
 import type { RouteHeights } from '../terrain/heights';
@@ -76,6 +84,7 @@ import {
   legMidpoint,
   mapWaypoints,
   nearestLeg,
+  viewAround,
 } from '../routing/map-edit';
 import {
   canCloseLoop,
@@ -141,6 +150,17 @@ import { hrefForSelection, routeById } from '../shell/routes';
  * turned off the line is drawn on a plain background, offline too. ⚠️ A
  * reviewer who remembers this paragraph saying there is no tile archive is
  * reading the old file.
+ *
+ * ## Where a new route opens — #3184
+ *
+ * A new route's map opens around where the rider rides: the start of the
+ * newer of their newest saved route and newest ride with a recorded position,
+ * read from this device's store (`routing/riding-place.ts`). With neither, or
+ * a store that cannot be read, it opens on today's whole-country view. The
+ * map waits for that read — it fits its view once (`MapPanel.tsx`), so a view
+ * that arrived after it would be ignored — and a draft kept across a reload
+ * opens on its own line as before, with no read at all. The place is never
+ * sent, logged or said: it only decides what the map shows first.
  *
  * ## The routing engine — #2008
  *
@@ -230,6 +250,12 @@ export interface RouteBuilderViewProps {
   readonly routes?: RoutePort | undefined;
   /** The instant to stamp a save with. Injected so a test can assert what was written. */
   readonly now?: (() => number) | undefined;
+  /**
+   * Where the rider rides, from this device's store (#3184,
+   * `routing/riding-place.ts`): a new route's map opens around it. `undefined`
+   * where there is no store, and the map opens on the whole-country view.
+   */
+  readonly ridingPlace?: (() => Promise<GeographicPosition | undefined>) | undefined;
 }
 
 /** The map engine (#2006), loaded as `RoutesView` loads it. */
@@ -328,11 +354,20 @@ export function RouteBuilderView({
   preferences: tilePreferences,
   routes,
   now,
+  ridingPlace,
 }: RouteBuilderViewProps): JSX.Element {
   const keep = useRef<DraftStorage>(
     storage ?? browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
   );
   const [history, setHistory] = useState<DraftHistory>(() => newHistory(keep.current.read()));
+  /**
+   * The map's view before there is a line (#3184): `undefined` while the
+   * rider's place is being read. Read only for a new route — a kept draft
+   * opens on its own line — and only where there is a store to read.
+   */
+  const [startView, setStartView] = useState<TrackBounds | undefined>(() =>
+    ridingPlace === undefined || !isEmpty(history.present) ? EMPTY_PLANNER_VIEW : undefined,
+  );
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [preferences, setPreferences] = useState<RidingPreferences>(RIDING_DEFAULTS);
   const [elevationFor, setElevation] = useState<ElevationFor | undefined>(undefined);
@@ -376,9 +411,12 @@ export function RouteBuilderView({
         return;
       }
       void resolveDraft(edit.draft, edit.stale, provider, preferences).then((resolved) => {
-        setHistory((current) =>
-          current.present === edit.draft ? settle(current, resolved) : current,
-        );
+        setHistory((current) => {
+          if (current.present === edit.draft) return settle(current, resolved);
+          // #2734: the rider edited again meanwhile; keep the answers the newer draft still waits for.
+          const adopted = adoptAnswers(current.present, edit.draft, resolved, edit.stale);
+          return adopted === current.present ? current : settle(current, adopted);
+        });
       });
     },
     [provider, preferences],
@@ -392,6 +430,15 @@ export function RouteBuilderView({
     if (isEmpty(draft)) keep.current.forget();
     else keep.current.write(draft);
   }, [draft]);
+
+  // #2734: the in-browser engine's worker and memory are let go as the planner
+  // closes; the next route drawn starts them again.
+  useEffect(
+    () => () => {
+      releaseRouting(provider);
+    },
+    [provider],
+  );
 
   // Legs restored from storage arrive unrouted, so ask for them on mount.
   const restored = useRef(false);
@@ -417,7 +464,8 @@ export function RouteBuilderView({
   const routedLegs = draft.legs.filter((leg) => leg.state === 'routed').length;
   // #2013: with no engine, the terrain archive answers, at its own spacing.
   const heightSource = provider ?? heights;
-  const heightInterval = provider === undefined ? heights?.interval : undefined;
+  // #2734: with no instance the tiers ask the terrain archive, at its own spacing.
+  const heightInterval = provider === undefined ? heights?.interval : heightIntervalOf(provider);
   useEffect(() => {
     if (heightSource === undefined || routedLegs === 0) {
       setElevation(undefined);
@@ -444,6 +492,24 @@ export function RouteBuilderView({
       live = false;
     };
   }, [draft, heightSource, heightInterval, routedLegs]);
+
+  // Where the rider rides, read once for a new route (#3184). Any failure is
+  // today's view: the place is a convenience and its absence costs a pan.
+  useEffect(() => {
+    if (startView !== undefined || ridingPlace === undefined) return undefined;
+    let live = true;
+    ridingPlace().then(
+      (place) => {
+        if (live) setStartView(place === undefined ? EMPTY_PLANNER_VIEW : viewAround(place));
+      },
+      () => {
+        if (live) setStartView(EMPTY_PLANNER_VIEW);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [startView, ridingPlace]);
 
   // The map engine, fetched once (#2006): the loader is the module's `import()`.
   useEffect(() => {
@@ -549,7 +615,14 @@ export function RouteBuilderView({
 
   const surfaces = surfaceSummary(draft);
   const unresolved = unresolvedSentence(draft.legs);
-  const risk = strandingRisk(preferences.surface);
+  // #2734: the in-browser engine is told the bicycle only, so with it routing
+  // every leg the surface choice cannot refuse a route, and the screen says
+  // the choice is not applied rather than show it as if it were.
+  const choicesNote = ridingChoicesNote(provider);
+  const risk =
+    provider !== undefined && ridingChoicesOf(provider) === 'not-applied'
+      ? undefined
+      : strandingRisk(preferences.surface);
   const loop = loopReadout(draft, loopTarget, units);
   const summary = routeSummary(draft, elevation, units);
 
@@ -767,7 +840,7 @@ export function RouteBuilderView({
 
           {map === undefined ? null : engine.kind === 'failed' ? (
             <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
-          ) : engine.kind === 'loading' ? (
+          ) : engine.kind === 'loading' || startView === undefined ? (
             <p className="oyl-muted">Loading the map…</p>
           ) : (
             <>
@@ -781,7 +854,7 @@ export function RouteBuilderView({
                 editing={{
                   waypoints: markers,
                   pointer,
-                  emptyView: EMPTY_PLANNER_VIEW,
+                  emptyView: startView,
                   onView,
                 }}
               />
@@ -897,10 +970,20 @@ export function RouteBuilderView({
                     >{`${String(index + 1)} to ${String(index + 2)}`}</th>
                     <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
                     <td>{surfaceWord(leg.surface)}</td>
-                    <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
+                    <td
+                      className={
+                        leg.state === 'routed' && leg.failure === undefined
+                          ? 'tw:whitespace-nowrap'
+                          : undefined
+                      }
+                    >
                       {leg.state === 'routed'
                         ? measurementText(formatDistance(leg.distance, units))
                         : (leg.failure?.message ?? 'Being routed')}
+                      {/* #2734: a leg the engine drew straight says why beside its length. */}
+                      {leg.state === 'routed' && leg.failure !== undefined
+                        ? ` ${leg.failure.message}`
+                        : ''}
                       {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
                     </td>
                     <td>
@@ -954,6 +1037,7 @@ export function RouteBuilderView({
           </p>
           <select
             id="surface-tolerance"
+            aria-describedby={choicesNote === undefined ? undefined : 'riding-choices-note'}
             value={preferences.surface}
             onChange={(event) => {
               setPreferences({ ...preferences, surface: event.target.value as SurfaceTolerance });
@@ -965,6 +1049,11 @@ export function RouteBuilderView({
               </option>
             ))}
           </select>
+          {choicesNote === undefined ? null : (
+            <p id="riding-choices-note" data-riding-choices="">
+              {choicesNote}
+            </p>
+          )}
           {risk === undefined ? null : (
             <StatusMessage tone="warning" label="This setting can refuse a route">
               {risk}

@@ -35,3 +35,20 @@ export async function loadNoticesDocument(): Promise<string> {
   const module = await import('../../public/licences/third-party.txt?raw');
   return module.default;
 }
+
+/**
+ * The in-browser routing engine's licence texts, verbatim, as the generator
+ * wrote them beside the document (#2734): about 2.1 MB, which the document
+ * names rather than carries, so a web rider's first visit does not precache
+ * them with it.
+ *
+ * ⚠️ **Its chunk goes under `routing/`, with the engine** (`vite.config.ts`
+ * §`chunkFileNames`, `tools/routing/runtime-assets.ts`), which the precache
+ * leaves out: in a browser it is downloaded when a rider opens it, and
+ * offline before then it cannot be read, which the screen says. The Android
+ * app carries it like every other file.
+ */
+export async function loadRoutingNoticesDocument(): Promise<string> {
+  const module = await import('../../public/routing/third-party.txt?raw');
+  return module.default;
+}

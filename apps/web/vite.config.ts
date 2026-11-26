@@ -29,6 +29,7 @@ import { onlyImportedIcons } from './tools/bundle/icon-modules';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
 import { poseRuntime } from './tools/pose/pose-runtime-plugin';
+import { assetFileName, chunkFileName } from './tools/routing/runtime-assets';
 import { themeSelection } from './tools/theme/theme-selection-plugin';
 import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precache/precache';
 
@@ -228,6 +229,17 @@ export default defineConfig({
     // #2361, ADR 0065 D-3.2: no built-in Delivery level over 2 MiB, and not 8 MiB of them.
     levelSizes(join(ROOT, 'src/game/delivery/levels/data')),
   ],
+  build: {
+    rolldownOptions: {
+      output: {
+        // #2734: the in-browser routing engine's worker and WebAssembly go to
+        // `routing/`, which the precache leaves out (`tools/routing/runtime-assets.ts`).
+        assetFileNames: assetFileName,
+        // and the chunk of its licence texts with them (`src/credits/notices-document.ts`).
+        chunkFileNames: chunkFileName,
+      },
+    },
+  },
   worker: {
     rolldownOptions: {
       output: {

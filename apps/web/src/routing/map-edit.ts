@@ -33,6 +33,33 @@ import { endsAtStart } from './loop';
 export const EMPTY_PLANNER_VIEW: TrackBounds = { west: -125, south: 24, east: -66, north: 50 };
 
 /**
+ * Half the height of the view {@link viewAround} opens on: **0.02°** of
+ * latitude, about 2.2 km, so the view is about 4.5 km tall — streets and
+ * their names on the tablet's map, with room to place a short loop without a
+ * pinch (#3184).
+ */
+export const PLACE_VIEW_HALF_DEGREES = 0.02;
+
+/**
+ * A view of the ground around one place: where a new route opens when the
+ * device holds a place the rider rides (#3184, `riding-place.ts`).
+ *
+ * As wide on the ground as it is tall, so the east–west half-span grows by
+ * the latitude's cosine. Clamped short of the poles, where that would divide
+ * by nothing.
+ */
+export function viewAround(place: GeographicPosition): TrackBounds {
+  const latitude = Math.max(-85, Math.min(85, place.latitude));
+  const halfLongitude = PLACE_VIEW_HALF_DEGREES / Math.cos((latitude * Math.PI) / 180);
+  return {
+    west: place.longitude - halfLongitude,
+    south: latitude - PLACE_VIEW_HALF_DEGREES,
+    east: place.longitude + halfLongitude,
+    north: latitude + PLACE_VIEW_HALF_DEGREES,
+  };
+}
+
+/**
  * A leg's line: its routed shape when it has one, and otherwise the straight
  * line between its two waypoints, which is the line a freehand leg is anyway.
  */
