@@ -20,8 +20,9 @@
  *   consent is said and can be withdrawn (D-5.4).
  * - A race chosen with AI bots and no consent rides seeded and asks nothing.
  * - A race with AI bots starts the instance's race, asks it as it goes, says
- *   so on the standings, and ends it at *End ride*. Refused at its start, it
- *   says AI bots are not available right now and asks nothing more (D-6.3).
+ *   so before the race (since #2868, not on the standings), and ends it at
+ *   *End ride*. Refused at its start, it says on the standings that AI bots
+ *   are not available right now and asks nothing more (D-6.3).
  */
 
 import { readFileSync } from 'node:fs';
@@ -40,7 +41,7 @@ import { endRideAnswer } from './end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { ModelTacticsReply } from './lap-race/model-race';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
-import { AI_BOTS_RACE_TEXT } from './lap-race/ride-race';
+import { AI_BOTS_RACE_TEXT } from './lap-race/choice';
 import { RACE_NOTICE_LABEL } from './room-ride';
 import type { GameRenderer } from './port';
 import { circuitRoute } from './route-fixtures-testing';
@@ -222,6 +223,16 @@ async function chooseAiBots(): Promise<void> {
   await activateWithKeyboard(switchNamed(AI_BOTS_TEXT.label) as HTMLElement);
 }
 
+/**
+ * #2868: the chooser's line that the race will be against AI bots, as its
+ * own paragraph inside the AI bots control, or `undefined`.
+ */
+function chooserRacingLine(): string | undefined {
+  return queryAll<HTMLParagraphElement>(document.body, '.oyl-game__ai-bots p')
+    .map((each) => each.textContent ?? '')
+    .find((text) => text === AI_BOTS_RACE_TEXT.racing);
+}
+
 function standingsNote(): string | undefined {
   return document.querySelector('.oyl-hud__standings-note')?.textContent ?? undefined;
 }
@@ -288,6 +299,8 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     expect(button(AI_BOTS_TEXT.agree)).toBeUndefined();
     expect(formatViolations(auditAccessibility(document))).toBe('');
     await activateWithKeyboard(box);
+    // #2868: chosen and not yet agreed, the race is not against AI bots.
+    expect(chooserRacingLine()).toBeUndefined();
     const group = document.querySelector('[role="group"][aria-labelledby$="ai-consent-title"]');
     expect(group?.textContent).toContain(INSTANCE);
     expect(group?.textContent).toContain(MODEL);
@@ -297,11 +310,14 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     expect(home.consents).toEqual([{ instance: INSTANCE, modelAddress: MODEL }]);
     expect(button(AI_BOTS_TEXT.agree)).toBeUndefined();
     expect(document.body.textContent).toContain(AI_BOTS_TEXT.consented(INSTANCE, MODEL));
+    // #2868: agreed and chosen, the chooser says the race is against AI bots.
+    expect(chooserRacingLine()).toBe(AI_BOTS_RACE_TEXT.racing);
     expect(formatViolations(auditAccessibility(document))).toBe('');
     // Withdrawn, the consent is asked again.
     await activateWithKeyboard(button(AI_BOTS_TEXT.withdraw) as HTMLElement);
     expect(home.calls.filter((call) => call === 'withdraw')).toHaveLength(1);
     expect(button(AI_BOTS_TEXT.agree)).toBeDefined();
+    expect(chooserRacingLine()).toBeUndefined();
   });
 
   it('turns AI bots off at Not now, and rides a race chosen with them and no consent seeded, asking nothing', async () => {
@@ -320,16 +336,21 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
   it('rides a race with AI bots: starts the instance’s race, asks it, says so, and ends it at End ride', async () => {
     const home = instance({ ...OFFERED, consented: true });
     await game(home.port);
-    await chooseAiBots();
+    // #2868: switched off, the chooser does not say it; on, it does.
+    await activateWithKeyboard(switchNamed(LAP_RACE_CHOICE_TEXT.label) as HTMLElement);
+    expect(chooserRacingLine()).toBeUndefined();
+    await activateWithKeyboard(switchNamed(AI_BOTS_TEXT.label) as HTMLElement);
     expect(document.body.textContent).toContain(AI_BOTS_TEXT.consented(INSTANCE, MODEL));
+    expect(chooserRacingLine()).toBe(AI_BOTS_RACE_TEXT.racing);
     await rideAndEnd();
-    expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.racing);
-    // Through the countdown and into the race, the notice says it too; past
-    // STANDING_NOTICE_SECONDS of ride it is gone, and the standings keep it.
+    // #2868: the line is said before the race, and the standings do not carry it.
+    expect(standingsNote()).toBeUndefined();
+    // Through the countdown and into the race, the notice says it; past
+    // STANDING_NOTICE_SECONDS of ride it is gone.
     expect(aiBotsNotice()).toBe(`${RACE_NOTICE_LABEL}: ${AI_BOTS_RACE_TEXT.racing}`);
     await pump(10);
     expect(aiBotsNotice()).toBeUndefined();
-    expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.racing);
+    expect(standingsNote()).toBeUndefined();
     expect(home.calls).toContain('start');
     expect(home.decided.length).toBeGreaterThan(2);
     expect(home.calls).not.toContain('end');

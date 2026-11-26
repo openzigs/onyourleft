@@ -349,6 +349,7 @@ import {
   askRaceLane,
   countLapRaceDown,
   lapRaceModelNote,
+  lapRaceStandingsNote,
   lapRaceRideFact,
   startedLapRaceRide,
   lapRaceCounting,
@@ -1834,9 +1835,10 @@ function GameScreen({
    * race's start, that they are not available (ADR 0071 D-6.3). On the world
    * notice's rule, for STANDING_NOTICE_SECONDS of ride (a held countdown is
    * not ride, so it stands through the countdown and that long after it),
-   * because the standings that carry the same line for the whole race are
-   * drawn on a tablet only (ADR 0051 D-7): at 1024×600, and on every phone,
-   * this is the line's one visible place. `undefined` on every other ride.
+   * because the standings are drawn on a tablet only (ADR 0051 D-7), and
+   * since #2868 they carry only the line that the bots are not available:
+   * that they race is said on the pre-race screen and, during the race,
+   * here. `undefined` on every other ride.
    */
   const [aiBotsNotice, setAiBotsNotice] = useState<
     { readonly text: string; readonly from: number } | undefined
@@ -5886,8 +5888,9 @@ function GameScreen({
             ? undefined
             : {
                 ...lapRaceStandings(riderLapRaceHud(lapRaceRef.current)),
-                // #2710: whether AI bots are racing, or not available (D-6.3).
-                note: lapRaceModelNote(lapRaceRef.current),
+                // #2710, #2868: only that AI bots are not available (D-6.3); that
+                // they race is said before the race and in the notice cell.
+                note: lapRaceStandingsNote(lapRaceRef.current),
               })
         }
         // #1816: the round on the HUD — its houses and its score, crashes in

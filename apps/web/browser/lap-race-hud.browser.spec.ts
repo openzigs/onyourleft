@@ -509,12 +509,20 @@ for (const { viewport, text } of CORNER_CASES) {
   });
 }
 
+/**
+ * A corner whose list is still short of its eight lines at 1024×768, so that
+ * it scrolls: the largest text, with the AI bots' sentence under the summary.
+ * At the normal text it did until #2868 put *Use item* on *Pause*'s row,
+ * and there it now holds all eight.
+ */
+const SCROLLING = '?corner=race&text=extra-large&note=ai';
+
 test.describe('#2599 the standings scroll at 1024×768', () => {
   const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
   if (fourByThree === undefined) throw new Error('no 4:3 tablet');
 
   test('scroll, hold every racer, and open on the rider’s own line', async ({ page }) => {
-    const measured = await open(page, fourByThree, '?corner=race&text=normal');
+    const measured = await open(page, fourByThree, SCROLLING);
     for (const stage of measured) {
       const list = stage.standingsList;
       expect(list?.scrolls, stage.stage).toBe(true);
@@ -563,7 +571,7 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     }
 
     test('a finger drawn down scrolls the list up', async ({ page }) => {
-      await open(page, fourByThree, '?corner=race&text=normal');
+      await open(page, fourByThree, SCROLLING);
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
@@ -577,7 +585,7 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     });
 
     test('a finger drawn up on a list at its foot never moves the page', async ({ page }) => {
-      await open(page, fourByThree, '?corner=race&text=normal');
+      await open(page, fourByThree, SCROLLING);
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
@@ -593,7 +601,7 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     test('a swipe that starts on the list and lifts over Use item never presses it', async ({
       page,
     }) => {
-      await open(page, fourByThree, '?corner=race&text=normal');
+      await open(page, fourByThree, SCROLLING);
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
@@ -639,7 +647,7 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     }) => {
       await page.emulateMedia({ reducedMotion: motion });
       await page.clock.install();
-      await open(page, fourByThree, '?corner=race&text=normal');
+      await open(page, fourByThree, SCROLLING);
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
@@ -668,10 +676,10 @@ test('#2599 the corner measurement can fail: the list at its full height is on t
 }) => {
   const fourByThree = OVERLAY_VIEWPORTS.find((each) => sized(each) === '1024×768');
   if (fourByThree === undefined) throw new Error('no 4:3 tablet to control at');
-  await open(page, fourByThree, '?corner=race&text=normal');
+  await open(page, fourByThree, SCROLLING);
   await page.addStyleTag({ content: LIST_HEIGHT_UNDONE });
   const undone = await remeasure(page);
-  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
+  const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'extra-large'));
   console.log(`#2599 control, 1024×768 with the list at its full height: ${faults.join('; ')}`);
   expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
 });
@@ -690,7 +698,9 @@ test('#2599 the corner measurement can fail: the list at its full height is on t
  * (`lap-race-hud-harness.tsx` §`CORNER`): `corner-back` holds nothing, so its
  * controls hide; `corner-middle` holds an item, which holds them drawn (ADR
  * 0075 D-5), so it is each case's control on the same page. `&note=ai` adds
- * the AI bots' sentence, as a race against a rider's own model draws it. The
+ * the AI bots' sentence under the summary: since #2868 the one the standings
+ * still carry, that AI bots are not available (a race against a rider's own
+ * model draws none). The
  * controls' wait runs on Playwright's clock, not a real one.
  *
  * Held, on the tablets — the owner's in the shell with its insets (the
@@ -732,8 +742,10 @@ interface GrowCase {
   readonly note: boolean;
   /**
    * Whether the drawn corner is short of the eight lines here on every
-   * machine measured — by two lines or more on a Mac — so that "it grows" is
-   * asserted of a list that had lines to gain.
+   * machine measured — by a line or more on a Mac — so that "it grows" is
+   * asserted of a list that had lines to gain. Since #2868 (*Use item* on
+   * *Pause*'s row on a landscape tablet) the drawn corner holds all eight on a
+   * Mac in every case but the 4:3 tablet's larger texts with the sentence.
    */
   readonly short: boolean;
 }
@@ -764,15 +776,15 @@ const GROW_CASES: readonly GrowCase[] = [
   { viewport: tablet('1280×800'), text: 'normal', insets: NO_INSETS, note: false, short: false },
   // The owner's tablet in the shell, a race against the rider's own model.
   { viewport: tablet('1280×800'), text: 'normal', insets: IN_THE_SHELL, note: true, short: false },
-  { viewport: tablet('1280×800'), text: 'large', insets: IN_THE_SHELL, note: true, short: true },
+  { viewport: tablet('1280×800'), text: 'large', insets: IN_THE_SHELL, note: true, short: false },
   {
     viewport: tablet('1280×800'),
     text: 'extra-large',
     insets: IN_THE_SHELL,
     note: true,
-    short: true,
+    short: false,
   },
-  { viewport: tablet('1024×768'), text: 'normal', insets: NO_INSETS, note: false, short: true },
+  { viewport: tablet('1024×768'), text: 'normal', insets: NO_INSETS, note: false, short: false },
   { viewport: tablet('1024×768'), text: 'large', insets: NO_INSETS, note: true, short: true },
   { viewport: tablet('1024×768'), text: 'extra-large', insets: NO_INSETS, note: true, short: true },
   // Upright there is room for every line already: nothing to gain, nothing lost.
@@ -1017,7 +1029,9 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
         (coming[index] ?? 0) + 1,
       );
     });
-    expect(tops.ended - inPlace, `${where}: down by most of the panel`).toBeGreaterThan(100);
+    expect(tops.ended - inPlace, `${where}: down by most of the panel`).toBeGreaterThan(
+      (drawn.actions?.height ?? Number.NaN) / 2,
+    );
   });
 
   test('on a phone, where no standings are drawn, the hidden panel stays where it was', async ({
@@ -1054,5 +1068,118 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
     console.log(`#2837 control, ${growName(each)} with the panel in place: ${faults.join('; ')}`);
     expect(linesInView(hidden)).toBe(linesInView(before));
     expect(faults.some((fault) => fault.includes('the standings no taller'))).toBe(true);
+  });
+});
+
+/*
+ * #2868 — MORE STANDINGS LINES WHILE THE CONTROLS ARE DRAWN.
+ *
+ * The owner's report of 2026-11-18, *"Can only see 3 people"*, was at the
+ * race's start, when the ride controls are drawn. Two things give the
+ * standings room then:
+ *
+ * - on a landscape tablet *Use item* is on *Pause*'s row (`theme.css`
+ *   §"#2868"), so the actions panel is a row shorter;
+ * - the AI bots' sentence that the race is against the rider's own model is
+ *   said on the pre-race screen, not under the standings' summary
+ *   (`ride-race.ts` §`lapRaceStandingsNote`), so a race against AI bots draws
+ *   the corner as `?corner=race` does, with no sentence.
+ *
+ * Held, on the owner's tablet in the shell and on the 4:3 tablet, at every
+ * text size, with the controls drawn: *Use item* on *Pause*'s row, inside the
+ * actions panel, at #94's 72 px floor and 8 px or more from the control
+ * before it (#669); the actions panel over no part of the leaning rider;
+ * #2599's corner whole; and at least {@link DRAWN_LINES_AT_LEAST} of the
+ * eight lines in view — the issue's target, 7 to 8 at 1280×800 at the large
+ * text. A Mac holds all 8 in every one of these cases.
+ *
+ * The control puts the panel's children back in one column, as before
+ * #2868: *Use item* is then under *Pause*, and the standings hold fewer
+ * lines than the target.
+ */
+
+/** The fewest of the eight lines in view with the controls drawn (#2868's target). */
+const DRAWN_LINES_AT_LEAST = 7;
+
+/** `theme.css` §"#2868" undone: the actions panel's children in one column. */
+const ONE_COLUMN = `
+  .oyl-game--riding .oyl-hud .oyl-hud__actions { flex-direction: column !important; }`;
+
+const ROW_CASES = (['normal', 'large', 'extra-large'] as const).flatMap((text) => [
+  { viewport: tablet('1280×800'), insets: IN_THE_SHELL, text },
+  { viewport: tablet('1024×768'), insets: NO_INSETS, text },
+]);
+
+function rowName(each: (typeof ROW_CASES)[number]): string {
+  const shell = each.insets === NO_INSETS ? '' : ', in the shell';
+  return `${each.viewport.name}${shell}, ${each.text} text`;
+}
+
+/** What is wrong with *Use item*'s place on one stage, as sentences. */
+function rowFaults(stage: LapRaceStageMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  const named = (label: string): Box | undefined =>
+    stage.controls.find((each) => each.label === label)?.box;
+  const pause = named('Pause');
+  const item = named('Use item');
+  const { actions } = stage;
+  if (pause === undefined || item === undefined || actions === undefined) {
+    return ['no Pause, no Use item or no actions panel'];
+  }
+  if (Math.abs(item.top - pause.top) > 1) {
+    faults.push(`Use item at ${item.top.toFixed(0)}, Pause at ${pause.top.toFixed(0)}`);
+  }
+  if (!within(item, actions)) faults.push('Use item out of the actions panel');
+  if (!inside(item, viewport)) faults.push('Use item off the stage');
+  if (item.width < 72 || item.height < 72) {
+    faults.push(`Use item ${item.width.toFixed(0)}×${item.height.toFixed(0)}`);
+  }
+  // The control just before it on its row, by where each is drawn.
+  const before = stage.controls
+    .map((each) => each.box)
+    .filter((box) => box.bottom > item.top && box.top < item.bottom)
+    .filter((box) => box.right <= item.left + 1)
+    .sort((a, b) => b.right - a.right)[0];
+  if (before !== undefined && item.left - before.right < 8 - 0.5) {
+    faults.push(`Use item ${(item.left - before.right).toFixed(1)} px from the control before it`);
+  }
+  if (overlap(actions, riderBox(viewport))) faults.push('the actions panel over the rider');
+  return faults;
+}
+
+test.describe('#2868 more standings lines while the controls are drawn', () => {
+  for (const each of ROW_CASES) {
+    test(`Use item on Pause’s row, and ${String(DRAWN_LINES_AT_LEAST)} or more lines in view — ${rowName(each)}`, async ({
+      page,
+    }) => {
+      if (each.insets !== NO_INSETS) await applyInsets(page, each.insets);
+      const measured = await open(page, each.viewport, `?corner=race&text=${each.text}`);
+      for (const stage of measured) {
+        const at = `${rowName(each)}, ${stage.stage}`;
+        const inView = linesInView(stage);
+        console.log(`#2868 ${at}: ${String(inView)} of 8 lines in view, the controls drawn`);
+        expect(rowFaults(stage, each.viewport), at).toEqual([]);
+        expect(cornerFaults(stage, each.viewport, each.text, false), at).toEqual([]);
+        expect(inView, at).toBeGreaterThanOrEqual(DRAWN_LINES_AT_LEAST);
+      }
+    });
+  }
+
+  test('the row can fail: in one column, Use item is under Pause and the standings hold fewer lines — a 4:3 tablet', async ({
+    page,
+  }) => {
+    const fourByThree = tablet('1024×768');
+    await open(page, fourByThree, '?corner=race&text=large');
+    await page.addStyleTag({ content: ONE_COLUMN });
+    await expect
+      .poll(async () => Math.min(...(await remeasure(page)).map((stage) => linesInView(stage))), {
+        message: 'the standings measured again for the taller panel',
+      })
+      .toBeLessThan(DRAWN_LINES_AT_LEAST);
+    for (const stage of await remeasure(page)) {
+      const faults = rowFaults(stage, fourByThree);
+      console.log(`#2868 control, ${stage.stage} in one column: ${faults.join('; ')}`);
+      expect(faults.some((fault) => fault.startsWith('Use item at'))).toBe(true);
+    }
   });
 });

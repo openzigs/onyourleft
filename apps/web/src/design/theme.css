@@ -9135,6 +9135,43 @@ html:has(.oyl-open-world__go) {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #2868: ON A LANDSCAPE TABLET, *Use item* IS ON *Pause*'S ROW, so a lap
+   race's actions panel is a row shorter and the standings above it hold
+   more lines while the controls are drawn. The panel's children flow in
+   rows: every one but the controls' row and *Use item* has a row of its
+   own, and those two share one where both fit. Where they do not (the
+   touch lock's sentence under *Use item*, or *Trainer notice* in the
+   controls' row) *Use item* wraps to a row of its own, as before.
+
+   The DOM order is untouched, so the tab order and the order a screen
+   reader reads are the eye's: *Pause*, *End ride*, the lock, *Use item*.
+   The controls' inline padding goes, as upright (§"#2281"), so the four fit
+   the 20 rem panel: each is still at least #94's 72 px floor (set inline)
+   or its words and its borders, and 8 px apart (#669). Measured in
+   `browser/lap-race-hud.browser.spec.ts` §"#2868". */
+@media (min-width: 46rem) and (min-height: 47rem) and (orientation: landscape) {
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__item) {
+    flex-flow: row wrap;
+    align-items: flex-start;
+    padding-inline: var(--oyl-space-xs);
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__item)
+    > :not(.oyl-hud__controls, .oyl-hud__item) {
+    flex-basis: 100%;
+  }
+
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__item) > .oyl-hud__item {
+    margin-block-start: 0;
+  }
+
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__item) .oyl-hud__control:not(.oyl-hud__lock) {
+    flex: 1 1 auto;
+    padding-inline: 0;
+  }
+}
+
 /* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT: every way on from the next
    junction as a ride-time control at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own

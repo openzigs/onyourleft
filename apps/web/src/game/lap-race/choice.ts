@@ -45,3 +45,20 @@ export const DEFAULT_LAP_RACE_CHOICE: LapRaceChoice = Object.freeze({
   tier: 'brisk',
   itemsOn: true,
 });
+
+/**
+ * What the ride says of a race's AI bots (#2710): that they are racing, or —
+ * when the instance refused the race's start — that they are not available
+ * now (ADR 0071 D-6.3). ⚠️ Draft wording for the owner's approval with the
+ * screenshots.
+ *
+ * Here and not in `ride-race.ts` since #2868, because the chooser now says
+ * {@link AI_BOTS_RACE_TEXT.racing} before the race (`StageChooser.tsx`
+ * §`AiBotsControl`), and this is the race's one module the chooser may
+ * import. The standings carry only {@link AI_BOTS_RACE_TEXT.unavailable}
+ * (`ride-race.ts` §`lapRaceStandingsNote`).
+ */
+export const AI_BOTS_RACE_TEXT = {
+  racing: 'AI bots: your instance’s model picks their moves.',
+  unavailable: 'AI bots are not available right now. The bots race on their own.',
+} as const;
