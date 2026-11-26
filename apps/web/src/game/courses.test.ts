@@ -40,6 +40,16 @@ describe('coursesFor — #2292', () => {
     expect(choosableCourses(courses)).toBe(2);
   });
 
+  it('says a loop’s best lap under it, and nothing on a loop with no lap kept — #2319', () => {
+    const courses = coursesFor('lap-race', [{ ...LOOP, bestLapSeconds: 245 }, LAKE]);
+    expect(courses.map((course) => course.line)).toEqual(['Your best lap 4:05', undefined]);
+    expect(COURSE_TEXT.bestLap(245)).toBe('Your best lap 4:05');
+    // Delivery's line is its houses, never a lap.
+    expect(
+      coursesFor('delivery', [{ ...LOOP, bestLapSeconds: 245 }]).map((course) => course.line),
+    ).toEqual([undefined]);
+  });
+
   it('offers Delivery every saved route: the press decides on its houses, as from the setup', () => {
     const courses = coursesFor('delivery', [OUT, LOOP]);
     expect(courses.map((course) => course.route.id)).toEqual(['out', 'loop']);
