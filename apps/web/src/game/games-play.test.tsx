@@ -22,13 +22,13 @@ import { watts } from '@onyourleft/domain';
 import { circuitRouteId } from '@onyourleft/store';
 
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
-import { hrefForGamePlay, hrefForGameRoute } from '../shell/routes';
+import { coursesRouteFor, hrefFor, hrefForGamePlay, hrefForGameRoute } from '../shell/routes';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { HOUSES_NOT_READY_TEXT } from './hud/delivery-announce';
 import type { GameRenderer, SceneFrame } from './port';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
-import { DELIVERY_CHOICE_TEXT, LAP_RACE_CHOICE_TEXT } from './StageChooser';
+import { DELIVERY_CHOICE_TEXT, DELIVERY_SETUP_TEXT, LAP_RACE_CHOICE_TEXT } from './StageChooser';
 import { writeRealisticWorldChoice } from './world-preference';
 
 const OUT: RidableRoute = {
@@ -141,6 +141,15 @@ async function ride(): Promise<void> {
   await settle();
 }
 
+/** #2579: from Delivery's own setup to the whole one, as the rider presses it. */
+async function allRideOptions(): Promise<void> {
+  const all = queryAll<HTMLButtonElement>(document.body, 'button').find(
+    (each) => each.textContent === DELIVERY_SETUP_TEXT.allOptions,
+  );
+  if (all === undefined) throw new Error('no All ride options');
+  await activateWithKeyboard(all);
+}
+
 function noRoundSaid(): boolean {
   return [...document.querySelectorAll('.oyl-hud__notices .oyl-status')].some((element) =>
     (element.textContent ?? '').includes(HOUSES_NOT_READY_TEXT),
@@ -201,12 +210,42 @@ describe('#2292 — a Delivery course chosen on the Games tab', () => {
     writeRealisticWorldChoice(localStorage, true);
   });
 
-  it('opens the setup on that route with the round switched on, and the press asks for one', async () => {
+  it('opens Delivery’s own setup on that route, not the trainer game’s, and the press asks for a round — #2579', async () => {
     await setupAt(hrefForGamePlay('delivery', OUT.id));
+    // No route cards, no loadout, no switch: the course, its round and Ride.
+    expect(chosenCard()).toBeUndefined();
+    expect(queryAll(document.body, '.oyl-chooser__card')).toHaveLength(0);
+    expect(switchNamed(DELIVERY_CHOICE_TEXT.label)).toBeUndefined();
+    expect(queryAll(document.body, 'h3').map((each) => each.textContent)).not.toContain(
+      'Your ride',
+    );
+    const setup = document.querySelector('[data-setup="delivery"]');
+    expect(setup?.querySelector('h2')?.textContent).toBe(DELIVERY_SETUP_TEXT.heading);
+    expect(setup?.querySelector('h3')?.textContent).toBe(OUT.name);
+    // Back to the courses, one press.
+    const other = queryAll<HTMLAnchorElement>(document.body, 'a').find(
+      (link) => link.textContent === DELIVERY_SETUP_TEXT.otherCourse,
+    );
+    expect(other?.getAttribute('href')).toBe(hrefFor(coursesRouteFor('delivery')));
+    await ride();
+    expect(noRoundSaid()).toBe(true);
+  });
+
+  it('opens the whole setup on that route, the round switched on, at the rider’s press on All ride options — #2579', async () => {
+    await setupAt(hrefForGamePlay('delivery', OUT.id));
+    await allRideOptions();
+    expect(document.querySelector('[data-setup="delivery"]')).toBeNull();
     expect(chosenCard()).toContain(OUT.name);
     expect(switchNamed(DELIVERY_CHOICE_TEXT.label)?.checked).toBe(true);
     await ride();
     expect(noRoundSaid()).toBe(true);
+  });
+
+  it('keeps the trainer game’s own setup in the standard world, where no round is offered on a saved route — #2579', async () => {
+    writeRealisticWorldChoice(localStorage, false);
+    await setupAt(hrefForGamePlay('delivery', OUT.id));
+    expect(document.querySelector('[data-setup="delivery"]')).toBeNull();
+    expect(chosenCard()).toContain(OUT.name);
   });
 
   it('asks for no round with no game asked for — the control', async () => {
@@ -219,6 +258,7 @@ describe('#2292 — a Delivery course chosen on the Games tab', () => {
 
   it('asks for no round once the rider switches it off again', async () => {
     await setupAt(hrefForGamePlay('delivery', OUT.id));
+    await allRideOptions();
     await activateWithKeyboard(switchNamed(DELIVERY_CHOICE_TEXT.label) as HTMLElement);
     expect(switchNamed(DELIVERY_CHOICE_TEXT.label)?.checked).toBe(false);
     await ride();

@@ -1133,6 +1133,15 @@ export function hrefForGameRoute(id: string): string {
 export const LEVEL_GAME_SUMMARY = 'Ride a built-in Delivery round.';
 
 /**
+ * The trainer game's title and the line under it on Delivery's own setup —
+ * #2579, for the owner's approval: opened from Delivery's course picker, the
+ * page is Delivery's, not the trainer game's (`StageChooser.tsx`
+ * §`DeliverySetup`). A built-in level keeps {@link LEVEL_GAME_SUMMARY}.
+ */
+export const DELIVERY_SETUP_TITLE = 'Delivery';
+export const DELIVERY_SETUP_SUMMARY = 'Ride a Delivery round on your route.';
+
+/**
  * The route {@link hrefForGameRoute} chose, or `undefined`. Total, for
  * {@link matchHash}'s reason: `URLSearchParams` decodes a lone `%` as itself
  * rather than throwing, and an empty value is no choice.

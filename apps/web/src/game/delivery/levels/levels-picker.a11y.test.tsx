@@ -27,12 +27,18 @@ import { OSM_ATTRIBUTION } from '../../../map/basemap';
 import { AppShell } from '../../../shell/AppShell';
 import { hrefForGamePlay } from '../../../shell/routes';
 import type { CapabilityProbe } from '../../../support/bluetooth-support';
-import { mount, queryAll, settle, type Mounted } from '../../../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  type Mounted,
+} from '../../../testing/mount';
 import { GAME_COURSES_TEXT } from '../../../views/GameCoursesView';
 import { GameView, type GamePort, type RidableRoute } from '../../GameView';
 import { northRoute } from '../../route-fixtures-testing';
 import { SHIPPED_LEVELS } from '../../shipped-levels';
-import { BUILT_IN_CIRCUITS_TEXT, LEVEL_WORLD_ID } from '../../StageChooser';
+import { BUILT_IN_CIRCUITS_TEXT, DELIVERY_SETUP_TEXT, LEVEL_WORLD_ID } from '../../StageChooser';
 import { writeRealisticWorldChoice } from '../../world-preference';
 
 import { writeLevelProgress } from '../level-progress';
@@ -202,6 +208,19 @@ describe('#2362 — the built-in levels on the Delivery picker', () => {
       ) {
         await settle();
       }
+      // #2579: Delivery's own setup first, the level's credit beside it, with no finding.
+      expect(document.querySelector('[data-setup="delivery"]')).not.toBeNull();
+      expect(document.querySelector('[data-credit="level"]')?.textContent).toContain(
+        OSM_ATTRIBUTION,
+      );
+      expect(document.getElementById(LEVEL_WORLD_ID) !== null).toBe(!realistic);
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+      // Then the whole setup, at the rider's press.
+      const all = queryAll<HTMLButtonElement>(document, 'button').find(
+        (button) => button.textContent === DELIVERY_SETUP_TEXT.allOptions,
+      );
+      if (all === undefined) throw new Error('no All ride options');
+      await activateWithKeyboard(all);
       const radios = queryAll<HTMLInputElement>(document, 'input').filter(
         (input) => input.type === 'radio' && input.closest('.oyl-chooser__routes') !== null,
       );

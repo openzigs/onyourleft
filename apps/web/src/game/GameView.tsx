@@ -731,6 +731,12 @@ export interface GameViewProps {
    */
   readonly onLevelChosen?: ((chosen: boolean) => void) | undefined;
   /**
+   * Whether the setup is Delivery's own — #2579: the shell titles the page
+   * as Delivery's while it is. Told `false` when the rider asks for the whole
+   * setup, when a ride starts and when this unmounts.
+   */
+  readonly onDeliverySetup?: ((focused: boolean) => void) | undefined;
+  /**
    * The tablet's side-camera pairing — #551. While a phone is paired its state
    * is one line on the HUD, its link going is said through the HUD's one
    * region, and *Stop side camera* is on the stage while it films.
@@ -1608,6 +1614,13 @@ function GameScreen({
    * world chosen (DL6): hidden, the switch asks for nothing.
    */
   const [withDelivery, setWithDelivery] = useState(() => played === 'delivery');
+  /**
+   * Whether the setup is Delivery's own — #2579: opened from Delivery's
+   * course picker, it shows the course, its round and Ride, and none of the
+   * trainer game's route cards and loadout, until the rider asks for the
+   * whole setup (`StageChooser.tsx` §`DeliverySetup`).
+   */
+  const [deliverySetup, setDeliverySetup] = useState(() => played === 'delivery');
   /**
    * Each saved route's houses for a round, by route id, once the round is
    * chosen — #2294, `delivery/courses.ts`. In memory only, and one number a
@@ -3736,6 +3749,21 @@ function GameScreen({
       onLevelChosen(false);
     };
   }, [levelPicked, onLevelChosen]);
+  // #2579: Delivery's own setup, where a round is offered on the chosen
+  // course (the realistic world, or a built-in level: DL6, #2362), as the
+  // chooser decides it; and the shell's title follows it.
+  const deliveryFocused =
+    deliverySetup &&
+    phase === 'choosing' &&
+    (levelPicked || readRealisticWorldChoice(deviceStorage()));
+  const onDeliverySetup = props.onDeliverySetup;
+  useEffect(() => {
+    if (onDeliverySetup === undefined) return;
+    onDeliverySetup(deliveryFocused);
+    return () => {
+      onDeliverySetup(false);
+    };
+  }, [deliveryFocused, onDeliverySetup]);
 
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
   useEffect(() => {
@@ -5450,6 +5478,12 @@ function GameScreen({
           }
           // #940: the card the rider chose, kept here so it survives a ride.
           picked={picked}
+          // #2579: Delivery's own setup, from its course picker, until the
+          // rider asks for the whole one.
+          focus={deliveryFocused ? 'delivery' : undefined}
+          onAllOptions={() => {
+            setDeliverySetup(false);
+          }}
           onPick={setPicked}
           units={units}
           // ⚠️ Read **here** rather than reusing the ride's captured state: a
@@ -5580,29 +5614,33 @@ function GameScreen({
           shared by its code. Ridden with no ghost, no pacer and no wind — a
           room rides everybody alike (ADR 0028 D-1, D-7.4) — at the room's
           own riding position.
+          #2579: not on Delivery's own setup, whose round is ridden solo
+          (DL9), unless a room is already entered; the whole setup offers it.
         */}
-        <RoomPanel
-          rooms={props.rooms}
-          routes={routes ?? []}
-          weightDeclared={!riderMassFor(props.riderMass).assumed}
-          position={position}
-          entered={entered}
-          onEnter={setEntered}
-          onRide={(room) => {
-            void start(
-              {
-                id: roomRouteId(room.roomId),
-                name: 'The room’s route',
-                profile: room.profile,
-                attempts: 0,
-              },
-              false,
-              undefined,
-              undefined,
-              room.ridingPosition,
-            );
-          }}
-        />
+        {deliveryFocused && entered === undefined ? null : (
+          <RoomPanel
+            rooms={props.rooms}
+            routes={routes ?? []}
+            weightDeclared={!riderMassFor(props.riderMass).assumed}
+            position={position}
+            entered={entered}
+            onEnter={setEntered}
+            onRide={(room) => {
+              void start(
+                {
+                  id: roomRouteId(room.roomId),
+                  name: 'The room’s route',
+                  profile: room.profile,
+                  attempts: 0,
+                },
+                false,
+                undefined,
+                undefined,
+                room.ridingPosition,
+              );
+            }}
+          />
+        )}
       </>
     );
   }

@@ -931,7 +931,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ON, through its course picker (`game/courses.ts`
                         §`coursesFor`, `?play=delivery`), which counts the
                         same way, and offers no course without the realistic
-                        world. **The press**, in `GameView`:
+                        world. Since #2579 a course chosen there opens
+                        Delivery's OWN setup (`StageChooser.tsx`
+                        §`DeliverySetup`, the page titled *Delivery*): the
+                        notices, Ride, the course and its round, no cards,
+                        loadout or rooms, and *All ride options* for the
+                        whole setup. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and

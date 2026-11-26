@@ -121,6 +121,8 @@ import { NavIcon } from './NavIcon';
 import {
   groupDestination,
   hrefFor,
+  DELIVERY_SETUP_SUMMARY,
+  DELIVERY_SETUP_TITLE,
   LEVEL_GAME_SUMMARY,
   moderationSectionFromQuery,
   NAV_GROUPS,
@@ -721,6 +723,7 @@ function viewFor(
     readonly onBodyChange: (body: RiderBody | undefined) => void;
   },
   onLevelChosen: (chosen: boolean) => void,
+  onDeliverySetup: (focused: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'home':
@@ -861,6 +864,8 @@ function viewFor(
           onImmersive={onImmersive}
           // #2362: a built-in level's card chosen, for the line under the title.
           onLevelChosen={onLevelChosen}
+          // #2579: Delivery's own setup, for the page's title.
+          onDeliverySetup={onDeliverySetup}
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
@@ -1032,6 +1037,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
    * when the rider picks a saved route. Told by `GameViewProps.onLevelChosen`.
    */
   const [levelChosen, setLevelChosen] = useState(false);
+  /**
+   * Whether the trainer game's setup is Delivery's own — #2579: opened from
+   * Delivery's course picker, the page is titled as Delivery's
+   * ({@link DELIVERY_SETUP_TITLE}). Told by `GameViewProps.onDeliverySetup`.
+   */
+  const [deliverySetup, setDeliverySetup] = useState(false);
   // #2349's review, B2: a browser Back or a typed address under a ride on the
   // game's stage is asked about first (`ride-leave.ts`).
   const [rideLeaves] = useState(rideLeave);
@@ -1231,6 +1242,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
                   onBodyChange: setRiderBody,
                 },
                 setLevelChosen,
+                setDeliverySetup,
               )}
             </Suspense>
           </ViewBoundary>
@@ -1352,12 +1364,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
           */}
           <div className={immersive ? undefined : 'oyl-view-head'}>
             <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
-              {route.title}
+              {route.id === 'game' && deliverySetup ? DELIVERY_SETUP_TITLE : route.title}
             </h1>
             {immersive ? null : (
               <p className="oyl-muted">
                 {/* #2362: a built-in level's card chosen in the setup is a Delivery round's, not a saved route's. */}
-                {route.id === 'game' && levelChosen ? LEVEL_GAME_SUMMARY : route.summary}
+                {route.id === 'game' && levelChosen
+                  ? LEVEL_GAME_SUMMARY
+                  : route.id === 'game' && deliverySetup
+                    ? DELIVERY_SETUP_SUMMARY
+                    : route.summary}
               </p>
             )}
             {/*
@@ -1366,7 +1382,10 @@ export function AppShell(props: AppShellProps): JSX.Element {
               the title alone; `theme.css` §`.oyl-help` draws the ⓘ at the end
               of the title's row, and the panel opens under the row.
             */}
-            {immersive || route.help === undefined ? null : (
+            {/* #2579: and none on Delivery's own setup: the trainer game's help is about pacers and ghosts. */}
+            {immersive ||
+            route.help === undefined ||
+            (route.id === 'game' && deliverySetup) ? null : (
               <ScreenHelp title={route.title} paragraphs={route.help} />
             )}
           </div>
