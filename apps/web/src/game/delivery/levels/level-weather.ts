@@ -20,15 +20,21 @@
  * the level's own again.
  */
 
-import type { LevelRound } from './level-file';
-
 /** What a setup offers, in the order it lists them: the level's own first, the default. */
 export const LEVEL_WEATHER_CHOICES = ['level', 'clear', 'rain', 'dusk'] as const;
 
 export type LevelWeatherChoice = (typeof LEVEL_WEATHER_CHOICES)[number];
 
-/** A round's weather and light: the pair a level file states. */
-export type LevelSky = Pick<LevelRound, 'weather' | 'light'>;
+/**
+ * A round's weather and light: the pair a level file states
+ * (`level-file.ts` §`LEVEL_WEATHERS`, §`LEVEL_LIGHTS`, which the test holds
+ * these to). ⚠️ Written out rather than imported: the setup imports this
+ * file, and `level-file.ts` reaches the map (`stage-chooser-imports.test.ts`).
+ */
+export interface LevelSky {
+  readonly weather: 'clear' | 'rain';
+  readonly light: 'day' | 'dusk';
+}
 
 /** Each choice but the level's own, as the pair it rides in. */
 const SKIES: Readonly<Record<Exclude<LevelWeatherChoice, 'level'>, LevelSky>> = {
