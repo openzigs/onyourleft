@@ -29,7 +29,7 @@ import { mount, settle, type Mounted } from '../testing/mount';
 
 import { drawnLineBuilt } from './drawn-line';
 import { DRAWN_LINE_WARM_DELAY_MS, GameView, type GamePort, type RidableRoute } from './GameView';
-import { DELIVERY_CHOICE_TEXT, LAP_RACE_CHOICE_TEXT } from './StageChooser';
+import { DELIVERY_CHOICE_TEXT, DELIVERY_SETUP_TEXT, LAP_RACE_CHOICE_TEXT } from './StageChooser';
 import { writeRealisticWorldChoice } from './world-preference';
 
 function ridableRoute(id: string, name: string): RidableRoute {
@@ -103,6 +103,13 @@ async function clickThrough(element: HTMLElement | null | undefined): Promise<vo
   await settle();
 }
 
+/** The button whose words are `words`. */
+function buttonNamed(words: string): HTMLButtonElement | undefined {
+  return [...(mounted?.container ?? document).querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === words,
+  );
+}
+
 /** The chooser's switch whose label holds `label`. */
 function switchLabelled(label: string): HTMLInputElement | undefined {
   return [
@@ -174,6 +181,10 @@ describe('the drawn path is built only for a ride drawn along it — #2470', () 
     const route = ridableRoute('a', 'Quarry climb');
     mounted = await mount(<GameView port={portWith([route])} />);
     await settle();
+    // #2579: Delivery's own setup, which has no switch, builds none either.
+    await pastTheDelay();
+    expect(drawnLineBuilt(route.profile)).toBe(false);
+    await clickThrough(buttonNamed(DELIVERY_SETUP_TEXT.allOptions));
     expect(switchLabelled(DELIVERY_CHOICE_TEXT.label)?.checked).toBe(true);
     await pastTheDelay();
     expect(drawnLineBuilt(route.profile)).toBe(false);

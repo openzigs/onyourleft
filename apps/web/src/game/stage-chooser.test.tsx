@@ -34,6 +34,7 @@ import { DEFAULT_RIDING_POSITION, type RidingPosition } from './rider';
 import {
   DELIVERY_CHOICE_TEXT,
   DELIVERY_COURSE_TEXT,
+  DELIVERY_SETUP_TEXT,
   deliveryCourseLine,
   deliveryCoursesText,
   deliveryWeekText,
@@ -82,6 +83,11 @@ interface Options {
   readonly week?: { readonly day: number; readonly houses: number };
   /** #1818: the switch already on, as a rider's earlier choice leaves it once the world is off. */
   readonly switchedOn?: boolean;
+  /** #2579: Delivery's own setup asked for. */
+  readonly focus?: 'delivery';
+  /** #2579: every argument a press hands `onStart`. */
+  readonly onStartWith?: (args: readonly unknown[]) => void;
+  readonly onAllOptions?: () => void;
 }
 
 /** The chooser with its own state, as `GameView` holds it. */
@@ -128,7 +134,10 @@ function Chooser(options: Options): JSX.Element {
             ? undefined
             : { chosen: withDelivery, onChoose: setWithDelivery, week: options.week }
         }
-        onStart={async (route, ghost, _pacer, _air, _position, _riderGhost, delivery) => {
+        focus={options.focus}
+        onAllOptions={options.onAllOptions}
+        onStart={async (route, ghost, pacer, air, riding, riderGhost, delivery, lapRace) => {
+          options.onStartWith?.([route, ghost, pacer, air, riding, riderGhost, delivery, lapRace]);
           await options.onStart?.(route, ghost, delivery);
         }}
       />
@@ -687,5 +696,83 @@ describe('#2294 — what each route card says it holds for a Delivery round', ()
     expect(Object.values(DELIVERY_COURSE_TEXT).join(' ')).not.toMatch(
       /paper|subscriber|newspaper/i,
     );
+  });
+});
+
+describe('#2579 — Delivery’s own setup', () => {
+  const WEEK = { day: 2, houses: 9 };
+
+  it('keeps every standing notice before Ride, #503’s promise last, and draws no route card or loadout', async () => {
+    const tree = await render({ notices: true, worldChosen: true, week: WEEK, focus: 'delivery' });
+    const ride = rideButton(tree.container);
+    const notices = noticesOf(tree.container);
+    expect(notices.length).toBeGreaterThan(1);
+    for (const notice of notices) {
+      expect(notice.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
+    expect(notices.at(-1)?.textContent).toContain(NOTICES.trainerPromise);
+    expect(radios(tree.container)).toHaveLength(0);
+    expect(queryAll(tree.container, 'input[role="switch"]')).toHaveLength(0);
+    const setup = tree.container.querySelector('[data-setup="delivery"]');
+    expect(setup?.textContent).toContain('Day 2 of 7 · up to 9 houses on the round');
+    expect(ride.textContent).toBe(`Ride ${ROUTES[0]?.name ?? ''}`);
+  });
+
+  it('rides the chosen course with a round and nothing else, a pacer asked for on the whole setup left out', async () => {
+    const pressed: (readonly unknown[])[] = [];
+    const tree = await render({
+      worldChosen: true,
+      week: WEEK,
+      focus: 'delivery',
+      intensity: '3.0',
+      onStartWith: (args) => pressed.push(args),
+    });
+    await activateWithKeyboard(rideButton(tree.container));
+    expect(pressed).toHaveLength(1);
+    const [route, ghost, pacer, air, riding, riderGhost, delivery, lapRace] = pressed[0] ?? [];
+    expect(route).toBe(ROUTES[0]);
+    expect([ghost, pacer, air, riderGhost, delivery, lapRace]).toEqual([
+      false,
+      undefined,
+      undefined,
+      false,
+      true,
+      undefined,
+    ]);
+    expect(riding).toBe(DEFAULT_RIDING_POSITION);
+  });
+
+  it('says Ride is unavailable while the trainer is asked for control, as the whole setup does (#509)', async () => {
+    // The press itself is refused by `GameView` §`startingRef`, for both setups.
+    const asking = await render({ worldChosen: true, week: WEEK, focus: 'delivery', asking: true });
+    expect(rideButton(asking.container).getAttribute('aria-disabled')).toBe('true');
+    asking.unmount();
+    const idle = await render({ worldChosen: true, week: WEEK, focus: 'delivery' });
+    expect(rideButton(idle.container).getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('hands the rider the whole setup at All ride options', async () => {
+    let asked = 0;
+    const tree = await render({
+      worldChosen: true,
+      week: WEEK,
+      focus: 'delivery',
+      onAllOptions: () => {
+        asked += 1;
+      },
+    });
+    const all = queryAll<HTMLButtonElement>(tree.container, 'button').find(
+      (button) => button.textContent === DELIVERY_SETUP_TEXT.allOptions,
+    );
+    await activateWithKeyboard(all as HTMLButtonElement);
+    expect(asked).toBe(1);
+  });
+
+  it('is the whole setup where no round is offered on the course: the standard world, a saved route', async () => {
+    const tree = await render({ worldChosen: false, week: WEEK, focus: 'delivery' });
+    expect(tree.container.querySelector('[data-setup="delivery"]')).toBeNull();
+    expect(radios(tree.container).length).toBeGreaterThan(0);
   });
 });

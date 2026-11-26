@@ -39,6 +39,8 @@ import { AppShell } from '../../../shell/AppShell';
 import {
   gamePlayFromHash,
   gameRouteFromHash,
+  DELIVERY_SETUP_SUMMARY,
+  DELIVERY_SETUP_TITLE,
   hrefForGamePlay,
   LEVEL_GAME_SUMMARY,
   routeById,
@@ -49,7 +51,7 @@ import { stripComments } from '../../../units/no-inline-units';
 import { GAME_COURSES_TEXT } from '../../../views/GameCoursesView';
 import { endRideAnswer } from '../../end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from '../../GameView';
-import { DELIVERY_CHOICE_TEXT } from '../../StageChooser';
+import { DELIVERY_CHOICE_TEXT, DELIVERY_SETUP_TEXT } from '../../StageChooser';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../../hud/announce-preference';
 import type { GameRenderer } from '../../port';
 import { northRoute } from '../../route-fixtures-testing';
@@ -204,6 +206,13 @@ async function click(element: HTMLElement | undefined): Promise<void> {
     await Promise.resolve();
   });
   await settle();
+}
+
+/** #2579: the press from Delivery's own setup to the whole one. */
+function allRideOptions(): HTMLButtonElement | undefined {
+  return queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find(
+    (button) => button.textContent === DELIVERY_SETUP_TEXT.allOptions,
+  );
 }
 
 function rideButton(): HTMLButtonElement | undefined {
@@ -367,6 +376,11 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
       queryAll<HTMLInputElement>(document, '.oyl-chooser__card input[type="radio"]').find(
         (each) => each.value === id,
       );
+    // #2579: Delivery's own setup first, titled as Delivery's, the level's line under it.
+    await until(() => subtitle() === LEVEL_GAME_SUMMARY);
+    expect(document.querySelector('.oyl-view-head h1')?.textContent).toBe(DELIVERY_SETUP_TITLE);
+    await click(allRideOptions());
+    expect(document.querySelector('.oyl-view-head h1')?.textContent).toBe(routeById('game').title);
     await until(() => radio('saved-0') !== undefined);
     await until(() => subtitle() === LEVEL_GAME_SUMMARY);
     await click(radio('saved-0'));
@@ -375,6 +389,27 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     expect(gameRouteFromHash(globalThis.location.hash)).toBe(levelRouteId(FIRST.id));
     await click(radio(levelRouteId(FIRST.id)));
     expect(subtitle()).toBe(LEVEL_GAME_SUMMARY);
+  });
+
+  it('titles Delivery’s own setup on a saved route as Delivery’s, with no trainer game help, and the trainer game’s again on the whole setup — #2579', async () => {
+    const routes: readonly RidableRoute[] = [
+      { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
+    ];
+    globalThis.location.hash = hrefForGamePlay('delivery', 'saved-0');
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} game={port(routes)} />);
+    const title = (): string | null | undefined =>
+      document.querySelector('.oyl-view-head h1')?.textContent;
+    const subtitle = (): string | null | undefined =>
+      document.querySelector('.oyl-view-head p')?.textContent;
+    await until(() => document.querySelector('[data-setup="delivery"]') !== null);
+    expect(title()).toBe(DELIVERY_SETUP_TITLE);
+    expect(subtitle()).toBe(DELIVERY_SETUP_SUMMARY);
+    expect(document.querySelector('.oyl-view-head .oyl-help')).toBeNull();
+    expect(rideButton()?.textContent).toBe('Ride First road');
+    await click(allRideOptions());
+    expect(title()).toBe(routeById('game').title);
+    expect(subtitle()).toBe(routeById('game').summary);
+    expect(document.querySelector('.oyl-view-head .oyl-help')).not.toBeNull();
   });
 
   it('says a saved route’s line under the title on the plain setup', async () => {
@@ -540,6 +575,8 @@ describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, 
 describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
   it('rides the level’s round with the chooser’s Delivery switch turned off', async () => {
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    // #2579: the switch is on the whole setup, one press from Delivery's own.
+    await click(allRideOptions());
     const toggle = queryAll<HTMLInputElement>(document, 'input[role="switch"]').find((box) =>
       (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
     );
@@ -605,11 +642,16 @@ describe('a level rides in the realistic world whatever Settings chose — the o
         />,
       );
       await until(() => !text().includes('Loading your routes'));
+      const houses = fixtureAs(FIRST.id).round.houses;
+      // #2579: Delivery's own setup says it first, then the level's card on the whole setup.
+      expect(document.querySelector('[data-setup="delivery"]')?.textContent).toContain(
+        `Delivery: up to ${String(houses)} houses on the round`,
+      );
+      await click(allRideOptions());
       const card = (id: string): Element | undefined =>
         [...document.querySelectorAll('.oyl-chooser__card')].find(
           (each) => each.querySelector('input')?.getAttribute('value') === id,
         );
-      const houses = fixtureAs(FIRST.id).round.houses;
       expect(card(levelRouteId(FIRST.id))?.querySelector('.oyl-chooser__course')?.textContent).toBe(
         `Delivery: up to ${String(houses)} houses on the round`,
       );
@@ -697,6 +739,9 @@ describe('a room’s course list never holds a level — ADR 0065 D-8.1', () => 
   it('offers no level to make a room on, with the level’s card in the chooser', async () => {
     await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)), { rooms: ROOMS });
     expect(rideButton()?.textContent).toContain(FIRST.name);
+    // #2579: Delivery's own setup offers no room (a round is solo, DL9); the whole setup does.
+    expect(mounted?.container.querySelector('.oyl-rooms__make')).toBeNull();
+    await click(allRideOptions());
     const make = mounted?.container.querySelector('.oyl-rooms__make');
     expect(make?.textContent).toContain('Save a route first');
     expect(queryAll(make ?? document.body, 'option')).toHaveLength(0);

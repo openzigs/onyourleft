@@ -78,7 +78,7 @@ import { ProfileShape } from '../design/illustration/ProfileShape';
 import { StatusMessage } from '../design/StatusMessage';
 import { Stepper } from '../design/Stepper';
 import { NO_ROUTES_YET } from '../routes/two-importers';
-import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { coursesRouteFor, hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 import type { PacerStatus } from '../instance/pacer-port';
@@ -548,6 +548,16 @@ interface RoutePickerProps {
    */
   readonly onPreview?:
     ((route: RidableRoute, rider: SimulatedRider, position: RidingPosition) => void) | undefined;
+  /**
+   * #2579: the setup opened from Delivery's own course picker (the Games tab,
+   * `shell/routes.ts` §`hrefForGamePlay`): Delivery's own setup, the chosen
+   * course, its round and Ride, and none of the trainer game's route cards
+   * and loadout. Only where a round is offered on the chosen course (the
+   * realistic world, or a built-in level); anywhere else the whole setup.
+   */
+  readonly focus?: 'delivery' | undefined;
+  /** #2579: the rider asked for the whole setup from Delivery's own. */
+  readonly onAllOptions?: (() => void) | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -790,6 +800,51 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
     props.lapRace === undefined || onLevel || onOpenWorld ? undefined : (
       <LapRaceControl offer={props.lapRace} route={chosen} builtIn={onCircuit} idPrefix={ids} />
     );
+  // #2579: Delivery's own setup — the course, its round and Ride — where the
+  // rider came from Delivery's course picker and a round is offered here.
+  if (props.focus === 'delivery' && deliveryOffer !== undefined && !onCircuit && !onOpenWorld) {
+    return (
+      <DeliverySetup
+        notices={notices}
+        route={chosen}
+        units={props.units}
+        course={courseOf(chosen)}
+        week={deliveryOffer.week}
+        onLevel={onLevel}
+        // ADR 0065 D-6.5: a level's credit beside it, here as on its card.
+        levelCredit={onLevel ? props.level?.credit : undefined}
+        asking={props.asking}
+        recording={props.recording}
+        onRide={() => {
+          // A Delivery round and nothing else: no ghost, no pacer and no
+          // wind, which this setup does not offer, in the position chosen.
+          void props.onStart(
+            chosen,
+            false,
+            undefined,
+            undefined,
+            props.position,
+            false,
+            true,
+            undefined,
+          );
+        }}
+        onAllOptions={props.onAllOptions}
+        preview={
+          props.onPreview === undefined ? undefined : (
+            <PreviewControl
+              route={chosen}
+              asking={props.asking}
+              onPreview={(rider) => {
+                props.onPreview?.(chosen, rider, props.position);
+              }}
+              idPrefix={ids}
+            />
+          )
+        }
+      />
+    );
+  }
   return (
     <div className="oyl-game__picker oyl-chooser">
       {/*
@@ -1001,6 +1056,102 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           idPrefix={ids}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of Delivery's own setup — #2579, for the owner's
+ * approval: the project's own (DL1).
+ */
+export const DELIVERY_SETUP_TEXT = {
+  heading: 'Your Delivery round',
+  otherCourse: 'Choose another course',
+  allOptions: 'All ride options',
+  allOptionsHint:
+    'Ride with a pacer, a ghost, wind or another route: the trainer game’s whole setup, with the round still on.',
+} as const;
+
+/**
+ * Delivery's own setup — #2579, the owner on the tablet: *"the menu to get
+ * into the game seems quirky. Seems to bring you to the regular trainer game
+ * which is a hard flow to follow."* Reached from Delivery's course picker, so
+ * the course is already chosen: the standing notices and Ride first (#940's
+ * order, so #503's promise is still the last thing before the press), then
+ * the course and its round in words, the way back to the courses, and the
+ * whole setup one press away for a rider who wants a pacer or wind with it.
+ * No route cards, no loadout. Ride is still pressed here: nothing starts a
+ * ride from a link (`shell/routes.ts` §`hrefForGameRoute`).
+ */
+function DeliverySetup(props: {
+  readonly notices: readonly JSX.Element[];
+  readonly route: RidableRoute;
+  readonly units: UnitSystem;
+  readonly course: CourseLine | undefined;
+  readonly week: Pick<WeekProgress, 'day' | 'houses'>;
+  readonly onLevel: boolean;
+  /** A built-in level's OpenStreetMap credit (ADR 0065 D-6.5); absent on a saved route. */
+  readonly levelCredit: string | undefined;
+  readonly asking: boolean;
+  readonly recording: RecordingOffer | undefined;
+  readonly onRide: () => void;
+  readonly onAllOptions: (() => void) | undefined;
+  readonly preview: JSX.Element | undefined;
+}): JSX.Element {
+  const headingId = useId();
+  return (
+    <div className="oyl-game__picker oyl-chooser" data-setup="delivery">
+      <div className="oyl-chooser__lead tw:mb-md">
+        {props.notices.length === 0 ? undefined : (
+          <div className="oyl-chooser__notices">{props.notices}</div>
+        )}
+        <div className="oyl-chooser__go">
+          {/* `aria-disabled` while the trainer is asked, as the whole setup's Ride (#509). */}
+          <Button size="ride" unavailable={props.asking} onClick={props.onRide}>
+            <span className="oyl-chooser__ride-label">Ride {props.route.name}</span>
+          </Button>
+        </div>
+        {props.recording === undefined ? undefined : <RecordingLine offer={props.recording} />}
+      </div>
+      <section
+        className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card"
+        aria-labelledby={headingId}
+      >
+        <h2 id={headingId} className="oyl-chooser__loadout-title tw:mt-0">
+          {DELIVERY_SETUP_TEXT.heading}
+        </h2>
+        <h3 className="tw:mt-0 tw:mb-xs">{props.route.name}</h3>
+        <p className="oyl-muted tw:mt-0">{routeFacts(props.route.profile, props.units)}</p>
+        {props.levelCredit === undefined ? null : (
+          <p className="oyl-chooser__circuits-credit" data-credit="level">
+            {props.levelCredit} ·{' '}
+            <a href={hrefFor(routeById('credits'))}>{BUILT_IN_CIRCUITS_TEXT.licence}</a>
+          </p>
+        )}
+        {props.course === undefined ? null : (
+          <p className={props.course.holds ? 'tw:m-0' : 'oyl-game__problem tw:m-0'}>
+            {props.course.holds
+              ? props.course.text
+              : `${props.course.text}. ${DELIVERY_COURSE_TEXT.chosenNoRound}`}
+          </p>
+        )}
+        <p className="tw:m-0">{deliveryWeekText(props.week)}</p>
+        <p>{props.onLevel ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}</p>
+        <p className="tw:flex tw:flex-wrap tw:gap-sm tw:mb-0">
+          <ButtonLink variant="secondary" href={hrefFor(coursesRouteFor('delivery'))}>
+            {DELIVERY_SETUP_TEXT.otherCourse}
+          </ButtonLink>
+          {props.onAllOptions === undefined ? null : (
+            <Button variant="secondary" onClick={props.onAllOptions}>
+              {DELIVERY_SETUP_TEXT.allOptions}
+            </Button>
+          )}
+        </p>
+        {props.onAllOptions === undefined ? null : (
+          <p className="oyl-muted tw:mb-0">{DELIVERY_SETUP_TEXT.allOptionsHint}</p>
+        )}
+      </section>
+      {props.preview}
     </div>
   );
 }
