@@ -1100,7 +1100,9 @@ function DeliverySetup(props: {
 }): JSX.Element {
   const headingId = useId();
   return (
-    <div className="oyl-game__picker oyl-chooser" data-setup="delivery">
+    // Not `.oyl-chooser`, whose grid sets cards beside a loadout this page has
+    // none of: one column, at the page's reading width.
+    <div className="oyl-game__picker oyl-delivery-setup" data-setup="delivery">
       <div className="oyl-chooser__lead tw:mb-md">
         {props.notices.length === 0 ? undefined : (
           <div className="oyl-chooser__notices">{props.notices}</div>
@@ -1113,11 +1115,8 @@ function DeliverySetup(props: {
         </div>
         {props.recording === undefined ? undefined : <RecordingLine offer={props.recording} />}
       </div>
-      <section
-        className="oyl-chooser__loadout tw:relative tw:mb-md tw:bg-surface-raised tw:rounded-card"
-        aria-labelledby={headingId}
-      >
-        <h2 id={headingId} className="oyl-chooser__loadout-title tw:mt-0">
+      <section className="oyl-panel tw:mb-md" aria-labelledby={headingId}>
+        <h2 id={headingId} className="tw:mt-0">
           {DELIVERY_SETUP_TEXT.heading}
         </h2>
         <h3 className="tw:mt-0 tw:mb-xs">{props.route.name}</h3>
@@ -1135,7 +1134,8 @@ function DeliverySetup(props: {
               : `${props.course.text}. ${DELIVERY_COURSE_TEXT.chosenNoRound}`}
           </p>
         )}
-        <p className="tw:m-0">{deliveryWeekText(props.week)}</p>
+        {/* A level's round is its own, never the week's (ADR 0065 D-9.3): its line above says it. */}
+        {props.onLevel ? null : <p className="tw:m-0">{deliveryWeekText(props.week)}</p>}
         <p>{props.onLevel ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}</p>
         <p className="tw:flex tw:flex-wrap tw:gap-sm tw:mb-0">
           <ButtonLink variant="secondary" href={hrefFor(coursesRouteFor('delivery'))}>
