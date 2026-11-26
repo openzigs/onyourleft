@@ -43,3 +43,41 @@ export {
   startRotation,
   stepRotation,
 } from './rotation';
+
+// The rider's cue (#3302): at most one a window, events said once,
+// corrections out of band for a dwell and rate limited. Kinds, never
+// sentences; none urges more effort, and none carries a power.
+export type {
+  Cue,
+  CueAsk,
+  CueCorrectionKind,
+  CueEventKind,
+  CueKind,
+  CueState,
+  CueStep,
+  CueView,
+  PendingCue,
+} from './cues';
+export {
+  CUE_ASK,
+  CUE_ASKS,
+  CUE_CEILING_PER_MINUTE,
+  CUE_CLIMB_AHEAD_METRES,
+  CUE_CORRECTION_GAP_MS,
+  CUE_CORRECTION_KINDS,
+  CUE_EASED_DWELL_MS,
+  CUE_EASED_METRES,
+  CUE_EVENT_KINDS,
+  CUE_GAP_DWELL_MS,
+  CUE_GAP_METRES,
+  CUE_KINDS,
+  CUE_LAST_WHEEL_METRES,
+  CUE_PAST_FRONT_DWELL_MS,
+  CUE_SAME_CORRECTION_MOST,
+  CUE_SHORTER_PULL_SHARE,
+  CUE_SURGE_DWELL_MS,
+  CUE_SURGE_MPS,
+  CUE_TIME_CRITICAL,
+  startCues,
+  stepCues,
+} from './cues';

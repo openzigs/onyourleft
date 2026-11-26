@@ -85,7 +85,10 @@ packages/             Apache-2.0, without exception
                         proposed): since #3299 the line's phases and roles
                         and the paceline rotation, one seeded step per 1 s
                         decision window; roles, bot speeds and facts out,
-                        nothing that reaches a trainer
+                        nothing that reaches a trainer. Since #3302 the
+                        rider's cue: a kind a window, never a sentence,
+                        none that urges more effort, silent with no power
+                        reading
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an
