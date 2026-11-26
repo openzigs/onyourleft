@@ -751,10 +751,14 @@ describe('an open-world road with real heights — #2899', () => {
   /**
    * The grid, its heights read from a source that knows a steady 6 % climb for
    * the first 600 m east and nothing past it: a height tile that is not held.
+   * It ends 1,050 m east (#3167): out to 2,450 m and back, the ride home took
+   * 105 of the case's 137 frames, and the case ran 5.0 s in the nightly's
+   * coverage half on CI. The ride to flat is the same 32 frames on either
+   * grid, and the ride home is 38.
    */
   function roadIntoTheUnknown(): OpenWorldRoad {
     const { graph, edges } = gridGraph(
-      [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450],
+      [0, 180, 410, 600, 870, 1_050],
       [0, 230, 400, 650, 820, 1_090, 1_280, 1_510],
       roughGround,
       3,
@@ -807,7 +811,7 @@ describe('an open-world road with real heights — #2899', () => {
     // ADR 0087 D-6.4: the start of the ride is walked too. The road's grade
     // under the start is some 3 %, and the first write is one step from 0 %.
     expect(Math.abs(grades[0] ?? Number.NaN)).toBeLessThanOrEqual(1.0001);
-    // The grid ends 2.4 km east, where the route turns round: riding back
+    // The grid ends 1,050 m east, where the route turns round: riding back
     // onto ground whose heights are known, the notice goes.
     for (
       let frames = 0;

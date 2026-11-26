@@ -56,12 +56,39 @@ let own: RidableRoute = OWN;
 /** The built-in circuits the port lists: the shipped ones, unless a test rides a shorter one. */
 let circuits: () => Promise<readonly RidableRoute[]> = () => loadBuiltInCircuits();
 
+/**
+ * Every read the port has started in the running case. The circuits and the
+ * levels are `import.meta.glob` loaders, and in Vitest each `import()` is a
+ * round trip to the main process that a loaded CI runner under coverage may
+ * not answer inside forty event-loop turns: the first case then found no
+ * *Ride Morning Round* (#3206, the shape `testing/mount.tsx` §`readsSettled`
+ * names for #1939). {@link arrived} waits for the reads themselves instead.
+ */
+let reads: Promise<unknown>[] = [];
+
+function read<T>(started: Promise<T>): Promise<T> {
+  reads.push(started);
+  return started;
+}
+
+/**
+ * Let every read the port has started resolve, however long that takes, then
+ * let React render what each resolved to. A read that starts another (the
+ * listing, then the level it names) is waited for on the next call.
+ */
+async function arrived(): Promise<void> {
+  await act(async () => {
+    await Promise.allSettled(reads);
+  });
+  await settle();
+}
+
 function gamePort(): GamePort {
   return {
-    listRoutes: () => Promise.resolve([own]),
-    listCircuits: () => circuits(),
-    listDeliveryLevels: () => Promise.resolve(SHIPPED_LEVELS.list()),
-    loadDeliveryLevel: (id) => SHIPPED_LEVELS.load(id),
+    listRoutes: () => read(Promise.resolve([own])),
+    listCircuits: () => read(circuits()),
+    listDeliveryLevels: () => read(Promise.resolve(SHIPPED_LEVELS.list())),
+    loadDeliveryLevel: (id) => read(SHIPPED_LEVELS.load(id)),
     // The rider's own data: a capture must ask for none of it.
     loadGhost: (routeId) => {
       asked.push(`loadGhost:${routeId}`);
@@ -158,6 +185,7 @@ const NO_LEVELS = JSON.stringify({ finished: [] });
 beforeEach(() => {
   running = new AbortController();
   asked = [];
+  reads = [];
   own = OWN;
   circuits = () => loadBuiltInCircuits();
   localStorage.clear();
@@ -226,7 +254,7 @@ async function captureFor(
   const ride = `Ride ${captureRideName(scene)}`;
   for (let tries = 0; tries < 40; tries += 1) {
     if (rideButton(ride) !== undefined) break;
-    await settle();
+    await arrived();
     stillRunning(signal);
   }
   expect(rideButton(ride), ride).toBeDefined();
@@ -241,7 +269,7 @@ async function captureFor(
       on.clock.frame();
       await Promise.resolve();
     });
-    await settle();
+    await arrived();
     stillRunning(signal);
   }
   expect(published()?.drawn).toBe(1);
@@ -458,7 +486,7 @@ describe('every other ride draws its own seed — #3153', () => {
       />,
     );
     for (let tries = 0; tries < 40 && rideButton(name) === undefined; tries += 1) {
-      await settle();
+      await arrived();
       stillRunning(signal);
     }
     on.clock.hold();

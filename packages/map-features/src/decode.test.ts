@@ -776,7 +776,12 @@ describe('decodeTile on a POI-matching storm (#2975, the review of #2996)', () =
   });
 
   it('control: with the budget lifted, the storm costs far more than the budget allows', () => {
-    const storm = poiMatchStormTile(64);
+    // #3167: 24 POIs, not 64, and warmed under the budget, not lifted. Lifted,
+    // each POI walks all 384,000 vertices, so 24 are some 9.2 million units
+    // against the budget's 2 million: four times the work, where 64 were
+    // twelve. The two lifted decodes of 64 ran 5.4 s in the nightly's coverage
+    // half on CI.
+    const storm = poiMatchStormTile(24);
     const lifted = { ...DEFAULT_DECODE_LIMITS, maxPoiMatchWork: Number.POSITIVE_INFINITY };
     const time = (limits: typeof lifted): number => {
       const started = performance.now();
@@ -784,7 +789,7 @@ describe('decodeTile on a POI-matching storm (#2975, the review of #2996)', () =
       if ('reason' in result) throw new Error(result.reason);
       return performance.now() - started;
     };
-    time(lifted);
+    time(DEFAULT_DECODE_LIMITS);
     expect(time(lifted)).toBeGreaterThan(time(DEFAULT_DECODE_LIMITS));
   });
 

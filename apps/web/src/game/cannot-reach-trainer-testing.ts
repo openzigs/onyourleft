@@ -156,7 +156,9 @@ function parse(code: string, path: string): ts.SourceFile {
   return ts.createSourceFile(
     path,
     code,
-    ts.ScriptTarget.Latest,
+    // #3167: no JSDoc parsed. Nothing here reads a comment, and this tree's
+    // modules are mostly comment.
+    { languageVersion: ts.ScriptTarget.Latest, jsDocParsingMode: ts.JSDocParsingMode.ParseNone },
     false,
     path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
@@ -174,7 +176,11 @@ function definedFunctionName(node: ts.Node): string | undefined {
 
 /** Whether `code` writes to a trainer, by rules W1–W4 in the header. */
 export function writesToATrainer(code: string, path: string): boolean {
-  const source = parse(code, path);
+  return writesIn(parse(code, path));
+}
+
+/** {@link writesToATrainer} of a module already parsed. */
+function writesIn(source: ts.SourceFile): boolean {
   let writes = false;
   let controlPointInterface = false;
   let definesWrite = false;
@@ -217,13 +223,28 @@ export function writesToATrainer(code: string, path: string): boolean {
   return writes || (controlPointInterface && definesWrite);
 }
 
-/** Every non-test module under `apps/` and `packages/` that writes to a trainer. */
+/**
+ * Every non-test module under `apps/` and `packages/` that writes to a trainer.
+ *
+ * #3167: each module is parsed once here, and its edges are kept for the
+ * walks ({@link edgesIn}), which parsed the same modules again: under coverage
+ * on CI that second parse was a walk's whole cost, past a case's 5 s. A
+ * module whose edges the walk cannot follow keeps none, so a walk that
+ * reaches it parses it again and throws there, naming it.
+ */
 export function trainerControlWriters(read: ReadSource = readFromDisk): string[] {
   return ['apps', 'packages']
     .flatMap((tree) => modulesUnder(tree))
     .filter((path) => {
       const code = read(path);
-      return code !== undefined && writesToATrainer(code, path);
+      if (code === undefined) return false;
+      const source = parse(code, path);
+      try {
+        EDGES.set(path, { code, edges: edgesOf(source, path) });
+      } catch {
+        // Not kept: the walk reports it, if a walk reaches it.
+      }
+      return writesIn(source);
     });
 }
 
@@ -254,9 +275,6 @@ export const KNOWN_TRAINER_CONTROL_WRITERS = [
   // W3: the game's gradient driver (also in GAME_TRAINER_MODULES).
   'apps/web/src/game/gradient.ts',
 ] as const;
-
-/** {@link trainerControlWriters} over the real tree, read once. */
-export const WRITERS_ON_DISK = trainerControlWriters();
 
 /**
  * Every module a mode may not reach. ⚠️ **Every path must exist**: a renamed
@@ -392,7 +410,11 @@ function edgesIn(code: string, path: string): ModuleEdges {
 const EDGES = new Map<string, { readonly code: string; readonly edges: ModuleEdges }>();
 
 function readEdges(code: string, path: string): ModuleEdges {
-  const source = parse(code, path);
+  return edgesOf(parse(code, path), path);
+}
+
+/** {@link readEdges} of a module already parsed. */
+function edgesOf(source: ts.SourceFile, path: string): ModuleEdges {
   const cannotFollow = (node: ts.Node, what: string): Error =>
     new Error(`${path} ${what}, which the walk cannot follow: ${node.getText(source)}`);
   const imports: { specifier: string; names: Names; url?: true }[] = [];
@@ -648,3 +670,10 @@ export function forbiddenInTheTree(): string[] {
 export function plantedOver(planted: Readonly<Record<string, string>>): ReadSource {
   return (path) => planted[path] ?? readFromDisk(path);
 }
+
+/**
+ * {@link trainerControlWriters} over the real tree, read once. Last in the
+ * module, since #3167: the scan keeps each module's edges, and so runs only
+ * once everything {@link edgesOf} reads is defined.
+ */
+export const WRITERS_ON_DISK = trainerControlWriters();
