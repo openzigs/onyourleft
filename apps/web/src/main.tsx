@@ -80,6 +80,7 @@ import { hrefFor, matchHash, routeById } from './shell/routes';
 import { createOpenWorldEntry } from './game/open-world/entry';
 import { lazyOpenWorldSessions } from './game/open-world/session-lazy';
 import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
+import { ridingPlace } from './routing/riding-place';
 import { startCoverage } from './game/open-world/start';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
@@ -2122,6 +2123,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           heights={buildRouteHeights()}
           terrain={browserTerrainConfig()}
           openWorld={buildOpenWorldStartPort()}
+          // #3184: read on the device only when a new route is opened.
+          ridingPlace={async () => ridingPlace(localStore(), LOCAL_ATHLETE)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
           boards={buildLeaderboardPort()}

@@ -136,7 +136,7 @@ import {
 import { botName, riderEntry, type LapRaceEntrant, type LapRaceHud } from '../hud/lap-race-hud';
 import { LANE_OFFSETS_METRES, sidewaysSpeedOf, type SteerIntent } from '../lanes';
 import type { LapRaceInView, RaceHitLook } from '../port';
-import { seededRiderBody } from '../rider-body';
+import { botSkinFor, seededRiderBody } from '../rider-body';
 import type { RaceBotInput } from '../scene';
 
 import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
@@ -278,6 +278,12 @@ export interface LapRaceRideStart {
    * a seeded race.
    */
   readonly model?: boolean | undefined;
+  /**
+   * #3153: the race's seed, set by capture mode alone (`capture-scene.ts`,
+   * which only the capture tool's build reads), so a scene deals the same
+   * field twice. Absent — every rider's race — it is drawn at the press.
+   */
+  readonly seed?: number | undefined;
 }
 
 /**
@@ -356,7 +362,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   }
   const course = raceCourse(profile.totalDistance, choice.laps);
   const assist = readLapRaceAssist(input.storage);
-  const seed = drawRaceSeed();
+  const seed = input.seed ?? drawRaceSeed();
   const tier = assistedBotTier(assist, choice.tier);
   const ids = Array.from({ length: choice.bots }, (_, index) => `bot-${String(index + 1)}`);
   const personalities = botFieldPersonalities(seed, ids.length);
@@ -806,6 +812,9 @@ export function lapRaceDrawing(
       // nothing a bot decides or rides reads it, so the bot-code version
       // (ADR 0071 D-4.4) is as it was.
       body: seededRiderBody(ride.seed, fieldOrder.get(bot.id) ?? 0),
+      // #3214: and which skin tone, from its id alone, so a bot keeps its
+      // face from race to race. Drawing only, as the body is.
+      skin: botSkinFor(bot.id),
     });
   }
   return {

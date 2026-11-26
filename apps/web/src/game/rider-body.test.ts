@@ -8,7 +8,16 @@
 import { DEFAULT_RIDER_BODY, RIDER_BODIES } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
-import { pacerBodyFor, RIDER_BODY_NAMES, riderBodyFor, seededRiderBody } from './rider-body';
+import { STAND_IN_PALETTE } from './bicycle';
+import {
+  botSkinFor,
+  pacerBodyFor,
+  RIDER_BODY_NAMES,
+  RIDER_SKIN_TONES,
+  riderBodyFor,
+  riderSkinFor,
+  seededRiderBody,
+} from './rider-body';
 
 describe('riderBodyFor — #2839', () => {
   it('keeps each of the store’s words', () => {
@@ -99,5 +108,53 @@ describe('pacerBodyFor — the solo ride’s pacer, #2839', () => {
     const female = drawn.filter((body) => body === 'female').length;
     expect(female).toBeGreaterThan(140);
     expect(female).toBeLessThan(260);
+  });
+});
+
+describe('the riders’ skin tones — #3214', () => {
+  const channels = (hex: number): readonly number[] => [
+    (hex >> 16) & 0xff,
+    (hex >> 8) & 0xff,
+    hex & 0xff,
+  ];
+
+  it('starts from the tone the realistic world drew every rider in, and only darkens it', () => {
+    const [first, ...rest] = RIDER_SKIN_TONES;
+    expect(first).toBe(STAND_IN_PALETTE.skin);
+    // A small range, so a pack is not all one shade.
+    expect(rest.length).toBeGreaterThanOrEqual(3);
+    let before = channels(first as number);
+    for (const tone of rest) {
+      const now = channels(tone);
+      // Darker in every channel than the one before it, so no share of the
+      // maps' skin passes 1 (`three-renderer.ts` §`riderSkinShare`).
+      now.forEach((value, at) => expect(value).toBeLessThan(before[at] as number));
+      // And skin: red over green over blue.
+      expect(now[0]).toBeGreaterThan(now[1] as number);
+      expect(now[1]).toBeGreaterThan(now[2] as number);
+      before = now;
+    }
+  });
+
+  it('draws a whole index of the list as its tone, and anything else as the first', () => {
+    RIDER_SKIN_TONES.forEach((tone, at) => expect(riderSkinFor(at)).toBe(tone));
+    for (const chosen of [undefined, -1, RIDER_SKIN_TONES.length, 1.5, Number.NaN, '1', null]) {
+      expect(riderSkinFor(chosen), String(chosen)).toBe(RIDER_SKIN_TONES[0]);
+    }
+  });
+
+  it('seeds a bot’s tone from its id alone, the same on every call, and spreads a field over the list', () => {
+    const field = Array.from({ length: 7 }, (_, at) => `bot-${String(at + 1)}`);
+    const tones = field.map(botSkinFor);
+    for (const tone of tones) {
+      expect(Number.isInteger(tone)).toBe(true);
+      expect(tone).toBeGreaterThanOrEqual(0);
+      expect(tone).toBeLessThan(RIDER_SKIN_TONES.length);
+    }
+    expect(field.map(botSkinFor)).toEqual(tones);
+    // Not all one shade: a field of seven in at least four tones, and the
+    // video's five in at least three.
+    expect(new Set(tones).size).toBeGreaterThanOrEqual(4);
+    expect(new Set(tones.slice(0, 5)).size).toBeGreaterThanOrEqual(3);
   });
 });

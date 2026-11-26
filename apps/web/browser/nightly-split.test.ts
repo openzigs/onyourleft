@@ -1097,8 +1097,15 @@ describe('the required check is one job over every shard — #1285', () => {
       /^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
     );
     // Under `merge_group` the pull request's payload is absent, so a step that
-    // read it would run on an empty value in the queue alone.
-    expect(workflow.replace(/^\s*#.*\n/gm, '')).not.toMatch(
+    // read it would run on an empty value in the queue alone. One step is the
+    // exception, by design (#3205): `Commit identity` must tell a fork's pull
+    // request from this repository's, which only the payload says, and each of
+    // its reads falls back to the queue's own field or sits behind an
+    // event_name test -- the #3205 describe below holds that.
+    const withoutIdentity = workflow
+      .replace(/^\s*#.*\n/gm, '')
+      .replace(/^ {6}- name: Commit identity\n(?: {8}.*\n)+/m, '');
+    expect(withoutIdentity).not.toMatch(
       /github\.event\.pull_request|github\.(base|head)_ref|GITHUB_(BASE|HEAD)_REF/,
     );
   });
@@ -1332,5 +1339,45 @@ describe('the required check is one job over every shard — #1285', () => {
     // The point of the shards: `Wall` is the run being created to the
     // required check completing, queueing included.
     expect(Math.max(...measuredShards()('Wall'))).toBeLessThan(900);
+  });
+});
+
+describe('the required check hands one secret to one step: the commit-identity list — #3205', () => {
+  const rules = uncommented(read(ROOT, '.github', 'workflows', 'rules.yml'));
+
+  it('references exactly one secret, in the `Commit identity` step of `checks`, before the install', () => {
+    // A step's `env` reaches no other step, so where the reference is decides
+    // who holds the list. A second reference -- the list in the concurrent
+    // step, beside `build` and every dependency's code -- is a red case here.
+    expect(rules.match(/secrets\./g)).toEqual(['secrets.']);
+    const steps = stepsOf(jobsOf(rules).get('checks') ?? '');
+    const at = steps.findIndex((step) => step.startsWith('name: Commit identity\n'));
+    expect(at).toBeGreaterThan(-1);
+    expect(steps[at]).toContain('          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}\n');
+    expect(steps[at]).toContain('node scripts/check-commit-identity.mjs ');
+    const install = steps.findIndex((step) => step.startsWith('name: Install dependencies\n'));
+    expect(install).toBeGreaterThan(at);
+  });
+
+  it('requires the list everywhere but a fork’s or Dependabot’s pull request', () => {
+    const steps = stepsOf(jobsOf(rules).get('checks') ?? '');
+    const step = steps.find((text) => text.startsWith('name: Commit identity\n')) ?? '';
+    expect(step).toContain(
+      "          REQUIRE_PRIVATE_TERMS: ${{ github.event_name != 'pull_request' || " +
+        '(github.event.pull_request.head.repo.full_name == github.repository && ' +
+        "github.actor != 'dependabot[bot]') }}\n",
+    );
+    // The range reads the pull request's payload, which is absent in the
+    // merge queue (#2198), so each read falls back to the queue's own field.
+    expect(step).toContain(
+      '          RANGE_BASE: ${{ github.event.pull_request.base.sha || ' +
+        'github.event.merge_group.base_sha || github.event.before }}\n',
+    );
+    expect(step).toContain(
+      '          RANGE_HEAD: ${{ github.event.pull_request.head.sha || ' +
+        'github.event.merge_group.head_sha || github.event.after }}\n',
+    );
+    // With the fork test above, the step's only reads of it.
+    expect(step.match(/github\.event\.pull_request/g)).toHaveLength(3);
   });
 });

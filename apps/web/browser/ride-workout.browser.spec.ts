@@ -1416,9 +1416,39 @@ test.describe('the actions row at a short laptop window, in a workout with a tra
  * The control: `theme.css` §"#2281" deleted, with §"THE MOVING TIME ON AN
  * UPRIGHT PHONE"'s gap back at 16 px, which is `main`: red at 800×1280,
  * 390×844 and 390×664 in a workout and at 360×800 and 360×752 on both rides.
+ *
+ * #2278 — the square and portrait corners windows: 900×900 and a desktop
+ * window snapped to half of a 1440p monitor (1200×1300), beside the upright
+ * tablet. §"#2281"'s rules are `orientation: portrait` and 47 rem tall, so they
+ * apply to both, and the row there is the tablet's. The control above turns
+ * both red in a workout. At 900×900 the ROUTE panel lies over the leaning
+ * rider's box (`[8,602 → 296,892]` on a Mac), on `main` as well and with or
+ * without a notice, so the rider check leaves that one panel out there and
+ * only there, under #3227; the actions panel and the moving time are held.
  */
-const UPRIGHT: readonly (Viewport & { readonly scrolls?: true })[] = [
+const UPRIGHT: readonly (Viewport & {
+  readonly scrolls?: true;
+  /**
+   * The open issue under which the route panel lies over the leaning rider
+   * here, on `main` as well: the one panel the rider check below leaves out at
+   * this viewport. Every other panel, and the moving time, is still held.
+   */
+  readonly routePanelOverRider?: number;
+})[] = [
   { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
+  {
+    name: 'a square corners window — 900×900',
+    width: 900,
+    height: 900,
+    unstagedFails: false,
+    routePanelOverRider: 3227,
+  },
+  {
+    name: 'a desktop window snapped to half a 1440p monitor — 1200×1300',
+    width: 1200,
+    height: 1300,
+    unstagedFails: false,
+  },
   { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
   {
     name: 'a narrow Android phone upright, in the app — 360×800',
@@ -1540,6 +1570,11 @@ test.describe('the actions row upright, running and paused — #2281', () => {
               if (moving === undefined) throw new Error(`no moving time ${how}`);
               expect(
                 [...seen.panels.filter((each) => each.box.height > 0), moving]
+                  .filter(
+                    (each) =>
+                      viewport.routePanelOverRider === undefined ||
+                      !each.name.split(' ').includes('oyl-hud__route'),
+                  )
                   .filter((each) => overlap(each.box, rider))
                   .map(describeItem),
                 `over the leaning rider ${how}`,

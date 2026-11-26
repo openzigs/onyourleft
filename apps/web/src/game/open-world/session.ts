@@ -167,6 +167,8 @@ export interface OpenWorldSessionOptions {
   readonly decodeHeights?: DecodeHeightTile | undefined;
   /** How long the start waits for its height tiles: `heights.ts` §`HEIGHTS_START_TIMEOUT_MS` when absent. */
   readonly heightsStartTimeoutMs?: number | undefined;
+  /** #3154: the name each street is shown by, or none. @see OpenWorldSessionExtras.streetName */
+  readonly streetName?: ((name: string) => string | undefined) | undefined;
   /** Where the tiles are planned (#2901): `tile-planner.ts` §`createTilePlanner`, a worker, when absent. */
   readonly tilePlanner?: ((options: TilePlannerOptions) => TilePlanner) | undefined;
 }
@@ -242,6 +244,35 @@ interface StreetLookup {
 }
 
 const tileKey = (tile: TileId): string => `${String(tile.x)}/${String(tile.y)}`;
+
+/**
+ * #3154: `graph` with every street's name shown as `rename` says, or none —
+ * the one place the session's names come from, so the junction prompt and
+ * the names painted on the road both read the renamed one.
+ */
+function renamedStreets(
+  graph: StreetLookup,
+  rename: (name: string) => string | undefined,
+): StreetLookup {
+  const renamed = (edge: StreetGraphEdge): StreetGraphEdge => {
+    if (edge.name === undefined) return edge;
+    // Never the map's: renamed, or no name at all.
+    return { ...edge, name: rename(edge.name) };
+  };
+  return {
+    get version() {
+      return graph.version;
+    },
+    node: (id) => graph.node(id),
+    edge: (id) => {
+      const edge = graph.edge(id);
+      return edge === undefined ? undefined : renamed(edge);
+    },
+    *edges() {
+      for (const edge of graph.edges()) yield renamed(edge);
+    },
+  };
+}
 
 /** Where the start meets a street: the edge, the segment and how far along it. */
 interface Snap {
@@ -448,16 +479,19 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
   };
   const schedule = options.schedule ?? defaultSchedule;
   const mirror = new StreetMirror();
+  // #3154: what the ride reads of the graph, every street by the name it is shown by.
+  const rename = options.streetName;
+  const streets = rename === undefined ? mirror : renamedStreets(mirror, rename);
   /** #3052: the graph's street names, where to paint each, built again only when the graph changes. */
   let named: { readonly version: number; readonly labels: readonly StreetNameLabel[] } | undefined;
   const streetNames = (): readonly StreetNameLabel[] => {
     if (named?.version !== mirror.version) {
-      const streets: NamedStreetLine[] = [];
-      for (const edge of mirror.edges()) {
+      const lines: NamedStreetLine[] = [];
+      for (const edge of streets.edges()) {
         if (edge.name !== undefined)
-          streets.push({ id: String(edge.id), line: edge.line, name: edge.name });
+          lines.push({ id: String(edge.id), line: edge.line, name: edge.name });
       }
-      named = { version: mirror.version, labels: streetNameLabels(streets) };
+      named = { version: mirror.version, labels: streetNameLabels(lines) };
     }
     return named.labels;
   };
@@ -647,13 +681,13 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     await sync();
     if (stopped) return { kind: 'stopped' };
     if (graphFailed) return refused('unavailable');
-    const ways = startWays(mirror, frame);
+    const ways = startWays(streets, frame);
     if (ways === undefined) return refused('no-street');
     // #2899: the start's height tiles, asked for at once and waited for a
     // bounded while. The ride does not need them to begin (ADR 0087 D-7).
     await heights?.start(start.position);
     if (stopped) return { kind: 'stopped' };
-    const route = rollingRouteFrom(mirror, frame, ways, heights);
+    const route = rollingRouteFrom(streets, frame, ways, heights);
     return {
       kind: 'ready',
       route: {
@@ -667,7 +701,7 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
       // the rider has not moved. #2990: the road tells the reader where the
       // rider is, and reopens a turn-round once the graph has grown past it.
       road: () =>
-        new OpenWorldRoad(rollingRouteFrom(mirror, frame, ways, heights), {
+        new OpenWorldRoad(rollingRouteFrom(streets, frame, ways, heights), {
           at: (position) => {
             reader.moveTo(position);
             heights?.moveTo(position);

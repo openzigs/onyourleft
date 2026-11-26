@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -22,6 +22,7 @@ import { build, defineConfig, type Plugin } from 'vite';
 
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
 import { lazyViewsStayLazy } from './tools/bundle/entry-graph';
+import { captureOutDir, captureStaysOut } from './tools/capture/capture-stays-out';
 import { demoStaysOut } from './tools/demo/demo-stays-out';
 import { levelSizes } from './tools/delivery-levels/level-sizes';
 import { onlyImportedIcons } from './tools/bundle/icon-modules';
@@ -35,6 +36,12 @@ import { cacheVersion, precacheEntries, type PrecacheFile } from './tools/precac
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIRECTORY = join(ROOT, 'public');
 const OUT_DIRECTORY = join(ROOT, 'dist');
+/**
+ * #3153: where the capture tool's build goes (`captureOutDir`), never `dist`:
+ * under `capture/dist`, so `.gitignore`'s `dist/` and every check's `dist`
+ * prune (`scripts/check-repo-rules.sh` §`GENERATED`) cover it.
+ */
+const CAPTURE_OUT_DIRECTORY = join(ROOT, 'capture', 'dist', 'app');
 const WORKER_ENTRY = join(ROOT, 'src/offline/sw.ts');
 
 function sha256(input: string | Uint8Array): string {
@@ -90,8 +97,13 @@ function publicFiles(directory: string, prefix = ''): PrecacheFile[] {
  */
 function serviceWorker(): Plugin {
   let files: PrecacheFile[] = [];
+  // #3153: the build's own, which the capture tool's build moves out of `dist`.
+  let outDir = OUT_DIRECTORY;
   return {
     name: 'oyl-service-worker',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
     // Only in a build. `vite dev` serves modules that do not exist on disk, so
     // there is nothing coherent for a precache to name — and a worker holding a
     // dev server's transformed modules is a debugging experience nobody wants.
@@ -130,7 +142,7 @@ function serviceWorker(): Plugin {
           __OYL_CACHE_VERSION__: JSON.stringify(version),
         },
         build: {
-          outDir: OUT_DIRECTORY,
+          outDir,
           // ⚠️ The application's own output is already there.
           emptyOutDir: false,
           copyPublicDir: false,
@@ -155,14 +167,18 @@ function serviceWorker(): Plugin {
       // yet measured".
       console.log(
         `oyl-service-worker: precaching ${String(entries.length)} files, ` +
-          `${(byteSize(files, entries) / 1024 / 1024).toFixed(2)} MiB, as ${version}`,
+          `${(byteSize(outDir, files, entries) / 1024 / 1024).toFixed(2)} MiB, as ${version}`,
       );
     },
   };
 }
 
 /** How much a first visit downloads because of the precache. ADR 0024 §Consequences. */
-function byteSize(files: readonly PrecacheFile[], entries: readonly string[]): number {
+function byteSize(
+  outDir: string,
+  files: readonly PrecacheFile[],
+  entries: readonly string[],
+): number {
   const wanted = new Set(entries);
   let total = 0;
   for (const file of files) {
@@ -170,7 +186,7 @@ function byteSize(files: readonly PrecacheFile[], entries: readonly string[]): n
       continue;
     }
     try {
-      total += statSync(join(OUT_DIRECTORY, ...file.name.split('/'))).size;
+      total += statSync(join(outDir, ...file.name.split('/'))).size;
     } catch {
       // A file this plugin saw in the bundle but cannot stat is one Vite has
       // not written yet. Reporting a smaller number is better than failing a
@@ -206,6 +222,10 @@ export default defineConfig({
     onlyImportedIcons(),
     // #1645: nothing of the demo (`vite.demo.config.ts`) is in what riders download.
     demoStaysOut(ROOT),
+    // PR #3160's review: no capture scene in a build not made by `pnpm run capture`.
+    captureStaysOut(),
+    // #3153: and the capture tool's build is never written to `dist`, Capacitor's `webDir`.
+    captureOutDir(CAPTURE_OUT_DIRECTORY),
     // #2361, ADR 0065 D-3.2: no built-in Delivery level over 2 MiB, and not 8 MiB of them.
     levelSizes(join(ROOT, 'src/game/delivery/levels/data')),
   ],

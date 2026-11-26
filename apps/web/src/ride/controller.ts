@@ -79,6 +79,7 @@ import {
   type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
+  type GeographicPosition,
   type ThresholdTest,
   type TimeInZones,
   type UnixSeconds,
@@ -1345,9 +1346,9 @@ export interface RideController {
   /**
    * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept for the
    * recording in progress, so the saved ride carries the pacer's decision
-   * log (`RideFacts.pacerModel`). A record asked earlier than the last one
-   * kept begins a new game ride's log, which replaces it: a recording keeps
-   * its LAST directed game ride's log. Ignored unless a ride is recording or
+   * log (`RideFacts.pacerModel`). A record whose `ride.gameRide` is not the
+   * last one kept begins a new game ride's log, which replaces it (#2727): a
+   * recording keeps its LAST directed game ride's log. Ignored unless a ride is recording or
    * paused. A closed-list record and no text. Decides no write to the trainer.
    *
    * `ride` (#2712's review) is what the log replays with beside it: the
@@ -1357,6 +1358,18 @@ export interface RideController {
    * frame's, so the recording's clock less those is the ride's start.
    */
   notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /**
+   * Where the rider is on an open-world ride's street — #3059, the owner's
+   * ruling of 2026-11-22 that an open-world ride saves its track. Recorded as
+   * the `latitude` and `longitude` channels on every frame, the recording
+   * keeping the last in each of its slots, and only while a ride is
+   * recording: the saved ride
+   * then has a position like any recorded track, private by default
+   * (`putActivity`, ADR 0004) and trimmed by the rider's zones wherever it is
+   * shared (`detail/load.ts` §`loadSharedTrack`). Paused, idle or stopped, it
+   * is ignored. Decides no write to the trainer.
+   */
+  notePosition(position: GeographicPosition): void;
   /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
@@ -1384,6 +1397,14 @@ export interface RideController {
    * in progress it is saved with nothing, for {@link noteRoomRace}'s reason.
    */
   noteLapRace(race: LapRaceModelRecord): void;
+  /**
+   * The game is riding the open world — #3088, the owner's ruling of
+   * 2026-11-25: told on every frame of an open-world ride. Marks the
+   * recording in progress (`Recorder.noteOpenWorld`), so the saved ride
+   * carries `RideFacts.openWorld` and is matched against no segment. Ignored
+   * unless a ride is recording or paused. Decides no write to the trainer.
+   */
+  noteOpenWorld(): void;
   /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
@@ -3509,6 +3530,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       ...(draft === undefined ? {} : { draft }),
       // #2712: and of its AI pacer. A recovered ride passes none.
       ...(pacerModel === undefined ? {} : { pacerModel }),
+      // #3088: the recorder's own, so a recovered ride keeps it by this path.
+      ...(current.openWorld ? { openWorld: true } : {}),
     });
   };
 
@@ -4573,8 +4596,10 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void {
       if (phase !== 'recording' && phase !== 'paused') return;
-      const last = pacerDecisions.at(-1);
-      if (last !== undefined && record.askedAtS < last.askedAtS) {
+      // #2727: a new directed game ride is told apart by the number it hands,
+      // never by its ask clock — a second ride whose first ask is at the
+      // first's last would otherwise be appended to it.
+      if (pacerRide !== undefined && ride.gameRide !== pacerRide.gameRide) {
         pacerDecisions = [];
         pacerRide = undefined;
       }
@@ -4590,6 +4615,18 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : unixSeconds(Math.max(0, clock - record.arrivedAtS)));
       pacerRide = { ...ride, startedAt };
+    },
+
+    notePosition(position: GeographicPosition): void {
+      // Idle, paused or stopped, the recording engine refuses the reading itself.
+      if (recorder === undefined) return;
+      const at = now();
+      // Every frame goes in: the session keeps the last reading in each slot.
+      // A once-a-second throttle keyed on the wall-clock second left slots
+      // empty, because a slot starts at the ride's own fractional start, and
+      // an empty slot splits the track (#3059).
+      recorder.observeReading({ channel: 'latitude', value: position.latitude, at });
+      recorder.observeReading({ channel: 'longitude', value: position.longitude, at });
     },
 
     async recordForRoom(): Promise<boolean> {
@@ -4612,6 +4649,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     noteLapRace(race: LapRaceModelRecord): void {
       // No phase check, for `noteRoomRace`'s reason.
       recorder?.noteLapRace(race);
+    },
+
+    noteOpenWorld(): void {
+      // #3088. A phase check, unlike `noteRoomRace`: a stopped recorder's ride
+      // is saved or being saved, and a mark landing after its save read the
+      // recorder would rewrite the stopped checkpoint for nothing. Idle, there
+      // is no recorder.
+      if (phase !== 'recording' && phase !== 'paused') return;
+      recorder?.noteOpenWorld();
     },
 
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
@@ -5605,7 +5651,14 @@ export function createRideController(options: RideControllerOptions): RideContro
  * review: what its log replays with (`@onyourleft/store` §`PacerModelFact`)
  * but the start, which the controller works out on the recording's clock.
  */
-export type PacerRideFacts = Omit<PacerModelFact, 'version' | 'decisions' | 'startedAt'>;
+export type PacerRideFacts = Omit<PacerModelFact, 'version' | 'decisions' | 'startedAt'> & {
+  /**
+   * Which directed game ride this is — #2727: a number no other directed
+   * game ride in the page has had, the same on every record of one. A record
+   * with another begins a new ride's log. Never saved: the log is one ride's.
+   */
+  readonly gameRide: number;
+};
 
 /**
  * The pacer's log as it is saved, or `undefined`: none for a ride with no

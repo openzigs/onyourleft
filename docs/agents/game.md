@@ -2633,6 +2633,57 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PreviewControl`): a power and a 1–8× speed-up, ridden
                         on a NEW screen `GameView` mounts with none of those
                         ports; ending it mounts an ordinary picker again.
+                        Since #3210 (owner ruling 2026-11-25) it invents a
+                        cadence and heart rate, live and paired, so the HUD
+                        shows both and the legs turn (`&cadence=`, `&hr=`
+                        fix them); they reach no recording, by the same
+                        absent ports.
+    src/game/simulated-body.ts
+                        the invented cadence and heart rate (#3210): ~86–94
+                        rpm on the flat, 70–80 on a steep climb, a spin-up on
+                        a surge, nought within 2 s of no power; heart rate
+                        from 70 bpm at rest, lagging power by tens of seconds
+                        and settling a step up in 2–3 min (#3215) towards the
+                        rider's own thresholds (else 250 W / 170
+                        bpm). Seeded wobble, no jumps; `simulated-body.test.ts`
+                        pins the curves.
+    src/game/capture-scene.ts
+                        capture mode (#3152): `#/game?capture=<scene>` is a
+                        simulated ride whose power, cadence and heart rate
+                        follow a scene's script, with no simulated mark on the
+                        HUD, for `tools/capture/`'s frame-stepped 1080p60
+                        render of the real app. The same absent ports as the
+                        simulated rider; `capture-wiring.test.tsx` holds the
+                        stepped clock. Read only in a `--mode capture` build;
+                        `tools/capture/capture-stays-out.ts` fails a product
+                        build that carries a scene (found by the id mark
+                        `oyl-capture-scene:`, #3153). #3153's scenes: Delivery
+                        on a built-in level, a lap race on a built-in circuit,
+                        a workout and the pacer — a seed only a scene sets,
+                        scripted presses (`CaptureCues`), an event log the
+                        tool writes beside the video (`CaptureLog`), and an
+                        in-memory store (`captureStorage`) so no rider data is
+                        read or written. `capture-modes-wiring.test.tsx`.
+                        `docs/demo-video.md` §"Capture mode"
+    src/game/capture-recording.ts
+                        a capture ride's Moving, Elapsed, ride-so-far and
+                        Calories, folded in memory by `recording/totals.ts`
+                        §`rideTotals` from the readings it rode, never stored;
+                        and its laps over a course's line (#3153)
+    src/game/capture-free-ride.ts
+                        a free-ride capture (#3154): the command's start, read
+                        from `start=` in a capture build only, and the
+                        placeholder street names a capture shows every street
+                        by — handed to the open-world session's one source of
+                        names (`session.ts` §`renamedStreets`,
+                        `ride.ts` §`OpenWorldSessionExtras`), so the road's
+                        painted names and the junction prompt both read them.
+                        `capture-free-ride-wiring.test.tsx`
+    src/game/capture-workout.ts
+                        a capture's workout (#3153): the Ride screen's built-in
+                        address, tailored and expanded as a rider's is, held at
+                        its ERG target on the ride's clock and drawn by
+                        `WorkoutStrip`. Writes to nothing
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists

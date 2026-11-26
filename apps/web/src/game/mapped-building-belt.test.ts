@@ -38,6 +38,7 @@ import {
   type FootprintRole,
 } from './footprint-buildings';
 import {
+  MIXED_TOWN_EDGE_RUNG,
   mixedTownFixture,
   richmondStreetFixture,
   rowTownFixture,
@@ -829,12 +830,8 @@ describe('the procedural structures and the mapped buildings, ranked together â€
     });
   }
 
-  /**
-   * #3132: a refill at a rung of this many structures. The frame's lots stood
-   * on the mapped buildings' plots and filled the realistic rung's 36 with
-   * them; off those plots, the frame's structures fill a rung of this.
-   */
-  const RUNG = 12;
+  /** #3132: a refill at a rung of this many structures, which the frame's fill. */
+  const RUNG = MIXED_TOWN_EDGE_RUNG;
 
   it('draws the townâ€™s nearest buildings at its edge, the fields beyond filling every structure slot', () => {
     const frame = mixedFrame(1_750);

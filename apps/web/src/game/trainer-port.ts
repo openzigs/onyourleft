@@ -79,6 +79,7 @@
  */
 
 import type {
+  GeographicPosition,
   LapRaceModelRecord,
   PacerDecisionRecord,
   TimeInZones,
@@ -391,6 +392,18 @@ export interface GameTrainerPort {
    */
   pacerDecided?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
+   * Where the rider is on an open-world ride's street, on every frame —
+   * #3059, the owner's ruling of 2026-11-22: kept by the ride controller
+   * (`notePosition`) as the recording's position, so the saved ride shows
+   * the streets actually ridden in History's map and its exports, private by
+   * default and trimmed by zones where shared (ADR 0004, ADR 0090 R-4). ⚠️ Not
+   * about the trainer, which no position reaches: on this port for
+   * {@link gameRideEnded}'s reason, and named so nothing else in production
+   * calls a method of that name. Optional, as {@link soloDraftStepped} is;
+   * `gameTrainerPortOver` always supplies it.
+   */
+  rodeAt?(position: GeographicPosition): void;
+  /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
    * ride controller's `recordForRoom`). Answers whether a recording is
@@ -445,6 +458,18 @@ export interface GameTrainerPort {
    * a trainer command, and this port writes it to no trainer.
    */
   lapRaceEnded?(race: LapRaceModelRecord): void;
+  /**
+   * This frame was ridden in the open world — #3088, the owner's ruling of
+   * 2026-11-25: told on every frame of an open-world ride, so the recording
+   * under it is marked (the ride controller's `noteOpenWorld`) and the saved
+   * ride is matched against no segment. Every frame rather than once, so a
+   * recording started part-way through the ride is marked too. ⚠️ Not about
+   * the trainer: it carries nothing, on this port for {@link gameRideEnded}'s
+   * reason, and named so nothing else in production calls a method of that
+   * name. Optional, as {@link soloDraftStepped} is; `gameTrainerPortOver`
+   * always supplies it.
+   */
+  rodeOpenWorld?(): void;
   /**
    * Whether the recording under this ride is PAUSED by the rider — #1360's
    * review (N1): the game says so while it rides in a room, and resumes
@@ -698,6 +723,8 @@ interface GameTrainerSource {
   noteSoloDraft?(reading: SoloDraftState): void;
   /** #2712. @see GameTrainerPort.pacerDecided. Optional for a source with no recording. */
   notePacerDecision?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /** #3059. @see GameTrainerPort.rodeAt. Optional for a source with no recording. */
+  notePosition?(position: GeographicPosition): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -707,6 +734,8 @@ interface GameTrainerSource {
   noteRoomRace?(race: RoomRaceFact): void;
   /** #2710. @see GameTrainerPort.lapRaceEnded */
   noteLapRace?(race: LapRaceModelRecord): void;
+  /** #3088. @see GameTrainerPort.rodeOpenWorld. Optional for a source with no recording. */
+  noteOpenWorld?(): void;
   /**
    * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
    * Optional for {@link recordForRoom}'s reason; the ride controller has both.
@@ -872,6 +901,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     pacerDecided: (record, ride) => {
       controller?.notePacerDecision?.(record, ride);
     },
+    rodeAt: (position) => {
+      controller?.notePosition?.(position);
+    },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide
     ...(recordFor === undefined ? {} : { recordGameRide: () => recordFor() }),
@@ -882,6 +914,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
+    },
+    rodeOpenWorld: () => {
+      controller?.noteOpenWorld?.();
     },
     lapRaceEnded: (race) => {
       controller?.noteLapRace?.(race);

@@ -21,6 +21,7 @@ import {
   positionAt,
   watts,
   seconds,
+  type GeographicPosition,
   type RollingEdge,
 } from '@onyourleft/domain';
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
@@ -169,6 +170,27 @@ describe('the open-world road past its first view — #2982', () => {
     expect(road.follow(Number.NaN)).toBeUndefined();
     expect(road.follow(Number.POSITIVE_INFINITY)).toBeUndefined();
     expect(road.view).toBe(first);
+  });
+
+  it('keeps where the rider is on the street as of the last follow, as the session is told — #3059', () => {
+    const told: GeographicPosition[] = [];
+    const { graph, edges } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+    const road = new OpenWorldRoad(
+      new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge),
+      { at: (position) => told.push(position) },
+    );
+    expect(road.position).toBeUndefined();
+    road.follow(250);
+    expect(road.position).toEqual(positionAt(road.view.profile, metres(250)));
+    road.follow(400);
+    expect(road.position).toEqual(positionAt(road.view.profile, metres(400)));
+    expect(told).toEqual([
+      positionAt(road.view.profile, metres(250)),
+      positionAt(road.view.profile, metres(400)),
+    ]);
+    // A distance that places nobody leaves the last place as it was.
+    road.follow(Number.NaN);
+    expect(road.position).toEqual(positionAt(road.view.profile, metres(400)));
   });
 });
 

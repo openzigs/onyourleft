@@ -344,6 +344,58 @@ describe('an open-world ride past its first view — #2982', () => {
   });
 });
 
+describe('an open-world ride hands the recording the streets ridden — #3059', () => {
+  it('tells the recording under the ride where the rider is on every frame, where the scene drew them', async () => {
+    // What the recording was told, with how many frames the scene had drawn by then.
+    const told: { readonly position: GeographicPosition; readonly frame: number }[] = [];
+    const base = trainer([]);
+    const recording = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { paired: true, controllable: true, canSimulate: true, hasControl: true },
+        workout: undefined,
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+      notePosition: (position) => {
+        told.push({ position, frame: inputs.length });
+      },
+    });
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={{
+          ...base,
+          rodeAt: (position) => {
+            recording.rodeAt?.(position);
+          },
+        }}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 60; frames += 1) await pump();
+
+    expect(told.length).toBeGreaterThan(40);
+    // Each is where the scene drew the rider on the frame it was told on: the
+    // street ridden, not the start, nor a point ahead on the view.
+    let compared = 0;
+    for (const { position, frame } of told) {
+      const drawn = inputs[frame];
+      if (drawn === undefined) continue;
+      compared += 1;
+      expect(distanceBetween(position, placeOf(drawn)), `frame ${frame}`).toBeLessThan(0.5);
+    }
+    expect(compared).toBeGreaterThan(40);
+    const first = told[0]?.position as GeographicPosition;
+    const last = told.at(-1)?.position as GeographicPosition;
+    expect(distanceBetween(first, last)).toBeGreaterThan(500);
+  });
+});
+
 /** A previous attempt, ahead of the rider: drawn as a ghost wherever one is loaded. */
 const OWN_GHOST: GhostTrack = buildGhostTrack({
   elapsedSeconds: [0, 60],
@@ -631,6 +683,66 @@ describe('an open-world ride is ridden alone — #2982', () => {
   });
 });
 
+describe('an open-world ride marks the recording under it — #3088, the owner’s ruling of 2026-11-25', () => {
+  /** A trainer port over a source that counts each mark the game hands its recording. */
+  function marking(marks: { count: number }): GameTrainerPort {
+    const facts = { paired: true, controllable: true, canSimulate: true, hasControl: true };
+    return gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: facts, workout: undefined }),
+      simulationControl: () => ({
+        setSimulationParameters: () => Promise.resolve(),
+        letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+      }),
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      noteOpenWorld: () => {
+        marks.count += 1;
+      },
+      subscribe: () => () => undefined,
+    });
+  }
+
+  it('on every frame ridden, through the product’s own trainer port', async () => {
+    const marks = { count: 0 };
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    expect(marks.count).toBe(0);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBeGreaterThanOrEqual(inputs.length);
+  });
+
+  it('and never on a saved route’s ride', async () => {
+    const marks = { count: 0 };
+    const loop = squareLoop();
+    mounted = await mount(
+      <GameView
+        port={{ ...port(), listRoutes: () => Promise.resolve([loop]) }}
+        trainer={marking(marks)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(cardRadio(loop.name));
+    expect(rideButton()?.textContent).toBe(`Ride ${loop.name}`);
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(marks.count).toBe(0);
+  });
+});
+
 describe('an open-world road with real heights — #2899', () => {
   /** How far east of the grid's corner a place is, in metres. */
   const eastOf = (place: GeographicPosition): number =>
@@ -639,10 +751,14 @@ describe('an open-world road with real heights — #2899', () => {
   /**
    * The grid, its heights read from a source that knows a steady 6 % climb for
    * the first 600 m east and nothing past it: a height tile that is not held.
+   * It ends 1,050 m east (#3167): out to 2,450 m and back, the ride home took
+   * 105 of the case's 137 frames, and the case ran 5.0 s in the nightly's
+   * coverage half on CI. The ride to flat is the same 32 frames on either
+   * grid, and the ride home is 38.
    */
   function roadIntoTheUnknown(): OpenWorldRoad {
     const { graph, edges } = gridGraph(
-      [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450],
+      [0, 180, 410, 600, 870, 1_050],
       [0, 230, 400, 650, 820, 1_090, 1_280, 1_510],
       roughGround,
       3,
@@ -695,7 +811,7 @@ describe('an open-world road with real heights — #2899', () => {
     // ADR 0087 D-6.4: the start of the ride is walked too. The road's grade
     // under the start is some 3 %, and the first write is one step from 0 %.
     expect(Math.abs(grades[0] ?? Number.NaN)).toBeLessThanOrEqual(1.0001);
-    // The grid ends 2.4 km east, where the route turns round: riding back
+    // The grid ends 1,050 m east, where the route turns round: riding back
     // onto ground whose heights are known, the notice goes.
     for (
       let frames = 0;

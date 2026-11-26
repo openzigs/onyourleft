@@ -45,6 +45,7 @@ import {
   unixSeconds,
   watts,
   type CalorieRider,
+  type GeographicPosition,
   type RouteProfile,
   type UnixSeconds,
   type Watts,
@@ -93,6 +94,7 @@ import {
   activityId,
   cameraFrameId,
   lapId,
+  privacyZoneId,
   RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
   workoutId,
@@ -185,6 +187,7 @@ import { lapSplits } from '../game/hud/lap-splits';
 import { CALORIES_KEY, hudReadings } from '../game/hud/fields';
 import { atStartLine } from '../game/simulation';
 import { caloriesValue } from '../detail/CaloriesFact';
+import { loadOwnTrack, loadSharedTrack } from '../detail/load';
 import type { RideTotals } from '../recording/totals';
 import { formatDuration } from '../format';
 import { createGradientSession } from '../game/gradient';
@@ -316,6 +319,8 @@ interface BenchOptions {
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   /** #1240: the simulated rider, and a heart rate that answers to load. */
   readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate' | 'startAt' | 'traits'>;
+  /** #3059: seconds added to the controller's clock, for a frame between the bench's whole seconds. */
+  readonly frameOffset?: () => number;
   /** #1305: the device's memory of acknowledged targets, as `main.tsx` hands it over. */
   readonly trainerTargets?: TrainerTargetMemory | undefined;
   /** #1244: the rider's instance, goals and saved workouts, as `main.tsx` hands them over. */
@@ -588,7 +593,7 @@ function benchWith(options: BenchOptions = {}): Bench {
       sessionIds.push(id);
       return id;
     },
-    now: () => bench.now,
+    now: () => unixSeconds(bench.now + (options.frameOffset?.() ?? 0)),
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
     ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
     ...(options.presence === undefined ? {} : { presence: options.presence }),
@@ -10376,16 +10381,24 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
 
 /** What a directed game ride hands beside each record — #2712's review. */
 const PACER_RIDE: PacerRideFacts = {
+  gameRide: 1,
   pacerWPerKg: 2.9,
   routeId: 'route-rolling',
   position: 'hoods',
 };
 const WINDY_RIDE: PacerRideFacts = {
+  gameRide: 2,
   pacerWPerKg: 3.4,
   routeId: 'route-hilly',
   position: 'drops',
   wind: wind(4.5, 270),
 };
+
+/** A ride's facts as its saved log carries them: all but which game ride it was (#2727). */
+function savedFacts(ride: PacerRideFacts): Omit<PacerRideFacts, 'gameRide'> {
+  const { pacerWPerKg, routeId, position, wind } = ride;
+  return { pacerWPerKg, routeId, position, ...(wind === undefined ? {} : { wind }) };
+}
 
 describe('#1042 — the saved ride the result card states, and the game’s outcome it carries', () => {
   it('states the activity the save WROTE, and nothing for a save that failed', async () => {
@@ -10646,6 +10659,137 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
   });
 
+  it('saves an open-world ride’s streets as its track: in History’s map, trimmed by a zone when shared, and in the GPX — #3059', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    if (game.rodeAt === undefined) throw new Error('the game port carries no rodeAt');
+    // Due north from a home, 100 m a second: the distance from home is the
+    // latitude alone, so which points a 250 m zone withholds is stated here.
+    const home = geographicPosition(degreesLatitude(51.5074), degreesLongitude(-0.1278));
+    const north = (metresNorth: number) =>
+      geographicPosition(
+        degreesLatitude(home.latitude + metresNorth / 111_194.93),
+        degreesLongitude(home.longitude),
+      );
+    await rig.controller.pair('trainer');
+    // Before the recording: not kept.
+    game.rodeAt(north(-5_000));
+    await rig.controller.start();
+    const ridden = Array.from({ length: 8 }, (_unused, index) => north(index * 100));
+    for (const position of ridden) {
+      // An earlier frame in the same second is overwritten by the later one.
+      game.rodeAt(north(-9_000));
+      game.rodeAt(position);
+      await ride(rig, 1);
+    }
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    if (saved === undefined) throw new Error('the ride was not saved');
+    // The store keeps a coordinate to about a millimetre, not to the last bit.
+    const expectStreets = (
+      seen: readonly GeographicPosition[] | undefined,
+      streets: readonly GeographicPosition[],
+    ): void => {
+      expect(seen).toHaveLength(streets.length);
+      streets.forEach((street, index) => {
+        expect(seen?.[index]?.latitude).toBeCloseTo(street.latitude, 7);
+        expect(seen?.[index]?.longitude).toBeCloseTo(street.longitude, 7);
+      });
+    };
+
+    const read = await harness.read(async (store) => ({
+      activity: await store.getActivity(ATHLETE_A, saved),
+      own: await loadOwnTrack({ athleteId: ATHLETE_A, store }, saved),
+    }));
+    expect(read.activity?.hasPosition).toBe(true);
+    // ADR 0004: private by default, like any recorded ride.
+    expect(read.activity?.visibility).toBe('private');
+    // History's map: the rider's own track, every street ridden and nothing else.
+    expectStreets(
+      read.own?.segments.flatMap((segment) => segment.points.map((p) => p.position)),
+      ridden,
+    );
+
+    // Shared, a zone round home withholds what lies in it (ADR 0004 B, ADR 0090 R-4).
+    await harness.write(async (store) =>
+      store.putPrivacyZone({
+        id: privacyZoneId('home'),
+        athleteId: ATHLETE_A,
+        centre: home,
+        radius: metres(250),
+        label: 'home',
+        createdAt: unixSeconds(1),
+      }),
+    );
+    const shared = await harness.read(async (store) =>
+      loadSharedTrack({ athleteId: ATHLETE_A, store }, saved),
+    );
+    const kept = shared?.segments.flatMap((segment) => segment.points.map((p) => p.position));
+    expectStreets(kept, ridden.slice(3));
+    expect(shared?.trimmedPoints).toBe(3);
+
+    // The GPX export carries the same streets, a point for each.
+    const gpx = new TextDecoder().decode(
+      (
+        await harness.read(async (store) =>
+          exportActivity({ store, athleteId: ATHLETE_A, activityId: saved, format: 'gpx' }),
+        )
+      ).file.bytes,
+    );
+    const points = [...gpx.matchAll(/<trkpt lat="([-\d.]+)" lon="([-\d.]+)"/gu)];
+    expect(points).toHaveLength(ridden.length);
+    points.forEach((point, index) => {
+      expect(Number(point[1])).toBeCloseTo(ridden[index]!.latitude, 6);
+      expect(Number(point[2])).toBeCloseTo(ridden[index]!.longitude, 6);
+    });
+    rig.controller.dispose();
+  });
+
+  it('leaves no slot of an open-world track empty when the ride starts on a fractional second and frames jitter — #3059', async () => {
+    // In production the clock is `Date.now() / 1000`, so a ride starts part way
+    // through a second and every slot straddles two wall-clock seconds. Here
+    // the slots start a tenth past each whole second, and the first frame of
+    // each wall-clock second lands either side of that boundary in turn.
+    let offset = 0;
+    const rig = benchWith({
+      rideSave: storeSavePort(),
+      simulator: { startAt: unixSeconds(1_800_000_000.1) },
+      frameOffset: () => offset,
+    });
+    const game = gameTrainerPortOver(rig.controller);
+    if (game.rodeAt === undefined) throw new Error('the game port carries no rodeAt');
+    const at = (step: number) =>
+      geographicPosition(degreesLatitude(51.5 + step / 10_000), degreesLongitude(-0.1));
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    const ridden = 8;
+    for (let second = 1; second <= ridden; second += 1) {
+      await ride(rig, 1);
+      // The bench reads 1_800_000_000.1 + second. A frame 0.05 s past the
+      // whole second is still in the slot before; one 0.15 s past is in this one.
+      offset = second % 2 === 1 ? -0.05 : 0.05;
+      game.rodeAt(at(second * 10));
+      // Later frames in the same wall-clock second, in this slot.
+      offset = 0.3;
+      game.rodeAt(at(second * 10 + 1));
+      offset = 0.5;
+      game.rodeAt(at(second * 10 + 2));
+      offset = 0;
+    }
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    if (saved === undefined) throw new Error('the ride was not saved');
+    const own = await harness.read(async (store) =>
+      loadOwnTrack({ athleteId: ATHLETE_A, store }, saved),
+    );
+    // One unbroken track, a point for every slot from the first to the last.
+    expect(own?.segments).toHaveLength(1);
+    expect(own?.segments[0]?.points).toHaveLength(ridden + 1);
+    rig.controller.dispose();
+  });
+
   it('saves whether the ride was drafted, and when, read back from the store — #2451, ADR 0066 D-5.3', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');
@@ -10715,7 +10859,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(read?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [applied, { askedAtS: 10, arrivedAtS: 16, outcome: 'late' }],
-      ...PACER_RIDE,
+      ...savedFacts(PACER_RIDE),
       startedAt: read!.startedAt + 2 - 6.5,
     });
 
@@ -10739,7 +10883,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(after?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'refused' }],
-      ...WINDY_RIDE,
+      ...savedFacts(WINDY_RIDE),
       startedAt: after!.startedAt + 1 - 1,
     });
 
@@ -10752,6 +10896,41 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     const plain = rig.controller.getSnapshot().savedRide?.activityId;
     const none = await harness.read(async (store) => store.getActivity(ATHLETE_A, plain!));
     expect(none?.rideFacts?.pacerModel).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('keeps the last directed ride’s log alone when its first ask is at the last ride’s last — #2727', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }, PACER_RIDE);
+    rig.controller.notePacerDecision(
+      { askedAtS: 30, arrivedAtS: 31, outcome: 'invalid' },
+      PACER_RIDE,
+    );
+    await ride(rig, 4);
+    // A second directed game ride in the same recording, four seconds on,
+    // whose first ask is at exactly the first ride's last: no clock going
+    // backwards says it is another ride; only the number it hands does.
+    const second = { askedAtS: 30, arrivedAtS: 32, outcome: 'refused' } as const;
+    const later = { askedAtS: 60, arrivedAtS: 61, outcome: 'late' } as const;
+    rig.controller.notePacerDecision(second, WINDY_RIDE);
+    rig.controller.notePacerDecision(later, WINDY_RIDE);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    // The second ride's records, route, position and wind alone, placed at
+    // ITS start: five seconds into the recording, less the 32 s ridden its
+    // first record arrived at, and never the first ride's start.
+    expect(read?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [second, later],
+      ...savedFacts(WINDY_RIDE),
+      startedAt: read!.startedAt + 5 - 32,
+    });
     rig.controller.dispose();
   });
 
@@ -10769,7 +10948,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(first?.rideFacts?.pacerModel).toStrictEqual({
       version: MODEL_PACER_CODE_VERSION,
       decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }],
-      ...PACER_RIDE,
+      ...savedFacts(PACER_RIDE),
       startedAt: first!.startedAt + 3 - 1,
     });
 
@@ -14577,5 +14756,81 @@ describe('#2077 — the HUD’s time in each power zone is the saved ride’s', 
     expect(saved.covered - (riding?.covered ?? Number.NaN)).toBeGreaterThanOrEqual(0);
     expect(atTheEnd?.perZone[1]).toBeGreaterThan(0);
     rig.controller.dispose();
+  });
+});
+
+describe('an open-world ride is saved marked, so it is matched against no segment — #3088', () => {
+  it('saves the mark the game’s own port gave, read back through the store, and the next ride carries none', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    // Told on every frame of an open-world ride.
+    game.rodeOpenWorld?.();
+    game.rodeOpenWorld?.();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(saved).toBeDefined();
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.openWorld).toBe(true);
+
+    // The next ride is ridden on a route, and must not inherit the mark.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(next).not.toBe(saved);
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.id).toBe(next);
+    expect(after?.rideFacts?.openWorld).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('writes no checkpoint for a frame of the open world after the ride is saved', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.activityId).toBeDefined();
+    // Stopped and saved: the checkpoint is gone, and a frame now must not
+    // write its header back, which would offer a saved ride to recover.
+    game.rodeOpenWorld?.();
+    await ride(rig, 1);
+    rig.controller.dispose();
+    const next = benchWith({ rideSave: storeSavePort() });
+    await next.controller.refreshRecoverable();
+    expect(next.controller.getSnapshot().recoverable).toStrictEqual([]);
+    next.controller.dispose();
+  });
+
+  it('saves a ride the app closed on before Stop with the mark it was recovered with', async () => {
+    const rig = benchWith();
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    game.rodeOpenWorld?.();
+    await ride(rig, 6);
+    rig.controller.dispose();
+    const id = rig.sessionIds[0];
+    if (id === undefined) throw new Error('no recording was started');
+
+    const next = benchWith({ rideSave: storeSavePort() });
+    await next.controller.refreshRecoverable();
+    expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+    expect(await next.controller.saveRecovered(id)).toBe('saved');
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.rideFacts?.openWorld).toBe(true);
+    next.controller.dispose();
   });
 });

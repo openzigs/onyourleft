@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "A free, open alternative to Strava + Zwift for cycling \u2014 workspace root.",
+  "description": "Free, open-source indoor and outdoor cycling \u2014 workspace root.",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=26 <27",

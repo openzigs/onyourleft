@@ -1312,6 +1312,20 @@ describe('TransferView — what it may say about another platform', () => {
     );
   });
 
+  it("keeps the README's non-affiliation sentence the same as the one on the screen (ADR 0009 R3 point 4)", async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    const text = document.body.textContent ?? '';
+    const readme = readFileSync(join(import.meta.dirname, '../../../../README.md'), 'utf8').replace(
+      /\s+/g,
+      ' ',
+    );
+    const sentence = 'not affiliated with, endorsed by, or derived from Strava or Zwift.';
+
+    expect(readme).toContain(sentence);
+    expect(text).toContain(sentence);
+  });
+
   it('offers nothing that claims a connection to another platform, and links to the ADR', async () => {
     const port = await openPort();
     mounted = await mount(<TransferView port={port} />);

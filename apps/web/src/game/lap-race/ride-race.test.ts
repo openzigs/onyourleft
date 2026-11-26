@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
-import { seededRiderBody } from '../rider-body';
+import { botSkinFor, seededRiderBody } from '../rider-body';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import {
   botArchetype,
@@ -82,6 +82,50 @@ function started(): LapRaceRide {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('the race’s seed — #3153', () => {
+  /** A seeded race on the loop, from `seed` when one is given. */
+  const seeded = (seed: number | undefined): LapRaceRide => {
+    const ride = startLapRaceRide({
+      choice: DEFAULT_LAP_RACE,
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      seed,
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  };
+  const drawing = (value: number) =>
+    vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = value;
+        return array;
+      });
+
+  it('is drawn from crypto at the press when none is given — every rider’s race', () => {
+    const draw = drawing(91);
+    expect(seeded(undefined).seed).toBe(91);
+    expect(draw).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a capture’s own when given, with nothing drawn, and the same field twice', () => {
+    const draw = drawing(91);
+    const first = seeded(3_153);
+    const second = seeded(3_153);
+    expect(first.seed).toBe(3_153);
+    expect(draw).not.toHaveBeenCalled();
+    expect(second.names).toEqual(first.names);
+    expect(second.bots).toEqual(first.bots);
+    expect(seeded(3_154).names).not.toEqual(first.names);
+  });
 });
 
 describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0076)', () => {
@@ -407,6 +451,27 @@ describe('a race counts down on its line before Go — #2546', () => {
       expect(flipped).toHaveLength(bodiesOf(ride).length);
       flipped.forEach((body, index) => expect(body).not.toBe(bodiesOf(ride)[index]));
     });
+  });
+
+  it('#3214 — draws each bot in the skin tone its id gives it, the same as the race is ridden', () => {
+    let ride = started();
+    const tones = (): (number | undefined)[] =>
+      lapRaceDrawing(ride, 0, 0, false).raceBots.map((bot) => bot.skin);
+    const expected = ride.race.racers
+      .filter((entry) => ride.bots.some((bot) => bot.id === entry.racer.id))
+      .map((entry) => botSkinFor(entry.racer.id));
+    expect(tones()).toEqual(expected);
+    // Not one shade for the whole field.
+    expect(new Set(tones()).size).toBeGreaterThan(1);
+    const byId = new Map(ride.bots.map((bot) => [bot.id, botSkinFor(bot.id)]));
+    for (let tick = 0; tick < 20; tick += 1) {
+      ride = stepLapRaceRide(ride, { ticks: 1, along: 0.01 * (tick + 1) });
+      const drawn = lapRaceDrawing(ride, 0, 0, false).raceBots;
+      const order = ride.race.racers.filter((entry) => byId.has(entry.racer.id));
+      drawn.forEach((bot, index) =>
+        expect(bot.skin, String(tick)).toBe(byId.get(order[index]?.racer.id ?? '')),
+      );
+    }
   });
 });
 

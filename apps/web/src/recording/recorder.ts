@@ -322,6 +322,24 @@ export interface Recorder {
    * rather than refusing it.
    */
   noteReplans(records: readonly ReplanRecord[]): void;
+  /**
+   * Whether some of this recording was ridden in the trainer game's open
+   * world — #3088. A recorder rebuilt by {@link recoverRecorder} starts with
+   * the mark its checkpoint held.
+   */
+  readonly openWorld: boolean;
+  /**
+   * Mark this recording as ridden in the open world — #3088: the saved ride
+   * carries `RideFacts.openWorld` and is matched against no segment. Once
+   * marked, it stays marked.
+   *
+   * ⚠️ **Writes the header at once**, as {@link noteCourseLap} does, rather
+   * than waiting for the next {@link flush}: a flush writes its chunk before
+   * its header, so a crash between the two would leave positions on disk under
+   * a header without the mark, and the recovered ride would be matched.
+   * **Never throws**: a failure is a {@link storageState}.
+   */
+  noteOpenWorld(): void;
 
   /** Starts recording and writes the header, so a crash one second in is recoverable. */
   start(at: UnixSeconds): Promise<void>;
@@ -392,6 +410,7 @@ export function createRecorder(options: RecorderOptions): Recorder {
     [],
     [],
     { records: [], dropped: undefined },
+    false,
   );
 }
 
@@ -470,6 +489,8 @@ export async function recoverRecorder(
     recovered.workoutBlocks ?? [],
     // #1328, for the same reason.
     { records: recovered.replans ?? [], dropped: recovered.replansDropped },
+    // #3088, for the same reason: or the recovered ride would be matched.
+    recovered.openWorld === true,
   );
   return { recorder, recovered };
 }
@@ -508,6 +529,7 @@ function recorderOver(
   racesSoFar: readonly RoomRaceFact[],
   blocksSoFar: readonly RecordedWorkoutBlock[],
   replansSoFar: { readonly records: readonly ReplanRecord[]; readonly dropped: number | undefined },
+  openWorldSoFar: boolean,
 ): Recorder {
   const { store, athleteId, sessionId } = options;
   /** @see Recorder.courseLaps */
@@ -522,6 +544,8 @@ function recorderOver(
   let workoutBlocks = blocksSoFar;
   /** @see Recorder.replans */
   let replans = replansSoFar.records;
+  /** @see Recorder.openWorld */
+  let openWorld = openWorldSoFar;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
 
   let storageState: RecorderStorageState = 'ok';
@@ -558,6 +582,7 @@ function recorderOver(
       // A count the checkpoint carried when this recorder was rebuilt from it:
       // written on, so a second recovery says the record has a gap.
       ...(replansSoFar.dropped === undefined ? {} : { replansDropped: replansSoFar.dropped }),
+      ...(openWorld ? { openWorld: true } : {}),
     };
   }
 
@@ -688,6 +713,19 @@ function recorderOver(
     },
     noteReplans(records: readonly ReplanRecord[]): void {
       replans = records;
+    },
+    get openWorld() {
+      return openWorld;
+    },
+    noteOpenWorld(): void {
+      if (openWorld) return;
+      openWorld = true;
+      const startedAt = session.startedAt;
+      if (startedAt === undefined || !cursor.headerWritten) {
+        // No header on disk yet: the next flush writes one, mark and all.
+        return;
+      }
+      void attempt(async () => store.putRecordingSession(header(startedAt, session.timeline)));
     },
 
     async start(at: UnixSeconds): Promise<void> {

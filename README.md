@@ -1,25 +1,40 @@
 # On Your Left
 
-A free, open alternative to Strava + Zwift for cycling: ride tracking, indoor smart-trainer control,
-and live sensor capture over Bluetooth Low Energy.
+Free, open-source indoor and outdoor cycling. Bring your outdoor rides indoors: import any route
+you have ridden as a GPX file and ride it on your smart trainer. The trainer follows every climb
+and descent, and a 3D world is built from the map around it, so it looks and feels like the road
+you know. Ride tracking, workouts and live Bluetooth Low Energy sensors are in the same app. On
+Android, and in Chrome or Edge on your computer.
+
+**Website: [openzigs.com/on-your-left](https://openzigs.com/on-your-left/)**
+
+![The ride screen: a rider on a country road in the 3D world, with live power, cadence, heart rate, gradient, speed and distance, and the climb profile ahead](https://openzigs.com/images/onyourleft/ride-1600.webp)
+
+## What it does
+
+- **Smart-trainer control** over Bluetooth (FTMS trainers, including ERG mode), so you feel every
+  climb. In a workout, the trainer holds each target power for you.
+- **Live sensors**: power, cadence and heart rate from your Bluetooth sensors, with the gradient
+  under your wheels and the climb profile ahead.
+- **An open world on real streets**: free ride through streets built from OpenStreetMap data and
+  pick your turn at every junction.
+- **Ways to ride**: structured workouts you can tailor in length and intensity, a pacer at the
+  effort you choose, a ghost of your own best ride, lap races against bots on built-in circuits,
+  and Delivery, a parcel round through a town.
+- **Routes and ride files**: any route you import becomes a world to ride, drawn on your device.
+  There is a route planner, and rides import and export as FIT, GPX or TCX.
+- **Your rides stay yours**: no subscription and no account. Rides are kept on your device, and a
+  [self-hosted instance](#self-hosting-and-what-free-actually-means) is optional. On an instance you
+  can also ride with friends in private rooms and, if you want them, get an AI pacer, AI bots and a
+  written analysis of a ride.
 
 ## Status
 
-Early. The workspace, toolchain and quality gates exist; the product does not yet — see the
+In active development and used on real rides. The first release, **0.9.0**, is out for Android as a
+direct download (the APK on the [v0.9.0 GitHub release](https://github.com/openzigs/onyourleft/releases/tag/v0.9.0)),
+and its Google Play listing is in review. The web app runs [from source](#getting-started). Watch the
+[two-minute demo](https://www.youtube.com/watch?v=lgpE-VbyFa0). What is being worked on is in the
 [open epics and issues](https://github.com/openzigs/onyourleft/issues).
-
-The first milestone is deliberately small and entirely local: pair a Bluetooth trainer, record a
-ride, store it and view it, with **no server, no account and no hosting bill**. Everything else
-sequences after that.
-
-## Scope
-
-- Web app first, then mobile and desktop clients
-- Smart trainer control (Wahoo KICKR and other FTMS trainers), including ERG mode
-- Sensors: power meter pedals, heart rate monitors, cadence and speed
-- Activity recording, FIT/GPX/TCX import and export, analysis
-- Route planning, segments and leaderboards
-- Local-first, with a self-hostable instance for anything that needs to be shared
 
 Sensors and trainers connect over **Bluetooth Low Energy only**. ANT+ is out of scope permanently —
 it is unreachable from any browser, has no iOS path at all, and its Shared Source License forbids
@@ -30,14 +45,14 @@ redistributing source containing the network key.
 The web client needs **Web Bluetooth**, which only Chrome-family browsers implement. **Safari and
 Firefox do not have it at all** — on any platform, in any version — so the web client **cannot reach
 an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-platform-features`.
-No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
-the answer to all of that, and they come later.
+No browser can record in the background, so the tab has to stay open. On a phone or tablet, use
+the Android app, which reaches Bluetooth without going through a browser.
 
 ### Installing the Android app: Google Play or the direct download
 
-The Android app is meant to come two ways: from **Google Play** once it is listed there, and as a
-**direct download**, the APK attached to a [GitHub release](https://github.com/openzigs/onyourleft/releases)
-once one is published. Neither exists yet. The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
+The Android app comes two ways: from **Google Play** (in review for 0.9.0), and as a
+**direct download**, the APK attached to each [GitHub release](https://github.com/openzigs/onyourleft/releases).
+The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
 Google's key. **Moving from one to the other means uninstalling the app first, and uninstalling
 deletes the rides on the device.** Export them, or sync them with an instance, before you switch.
 The app's About page says which copy you have. Why, and how each is built:
@@ -62,11 +77,10 @@ Two things are worth knowing before you rely on the numbers:
   directions and delete, not only pins to drag. Clearing asks first, undo covers everything
   including the clear, and a half-drawn route survives closing the tab.
 
-> ⚠️ **There is no routing service configured yet, so the roads between your waypoints cannot be
-> worked out on this build.** Everything above is built and tested against a stand-in; what is
-> missing is a running engine, which is
-> [#53](https://github.com/openzigs/onyourleft/issues/53). The page says so rather than looking
-> broken.
+> ⚠️ **The roads between your waypoints are worked out by the routing engine on your own
+> instance** (Valhalla, set up as [`docs/operating-an-instance.md`](docs/operating-an-instance.md)
+> describes). With no instance, or one with no engine, every leg is a straight line, and the page
+> says so rather than looking broken.
 
 ### Bringing your history in, and taking it out
 
@@ -111,8 +125,8 @@ by decoding every second, so a recording with a hole in it recovers a little les
 
 That is the whole guarantee, and it is a number rather than a reassurance: five seconds between
 checkpoints, two seconds during which a sensor reading may still arrive for a second already past,
-and the one second currently being recorded. There is no server in this milestone, so there is no
-backup, no re-upload and no support ticket — the copy on the device is the only copy in existence,
+and the one second currently being recorded. A ride being recorded exists only on the device, so
+there is no backup, no re-upload and no support ticket — that copy is the only copy in existence,
 and everything else about the recorder follows from that.
 
 That bound is about a crash, and a crash is not the only way to lose a second. If the device's
@@ -190,7 +204,8 @@ rather than pending: [`docs/adr/0003-platform-support-matrix.md`](docs/adr/0003-
 
 ## Technology
 
-TypeScript on Node, in a pnpm workspace: a React web client under `apps/`, and reusable leaf
+TypeScript on Node, in a pnpm workspace: a React web client, its Android shell and the
+self-hostable instance server under `apps/`, and reusable leaf
 packages — domain types, FIT/GPX/TCX codec, BLE sensor layer, physics model, local store — under
 `packages/`.
 
@@ -258,9 +273,16 @@ is fine ("based on On Your Left") and what is not.
 
 ## Privacy
 
-Nothing is collected. There is no account, no server, no analytics and no code in the client that
-transmits a ride, a heart rate or a position anywhere — which is checkable rather than a promise,
+There is no analytics and no account you need, and the app sends no ride, heart rate or position
+anywhere except to an instance you choose to sign in to — which is checkable rather than a promise,
 because the whole thing is here.
+
+It does fetch map data from the project's own tile host, `tiles.openzigs.com`: the map around where
+you ride, the route's tiles in the realistic world, the heights along a route you draw, and, in an
+open-world ride, the map block by block, which lets the host see requests that follow where you go.
+Cloudflare, which serves it, keeps each request's IP address, time and device or browser type for up
+to 7 days, visible to the project's Cloudflare account, which does not use or share it. You can turn
+map tiles off in Settings, and then no request is made.
 
 The published policy is [`docs/privacy-policy.md`](docs/privacy-policy.md). It is the one the Android
 app links to from its About page and the one the Play listing points at; `apps/web/src/privacy/policy.ts`
@@ -289,7 +311,7 @@ Every figure, where it came from, and which of them are guesses:
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Commits are signed off under the DCO; there is no CLA, and
 you keep your copyright.
 
-## Relationship to Strava and Zwift
+## Relationship to other cycling apps
 
 This project is not affiliated with, endorsed by, or derived from Strava or Zwift. It does not use
 their APIs, code, assets or data, and it reimplements product concepts independently. You can bring

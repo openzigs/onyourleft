@@ -49,6 +49,16 @@ describe('the demo’s stylesheet (#1945)', () => {
     expect(css).not.toMatch(/\.oyl-hud__actions[^{]*\{[^}]*display: none/);
   });
 
+  it('leaves the video link’s lead to a screen reader in a small frame, so the link costs no line (#3225)', () => {
+    const css = rules(DEMO_CSS);
+    expect(css).toMatch(
+      /\.oyl-demo__offer-sentence,\s*\.oyl-demo__video-lead \{[^}]*position: absolute;/,
+    );
+    expect(css).toMatch(/\.oyl-demo__video-link::first-letter \{[^}]*text-transform: uppercase;/);
+    // Not display: none, which would drop it from the link's name.
+    expect(css).not.toMatch(/\.oyl-demo__video-lead[^{]*\{[^}]*display: none/);
+  });
+
   it('paints only with declared tokens: every var() is one theme.css declares, and no colour literal', () => {
     const css = rules(DEMO_CSS);
     const declared = new Set([...THEME_CSS.matchAll(/(--oyl-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));

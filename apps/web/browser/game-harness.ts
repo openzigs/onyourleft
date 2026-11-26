@@ -199,6 +199,7 @@ import {
   denseTownFixture,
   kerbsideFixture,
   landBeside,
+  MIXED_TOWN_EDGE_RUNG,
   mixedTownFixture,
   rectangleBeside,
 } from '../src/game/footprint-fixtures-testing';
@@ -359,6 +360,7 @@ import {
 import {
   HARD_SWAP_TREE_LEVELS,
   MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_REMOTE_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
 } from '../src/game/realistic-budget';
@@ -933,6 +935,16 @@ declare global {
       readonly litDrawCalls: number;
       readonly flatDrawCalls: number;
       /**
+       * #976: the lit materials a drawn mesh wears on the whole harness
+       * frame — at the start line, so with the gate, its wordmark board,
+       * scenery, riders and terrain — once at each shading, by three's own
+       * type. What says `ThreeGameView`'s own `#applyShading` reaches every
+       * belt: each belt's swap is tested in jsdom, and the view that calls
+       * them cannot be built there. @see LIT_MATERIAL_TYPES
+       */
+      readonly litShadedMaterials: readonly string[];
+      readonly flatShadedMaterials: readonly string[];
+      /**
        * How many vertex indices the **scenery** submitted for one frame of each
        * kind, with #341's models loaded — the whole point of the change, read
        * off the driver rather than off a geometry the harness built itself.
@@ -953,7 +965,7 @@ declare global {
       /**
        * WebGL textures created across a whole sweep — #366's fourth criterion.
        *
-       * ⚠️ **Since #966 ONE is the assertion — the start gate's wordmark, the
+       * ⚠️ **Since #966 ONE is the assertion — the gates' wordmark, the
        * stylised world's one allowed texture — and {@link stylisedTextures}
        * says which texture it was.** Until then zero was. The
        * buildings' colour comes out of a 512 × 512 atlas that is fetched,
@@ -6346,7 +6358,11 @@ function facadeTrimProbe(
 
 /** What {@link townEdgeProbe} publishes — #1586. */
 interface TownEdgeMeasurement {
-  /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
+  /**
+   * The procedural structures and billboards in the frame: the issue's frame
+   * fills the cap with them — since #3161 the cap of a rung of
+   * `MIXED_TOWN_EDGE_RUNG` structures, which the view draws the frame at.
+   */
   readonly structures: number;
   /** The mapped buildings the belt drew at the frame's refill. */
   readonly buildings: number;
@@ -6375,11 +6391,34 @@ const NO_TOWN_EDGE: TownEdgeMeasurement = {
  * here; ranked together by distance, the houses round the rider are. The
  * frame is the view's own: its scatter, through `updateMapped`. The control
  * of the old rule is `mapped-building-belt.test.ts` §"#1586", in Node.
+ *
+ * ⚠️ **Drawn on a rung of `MIXED_TOWN_EDGE_RUNG` structures, not the realistic
+ * rung's 36** — #3161. Since #3132 no procedural building stands on a mapped
+ * building's plot, and the frame carries 15 structures, so at 36 the cap is
+ * never full and the town would be drawn whatever the ranking did. The Node
+ * twin was moved to the same rung by #3132; this is the same frame, its plans
+ * without the shops' aprons as the twin's are (#2848), drawn at the same rung,
+ * and the view is put back on `top` after it.
  */
-function townEdgeProbe(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
+function townEdgeProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  top: QualitySettings,
+): TownEdgeMeasurement {
+  view.setQuality({ ...top, structureItems: MIXED_TOWN_EDGE_RUNG });
+  try {
+    return townEdgeAtTheRung(view);
+  } finally {
+    view.setQuality(top);
+  }
+}
+
+/** {@link townEdgeProbe}'s frame and reading, on a view already on the probe's rung. */
+function townEdgeAtTheRung(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
   const { profile, origin, corridor } = mixedTownFixture();
   const land = landClassMask(corridor);
-  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const plans = footprintPlans(corridor, land, profile, origin, undefined, undefined, {
+    shopAprons: false,
+  }).plans;
   const start = atStartLine(profile);
   const frame = sceneFrame({
     profile,
@@ -7066,7 +7105,7 @@ function colourProbes(probe: SceneFrame): {
     // this program has an image anywhere. What #366's fourth criterion is
     // about is whether the **scenery** adds one, so the baseline is taken
     // after the first frame and what is published is the difference.
-    // ⚠️ **And with no gate and no billboard in it — #966**: the start gate's
+    // ⚠️ **And with no gate and no billboard in it — #966**: the gates'
     // wordmark is the one texture the stylised world may upload, and it is
     // uploaded the first time a frame draws a board, so the baseline frame
     // must not, or the count below could not see it.
@@ -8129,6 +8168,19 @@ const SCENERY_REGION = {
   toRow: 0.85,
 } as const;
 
+/**
+ * three's materials that a light shades — #976: what no drawn mesh may wear at
+ * the `'flat'` rung, where `QualitySettings.shading` mounts every belt's
+ * unlit twin. A `ShaderMaterial` is its own author's and is not counted.
+ */
+const LIT_MATERIAL_TYPES: ReadonlySet<string> = new Set([
+  'MeshLambertMaterial',
+  'MeshPhongMaterial',
+  'MeshStandardMaterial',
+  'MeshPhysicalMaterial',
+  'MeshToonMaterial',
+]);
+
 /** Reads a rectangle of the drawing buffer, four bytes a pixel. */
 function readRegion(
   gl: WebGL2RenderingContext | WebGLRenderingContext,
@@ -9110,11 +9162,43 @@ const NO_ROOM_TRIANGLES: RoomTriangles = {
   remoteRiders: 0,
 };
 
+/**
+ * #3176: a lap race's bots near the rider in the realistic world, read off the
+ * scene's own meshes — how many of the meshes drawn wear a material the
+ * realistic world does not light. Its ambient lamp is off there (ADR 0026
+ * D-9), so a `MeshLambertMaterial` there draws every face turned from the sun
+ * black.
+ */
+export interface LapRaceLight {
+  readonly measured: boolean;
+  /** The bots in the race, every one a racer. */
+  readonly racers: number;
+  /** The visible meshes on a Lambert material with no race in the frame. */
+  readonly unlitWithout: number;
+  /** The same with the race's bots in it. */
+  readonly unlitWith: number;
+  /**
+   * The visible meshes the race added over a race of only as many bots as wear
+   * the realistic body: the stylised belt's, drawing the rest — the control.
+   */
+  readonly stylisedMeshes: number;
+}
+
+const NO_LAP_RACE_LIGHT: LapRaceLight = {
+  measured: false,
+  racers: 0,
+  unlitWithout: 0,
+  unlitWith: 0,
+  stylisedMeshes: 0,
+};
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
   /** #783: a room's riders in the realistic world. @see RoomTriangles */
   readonly room: RoomTriangles;
+  /** #3176: a lap race's bots in the realistic world, lit. @see LapRaceLight */
+  readonly lapRaceLight: LapRaceLight;
   /** #622: the air, read and predicted. @see airProbe */
   readonly air: AirMeasurement;
   /** #628: the worn road's wheel track against its lane, worn and not. @see roadWearProbe */
@@ -10879,6 +10963,13 @@ export interface LogoMeasurement {
   /** Draw calls the boards add to the gate's frame. */
   readonly calls: number;
   /**
+   * #976: a frame holding the start's AND the finish's boards — a 300 m
+   * point-to-point route at its start, both gates in reach — the boards the
+   * view drew in it and the draw calls they add: two boards, one call.
+   */
+  readonly bothGatesBoards: number;
+  readonly bothGatesCalls: number;
+  /**
    * Which way up the wordmark reads — #966's review: how well a grid read
    * over each board's face correlates with the committed picture, upright,
    * mirrored and upside down. Drawn right, the upright picture must agree
@@ -11091,6 +11182,8 @@ const NO_LOGO: LogoMeasurement = {
   billboardMean: [],
   finishMean: [],
   calls: 0,
+  bothGatesBoards: 0,
+  bothGatesCalls: 0,
   gateOrientation: NO_ORIENTATION,
   billboardOrientation: NO_ORIENTATION,
   finishOrientation: NO_ORIENTATION,
@@ -11212,15 +11305,26 @@ function logoProbe(
     gateAim,
     'upside-down',
   );
+  // #976: and a frame with two gate boards in it, the start's and the finish's.
+  const short = northRoute(300, () => 0);
+  const bothGatesFrame = bare(riding(short, 0));
+  view.render(bothGatesFrame);
+  const bothGatesBoards = logoBoardsOf(view);
   let calls = 0;
+  let bothGatesCalls = 0;
   countingDrawCalls((counted) => {
-    const before = counted();
-    view.render(gateFrame);
-    const on = counted() - before;
-    logosShownOf(view, false);
-    const again = counted();
-    view.render(gateFrame);
-    calls = on - (counted() - again);
+    const drawnOnAndOff = (frame: SceneFrame): number => {
+      logosShownOf(view, true);
+      const before = counted();
+      view.render(frame);
+      const on = counted() - before;
+      logosShownOf(view, false);
+      const again = counted();
+      view.render(frame);
+      return on - (counted() - again);
+    };
+    calls = drawnOnAndOff(gateFrame);
+    bothGatesCalls = drawnOnAndOff(bothGatesFrame);
   });
   let gateLetteringOff: number;
   let billboardLetteringOff: number;
@@ -11248,6 +11352,8 @@ function logoProbe(
     billboardMean: means[1] ?? [],
     finishMean: means[2] ?? [],
     calls,
+    bothGatesBoards,
+    bothGatesCalls,
     gateOrientation,
     billboardOrientation,
     finishOrientation,
@@ -11281,7 +11387,7 @@ function stylisedLogoProbe(): LogoMeasurement {
 
 /**
  * The stylised world's one texture — #966: what a view uploads when it first
- * draws the start gate's wordmark, counted from a frame drawn without it, and
+ * draws a gate's wordmark, counted from a frame drawn without it, and
  * the size of every 2D image handed to the GPU meanwhile — with the control: a
  * second view, the boards off, the same frames, which must upload nothing.
  */
@@ -11395,6 +11501,7 @@ const NO_AIR: AirMeasurement = {
 const NO_REALISTIC: RealisticMeasurement = {
   measured: false,
   room: NO_ROOM_TRIANGLES,
+  lapRaceLight: NO_LAP_RACE_LIGHT,
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
@@ -12741,7 +12848,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
 
-  // #966: the wordmark on the start gate and a billboard, read.
+  // #966: the wordmark on a loop's gate and a billboard, and since #978 on a
+  // finish gate, read.
   const logos = logoProbe(view, gl, canvas, riding);
   phaseEnds('realistic: wordmark — #966');
 
@@ -13268,8 +13376,28 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     withoutTheRule: roomWithoutTheRule,
     remoteRiders: crowded.markers.filter((marker) => marker.kind === 'remote').length,
   };
-  view.destroy();
   phaseEnds('realistic: a room of other riders — #783');
+  // #3176: the demo's lap race — five bots just ahead of the rider — and its
+  // control, a race of only as many bots as wear the realistic body.
+  const shown = (unlit: boolean): number =>
+    sceneMaterialsOf(view).filter(
+      (each) => each.visible && (!unlit || each.type === 'MeshLambertMaterial'),
+    ).length;
+  woodedFrameOf(view, gl, wooded);
+  const unlitWithout = shown(true);
+  woodedFrameOf(view, gl, withRacers(wooded, REALISTIC_REMOTE_RIDERS));
+  const shownRealisticOnly = shown(false);
+  const raced = withRacers(wooded, LAP_RACE_LIGHT_BOTS);
+  woodedFrameOf(view, gl, raced);
+  const lapRaceLight: LapRaceLight = {
+    measured: true,
+    racers: raced.markers.filter((marker) => marker.racer === true).length,
+    unlitWithout,
+    unlitWith: shown(true),
+    stylisedMeshes: shown(false) - shownRealisticOnly,
+  };
+  view.destroy();
+  phaseEnds('realistic: a lap race’s bots, lit — #3176');
 
   // #2663: the world arriving mid-ride, on fresh views — the valley's wooded
   // stretch, every frame lent as `GameView`'s are.
@@ -13290,6 +13418,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   return {
     measured: true,
     room,
+    lapRaceLight,
     roadWear,
     groundBlend,
     surfacePrograms,
@@ -13916,6 +14045,8 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     frameMsNoise: 0,
     litDrawCalls: 0,
     flatDrawCalls: 0,
+    litShadedMaterials: [],
+    flatShadedMaterials: [],
     sceneryIndicesModelled: {},
     sceneryIndicesPlain: {},
     sceneryInstances: {},
@@ -14030,7 +14161,7 @@ function townProbes(
   phaseEnds('town: a mapped window’s lintel — #1663');
 
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
-  const townEdge = townEdgeProbe(view);
+  const townEdge = townEdgeProbe(view, REALISTIC_LADDER[0] as QualitySettings);
   phaseEnds('town: a town’s edge — #1586');
 
   // #1550, on the same view: procedural lots in a mapped town with no footprints.
@@ -14139,6 +14270,35 @@ function withRoom(frame: SceneFrame, count: number): SceneFrame {
     };
   });
   return { ...frame, markers: [...frame.markers, ...remote] };
+}
+
+/** #3176: the bots the demo's lap race starts with near the rider. */
+const LAP_RACE_LIGHT_BOTS = 5;
+
+/**
+ * `frame` with `count` of a lap race's bots just ahead of the rider, in place
+ * of the pacer — #3176: `racer` bots, as `scene.ts` §`SceneInput.raceBots`
+ * makes them, so the realistic world splits them as it splits a room's.
+ */
+function withRacers(frame: SceneFrame, count: number): SceneFrame {
+  const rider = frame.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) return frame;
+  const bots: RiderMarker[] = Array.from({ length: count }, (_, index) => {
+    const ahead = 3 + index * 2;
+    const across = laneLateral(index % 3);
+    return {
+      ...rider,
+      kind: 'bot',
+      racer: true,
+      x: rider.x + rider.headingX * ahead - rider.headingZ * across,
+      z: rider.z + rider.headingZ * ahead + rider.headingX * across,
+      crankAngle: index * 0.37,
+    };
+  });
+  return {
+    ...frame,
+    markers: [...frame.markers.filter((marker) => marker.kind !== 'bot'), ...bots],
+  };
 }
 
 /**
@@ -14343,6 +14503,8 @@ async function run(): Promise<void> {
   let frameMsNoise = 0;
   let litDrawCalls = 0;
   let flatDrawCalls = 0;
+  let litShadedMaterials: readonly string[] = [];
+  let flatShadedMaterials: readonly string[] = [];
   let sceneryIndicesModelled: Record<string, number> = {};
   let sceneryIndicesPlain: Record<string, number> = {};
   const sceneryInstances: Record<string, number> = {};
@@ -14711,6 +14873,13 @@ async function run(): Promise<void> {
               flatDrawCalls = drawn;
             }
           }
+          // #976: and what every drawn mesh of the whole frame wears.
+          view.render(frame);
+          const shaded = sceneMaterialsOf(view)
+            .filter((each) => each.visible && LIT_MATERIAL_TYPES.has(each.type))
+            .map((each) => each.type);
+          if (record === 'lit') litShadedMaterials = shaded;
+          else flatShadedMaterials = shaded;
         }
 
         // ----------------------------------------- the pedalling — #349
@@ -15035,6 +15204,8 @@ async function run(): Promise<void> {
     frameMsNoise,
     litDrawCalls,
     flatDrawCalls,
+    litShadedMaterials,
+    flatShadedMaterials,
     sceneryIndicesModelled,
     sceneryIndicesPlain,
     sceneryInstances,

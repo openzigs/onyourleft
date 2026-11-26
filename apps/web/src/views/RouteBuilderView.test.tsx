@@ -15,6 +15,7 @@ import { buttonsByView, onePrimaryViolations } from '../a11y/button-hierarchy';
 import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import type { DraftStorage } from '../routing/draft-storage';
 import { IS_A_LOOP_TEXT, NOT_YET_A_LOOP_TEXT } from '../routing/loop';
+import { NO_CLIMBING_TEXT, ROUTING_TEXT } from '../routing/present';
 import { scriptedProvider, type ScriptedProvider } from '../routing/testing';
 import {
   CHOICES_NOT_APPLIED_TEXT,
@@ -29,7 +30,12 @@ import {
   settle,
   type Mounted,
 } from '../testing/mount';
-import { NUDGE_DEGREES, RouteBuilderView } from './RouteBuilderView';
+import {
+  GRADIENT_TABLE_SUMMARY,
+  NUDGE_DEGREES,
+  ROUTE_SUMMARY_LABEL,
+  RouteBuilderView,
+} from './RouteBuilderView';
 
 let mounted: Mounted | undefined;
 
@@ -593,6 +599,138 @@ describe('the profile', () => {
     await place(3);
     await settle();
     expect(view.container.textContent).toContain('Steep climb');
+  });
+});
+
+describe('the profile is drawn, with its table one press away (#3185)', () => {
+  it('draws the chart and keeps the gradient table behind a closed disclosure under it', async () => {
+    const view = await open({ provider: scriptedProvider({ heights: [10, 40, 12, 60] }) });
+    await place(3);
+    await settle();
+    const chart = view.container.querySelector('.oyl-planner__profile');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute('aria-hidden')).toBe('true');
+    expect(chart?.querySelectorAll('path').length).toBeGreaterThan(0);
+    const disclosure = chart?.nextElementSibling;
+    expect(disclosure?.tagName).toBe('DETAILS');
+    expect((disclosure as HTMLDetailsElement).open).toBe(false);
+    expect(disclosure?.querySelector('summary')?.textContent).toBe(GRADIENT_TABLE_SUMMARY);
+    // The table itself, row by row with each band named: the non-visual half.
+    const rows = disclosure?.querySelectorAll('tbody tr') ?? [];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(disclosure?.querySelector('caption')?.textContent).toContain('Very steep climb');
+    // One gradient table on the page, not one under the chart and another below.
+    expect(view.container.querySelectorAll('table caption')).toHaveLength(2);
+  });
+
+  it('breaks the drawn line where the dataset has no height', async () => {
+    const view = await open({
+      provider: scriptedProvider({ heights: [100, 110, 120, null, null, null, 130, 140] }),
+    });
+    await place(3);
+    await settle();
+    expect(view.container.querySelectorAll('.oyl-planner__profile path').length).toBeGreaterThan(1);
+  });
+
+  it('draws nothing before there is a profile', async () => {
+    const view = await open({ provider: scriptedProvider() });
+    expect(view.container.querySelector('.oyl-planner__profile')).toBeNull();
+    expect(view.container.querySelector('details.oyl-chart-table')).toBeNull();
+  });
+});
+
+/**
+ * A provider whose `route` answers only when the test lets it — so the screen
+ * can be read while a leg is out (#3185).
+ */
+function heldProvider(): ScriptedProvider & { release(): void } {
+  const inner = scriptedProvider({ heights: [10, 20, 30] });
+  const waiting: (() => void)[] = [];
+  return {
+    ...inner,
+    route: (request) =>
+      new Promise((resolve, reject) => {
+        waiting.push(() => {
+          inner.route(request).then(resolve, reject);
+        });
+      }),
+    release: () => {
+      for (const go of waiting.splice(0)) go();
+    },
+  };
+}
+
+describe('the distance and climbing beside the map (#3185)', () => {
+  function strip(): HTMLElement | null {
+    if (mounted === undefined) throw new Error('nothing is mounted');
+    return mounted.container.querySelector(`[role="group"][aria-label="${ROUTE_SUMMARY_LABEL}"]`);
+  }
+
+  /** The strip's figures, by their terms. */
+  function figures(): Record<string, string> {
+    const found: Record<string, string> = {};
+    for (const item of strip()?.querySelectorAll('dl > div') ?? []) {
+      found[item.querySelector('dt')?.textContent ?? ''] =
+        item.querySelector('dd')?.textContent ?? '';
+    }
+    return found;
+  }
+
+  it('is on the page from the start, so its arrival with the first leg moves no map', async () => {
+    await open({ provider: scriptedProvider() });
+    expect(figures()).toEqual({ Distance: '0.0 km', Climbing: NO_CLIMBING_TEXT });
+    await place(1);
+    expect(figures()['Distance']).toBe('0.0 km');
+  });
+
+  it('says the distance and the climbing of the route as drawn', async () => {
+    await open({ provider: scriptedProvider({ heights: [10, 20, 30] }) });
+    await place(3);
+    await settle();
+    const shown = figures();
+    // Two legs of the scripted 1 km.
+    expect(shown['Distance']).toBe('2.0 km');
+    expect(shown['Climbing']).toMatch(/^\d+ m$/);
+    expect(shown['Climbing']).not.toBe('0 m');
+    expect(strip()?.textContent).not.toContain(ROUTING_TEXT);
+  });
+
+  it('follows an edit: a third leg adds to the distance', async () => {
+    await open({ provider: scriptedProvider({ heights: [10, 20, 30] }) });
+    await place(3);
+    expect(figures()['Distance']).toBe('2.0 km');
+    await place(1);
+    expect(figures()['Distance']).toBe('3.0 km');
+  });
+
+  it('says routing while a leg is out, and stops once it is back', async () => {
+    const provider = heldProvider();
+    await open({ provider });
+    await place(2);
+    const slot = strip()?.querySelector('.oyl-planner__routing');
+    expect(slot?.textContent).toBe(ROUTING_TEXT);
+    expect(figures()['Distance']).toBe('0.0 km');
+    provider.release();
+    await settle();
+    await settle();
+    // The slot stays, empty, so the strip does not lose a line under the map.
+    expect(strip()?.querySelector('.oyl-planner__routing')).toBe(slot);
+    expect(slot?.textContent).toBe('');
+    expect(figures()['Distance']).toBe('1.0 km');
+  });
+
+  it('says the climbing is not known with no routing service and no terrain', async () => {
+    await open({});
+    await place(2);
+    expect(figures()['Distance']).toMatch(/^At least /);
+    expect(figures()['Climbing']).toBe(NO_CLIMBING_TEXT);
+  });
+
+  it('is not a live region, so a drag is not read out', async () => {
+    await open({ provider: scriptedProvider() });
+    await place(2);
+    expect(strip()?.closest('[role="status"], [aria-live]')).toBeNull();
+    expect(strip()?.querySelector('[role="status"], [aria-live]')).toBeNull();
   });
 });
 

@@ -2615,3 +2615,62 @@ test.describe('#2065 — the title block costs less than half what it did', () =
     });
   }
 });
+
+/**
+ * #3185 — the route planner's distance and climbing, on the screen with its
+ * map.
+ *
+ * The UI evaluation of PR 3149 found the totals under the legs table and the
+ * surface choice: 2196 px down on a phone, off the tablet's screen as the
+ * legs grew, so a rider dragged a waypoint, scrolled two screens to read the
+ * result, and scrolled back. The strip (`views/RouteBuilderView.tsx`
+ * §"The numbers beside the map") is directly above the map. Measured here, in
+ * `reflow.html`'s real shell over the populated fixture's draft, at the phone
+ * and the tablet both ways up: with the map scrolled onto the screen, the
+ * strip is on it too, whole, uncovered (a hit test at its centre lands in
+ * it), and nothing stands between the strip and the map.
+ *
+ * ⚠️ Not proved here: the map's own share of the screen, which #3185's
+ * second suggestion asks for and its lane leaves for later.
+ */
+test.describe('#3185 — the route planner’s distance and climbing stay on the screen with its map', () => {
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`directly above the map, and on the screen with it, at a ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, 'data=populated');
+      await visit(page, routeById('route-builder'));
+      await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+      await expect(page.locator('main .oyl-planner__summary')).toHaveCount(1);
+      await page.locator('main .oyl-map').scrollIntoViewIfNeeded();
+      const seen = await page.evaluate(() => {
+        const strip = document.querySelector('main .oyl-planner__summary');
+        const map = document.querySelector('main .oyl-map');
+        if (strip === null || map === null) throw new Error('no strip or no map');
+        const box = strip.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          mapTop: map.getBoundingClientRect().top,
+          window: window.innerHeight,
+          uncovered: hit !== null && strip.contains(hit),
+          text: strip.textContent,
+          page: document.documentElement.scrollHeight,
+        };
+      });
+      console.log(
+        `[#3185] ${viewport.name}: strip ${seen.top.toFixed(0)}–${seen.bottom.toFixed(0)} px, ` +
+          `map from ${seen.mapTop.toFixed(0)} px, window ${String(seen.window)} px, ` +
+          `page ${String(seen.page)} px: "${seen.text}"`,
+      );
+      expect(seen.text, 'the strip names both figures').toMatch(/Distance.*Climbing/);
+      expect(seen.top, 'the strip starts on the screen').toBeGreaterThanOrEqual(0);
+      expect(seen.bottom, 'the strip ends on the screen').toBeLessThanOrEqual(seen.window);
+      expect(seen.uncovered, 'the strip is not under the shell’s chrome').toBe(true);
+      const between = seen.mapTop - seen.bottom;
+      expect(between, 'the gap from the strip to the map').toBeGreaterThanOrEqual(0);
+      expect(between, 'the gap from the strip to the map').toBeLessThanOrEqual(8);
+    });
+  }
+});

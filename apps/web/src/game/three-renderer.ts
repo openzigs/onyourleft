@@ -392,7 +392,11 @@ import {
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
   RIDER_BICYCLE_PARTS,
+  RIDER_STAND_IN_BICYCLE_PARTS,
+  RIDER_STAND_IN_PARTS_BY_BODY,
   RIDER_UPPER_BODY_PARTS_BY_BODY,
+  STAND_IN_LEGS,
+  STAND_IN_PALETTE,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -603,8 +607,7 @@ import {
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
-  carriesTheLogo,
-  gateLogoPlace,
+  gateLogoPlaces,
   logoBoxes,
   type LogoPlace,
 } from './logo-board';
@@ -685,7 +688,7 @@ import {
   type RiderFade,
   type RiderFadeLine,
 } from './rider-fade';
-import { riderBodyFor } from './rider-body';
+import { riderBodyFor, riderSkinFor } from './rider-body';
 import {
   directionalFogColour,
   drawnHorizonColour,
@@ -918,6 +921,13 @@ export const STYLISED_RIDER_SLOTS = 3 + MAXIMUM_DRAWN_SET;
  * same rule, so a race in the realistic world draws at most the realistic
  * bodies a room does, and none of its seven bots goes undrawn; the pacer, a
  * `bot` too, keeps its own realistic place.
+ *
+ * #3176: the stylised belt draws its share in the realistic world's light
+ * (`RiderBelt.setWorld`), not under a Lambert material that world leaves black.
+ *
+ * #3211: and as STAND-INS there — shaped and dressed as the realistic body
+ * beside them is (`bicycle.ts` §`RIDER_STAND_IN_PARTS_BY_BODY`), in the same
+ * meshes and at no more triangles, so the split's arithmetic is unchanged.
  */
 export function realisticRemoteSplit(markers: readonly RiderMarker[]): {
   readonly realistic: readonly RiderMarker[];
@@ -3338,6 +3348,32 @@ export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
   /**
+   * What the lit riders wear in the REALISTIC world — #3176: the realistic
+   * world's primitive material (@see physicalMaterials), taught the kit, the
+   * steer and the fade the stylised pair are.
+   *
+   * ⚠️ **A `MeshLambertMaterial` there is drawn black.** The realistic world
+   * turns the ambient lamp off (`WorldLamps.apply`'s `ambientShare`, ADR 0026
+   * D-9) because its environment map is the ambient term, and three lights only
+   * a physically based material by `scene.environment` — so every face of a
+   * Lambert rider turned from the sun had no light at all, which is what a
+   * realistic lap race's stylised bots (#1971) and a room's (#783) were.
+   */
+  readonly #physical = physicalRiderMaterial();
+  /** Which world the belt is drawn in. @see setWorld */
+  #world: QualitySettings['world'] = 'stylised';
+  /**
+   * The bicycle and the upper bodies each world draws — #3211: the stylised
+   * world's own, and the realistic world's stand-ins (`bicycle.ts`
+   * §`RIDER_STAND_IN_PARTS_BY_BODY`, §`RIDER_STAND_IN_BICYCLE_PARTS`), shaped
+   * and dressed as the realistic body beside them is. The three meshes wear
+   * one set or the other, so a world costs no draw call the other does not;
+   * each set shares its mesh's per-instance channels.
+   */
+  readonly #shapes: Readonly<Record<QualitySettings['world'], RiderShapes>>;
+  /** The rung's shading. @see setShading */
+  #shading: QualitySettings['shading'] = 'lit';
+  /**
    * What the riders are drawn with into the sun's shadow map — #2596: a
    * depth material made as three 0.185's `WebGLShadowMap` makes its own
    * default (`new MeshDepthMaterial()`, basic depth packing: the directional
@@ -3412,6 +3448,8 @@ export class RiderBelt {
   readonly #rider = new Matrix4();
   readonly #local = new Matrix4();
   readonly #tint = new Color();
+  /** No tint at all: what a stand-in's bare shin is drawn under — #3214. */
+  readonly #untinted = new Color(0xffffff);
   readonly #up = new Vector3(0, 1, 0);
   readonly #acrossTheBicycle = new Vector3(1, 0, 0);
   readonly #alongTheBicycle = new Vector3(0, 0, 1);
@@ -3479,6 +3517,19 @@ export class RiderBelt {
       mesh.customDepthMaterial = this.#depth;
       this.#group.add(mesh);
     }
+    // #3211: after the loop, so each stand-in takes the channels it made.
+    this.#shapes = {
+      stylised: {
+        bicycle: this.#bodies.geometry,
+        male: this.#torsos.geometry,
+        female: this.#femaleTorsos.geometry,
+      },
+      realistic: {
+        bicycle: standInGeometry(RIDER_STAND_IN_BICYCLE_PARTS, this.#bodies.geometry),
+        male: standInGeometry(RIDER_STAND_IN_PARTS_BY_BODY.male, this.#torsos.geometry),
+        female: standInGeometry(RIDER_STAND_IN_PARTS_BY_BODY.female, this.#femaleTorsos.geometry),
+      },
+    };
     this.#group.visible = false;
   }
 
@@ -3656,7 +3707,48 @@ export class RiderBelt {
 
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    const material = this.#materials[shading];
+    this.#shading = shading;
+    this.#mount();
+  }
+
+  /**
+   * Which world's light the riders are drawn in — #3176. The realistic world
+   * lights them as it lights its other primitives (@see #physical); an unlit
+   * rung's flat material is the same in both.
+   */
+  setWorld(world: QualitySettings['world']): void {
+    if (world !== this.#world) {
+      // #3211: a stand-in's legs are another girth, so every leg is posed afresh.
+      this.#posed.fill(Number.NaN);
+    }
+    this.#world = world;
+    // #3211: and shaped and dressed as the realistic body beside them is.
+    const shapes = this.#shapes[world];
+    this.#bodies.geometry = shapes.bicycle;
+    this.#torsos.geometry = shapes.male;
+    this.#femaleTorsos.geometry = shapes.female;
+    this.#mount();
+  }
+
+  /**
+   * The bicycle and the upper bodies the belt draws in each world — #3211.
+   *
+   * @test-facing read by `three-renderer.test.ts` §"#3211" and by
+   * {@link stylisedRiderTriangles}, which prices the heavier world's.
+   */
+  get shapes(): Readonly<Record<QualitySettings['world'], RiderShapes>> {
+    return this.#shapes;
+  }
+
+  /** The material the meshes wear. @see setShading @see setWorld */
+  get material(): Material {
+    return this.#world === 'realistic' && this.#shading === 'lit'
+      ? this.#physical
+      : this.#materials[this.#shading];
+  }
+
+  #mount(): void {
+    const material = this.material;
     for (const mesh of this.#all()) mesh.material = material;
   }
 
@@ -3671,10 +3763,11 @@ export class RiderBelt {
     }
   }
 
-  /** Asks three to rebuild both materials' programs. @see ThreeGameView.#applyRiderShadows */
+  /** Asks three to rebuild every material's program. @see ThreeGameView.#applyRiderShadows */
   recompile(): void {
     this.#materials.lit.needsUpdate = true;
     this.#materials.flat.needsUpdate = true;
+    this.#physical.needsUpdate = true;
   }
 
   dispose(): void {
@@ -3682,10 +3775,15 @@ export class RiderBelt {
       mesh.geometry.dispose();
       mesh.dispose();
     }
+    // #3211: and the shapes of the world the belt is not drawn in.
+    for (const { bicycle, male, female } of Object.values(this.#shapes)) {
+      for (const geometry of [bicycle, male, female]) geometry.dispose();
+    }
     // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
     // of the two is mounted, and the other would leak.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#physical.dispose();
     this.#depth.dispose();
   }
 
@@ -3726,8 +3824,22 @@ export class RiderBelt {
     for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos]) {
       writeKit(mesh, slot, kit, this.#tint);
     }
+    // #3211: a stand-in's thighs are in the shorts and its shins bare.
+    const standIn = this.#world === 'realistic';
+    // #3214: and its skin is this rider's own tone, which no tint reaches —
+    // in the upper body's limb channel, which a stand-in's has no other use
+    // for (@see KIT_SKIN), and a bare shin's.
+    const skin = riderSkinFor(marker.skin);
+    if (standIn) {
+      for (const mesh of [this.#torsos, this.#femaleTorsos]) {
+        writeKitChannel(mesh, KIT_LIMB_ATTRIBUTE, slot, skin, this.#tint);
+      }
+    }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
-      writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
+      const at = slot * LEG_BONE_COUNT + bone;
+      writeKit(this.#limbs, at, standIn ? (STAND_IN_LEG_KITS[bone] ?? kit) : kit, this.#tint);
+      if (this.#bareLeg(bone))
+        writeKitChannel(this.#limbs, KIT_LIMB_ATTRIBUTE, at, skin, this.#tint);
     }
     this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
 
@@ -3767,7 +3879,11 @@ export class RiderBelt {
     this.#cranksets.setColorAt(slot, this.#tint);
 
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
-      this.#limbs.setColorAt(slot * LEG_BONE_COUNT + bone, this.#tint);
+      // #3214: a bare shin is drawn untinted, in its tone alone.
+      this.#limbs.setColorAt(
+        slot * LEG_BONE_COUNT + bone,
+        this.#bareLeg(bone) ? this.#untinted : this.#tint,
+      );
     }
     // ⚠️ **All six, not the angle alone.** `#poseLegs` writes world matrices,
     // so the rider's own place and heading are part of what a pose was solved
@@ -3799,6 +3915,11 @@ export class RiderBelt {
     return true;
   }
 
+  /** Whether leg segment `bone` is bare skin in this world — #3214: a stand-in's shin. @see STAND_IN_LEGS */
+  #bareLeg(bone: number): boolean {
+    return this.#world === 'realistic' && STAND_IN_LEGS[bone]?.colour === STAND_IN_PALETTE.skin;
+  }
+
   /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
   #fadeOne(slot: number, faded: number): void {
     for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets]) {
@@ -3821,7 +3942,9 @@ export class RiderBelt {
       this.#turn.setFromAxisAngle(this.#acrossTheBicycle, bone.pitch);
       // The limb geometry is one metre long, so the bone's own length is the
       // `y` scale and nothing has to be rebuilt when a leg changes shape.
-      this.#stretch.set(1, bone.length, 1);
+      // #3211: and a stand-in's thigh is thicker than its shin.
+      const girth = this.#world === 'realistic' ? (STAND_IN_LEGS[index]?.girth ?? 1) : 1;
+      this.#stretch.set(girth, bone.length, girth);
       this.#local.compose(this.#position, this.#turn, this.#stretch);
       this.#limbs.setMatrixAt(
         slot * LEG_BONE_COUNT + index,
@@ -4774,7 +4897,14 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
     case 'box':
       return new BoxGeometry(solid.width, solid.height, solid.depth);
     case 'tube':
-      return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
+      return new CylinderGeometry(
+        solid.radius,
+        solid.radius,
+        solid.length,
+        solid.sides ?? LIMB_SEGMENTS,
+        1,
+        solid.open === true,
+      );
     case 'ring':
       return ringGeometry(solid.radius, solid.thickness);
     case 'bend':
@@ -4783,11 +4913,25 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
       // is for. Folding it into the part's `roll` would apply it last, after
       // the yaw that stands the arc up, and spin the bar out of the bicycle's
       // plane entirely.
-      return new TorusGeometry(solid.radius, solid.thickness, 5, 12, solid.sweep).rotateZ(
-        solid.start,
-      );
+      // #3211: a stand-in's bar is three sides round and six pieces along.
+      return new TorusGeometry(
+        solid.radius,
+        solid.thickness,
+        solid.coarse === true ? 3 : 5,
+        solid.coarse === true ? 6 : 12,
+        solid.sweep,
+      ).rotateZ(solid.start);
     case 'ball':
       return new SphereGeometry(solid.radius, 8, 6);
+    case 'lathe':
+      // #3211: turned about `+Y`, then made as deep as a chest is. `scale`
+      // turns the normals with the shape, so the light reads it as round.
+      return new LatheGeometry(
+        solid.rings.map(([halfWidth, height]) => new Vector2(halfWidth, height)),
+        solid.sides,
+      ).scale(1, 1, solid.depthShare);
+    case 'ellipsoid':
+      return new SphereGeometry(0.5, 8, 5).scale(solid.width, solid.height, solid.depth);
   }
 }
 
@@ -4834,12 +4978,54 @@ function limbGeometry(): BufferGeometry {
   return geometry;
 }
 
+/**
+ * A stand-in's legs as kits — #3211: each bone's colour in both places, since
+ * a leg's vertices read the `limb`. Made once, so `RiderBelt.place` allocates
+ * nothing for them. @see STAND_IN_LEGS
+ */
+const STAND_IN_LEG_KITS: readonly RiderKit[] = STAND_IN_LEGS.map(({ colour }) => ({
+  jersey: colour,
+  limb: colour,
+}));
+
+/**
+ * What one world draws a rider's bicycle and upper body with — #3211. A
+ * rider wears the bicycle and ONE of the two bodies. @see RiderBelt.shapes
+ */
+export interface RiderShapes {
+  readonly bicycle: BufferGeometry;
+  readonly male: BufferGeometry;
+  readonly female: BufferGeometry;
+}
+
+/**
+ * A stand-in's `parts` as one geometry — #3211 — carrying the per-instance
+ * channels `stylised` already has (the kit, the steer and the fade), so the
+ * mesh that swaps between the two writes one set of buffers whichever it wears.
+ */
+function standInGeometry(parts: readonly RiderPart[], stylised: BufferGeometry): BufferGeometry {
+  const geometry = mergedParts(parts);
+  for (const name of [RIDER_INSTANCE_ATTRIBUTE, KIT_JERSEY_ATTRIBUTE, KIT_LIMB_ATTRIBUTE]) {
+    geometry.setAttribute(name, stylised.getAttribute(name));
+  }
+  return geometry;
+}
+
 /** A vertex that is not the kit: it keeps the colour baked into it. @see markKit */
 const KIT_NONE = 0;
 /** A vertex of the jersey, which a rider's kit colours. @see markKit */
 const KIT_JERSEY = 1;
 /** A vertex of the legs or the helmet, in the kit's darker colour. @see markKit */
 const KIT_LIMB = 2;
+/**
+ * A vertex of a stand-in's SKIN — #3214: drawn in its instance's limb channel
+ * and never tinted. Only the stand-in has skin, and its upper body has no
+ * {@link KIT_LIMB} vertex, so its limb channel is free to carry the tone
+ * (`RiderBelt.#placeOne` writes it there). @see RIDER_KIT_GLSL
+ */
+const KIT_SKIN = 3;
+/** A vertex drawn as it is baked and never tinted — #3214: a stand-in's hair. @see RIDER_KIT_GLSL */
+const KIT_BARE = 4;
 
 /**
  * Which part of the kit a part painted `colour` is — #623. The stylised
@@ -4850,6 +5036,9 @@ const KIT_LIMB = 2;
 function kitRoleOf(colour: number): number {
   if (colour === RIDER_PALETTE.jersey) return KIT_JERSEY;
   if (colour === RIDER_PALETTE.limb) return KIT_LIMB;
+  // #3214: a stand-in's skin and hair, which no tint reaches.
+  if (colour === STAND_IN_PALETTE.skin) return KIT_SKIN;
+  if (colour === STAND_IN_PALETTE.hair) return KIT_BARE;
   return KIT_NONE;
 }
 
@@ -4889,16 +5078,47 @@ function kitChannels(mesh: InstancedMesh): void {
  * vertex colour is. `into` is scratch, so this allocates nothing.
  */
 function writeKit(mesh: InstancedMesh, slot: number, kit: RiderKit, into: Color): void {
-  for (const [name, colour] of [
-    [KIT_JERSEY_ATTRIBUTE, kit.jersey],
-    [KIT_LIMB_ATTRIBUTE, kit.limb],
-  ] as const) {
-    const channels = mesh.geometry.getAttribute(name) as InstancedBufferAttribute;
-    into.setHex(colour);
-    channels.setXYZ(slot, into.r, into.g, into.b);
-    channels.needsUpdate = true;
-  }
+  writeKitChannel(mesh, KIT_JERSEY_ATTRIBUTE, slot, kit.jersey, into);
+  writeKitChannel(mesh, KIT_LIMB_ATTRIBUTE, slot, kit.limb, into);
 }
+
+/** One of {@link kitChannels}' two colours for one instance, linear. @see writeKit */
+function writeKitChannel(
+  mesh: InstancedMesh,
+  name: string,
+  slot: number,
+  colour: number,
+  into: Color,
+): void {
+  const channels = mesh.geometry.getAttribute(name) as InstancedBufferAttribute;
+  into.setHex(colour);
+  channels.setXYZ(slot, into.r, into.g, into.b);
+  channels.needsUpdate = true;
+}
+
+/**
+ * The colour of one rider vertex — #623's kit per instance, and #3214's skin.
+ * `baked` is the vertex's own colour, `jersey` and `limb` its instance's kit
+ * channels and `tint` its instance's {@link RIDER_TINTS} entry; `role` is
+ * {@link markKit}'s. The kit, the helmet and the bicycle are drawn under the
+ * tint; a {@link KIT_SKIN} vertex is its instance's tone and a
+ * {@link KIT_BARE} one its own colour, and neither is tinted — the owner's
+ * ruling of 2026-11-25. Exported so `three-renderer.test.ts` runs it as text.
+ */
+export const RIDER_KIT_GLSL = /* glsl */ `
+vec3 oylRiderColour(float role, vec3 baked, vec3 jersey, vec3 limb, vec3 tint) {
+  if (role > ${String(KIT_BARE - 0.5)}) {
+    return baked;
+  } else if (role > ${String(KIT_SKIN - 0.5)}) {
+    return limb;
+  } else if (role > ${String(KIT_LIMB - 0.5)}) {
+    return limb * tint;
+  } else if (role > ${String(KIT_JERSEY - 0.5)}) {
+    return jersey * tint;
+  }
+  return baked * tint;
+}
+`;
 
 /**
  * The stylised rider's two materials, taught to put each INSTANCE's own kit
@@ -4918,22 +5138,81 @@ function withKitPerInstance(material: Material): void {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};\nattribute vec3 ${KIT_JERSEY_ATTRIBUTE};\nattribute vec3 ${KIT_LIMB_ATTRIBUTE};`,
+        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};\nattribute vec3 ${KIT_JERSEY_ATTRIBUTE};\nattribute vec3 ${KIT_LIMB_ATTRIBUTE};${RIDER_KIT_GLSL}`,
         'vertex',
         spliced,
       ),
       '#include <color_vertex>',
       /* glsl */ `#include <color_vertex>
-#ifdef USE_INSTANCING_COLOR
-if (${KIT_ROLE_ATTRIBUTE} > 0.5) {
-  vColor.rgb = (${KIT_ROLE_ATTRIBUTE} > 1.5 ? ${KIT_LIMB_ATTRIBUTE} : ${KIT_JERSEY_ATTRIBUTE}) * instanceColor.rgb;
-}
+#if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, ${KIT_JERSEY_ATTRIBUTE}, ${KIT_LIMB_ATTRIBUTE}, instanceColor.rgb);
 #endif`,
       'vertex',
       spliced,
     );
   };
   material.customProgramCacheKey = () => 'oyl-rider-kit-per-instance';
+}
+
+/**
+ * How chromatic a realistic helmet vertex's colour must be to be the FACE or
+ * the hair — #3214, as `max − min` of its linear channels. The file's helmet
+ * mesh carries the shell, the straps, the vents and the glasses' frame, all
+ * greys, and beside them the lenses, the eyes and the female rider's hair
+ * (`process_rider.py` §`SHELL` to §`VENT`, `rider_kit.py` §`EYE_BANDS`,
+ * §`HAIR`), each with a hue: the smoked lens, the least of them, leads with
+ * its blue by 0.04, and the vent, the most hued grey, by 0.005.
+ */
+const HELMET_BARE_CHROMA = 0.015;
+
+/**
+ * Marks which of a realistic helmet mesh's vertices are the face and the hair
+ * — #3214 — as {@link KIT_BARE}, and every other {@link KIT_NONE}, from the
+ * colours the file paints them: drawn as they are and never tinted, where the
+ * shell and the straps keep the tint. Once, on a helmet's own clone.
+ */
+function markBareHelmet(geometry: BufferGeometry): BufferGeometry {
+  const colour = geometry.getAttribute('color');
+  const roles = new Float32Array(colour.count);
+  for (let at = 0; at < colour.count; at += 1) {
+    const [r, g, b] = [colour.getX(at), colour.getY(at), colour.getZ(at)];
+    roles[at] = Math.max(r, g, b) - Math.min(r, g, b) > HELMET_BARE_CHROMA ? KIT_BARE : KIT_NONE;
+  }
+  geometry.setAttribute(KIT_ROLE_ATTRIBUTE, new BufferAttribute(roles, 1));
+  return geometry;
+}
+
+/**
+ * Teaches an instanced, vertex-coloured material {@link markKit}'s
+ * {@link KIT_BARE} — #3214: a vertex so marked is drawn in its own colour and
+ * not under its instance's tint, through {@link RIDER_KIT_GLSL} with no kit
+ * (the realistic helmet wears none). Chained after any earlier hook.
+ */
+function withBareVertices<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#3214's untinted face";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${KIT_ROLE_ATTRIBUTE};${RIDER_KIT_GLSL}`,
+        'vertex',
+        spliced,
+      ),
+      '#include <color_vertex>',
+      /* glsl */ `#include <color_vertex>
+#if defined( USE_INSTANCING_COLOR ) && defined( USE_COLOR )
+vColor.rgb = oylRiderColour(${KIT_ROLE_ATTRIBUTE}, color.rgb, vec3(0.0), vec3(0.0), instanceColor.rgb);
+#endif`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}+oyl-bare`;
+  return material;
 }
 
 /**
@@ -5009,6 +5288,21 @@ function physicalMaterials(): ShadedMaterials {
     ),
     flat: withAtmosphere(constructed(new MeshBasicMaterial({ vertexColors: true }))),
   };
+}
+
+/**
+ * The stylised rider's lit material in the realistic world — #3176: that
+ * world's primitive material (@see physicalMaterials), taught the kit, the
+ * steer and the fade as the stylised pair are in `RiderBelt`'s constructor.
+ * The kit first, because {@link withKitPerInstance} replaces the compile hook
+ * where the other two chain after it.
+ */
+function physicalRiderMaterial(): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+  );
+  withKitPerInstance(material);
+  return withAtmosphere(withRiderInstance(material, true));
 }
 
 /**
@@ -10795,9 +11089,8 @@ export class LogoBelt {
       count += 1;
     };
     if (this.#shown && this.#switchedOn) {
-      for (const line of lines) {
-        if (carriesTheLogo(line)) place(gateLogoPlace(line));
-      }
+      // #976: never two gate boards crossed on one point. @see gateLogoPlaces
+      for (const at of gateLogoPlaces(lines)) place(at);
       for (const board of billboards) place(billboardLogoPlace(board));
     }
     this.#mesh.count = count;
@@ -17703,9 +17996,17 @@ interface RealisticRiderPool {
  * maps: it is each body's own kit uniform, set every frame from
  * {@link RIDER_KITS} — the rider's is `bicycle.ts` §`HOUSE_KIT`'s jersey, the
  * colour the stylised rider wears too, and the pacer's and the ghost's is
- * `PACER_KIT`'s blue. The tint still multiplies the whole body after it, and
- * it multiplies the kit THAT kind wears, so #368's three stay three: orange
+ * `PACER_KIT`'s blue. The tint still multiplies the kit after it, and it
+ * multiplies the kit THAT kind wears, so #368's three stay three: orange
  * times teal was a jersey whose green led its red (#742's review).
+ *
+ * ⚠️ **Since #3214 the tint never reaches the skin** (the owner's ruling of
+ * 2026-11-25): it multiplied the whole body until then, so every bot's arms,
+ * legs and face were orange. The skin is drawn in the marker's own tone
+ * (`rider-body.ts` §`RIDER_SKIN_TONES`, a lap race's bot's seeded from its
+ * id) and the kit, the helmet and the bicycle under the tint
+ * ({@link RIDER_BODY_GLSL}); the helmet mesh's lenses, eyes and hair are
+ * drawn as the file paints them ({@link markBareHelmet}).
  *
  * The helmet and glasses are the file's own mesh since #623 — a plain shell
  * with vents and straps, and glasses, built round the head's own vertices and
@@ -17848,9 +18149,14 @@ export class RealisticRiderBelt {
     this.#otherBodiesOf = world;
     // #623: the helmet and glasses are the file's own, coloured per vertex.
     // #2596: faded with the rider who wears it.
+    // #3214: and its face and hair drawn as they are, untinted.
     const helmetMaterial = withRiderInstance(
       withAtmosphere(
-        constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+        withBareVertices(
+          constructed(
+            new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 }),
+          ),
+        ),
       ),
       false,
     );
@@ -17900,7 +18206,7 @@ export class RealisticRiderBelt {
     this.#handAlong = [new Vector3(), new Vector3()];
     this.#footBall = [new Vector3(), new Vector3()];
     this.#helmets = riderInstanceChannels(
-      tintable(helmetSource.geometry.clone(), helmetMaterial, instances),
+      tintable(markBareHelmet(helmetSource.geometry.clone()), helmetMaterial, instances),
       instances,
     );
     this.#helmets.count = 0;
@@ -17919,7 +18225,9 @@ export class RealisticRiderBelt {
       const source = skinned.material as Material;
       const kit = { value: new Color(RIDER_KITS.rider.jersey) };
       const fade = { value: 0 };
-      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade);
+      // #3214: the maps' own skin until a frame says otherwise.
+      const skin = { value: new Color(1, 1, 1) };
+      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade, skin);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -17975,6 +18283,7 @@ export class RealisticRiderBelt {
         material,
         kit,
         fade,
+        skin,
         bones,
         ordered,
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
@@ -18212,6 +18521,11 @@ export class RealisticRiderBelt {
     return this.kitColoursOf(REALISTIC_DEFAULT_BODY);
   }
 
+  /** Each slot's skin as a share of the maps', in the default body's pool — #3214. For the tests. */
+  get skinShares(): readonly Color[] {
+    return (this.#pools[REALISTIC_DEFAULT_BODY]?.riders ?? []).map((rider) => rider.skin.value);
+  }
+
   /** Each slot's kit colour in one body's pool — #2839. For the tests. */
   kitColoursOf(body: RiderBody): readonly Color[] {
     return (this.#pools[body]?.riders ?? []).map((rider) => rider.kit.value);
@@ -18434,6 +18748,8 @@ export class RealisticRiderBelt {
     );
     // #623: the kit this kind wears, under its tint. @see RIDER_KITS
     rider.kit.value.setHex(this.#kits[marker.kind].jersey);
+    // #3214: this rider's own skin, which the tint below never reaches.
+    riderSkinShare(riderSkinFor(marker.skin), rider.skin.value);
     const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
     rider.material.color.copy(tint);
     rider.root.updateMatrixWorld(true);
@@ -18867,6 +19183,8 @@ interface RealisticRiderSlot {
   readonly kit: { value: Color };
   /** How much of this body is faded out — #2596. Set per frame from `rider-fade.ts`. */
   readonly fade: { value: number };
+  /** This body's skin tone as a share of the maps' — #3214. Set per frame. @see riderSkinShare */
+  readonly skin: { value: Color };
   readonly bones: ReadonlyMap<string, Bone>;
   readonly restQuaternions: readonly Quaternion[];
   readonly restPositions: readonly Vector3[];
@@ -19036,6 +19354,55 @@ function helmetOf(scene: Object3D): Mesh {
 }
 
 /**
+ * How chromatic a texel of the realistic rider's colour map must be to be
+ * SKIN — #3214, as `[none, all]` of `max − min` of its linear channels. The
+ * map holds no skin mask, and needs none: everything in it that is not skin
+ * is a grey — the white kit at 0.80, the bib, the zip, the shoes and the
+ * soles (`rider_kit.py` §`WHITE` to §`SOLE`) — and the main colour is black
+ * there (`REALISTIC_RIDER_MAPS`). Read off the committed map on 2026-11-25:
+ * its grey texels reach 0.07 (ETC1S warms a white), its skin starts near
+ * 0.17, its darkest detail (`rider_kit.py` §`SKIN_DETAIL_RANGE`) at 0.16, and a
+ * texel between the two is a hem's blend of both.
+ */
+const RIDER_SKIN_CHROMA: readonly [number, number] = [0.08, 0.15];
+
+/**
+ * The realistic body's albedo — #623's kit, and #3214's skin. `map` is the
+ * colour map's texel (linear), `kit` the main colour's share (`orm`'s blue),
+ * `jersey` the body's kit uniform, `tint` its #368 tint and `skin` its tone
+ * as a share of the map's ({@link riderSkinShare}). The kit and every grey of
+ * the map are drawn under the tint; the skin, found by
+ * {@link RIDER_SKIN_CHROMA}, in its own tone and never tinted — the owner's
+ * ruling of 2026-11-25. Exported so `three-renderer.test.ts` runs it as text.
+ */
+export const RIDER_BODY_GLSL = /* glsl */ `
+float oylSkinOfMap(vec3 map) {
+  float chroma = max(map.x, max(map.y, map.z)) - min(map.x, min(map.y, map.z));
+  return smoothstep(${glslFloat(RIDER_SKIN_CHROMA[0])}, ${glslFloat(RIDER_SKIN_CHROMA[1])}, chroma);
+}
+vec3 oylBodyAlbedo(vec3 map, float kit, vec3 jersey, vec3 tint, vec3 skin) {
+  return map * mix(tint, skin, oylSkinOfMap(map)) + kit * jersey * tint;
+}
+`;
+
+/** The first skin tone (`rider-body.ts` §`RIDER_SKIN_TONES`), linear: the one the realistic body's maps are drawn in. */
+const MAPPED_SKIN = new Color(STAND_IN_PALETTE.skin);
+
+/**
+ * A rider's skin tone as a share of the realistic body's maps', linear, per
+ * channel — #3214: `rider-body.ts` §`RIDER_SKIN_TONES`' entry over its first,
+ * which is the tone the maps were matched to. Written into `into`, so a frame
+ * allocates nothing; never above 1 in a channel (`rider-body.test.ts`).
+ */
+function riderSkinShare(tone: number, into: Color): Color {
+  into.setHex(tone);
+  into.r /= MAPPED_SKIN.r;
+  into.g /= MAPPED_SKIN.g;
+  into.b /= MAPPED_SKIN.b;
+  return into;
+}
+
+/**
  * The material a realistic rider's body wears — #623, ADR 0026 D-11:
  * constructed here, physically based, and one a rider.
  *
@@ -19047,7 +19414,9 @@ function helmetOf(scene: Object3D): Mesh {
  *   main colour a texel is — a SHADE, premultiplied: the colour map is black
  *   there. The one line spliced after `map_fragment` ADDS `blue × kit × color`,
  *   where `kit` is the body's own kit uniform ({@link RIDER_KITS}) and `color` the #368
- *   tint, so the albedo is `(map + blue × kit) × tint`. ⚠️ Added rather than
+ *   tint, so the albedo is `(map + blue × kit) × tint` — but for the skin,
+ *   which since #3214 is `map × skin` and never tinted ({@link RIDER_BODY_GLSL}).
+ *   ⚠️ Added rather than
  *   multiplied, because both maps are filtered: a white shade in the colour
  *   map times a 0/1 mask drew a pale halo half-way across every hem and cuff,
  *   which the browser gate's first picture of the kit showed.
@@ -19056,12 +19425,15 @@ function helmetOf(scene: Object3D): Mesh {
  *   gate's control for the pattern (#623).
  * - `fade` is how much of the body is faded out, the share of its pixels
  *   discarded by the same dither its bicycle's instances read (#2596).
+ * - `skin` is this rider's skin tone as a share of the maps' own, linear, per
+ *   channel (#3214, {@link riderSkinShare}): 1 draws the maps' skin.
  */
 function riderBodyMaterial(
   maps: RealisticRiderMaps,
   kit: { value: Color },
   plain: { value: number },
   fade: { value: number },
+  skin: { value: Color },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -19079,12 +19451,13 @@ function riderBodyMaterial(
     shader.uniforms['oylKitColour'] = kit;
     shader.uniforms['oylKitPlain'] = plain;
     shader.uniforms['oylRiderFade'] = fade;
+    shader.uniforms['oylSkin'] = skin;
     shader.fragmentShader = replacedOrThrown(
       replacedOrThrown(
         replacedOrThrown(
           shader.fragmentShader,
           '#include <common>',
-          '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;',
+          `#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;\nuniform vec3 oylSkin;${RIDER_BODY_GLSL}`,
           'fragment',
           spliced,
         ),
@@ -19095,8 +19468,12 @@ function riderBodyMaterial(
       ),
       '#include <map_fragment>',
       /* glsl */ `#include <map_fragment>
+#ifdef USE_MAP
+float oylKitShare = 0.0;
 #ifdef USE_ROUGHNESSMAP
-diffuseColor.rgb += diffuse * oylKitColour * texture2D(roughnessMap, vRoughnessMapUv).b;
+oylKitShare = texture2D(roughnessMap, vRoughnessMapUv).b;
+#endif
+diffuseColor.rgb = oylBodyAlbedo(sampledDiffuseColor.rgb, oylKitShare, oylKitColour, diffuse, oylSkin);
 #endif
 diffuseColor.rgb = mix(
   diffuseColor.rgb,
@@ -20631,6 +21008,9 @@ function realisticBicycle(): {
       // unreachable — and it is spelled out rather than left to the `else`
       // below, which is what makes that `else` a `never`.
       throw new Error('the realistic bicycle has no ball to draw');
+    } else if (solid.shape === 'lathe' || solid.shape === 'ellipsoid') {
+      // #3211: a stand-in's trunk and helmet, which no bicycle is built from.
+      throw new Error(`the realistic bicycle has no ${solid.shape} to draw`);
     } else {
       // ⚠️ **A shape this chain does not know is a COMPILE error, since #369's
       // review.** It used to fall out of an `if`/`else if` chain in silence, so
@@ -20743,13 +21123,17 @@ export function realisticBicycleTriangles(): number {
  */
 export function stylisedRiderTriangles(): number {
   const belt = new RiderBelt();
-  const { bodies, torsos, femaleTorsos, cranksets, limbs } = belt.meshes;
+  const { cranksets, limbs } = belt.meshes;
   const count = (geometry: BufferGeometry): number =>
     (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
   const total =
-    count(bodies.geometry) +
-    // #2839: a rider wears one upper body; the budget prices the heavier.
-    Math.max(count(torsos.geometry), count(femaleTorsos.geometry)) +
+    // #2839: a rider wears one upper body; the budget prices the heavier,
+    // #3211: in whichever world's shapes are the heavier.
+    Math.max(
+      ...Object.values(belt.shapes).map(
+        (shapes) => count(shapes.bicycle) + Math.max(count(shapes.male), count(shapes.female)),
+      ),
+    ) +
     count(cranksets.geometry) +
     count(limbs.geometry) * LEG_BONE_COUNT;
   belt.dispose();
@@ -25708,7 +26092,7 @@ class RealisticDrawing {
   readonly grounding: GroundBlobBelt;
   /** The start and finish gantries — #679. */
   readonly gantries: GantryBelt;
-  /** The wordmark's boards, on the start gate and the billboards — #966. */
+  /** The wordmark's boards, on every gate (the finish's since #978) and the billboards — #966. */
   readonly logos: LogoBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
@@ -26703,7 +27087,7 @@ export function gantriesShownOf(view: GameView, on: boolean): void {
 
 /**
  * Turns a view's wordmark boards off, or on again — #966. The browser gate's
- * control: with them off, the probe aimed at the start gate's board or a
+ * control: with them off, the probe aimed at a gate's board or a
  * billboard must read no wordmark, and the stylised world must upload no
  * texture at all.
  *
@@ -27677,7 +28061,7 @@ class ThreeGameView implements GameView {
     this.#sideRoads.addTo(this.#scene);
 
     this.#scatter.addTo(this.#scene);
-    // #966: the start gate and the billboards, in the stylised world.
+    // #966: the gates and the billboards, in the stylised world.
     this.#gantries.addTo(this.#scene);
     this.#logos.addTo(this.#scene);
     // #1535: the village pavements, in the stylised world.
@@ -27887,7 +28271,8 @@ class ThreeGameView implements GameView {
     this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
-    // on the start gate and the billboards. The hidden world's draw nothing.
+    // on every gate (the finish's since #978) and the billboards. The hidden
+    // world's draw nothing.
     this.#realistic?.gantries.update(frame.lines);
     this.#realistic?.logos.update(frame.lines, frame.billboards);
     this.#gantries.update(frame.lines);
@@ -28231,6 +28616,8 @@ class ThreeGameView implements GameView {
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
     this.#riders.setShown(true);
+    // #3176: and lit by the realistic world's light there, which has no ambient lamp.
+    this.#riders.setWorld(world);
     this.#skyDome.mesh.visible = !realistic;
     this.#realistic?.setShown(realistic);
     this.#realistic?.grounding.setShown(realistic && this.#groundBlobsShown);

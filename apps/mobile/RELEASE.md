@@ -434,6 +434,25 @@ independent of any store (#95's sixth criterion), and the one §5 says is under
 threat. ⚠️ Nobody has done this yet, so the release step itself is the one part
 of this workflow that has never executed.
 
+### The version, and the first tag ([#3221](https://github.com/openzigs/onyourleft/issues/3221))
+
+The first Google Play release is **0.9.0** (owner ruling 2026-11-25), so the
+first release tag is **`v0.9.0`**, not `v1.0.0`. The version is stated twice and
+the tag is a third statement of it: `versionName` in
+`apps/mobile/android/app/build.gradle` and `version` in
+`apps/mobile/package.json` must be equal, and a `v*` tag must be `v` plus that
+number. The workflow's first step after `setup-java` ("Check the release tag
+names the app's version") fails a tag that is not, and
+`apps/mobile/src/android/release-pipeline.test.ts` fails a pull request in which
+the two files disagree. The tag is pushed by the maintainer, not by a pull
+request.
+
+`versionCode` is a different number with a different rule: Play refuses an
+upload whose code it has already seen, so **every later Play upload needs
+`versionCode` raised by one**, whether or not `versionName` changed. It is `1`
+now because nothing has been uploaded yet. Nothing checks it; raise it in the
+same pull request that changes `versionName`.
+
 ## 9. Why the key alias is a repository variable and not a secret
 
 [#338](https://github.com/openzigs/onyourleft/issues/338).

@@ -1524,6 +1524,18 @@ describe('nothing claims the tile host keeps nothing — #558', () => {
     expect(findings).toStrictEqual([]);
   });
 
+  it('keeps the README’s Privacy section from claiming nothing leaves the device (#3192)', () => {
+    // The README overclaimed the other way once: "Nothing is collected" and "except to an
+    // instance" read as the only exception, while the app's own code fetches map data from the
+    // tile host and Cloudflare keeps the request for 7 days. The section must say so.
+    const readme = readFileSync(join(REPOSITORY_ROOT, 'README.md'), 'utf8');
+    const section = policySection(readme, 'Privacy').replace(/\s+/g, ' ');
+    expect(section).not.toContain('Nothing is collected');
+    expect(section).toContain('tiles.openzigs.com');
+    expect(section).toContain('Cloudflare');
+    expect(section).toContain('7 days');
+  });
+
   it('would find one wrapped across lines and emphasised — the rule is not vacuous', () => {
     // The shape #535 shipped in the policy: Markdown, hard-wrapped mid-phrase.
     expect(

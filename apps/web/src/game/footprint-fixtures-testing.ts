@@ -583,6 +583,21 @@ export function farmRoadFixture(): {
 }
 
 /**
+ * The structure rung #1586's frame of {@link mixedTownFixture} is refilled at,
+ * the rider at 1 750 m: **12** — #3132, and since #3161 the browser gate's too.
+ * The frame's procedural lots stood on the mapped buildings' plots and filled
+ * the realistic rung's 36 (`realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`)
+ * until #3132 kept every procedural building off a mapped building's plot:
+ * measured since, the frame carries 15 structures, 6 buildings and 9 hedges,
+ * and no billboard. A rung of 12 is one they fill, so the frame is still the
+ * one #1586 is about — the structures beyond the town's end fill every slot,
+ * and the town's nearest buildings are drawn because they are nearer.
+ * `mapped-building-belt.test.ts` §"#1586" and `game-harness.ts`
+ * §`townEdgeProbe` both refill at it.
+ */
+export const MIXED_TOWN_EDGE_RUNG = 12;
+
+/**
  * #1581's fixture: a town of mixed footprints, as a real map has them, where
  * #1549's are identical boxes in rows. Along 1 km of level road from 1 000 m,
  * both sides: houses every 20 m in two rows, each a rectangle 6 to 14 m along
