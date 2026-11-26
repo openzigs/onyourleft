@@ -201,3 +201,25 @@ export function billboardLogoPlace(board: Billboard): LogoPlace {
 export function carriesTheLogo(line: PlacedStand): boolean {
   return line.stand.kind === 'gantry';
 }
+
+/**
+ * The gate boards a frame draws, in the order of its lines — every line that
+ * {@link carriesTheLogo}, but none within {@link LOGO_BOARD_WIDTH_METRES} in
+ * plan of a board already placed (#976). On a closed route under the reach
+ * that the rider did not tick as a loop, the start's gate and the finish's
+ * stand on one point, and their two boards, a few degrees apart, crossed
+ * there in an X with their lettering z-fighting (#984's review). The first is
+ * kept: the start's, which `gantry.ts` §`lineStands` lists before the finish.
+ */
+export function gateLogoPlaces(lines: readonly PlacedStand[]): readonly LogoPlace[] {
+  const placed: LogoPlace[] = [];
+  for (const line of lines) {
+    if (!carriesTheLogo(line)) continue;
+    const at = gateLogoPlace(line);
+    const crowded = placed.some(
+      (other) => Math.hypot(other.x - at.x, other.z - at.z) < LOGO_BOARD_WIDTH_METRES,
+    );
+    if (!crowded) placed.push(at);
+  }
+  return placed;
+}
