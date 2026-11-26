@@ -364,6 +364,7 @@ import {
   stepLapRaceRide,
   type LapRaceRide,
 } from './lap-race/ride-race';
+import { raceLapToKeep } from './lap-race/best-lap';
 import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
 import {
@@ -473,6 +474,17 @@ export interface GamePort {
    * `check:wiring`; `circuits/circuits-wiring.test.tsx` is what goes red.
    */
   listCircuits?(): Promise<readonly RidableRoute[]>;
+  /**
+   * Keep a lap of one of the rider's loops, ridden in a solo lap race, as its
+   * best lap if it is the fastest — #2319 (`@onyourleft/store`
+   * §`ActivityStore.recordBestLap`), read back as
+   * {@link RidableRoute.bestLapSeconds}. `route` is a saved route's id, never
+   * a circuit's or a level's; `lap` is the lap's moving time in seconds.
+   * Absent, nothing is kept. ⚠️ An optional member, so a `main.tsx` that
+   * stopped supplying it is GREEN in `check:wiring`;
+   * `lap-race/best-lap-wiring.test.ts` is what goes red.
+   */
+  recordBestLap?(route: string, lap: number): Promise<void>;
   /**
    * The app's built-in Delivery levels, as the Delivery picker lists them —
    * #2362, ADR 0065 D-8.1: each one's id, name, length and houses, from
@@ -1885,6 +1897,16 @@ function GameScreen({
   /** The course this ride is on, for `teardown`, which closes over nothing of the ride. */
   const courseRef = useRef<RouteProfile | undefined>(undefined);
   /**
+   * Where a solo lap race's lap of this ride is kept if it is the loop's best
+   * — #2319: the rider's saved loop, and the port's {@link GamePort.recordBestLap}.
+   * `undefined` on a built-in circuit or level, the open world, a simulated
+   * rider's ride, a route that is no loop, and with no port to keep it.
+   */
+  const bestLapRef = useRef<
+    | { readonly route: string; readonly keep: (route: string, lap: number) => Promise<void> }
+    | undefined
+  >(undefined);
+  /**
    * The finished lap's sentence, still owed to the HUD's one region, and the
    * ride time after which it is no longer worth saying — #1312. Offered on
    * every call until it comes back as `kind` (`announce.ts`, rank 5e).
@@ -3272,6 +3294,20 @@ function GameScreen({
       // #2982: and an open-world ride is no course: it has no line, no lap and
       // no part lap, so the recording under it has none.
       courseRef.current = onOpenWorld ? undefined : profile;
+      // #2319: a race lap of this ride is kept on the rider's own loop only.
+      const keptBy = props.port;
+      bestLapRef.current =
+        keptBy?.recordBestLap === undefined ||
+        onOpenWorld ||
+        onCircuit ||
+        onLevel ||
+        simulated !== undefined ||
+        !profile.loop
+          ? undefined
+          : {
+              route: route.id,
+              keep: (id, lap) => keptBy.recordBestLap?.(id, lap) ?? Promise.resolve(),
+            };
       lapsDoneRef.current = 0;
       lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
@@ -4417,6 +4453,22 @@ function GameScreen({
         }
         if (laps !== undefined) {
           setRideLaps(laps);
+        }
+        // #2319: a solo lap race's whole lap of the rider's own loop, offered
+        // to the store, which keeps it if it is the fastest. A lap time and
+        // nothing else (ADR 0060 D-12.2). Never a simulated rider's, a capture
+        // included: `bestLapRef` is unset for one, where the ride begins.
+        const best = bestLapRef.current;
+        const raceLap =
+          best === undefined ||
+          crossed.kind !== 'lap' ||
+          lapRaceRef.current === undefined ||
+          laps === undefined
+            ? undefined
+            : raceLapToKeep(laps, course.totalDistance);
+        if (best !== undefined && raceLap !== undefined) {
+          // A lap not kept costs the rider a best time, never the ride.
+          void best.keep(best.route, raceLap).catch(() => undefined);
         }
         const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
         if (summary !== undefined) {

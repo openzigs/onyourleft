@@ -589,6 +589,20 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'recordBestLap',
+    leaks:
+      "another athlete's best lap of their loop, overwritten, and through the answer whether they have that route",
+    async run(store, mine, theirs) {
+      const before = await store.getRoute(theirs.owner, theirs.route.id);
+      if (before === undefined) throw new Error('the fixture route is missing');
+      // A lap so fast it would replace any kept one, were the owner not filtered on.
+      await expect(store.recordBestLap(mine.owner, theirs.route.id, seconds(0.001))).resolves.toBe(
+        false,
+      );
+      await expect(store.getRoute(theirs.owner, theirs.route.id)).resolves.toStrictEqual(before);
+    },
+  },
+  {
     member: 'getWorkout',
     leaks: "another athlete's workout, and through its targets their threshold",
     async run(store, mine, theirs) {
