@@ -479,6 +479,11 @@ interface RoutePickerProps {
    * instance can be sealed to. Absent, never drawn.
    */
   readonly aiPacer?: AiPacerControl | undefined;
+  /**
+   * Whether the rider takes a draft on this ride — #2967. Absent, never
+   * drawn. @see DraftControl
+   */
+  readonly draft?: DraftOffer | undefined;
   readonly withWind: boolean;
   readonly onWind: (value: boolean) => void;
   readonly windSpeed: string;
@@ -969,6 +974,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             aiPacer={props.aiPacer}
           />
         )}
+        {props.draft === undefined || onOpenWorld ? null : <DraftControl offer={props.draft} />}
         <PositionControl position={props.position} onPosition={props.onPosition} />
         <WindControls
           withWind={props.withWind}
@@ -2110,6 +2116,67 @@ function PacerControls(props: {
     </div>
   );
 }
+
+/** What the chooser draws the rider's *Draft* from — #2967. @see DraftControl */
+interface DraftOffer {
+  /** Whether the rider takes a draft: `rider-draft-preference.ts`, as this device last kept it. */
+  readonly on: boolean;
+  readonly onChange: (value: boolean) => void;
+  /**
+   * Whether this device drafts at all: ADR 0066 D-6's switch in Settings
+   * (`solo-draft-preference.ts`). Off, there is no draft to decline, and the
+   * chooser says so in place of the switch.
+   */
+  readonly onDevice: boolean;
+}
+
+/**
+ * Whether the rider takes a draft on this ride — #2967, the owner's request
+ * after the AI pacer ride of 2026-11-20. Beside *Ride against a pacer*, for
+ * the pacer, the rider's own ghost and a lap race's bots alike, and kept on
+ * this device for the next ride.
+ *
+ * Off, the rider is ridden at `k = 1` and the effort shown and felt is their
+ * own; a lap race's bots still draft each other. The line under the switch
+ * says both, and that the trainer is never sent a draft (ADR 0066 D-7). With
+ * the Settings switch off there is no draft at all, so the switch is not
+ * offered and one line says where the draft was turned off.
+ */
+function DraftControl(props: { readonly offer: DraftOffer }): JSX.Element {
+  const { offer } = props;
+  if (!offer.onDevice) {
+    return (
+      <div className="oyl-game__draft tw:mb-sm">
+        <p className="tw:m-0">{DRAFT_TEXT.offOnDevice}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="oyl-game__draft tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={offer.on}
+          onChange={(event) => {
+            offer.onChange(event.target.checked);
+          }}
+        />
+        {DRAFT_TEXT.switch}
+      </label>
+      {offer.on ? null : <p className="tw:m-0">{DRAFT_TEXT.off}</p>}
+    </div>
+  );
+}
+
+/** The *Draft* choice's words on the chooser — #2967. ⚠️ Draft wording for the owner. */
+const DRAFT_TEXT = {
+  switch: 'Draft behind the pacer, your best and the bots',
+  off:
+    'No draft for you on this ride: your speed is your own effort. Bots in a lap race still ' +
+    'draft each other. Your trainer is never sent a draft.',
+  offOnDevice: 'The draft is off on this device, in Settings, so you ride with none.',
+} as const;
 
 /** What the chooser draws the AI pacer from — #2712. @see AiPacerControls */
 interface AiPacerControl {

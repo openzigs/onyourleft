@@ -116,7 +116,9 @@ describe('the route picker', () => {
     // the wind block below audits them; the pacer's intensity shows only with
     // the pacer on since #2338, and the test below audits it there.
     expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(1);
-    for (const words of ['pacer', 'wind']) {
+    // The pacer's switch by its own words: since #2967 the Draft switch beside
+    // it names the pacer too.
+    for (const words of ['Ride against a pacer', 'wind']) {
       expect(
         queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
           (input.labels?.[0]?.textContent ?? '').includes(words),

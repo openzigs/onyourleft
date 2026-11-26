@@ -99,6 +99,7 @@ import { writeRealisticReport } from './realistic-report';
 import { RealisticWatch } from './realistic-watch';
 import { readDraftReadingChoice } from './draft-preference';
 import { readSoloDraftChoice } from './solo-draft-preference';
+import { readRiderDraftChoice, writeRiderDraftChoice } from './rider-draft-preference';
 import { draftedRide, soloDraftPercent, type SoloDraftSources } from './solo-draft';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
@@ -1579,6 +1580,19 @@ function GameScreen({
     status: undefined,
   });
   aiPacerRef.current = { wanted: withAiPacer, status: aiPacerStatus };
+  /**
+   * Whether the rider takes a draft on the next ride — #2967: *Your ride*'s
+   * *Draft*, remembered on this device. Read by {@link begin} through the
+   * ref, at the press. @see rider-draft-preference.ts
+   */
+  const [withDraft, setWithDraft] = useState(() => readRiderDraftChoice(deviceStorage()));
+  const withDraftRef = useRef(withDraft);
+  withDraftRef.current = withDraft;
+  const chooseDraft = useCallback((value: boolean) => {
+    setWithDraft(value);
+    // A device that refuses to keep it still rides this choice: it is the state.
+    writeRiderDraftChoice(deviceStorage(), value);
+  }, []);
   /** The AI pacer of the ride on the stage, or `undefined`. @see model-pacer.ts */
   const modelPacerRef = useRef<
     | {
@@ -2493,6 +2507,12 @@ function GameScreen({
    * of each ride, like the announcements.
    */
   const draftShownRef = useRef(false);
+  /**
+   * Whether this ride would have drafted the rider and does not, because the
+   * rider chose no draft in *Your ride* (#2967): the HUD's Draft field then
+   * reads *Off* and says it was their choice. Set at the start of a ride.
+   */
+  const draftDeclinedRef = useRef(false);
   /** #2079: the HUD's panels and text size, read as each ride begins. */
   const [hudLayout, setHudLayout] = useState<HudLayoutPreference>(DEFAULT_HUD_LAYOUT);
   /**
@@ -3147,6 +3167,16 @@ function GameScreen({
       // the hill they are on get heavier under them, and `simulation.ts`'s
       // determinism — a step count derived from the origin — would be a
       // different claim if its conditions could move.
+      //
+      // #2425, ADR 0066 D-1, D-6: the solo draft this ride offers the rider
+      // (see `soloDraftOf` below), and #2967: whether the rider declined it.
+      const offeredDraft = soloDraftOf(
+        roomId === undefined && readSoloDraftChoice(deviceStorage()),
+        pacer !== undefined && raceChoice === undefined,
+        ghostRiderRef.current === undefined ? ghostRef.current : undefined,
+        raceChoice !== undefined,
+      );
+      draftDeclinedRef.current = !withDraftRef.current && offeredDraft.soloDraft !== undefined;
       const simulation = new GameSimulation({
         profile,
         // ⚠️ #365: the second half of "nobody ever chose the rider". The mass
@@ -3181,12 +3211,10 @@ function GameScreen({
         // state for the Draft field and the mark (D-3.7). With the switch off,
         // or with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
-        ...soloDraftOf(
-          roomId === undefined && readSoloDraftChoice(deviceStorage()),
-          pacer !== undefined && raceChoice === undefined,
-          ghostRiderRef.current === undefined ? ghostRef.current : undefined,
-          raceChoice !== undefined,
-        ),
+        // #2967: and only with the rider's own *Draft* on. Off, the ride is
+        // handed nothing, as with the switch off: the rider's `k` is 1 and the
+        // ride is the undrafted ride to the bit.
+        ...(withDraftRef.current ? offeredDraft : {}),
       });
       simulationRef.current = simulation;
       // #2982: the road this ride reads, from its first frame. @see rideRoadRef
@@ -3571,6 +3599,9 @@ function GameScreen({
               // #2461, ADR 0067 D-3.4: ADR 0066 D-6's switch reaches the race.
               // On, every racer drafts, the rider included; off, none does.
               draft: readSoloDraftChoice(deviceStorage()),
+              // #2967: the rider's own *Draft*. Off, the rider takes no draft
+              // from the bots, and the bots still draft each other.
+              riderDrafts: withDraftRef.current,
               // #2463: the bots read the rider's power as W/kg, the standings' figure.
               riderMassKilograms: riderMassFor(props.riderMass).mass,
               // #2710: AI bots only when chosen, and only while the instance
@@ -5499,6 +5530,14 @@ function GameScreen({
                 }
               : undefined
           }
+          // #2967: the rider's own Draft, beside the pacer. Whether the device
+          // drafts at all is read here, as the world is, so a switch changed in
+          // Settings is seen at once.
+          draft={{
+            on: withDraft,
+            onChange: chooseDraft,
+            onDevice: readSoloDraftChoice(deviceStorage()),
+          }}
           intensity={intensity}
           onIntensity={setIntensity}
           choice={pacerChoice(withPacer, intensity)}
@@ -5856,8 +5895,12 @@ function GameScreen({
         )}
         // #2425: a solo ride's draft, from the simulation's own `k` — only
         // when the rider's display preference shows it (ADR 0066 D-6, R-13).
+        // #2967: a draft the rider declined in *Your ride* reads *Off*, and
+        // says it was their choice, under the same display preference.
         {...(state.soloDraft === undefined || !draftShownRef.current
-          ? {}
+          ? draftDeclinedRef.current && draftShownRef.current
+            ? { soloDraft: 'off' as const }
+            : {}
           : {
               soloDraft: soloDraftPercent(state.soloDraft.k),
               // #2426: in the draft by the simulation's own `draftEvent` state.
