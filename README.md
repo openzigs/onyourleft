@@ -1,8 +1,10 @@
 # On Your Left
 
-A free, open alternative to Strava + Zwift for cycling: ride tracking, indoor smart-trainer control,
-and live sensor capture over Bluetooth Low Energy. On Android, and in Chrome or Edge on your
-computer.
+Free, open-source indoor and outdoor cycling. Bring your outdoor rides indoors: import any route
+you have ridden as a GPX file and ride it on your smart trainer. The trainer follows every climb
+and descent, and a 3D world is built from the map around it, so it looks and feels like the road
+you know. Ride tracking, workouts and live Bluetooth Low Energy sensors are in the same app. On
+Android, and in Chrome or Edge on your computer.
 
 **Website: [openzigs.com/on-your-left](https://openzigs.com/on-your-left/)**
 
@@ -28,11 +30,11 @@ computer.
 
 ## Status
 
-In active development and used on real rides. There is **no store listing or download yet**: run
-the web app [from source](#getting-started), or build the Android app yourself
-([`apps/mobile/README.md`](apps/mobile/README.md)). A Google Play listing and an APK on
-[GitHub releases](https://github.com/openzigs/onyourleft/releases) are planned. What is being worked
-on is in the [open epics and issues](https://github.com/openzigs/onyourleft/issues).
+In active development and used on real rides. The first release, **0.9.0**, is out for Android as a
+direct download (the APK on the [v0.9.0 GitHub release](https://github.com/openzigs/onyourleft/releases/tag/v0.9.0)),
+and its Google Play listing is in review. The web app runs [from source](#getting-started). Watch the
+[two-minute demo](https://www.youtube.com/watch?v=lgpE-VbyFa0). What is being worked on is in the
+[open epics and issues](https://github.com/openzigs/onyourleft/issues).
 
 Sensors and trainers connect over **Bluetooth Low Energy only**. ANT+ is out of scope permanently —
 it is unreachable from any browser, has no iOS path at all, and its Shared Source License forbids
@@ -48,9 +50,9 @@ the Android app, which reaches Bluetooth without going through a browser.
 
 ### Installing the Android app: Google Play or the direct download
 
-The Android app is meant to come two ways: from **Google Play** once it is listed there, and as a
-**direct download**, the APK attached to a [GitHub release](https://github.com/openzigs/onyourleft/releases)
-once one is published. Neither exists yet. The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
+The Android app comes two ways: from **Google Play** (in review for 0.9.0), and as a
+**direct download**, the APK attached to each [GitHub release](https://github.com/openzigs/onyourleft/releases).
+The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
 Google's key. **Moving from one to the other means uninstalling the app first, and uninstalling
 deletes the rides on the device.** Export them, or sync them with an instance, before you switch.
 The app's About page says which copy you have. Why, and how each is built:
@@ -309,7 +311,7 @@ Every figure, where it came from, and which of them are guesses:
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Commits are signed off under the DCO; there is no CLA, and
 you keep your copyright.
 
-## Relationship to Strava and Zwift
+## Relationship to other cycling apps
 
 This project is not affiliated with, endorsed by, or derived from Strava or Zwift. It does not use
 their APIs, code, assets or data, and it reimplements product concepts independently. You can bring
