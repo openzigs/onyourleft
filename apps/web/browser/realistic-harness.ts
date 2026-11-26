@@ -91,6 +91,7 @@ import {
   waterFixture,
   // #2975's street of shops, cafés and fuel stations the map's POIs mark, which `town=pois` rides.
   poiStreetFixture,
+  settingsFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -622,7 +623,10 @@ async function run(): Promise<void> {
                                                       : // #2688: pitches and a playground.
                                                         config.town === 'fields'
                                                         ? fieldsFixture(latitude)
-                                                        : undefined;
+                                                        : // #3287: lots in three settings.
+                                                          config.town === 'settings'
+                                                          ? settingsFixture(latitude)
+                                                          : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

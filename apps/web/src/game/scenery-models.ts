@@ -46,6 +46,15 @@
  * is capped in source and asserted, rather than being however many files
  * somebody felt like adding.
  *
+ * ⚠️ **Since #3287 a shape is no longer a mesh, and the budget is unmoved.**
+ * Each mesh this table gives a kind is drawn with more shapes than its model:
+ * `stylised-shapes.ts` §`STYLISED_FOLDS` folds a suburban house and a
+ * commercial front in beside each building, and a tree or a rock beside each
+ * of those, into the mesh's ONE geometry, and the vertex shader draws the one
+ * an instance is. So a kind has more shapes and exactly the meshes, and the
+ * draw calls, it had; what a fold costs is triangles, and that file bounds
+ * them. This table is still the list of FILES, and still the mesh count.
+ *
  * ## Provenance
  *
  * Every file is the **upstream artefact, byte for byte**: extracted from the

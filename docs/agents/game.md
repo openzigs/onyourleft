@@ -696,6 +696,31 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `model-bytes-testing.ts` beside it is the INDEPENDENT
                         glTF and PNG reader the gate reproduces that table with
                         — the same argument `identity-verifier.test.ts` makes
+    src/game/stylised-shapes.ts
+                        the stylised world's shapes by setting, and the ones
+                        built from numbers (#3287) — `buildingSettingOf`, the
+                        urban class read as rural, suburban or commercial;
+                        `STYLISED_FOLDS`, the houses, shop fronts, trees and
+                        rocks drawn BESIDE each mesh's Kenney model;
+                        `stylisedFoldOf`, which of them an item is; and
+                        `writeStylisedTint`, its seeded tint. ⚠️ **A shape is
+                        no longer a mesh, and a reviewer who remembers "a
+                        variant is a draw call" is reading the old file**: a
+                        mesh's one geometry holds several shapes, each vertex
+                        marked with its own, and the vertex shader folds away
+                        the ones an instance is not (`three-renderer.ts`
+                        §`STYLISED_INSTANCE_GLSL`, the realistic fence's fold,
+                        #1274). So the mesh count, `MAXIMUM_SCENERY_VARIANTS`
+                        and every draw-call ceiling are what they were, and
+                        the cost is triangles: an instance submits every shape
+                        its mesh holds, at most `FOLDED_TRIANGLES_A_MESH` more.
+                        ⚠️ The new shapes are arithmetic and not Kenney files:
+                        the file's header says why, and a Kenney file can
+                        replace any of them — a shape is a geometry to the
+                        renderer, whichever made it. The setting is written on
+                        a mapped town's lot by `settlements.ts` §`lotsAt`
+                        (`ScatterItem.setting`); a ride with no urban class has
+                        none, and draws the three Kenney buildings as before
     src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
                         one ASSETS.toml row each (ADR 0022 D-5). ⚠️ **"Kenney
                         CC0, upstream bytes" describes the STYLISED world only

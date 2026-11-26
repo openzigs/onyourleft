@@ -731,12 +731,19 @@ describe('a city centre’s lots — #1637', () => {
     );
     // Non-vacuity: a town's lots stand on its built-up frontage.
     expect(houses.length).toBeGreaterThan(5);
-    // And exactly the lots of a ride with no class.
+    // And exactly the lots of a ride with no class — where they stand, what
+    // they are and how they are painted. Since #3287 a town's house also
+    // carries its setting, by which the stylised world chooses its shape, and
+    // a ride with no class has none on anything.
     const none = pressed(() => undefined);
     const noneFrame = frameAt(none, 1_500);
-    expect(frame.scatter.filter((item) => item.paint !== undefined)).toEqual(
-      noneFrame.scatter.filter((item) => item.paint !== undefined),
+    const painted = frame.scatter.filter((item) => item.paint !== undefined);
+    const paintedNone = noneFrame.scatter.filter((item) => item.paint !== undefined);
+    expect(paintedNone.some((item) => item.setting !== undefined)).toBe(false);
+    expect(painted.map((item) => ({ ...item, setting: undefined }))).toEqual(
+      paintedNone.map((item) => ({ ...item, setting: undefined })),
     );
+    for (const house of houses) expect(house.setting).toBe('commercial');
   });
 });
 

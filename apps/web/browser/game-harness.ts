@@ -232,6 +232,7 @@ import {
   realisticTextureReport,
   uploadRealisticTexturesOf,
   loadSceneryModels,
+  setStylisedFolds,
   airOf,
   atmosphereOf,
   type AirReading,
@@ -373,9 +374,11 @@ import {
   STRUCTURE_KINDS,
   SCENERY_KINDS,
   SCATTER_VARIANT_SLOTS,
+  type BuildingSetting,
   type ScatterItem,
   type SceneryKind,
 } from '../src/game/scatter';
+import { writeStylisedTint } from '../src/game/stylised-shapes';
 import { atStartLine } from '../src/game/simulation';
 import {
   CAMERA_CONSTRAINTS,
@@ -1039,6 +1042,13 @@ declare global {
        * other measurement here, including the draw-call counts above.
        */
       readonly variantIndices: Readonly<Record<string, readonly number[]>>;
+      /**
+       * #3287: a building by its setting, two shrubs by their tints, and what
+       * the folded shapes cost a frame — with the models alone as the control.
+       */
+      readonly stylisedFolds: StylisedFoldMeasurement & {
+        readonly control: StylisedFoldMeasurement;
+      };
       /**
        * The mean colour of each rider's own silhouette — #368.
        *
@@ -2403,6 +2413,164 @@ function placedAhead(
     scale: 1,
     variant,
   };
+}
+
+/** What one building drawn alone covers, and what leads in it. @see foldProbe */
+interface SettingPixels {
+  /** Pixels the building changed. */
+  readonly pixels: number;
+  /** Of those, the ones whose green leads — a Kenney roof, and no generated shape's. */
+  readonly green: number;
+}
+
+/** #3287's measurement of one load of the models. @see foldProbe */
+interface StylisedFoldMeasurement {
+  /** The first building mesh's house, drawn alone, on a lot of each setting. */
+  readonly settings: Readonly<Record<BuildingSetting, SettingPixels>>;
+  /**
+   * Two shrubs of one shape, each drawn alone 14 m ahead: the mean colour of
+   * each one's pixels, and the share of the first's green the second's tint
+   * leaves (`stylised-shapes.ts` §`writeStylisedTint`), linear.
+   */
+  readonly tint: {
+    readonly lighter: Pixel;
+    readonly darker: Pixel;
+    readonly ratio: number;
+  };
+  /** What the frame of one item a slot a kind submits for its scenery. */
+  readonly triangles: number;
+  readonly calls: number;
+}
+
+/** What {@link foldProbe} reports when it did not run. */
+const NO_STYLISED_FOLDS: StylisedFoldMeasurement = {
+  settings: {
+    rural: { pixels: 0, green: 0 },
+    suburban: { pixels: 0, green: 0 },
+    commercial: { pixels: 0, green: 0 },
+  },
+  tint: { lighter: [0, 0, 0, 0], darker: [0, 0, 0, 0], ratio: 1 },
+  triangles: 0,
+  calls: 0,
+};
+
+/**
+ * #3287, read back off a drawing buffer: that an instance draws the ONE shape
+ * its setting names, that a tint reaches the screen, and what the folded
+ * shapes cost.
+ *
+ * - **The settings.** One building, of the first mesh, 14 m ahead, drawn
+ *   alone as a rural, a suburban and a commercial lot. The Kenney building
+ *   that mesh holds has a green roof and no generated shape has a green
+ *   thing on it — so a fold that did not fold, which would draw all three
+ *   shapes through each other, leaves the roof's green in every one.
+ * - **The tint.** A shrub is one colour and has one shape a mesh, so two
+ *   drawn alone a pace apart differ by their tints and nothing else. The two
+ *   places are the pair, of a few dozen, whose tints are furthest apart.
+ * - **The cost.** The scenery's triangles and draw calls on `every`, the
+ *   frame of one item a slot a kind — every mesh the belt owns.
+ *
+ * Run twice by its caller: as the product loads the models, and with the
+ * models alone (`setStylisedFolds`), which is the control for all three.
+ */
+function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2');
+  const whole = () =>
+    gl === null ? new Uint8Array(0) : readRegion(gl, 0, 0, canvas.width, canvas.height);
+  const pose = probe.camera;
+  const alone = (item: ScatterItem): SceneFrame => ({ ...probe, markers: [], scatter: [item] });
+  const empty: SceneFrame = { ...probe, markers: [], scatter: [] };
+  view.render(empty);
+  view.render(empty);
+  const nothing = whole();
+  /** The pixels a frame changed, and their mean colour. */
+  const changed = (present: Uint8Array): { pixels: number; mean: Pixel } => {
+    let pixels = 0;
+    const sum = [0, 0, 0];
+    for (let at = 0; at + 3 < present.length; at += 4) {
+      if (
+        present[at] === nothing[at] &&
+        present[at + 1] === nothing[at + 1] &&
+        present[at + 2] === nothing[at + 2]
+      ) {
+        continue;
+      }
+      pixels += 1;
+      sum[0] = (sum[0] ?? 0) + (present[at] ?? 0);
+      sum[1] = (sum[1] ?? 0) + (present[at + 1] ?? 0);
+      sum[2] = (sum[2] ?? 0) + (present[at + 2] ?? 0);
+    }
+    const count = Math.max(1, pixels);
+    return {
+      pixels,
+      mean: [(sum[0] ?? 0) / count, (sum[1] ?? 0) / count, (sum[2] ?? 0) / count, 255],
+    };
+  };
+
+  const lot = (setting: BuildingSetting): SettingPixels => {
+    view.render(
+      alone({
+        ...placedAhead(pose, 'building', 0, 14, 0),
+        scale: 1.4,
+        ...(setting === 'rural' ? {} : { setting }),
+      }),
+    );
+    const drawn = whole();
+    return { pixels: changed(drawn).pixels, green: channelLead(drawn, nothing).green };
+  };
+  const settings = {
+    rural: lot('rural'),
+    suburban: lot('suburban'),
+    commercial: lot('commercial'),
+  };
+
+  // The two shrubs: of a few dozen places a pace apart, the lightest and the darkest.
+  const tintAt = new Float32Array(3);
+  const greenOf = (item: ScatterItem): number => {
+    writeStylisedTint(item.kind, item.x, item.z, tintAt, 0);
+    return tintAt[1] ?? 1;
+  };
+  let lightest = placedAhead(pose, 'shrub', 0, 14, 0);
+  let darkest = lightest;
+  for (let step = 0; step < 48; step += 1) {
+    const here = placedAhead(
+      pose,
+      'shrub',
+      0,
+      13.5 + (step % 8) / 8,
+      (Math.floor(step / 8) - 3) / 6,
+    );
+    if (greenOf(here) > greenOf(lightest)) lightest = here;
+    if (greenOf(here) < greenOf(darkest)) darkest = here;
+  }
+  view.render(alone({ ...lightest, scale: 1.4 }));
+  const lighter = changed(whole()).mean;
+  view.render(alone({ ...darkest, scale: 1.4 }));
+  const darker = changed(whole()).mean;
+  const ratio = greenOf(darkest) / greenOf(lightest);
+
+  let triangles = 0;
+  let calls = 0;
+  const bare: SceneFrame = { ...every, scatter: [] };
+  // Drawn once first: three compiles a program and allocates an instance
+  // buffer the first time it draws a mesh. @see sceneryCallsAcrossRungs
+  view.render(every);
+  view.render(bare);
+  countingTriangles((submitted, drawn) => {
+    view.render(bare);
+    const bareTriangles = submitted();
+    const bareCalls = drawn();
+    view.render(every);
+    triangles = submitted() - 2 * bareTriangles;
+    calls = drawn() - 2 * bareCalls;
+  });
+  view.destroy();
+  return { settings, tint: { lighter, darker, ratio }, triangles, calls };
 }
 
 /**
@@ -14060,6 +14228,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     buildingBluePixels: 0,
     sceneryCallsByVariants: [],
     variantIndices: {},
+    stylisedFolds: { ...NO_STYLISED_FOLDS, control: NO_STYLISED_FOLDS },
     riderMeanColour: {},
     riderSilhouettePixels: {},
     riderBuriedPixels: 0,
@@ -14516,6 +14685,10 @@ async function run(): Promise<void> {
   let buildingBluePixels = 0;
   let sceneryCallsByVariants: readonly number[] = [];
   let variantIndices: Record<string, readonly number[]> = {};
+  let stylisedFolds: StylisedFoldMeasurement & { readonly control: StylisedFoldMeasurement } = {
+    ...NO_STYLISED_FOLDS,
+    control: NO_STYLISED_FOLDS,
+  };
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
   let riderBuriedPixels = 0;
@@ -15048,6 +15221,27 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // ------------------------------------- shapes by setting — #3287
+  //
+  // Here for the models' reason: its control loads the models again, with
+  // none of #3287's shapes folded in beside them, and that is asynchronous.
+  try {
+    if (probeFrame !== null && variantFrame !== null && !SHADOW_MAP_LOAD) {
+      const folded = foldProbe(probeFrame, variantFrame);
+      try {
+        setStylisedFolds(false);
+        await loadSceneryModels();
+        stylisedFolds = { ...folded, control: foldProbe(probeFrame, variantFrame) };
+      } finally {
+        setStylisedFolds(true);
+        await loadSceneryModels();
+      }
+      phaseEnds('default: folds');
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   // -------------------------------------------- the variants — #367
   //
   // Outside the synchronous block for the reason the one above it is: the
@@ -15219,6 +15413,7 @@ async function run(): Promise<void> {
     buildingBluePixels,
     sceneryCallsByVariants,
     variantIndices,
+    stylisedFolds,
     riderMeanColour,
     riderSilhouettePixels,
     riderBuriedPixels,

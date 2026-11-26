@@ -3155,3 +3155,91 @@ export function nationalForestTownFixture(boundary = 'forest'): {
 export function plinthTriangles(plan: FootprintPlan): number {
   return plan.triangles.plinth.length / (3 * FOOTPRINT_VERTEX_FLOATS);
 }
+
+/**
+ * #3287: the stretches of {@link settingsFixture}, in metres along its road —
+ * whole windows of `urban-class.ts`' 100 m, each long enough to be a run of
+ * its own, and the suburban and the commercial one inside the 900 m to
+ * 2 100 m the realistic page's town rides.
+ */
+export const SETTINGS_STRETCHES = {
+  rural: { from: 100, to: 1_100 },
+  suburban: { from: 1_100, to: 1_600 },
+  commercial: { from: 1_600, to: 2_100 },
+} as const;
+
+/** Land reaches past the urban sweep's ±250 m. */
+const SETTINGS_REACH = 260;
+/** The commercial land, either side: 61 of the sweep's 101 samples. */
+const SETTINGS_COMMERCIAL_REACH = 150;
+/**
+ * A rural stretch's ribbon of built-up land, either side: 9 of the sweep's
+ * 101 samples, under `urban-class.ts` §`RURAL_MAX_BUILT_UP`'s tenth, and wide
+ * enough for a lot at the setback to stand on.
+ */
+const SETTINGS_RIBBON_REACH = 23;
+
+/**
+ * A road through three settings — #3287, and the realistic page's
+ * `town=settings`: a straight level road with NO footprints, so every house
+ * beside it is a lot (`settlements.ts` §`lotsAt`). Beside its first kilometre,
+ * and again past 2 100 m, farmland with a ribbon of houses' land along the
+ * road, too narrow to read as a village: `rural`. From 1 100 m residential
+ * land: `village`, a suburb. From 1 600 m commercial land 150 m either side:
+ * `town`. The class is `urban-class.ts`' own reading of that land.
+ */
+export function settingsFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  const { rural, suburban, commercial } = SETTINGS_STRETCHES;
+  const ribbon = (from: number, to: number): LandUseFeature[] => [
+    land('farmland', from, to, SETTINGS_RIBBON_REACH, SETTINGS_REACH),
+    land('farmland', from, to, -SETTINGS_REACH, -SETTINGS_RIBBON_REACH),
+    land('residential', from, to, -SETTINGS_RIBBON_REACH, SETTINGS_RIBBON_REACH),
+  ];
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'settings-fixture',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        ...ribbon(rural.from, rural.to),
+        land('residential', suburban.from, suburban.to, -SETTINGS_REACH, SETTINGS_REACH),
+        land(
+          'commercial',
+          commercial.from,
+          commercial.to,
+          -SETTINGS_COMMERCIAL_REACH,
+          SETTINGS_COMMERCIAL_REACH,
+        ),
+        land(
+          'residential',
+          commercial.from,
+          commercial.to,
+          SETTINGS_COMMERCIAL_REACH,
+          SETTINGS_REACH,
+        ),
+        land(
+          'residential',
+          commercial.from,
+          commercial.to,
+          -SETTINGS_REACH,
+          -SETTINGS_COMMERCIAL_REACH,
+        ),
+        ...ribbon(commercial.to, 2_900),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+    },
+  };
+}

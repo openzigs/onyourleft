@@ -728,6 +728,13 @@ import {
   type SceneryModel,
 } from './scenery-models';
 import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from './scenery-palette';
+import {
+  STYLISED_FOLDS,
+  stylisedFoldOf,
+  stylisedTinted,
+  writeStylisedTint,
+  type GeneratedShape,
+} from './stylised-shapes';
 import type {
   CameraPose,
   DeliveryCarMotion,
@@ -1924,6 +1931,17 @@ export function prepareSceneryGeometry(
     }
   }
 
+  return fittedToKind(merged, kind);
+}
+
+/**
+ * A shape made to fit its kind, in place: scaled so its largest extent is
+ * {@link sceneryFitMetres}, centred on x and z, its base at y = 0.
+ * {@link prepareSceneryGeometry}'s last step, and since #3287 a generated
+ * shape's too ({@link generatedSceneryGeometry}), so a shape from numbers
+ * takes the room a model of its kind takes by the same arithmetic.
+ */
+function fittedToKind(merged: BufferGeometry, kind: SceneryKind): BufferGeometry {
   // One helper rather than the same guard written three times: `boundingBox`
   // is nullable because a geometry may have no positions, and the box has to be
   // read twice — before the scale to size it, and after, because scaling a
@@ -1948,6 +1966,215 @@ export function prepareSceneryGeometry(
   const centre = fitted.getCenter(new Vector3());
   merged.translate(-centre.x, -fitted.min.y, -centre.z);
   return merged;
+}
+
+/**
+ * The vertex attribute that says which of its mesh's shapes a vertex belongs
+ * to — #3287: 0 the model, 1 and up the shapes folded in beside it
+ * (`stylised-shapes.ts` §`STYLISED_FOLDS`). Only a geometry that holds more
+ * than one shape carries it: a driver reads nought where there is none, which
+ * is the one shape such a mesh is. @see STYLISED_INSTANCE_GLSL
+ */
+export const STYLISED_SHAPE_ATTRIBUTE = 'oylShape';
+
+/**
+ * The instance attribute a stylised mesh's instances carry — #3287, four
+ * numbers: in `xyz` what the item's tint takes OFF each channel
+ * (`stylised-shapes.ts` §`writeStylisedTint`, as `1 − tint`), and in `w` one
+ * more than which of its mesh's shapes it is (§`stylisedFoldOf`).
+ *
+ * ⚠️ **Written that way round so that a mesh with no such attribute is drawn
+ * as it always was.** A driver reads `(0, 0, 0, 1)` for an attribute a
+ * geometry does not carry: nothing taken off, and the first shape. So a post,
+ * a barn and a wall — one shape and no tint — carry no buffer for it at all,
+ * and the whole belt still wears one material and compiles one program.
+ */
+export const STYLISED_INSTANCE_ATTRIBUTE = 'oylInstance';
+
+/**
+ * The two functions {@link withStylisedInstances} declares in the vertex
+ * program — #3287.
+ *
+ * - `oylShapeIs` is 1 for a vertex of the shape its instance is, and 0 for a
+ *   vertex of any other: `transformed` is multiplied by it, so a shape an
+ *   instance is not is folded to the instance's origin, every corner of its
+ *   triangles to one point, which draws nothing. The realistic fence's fold
+ *   (`CHAIN_LINK_FOLD_GLSL`, #1274), for as many shapes as a mesh holds.
+ * - `oylTinted` is a vertex's own colour, less what the instance's tint takes
+ *   off each channel.
+ *
+ * Exported for `stylised-folds.test.ts`, which runs it.
+ */
+export const STYLISED_INSTANCE_GLSL = `float oylShapeIs(float shape, float oneMore) {
+  return 1.0 - step(0.5, abs(shape - (oneMore - 1.0)));
+}
+vec3 oylTinted(vec3 colour, vec3 off) {
+  return colour * (vec3(1.0) - off);
+}`;
+
+/** The materials {@link withStylisedInstances} has taught. */
+const STYLISED_INSTANCES_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material draws each instance as the one shape and in the tint its
+ * {@link STYLISED_INSTANCE_ATTRIBUTE} says — #3287.
+ *
+ * @test-facing held by `stylised-folds.test.ts`
+ */
+export function readsStylisedInstances(material: Material): boolean {
+  return STYLISED_INSTANCES_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a stylised scenery material its instances' shape and tint — #3287,
+ * {@link STYLISED_INSTANCE_GLSL}, applied where three has the vertex's colour
+ * and where it has begun its position. Throws, as every splice here does, if
+ * three's program no longer holds an include it is spliced at.
+ */
+function withStylisedInstances<M extends Material>(material: M): M {
+  STYLISED_INSTANCES_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#3287's shapes and tints";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\nattribute float ${STYLISED_SHAPE_ATTRIBUTE};\nattribute vec4 ${STYLISED_INSTANCE_ATTRIBUTE};\n${STYLISED_INSTANCE_GLSL}`,
+          'vertex',
+          spliced,
+        ),
+        '#include <color_vertex>',
+        `#include <color_vertex>\nvColor.rgb = oylTinted(vColor.rgb, ${STYLISED_INSTANCE_ATTRIBUTE}.xyz);`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\ntransformed *= oylShapeIs(${STYLISED_SHAPE_ATTRIBUTE}, ${STYLISED_INSTANCE_ATTRIBUTE}.w);`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-stylised-instances`;
+  return material;
+}
+
+/**
+ * The stylised belt's pair — #3287: {@link vertexColouredMaterials}, taught
+ * each instance's shape and tint. One pair for the whole belt still, so one
+ * program a shading.
+ */
+function stylisedSceneryMaterials(): ShadedMaterials {
+  const pair = vertexColouredMaterials();
+  return { lit: withStylisedInstances(pair.lit), flat: withStylisedInstances(pair.flat) };
+}
+
+/** How many shapes a stylised mesh's one geometry holds — #3287: one, with no marks. */
+function shapesHeldBy(geometry: BufferGeometry): number {
+  const held = geometry.getAttribute(STYLISED_SHAPE_ATTRIBUTE) as BufferAttribute | undefined;
+  if (held === undefined) return 1;
+  let last = 0;
+  for (let at = 0; at < held.count; at += 1) last = Math.max(last, held.getX(at));
+  return Math.round(last) + 1;
+}
+
+/**
+ * A shape built from numbers as a geometry of its kind — #3287: its triangles
+ * and their colours as `stylised-shapes.ts` gives them, flat normals, and
+ * fitted as a model is ({@link fittedToKind}). Exported for
+ * `stylised-folds.test.ts`, which reads each shape's extent through it.
+ */
+export function generatedSceneryGeometry(shape: GeneratedShape, kind: SceneryKind): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(Float32Array.from(shape.positions), 3));
+  geometry.setAttribute('color', new BufferAttribute(Float32Array.from(shape.colours), 3));
+  geometry.computeVertexNormals();
+  return fittedToKind(geometry, kind);
+}
+
+/**
+ * One mesh's shapes as ONE geometry — #3287: `model`, and each of `folds`
+ * after it, every vertex marked with its shape in
+ * {@link STYLISED_SHAPE_ATTRIBUTE}. One geometry is one instanced mesh and one
+ * draw call, however many shapes it holds; {@link STYLISED_INSTANCE_GLSL} draws
+ * the one an instance is. `model` is released; with no `folds` it is returned
+ * as it came. Exported for `stylised-folds.test.ts`, which folds a shape of
+ * its own through it.
+ */
+export function foldedSceneryGeometry(
+  model: BufferGeometry,
+  folds: readonly GeneratedShape[],
+  kind: SceneryKind,
+): BufferGeometry {
+  if (folds.length === 0) return model;
+  const parts = [model, ...folds.map((shape) => generatedSceneryGeometry(shape, kind))];
+  // `mergeGeometries` needs every part to agree about being indexed. A model's
+  // index is kept, since a file's shared corners are vertices a phone does
+  // not shade twice; a generated shape shares none, so its index is a count.
+  if (model.index !== null) {
+    for (const part of parts.slice(1)) {
+      const vertices = part.getAttribute('position').count;
+      part.setIndex(Array.from({ length: vertices }, (_, at) => at));
+    }
+  }
+  const joined = mergeGeometries(parts);
+  if (joined === null) {
+    for (const part of parts.slice(1)) part.dispose();
+    throw new Error(`${kind}: a model and its folded shapes could not be merged into one geometry`);
+  }
+  const marks = new Float32Array(joined.getAttribute('position').count);
+  let at = 0;
+  parts.forEach((part, fold) => {
+    const vertices = part.getAttribute('position').count;
+    marks.fill(fold, at, at + vertices);
+    at += vertices;
+  });
+  joined.setAttribute(STYLISED_SHAPE_ATTRIBUTE, new BufferAttribute(marks, 1));
+  for (const part of parts) part.dispose();
+  return joined;
+}
+
+/**
+ * Whether #3287's shapes are folded in beside the models — the browser gate's
+ * control, and nothing else's. @see setStylisedFolds
+ */
+let stylisedFoldsOn = true;
+
+/**
+ * Loads the models, from the next {@link loadSceneryModels} on, with #3287's
+ * shapes folded in beside them, or with the models alone — the browser gate's
+ * control: the same frame drawn as it was before, in the same browser, for
+ * what the shapes cost and for the building a setting must NOT draw.
+ *
+ * @test-facing `apps/web/browser/game-harness.ts` §`foldProbe` loads the
+ * models with none, for the control; the product never switches them off
+ */
+export function setStylisedFolds(on: boolean): void {
+  stylisedFoldsOn = on;
+}
+
+/**
+ * A kind's loaded models, each with the shapes `stylised-shapes.ts` folds
+ * into its mesh — #3287. ⚠️ **A fold that cannot be made keeps the model**:
+ * the trade {@link loadSceneryModels} states for a file that cannot be read —
+ * a rider loses variety, never an item.
+ */
+function withStylisedFolds(
+  kind: SceneryKind,
+  models: readonly BufferGeometry[],
+): readonly BufferGeometry[] {
+  const folds = STYLISED_FOLDS[kind];
+  if (folds === undefined || !stylisedFoldsOn) return models;
+  return models.map((model, mesh) => {
+    try {
+      return foldedSceneryGeometry(model, folds[mesh] ?? [], kind);
+    } catch {
+      return model;
+    }
+  });
 }
 
 /**
@@ -2151,7 +2378,9 @@ export async function loadSceneryModels(
       // vanish. Losing variety is the documented trade; losing items is not.
       const kept = shapes.filter((shape): shape is BufferGeometry => shape !== undefined);
       if (kept.length > 0) {
-        loaded.set(kind, kept);
+        // #3287: each mesh's model, and the shapes drawn beside it in the same
+        // draw call. A kind with no model loaded keeps its primitive alone.
+        loaded.set(kind, withStylisedFolds(kind, kept));
       }
     }),
   );
@@ -2755,11 +2984,11 @@ export interface ScatterFold {
  * {@link ScatterFold}'s shape: replaced only when {@link reserve} grew the
  * matrices, so each growth strands one buffer, and the doubling bounds them.
  */
-function foldChannel(mesh: InstancedMesh, name: string): InstancedBufferAttribute {
+function foldChannel(mesh: InstancedMesh, name: string, size = 1): InstancedBufferAttribute {
   const needed = mesh.instanceMatrix.count;
   const held = mesh.geometry.getAttribute(name) as InstancedBufferAttribute | undefined;
   if (held !== undefined && held.count >= needed) return held;
-  const channel = new InstancedBufferAttribute(new Float32Array(needed), 1);
+  const channel = new InstancedBufferAttribute(new Float32Array(needed * size), size);
   channel.setUsage(DynamicDrawUsage);
   mesh.geometry.setAttribute(name, channel);
   return channel;
@@ -2857,6 +3086,20 @@ export class ScatterBelt {
   readonly #folded = new Set<InstancedMesh>();
 
   /**
+   * Whether this is the stylised world's belt — #3287: the one built with no
+   * materials of another's and not lit physically. It alone wears
+   * {@link stylisedSceneryMaterials}.
+   */
+  readonly #stylised: boolean;
+  /**
+   * #3287: the stylised meshes whose instances carry
+   * {@link STYLISED_INSTANCE_ATTRIBUTE} — a mesh that holds more than one
+   * shape, or whose kind is tinted — and how many shapes each holds. Every
+   * other mesh is drawn from the attribute's default, and carries no buffer.
+   */
+  readonly #held = new Map<InstancedMesh, number>();
+
+  /**
    * @param models the shapes to draw, by kind, in variant order. Defaults to
    * whatever {@link loadSceneryModels} has loaded, which is what the shipped
    * client gets; a kind with no entry is drawn as {@link SCATTER_STYLE}'s
@@ -2896,9 +3139,10 @@ export class ScatterBelt {
       readonly fold?: ScatterFold;
     } = {},
   ) {
+    this.#stylised = options.materials === undefined && options.physical !== true;
     this.#materials =
       options.materials ??
-      (options.physical === true ? physicalMaterials() : vertexColouredMaterials());
+      (options.physical === true ? physicalMaterials() : stylisedSceneryMaterials());
     this.#skip = options.skip ?? new Set();
     this.#tint = options.tint;
     this.#fold = options.fold;
@@ -2946,6 +3190,15 @@ export class ScatterBelt {
         if (this.#fold?.kind === kind) {
           foldChannel(mesh, this.#fold.attribute);
           this.#folded.add(mesh);
+        }
+        // #3287: a stylised mesh of several shapes, or of a tinted kind,
+        // carries which shape each instance is and its tint.
+        if (this.#stylised) {
+          const held = shapesHeldBy(mesh.geometry);
+          if (held > 1 || stylisedTinted(kind)) {
+            this.#held.set(mesh, held);
+            foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 4);
+          }
         }
         // three's constructor fills every slot with the identity matrix and
         // sets `count` to the capacity. A belt that drew before its first frame
@@ -3179,6 +3432,7 @@ export class ScatterBelt {
       if (this.#fold !== undefined && this.#folded.has(mesh)) {
         foldChannel(mesh, this.#fold.attribute);
       }
+      if (this.#held.has(mesh)) foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 4);
       // Rewound here rather than tracked in a second map: the next loop uses
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
@@ -3221,6 +3475,21 @@ export class ScatterBelt {
           this.#fold.shapeOf(item),
         );
       }
+      // #3287: its tint, as what it takes off each channel, and which of its
+      // mesh's shapes this one is — a building's by its setting, a tree's or
+      // a rock's by where it stands. @see STYLISED_INSTANCE_ATTRIBUTE
+      const held = this.#held.get(mesh);
+      if (held !== undefined) {
+        const channels = (
+          mesh.geometry.getAttribute(STYLISED_INSTANCE_ATTRIBUTE) as InstancedBufferAttribute
+        ).array as Float32Array;
+        const at = mesh.count * 4;
+        writeStylisedTint(item.kind, item.x, item.z, channels, at);
+        channels[at] = 1 - (channels[at] as number);
+        channels[at + 1] = 1 - (channels[at + 1] as number);
+        channels[at + 2] = 1 - (channels[at + 2] as number);
+        channels[at + 3] = 1 + stylisedFoldOf(item, held);
+      }
       mesh.count += 1;
     }
     for (const mesh of this.#meshes.values()) {
@@ -3232,6 +3501,9 @@ export class ScatterBelt {
         if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
         if (this.#fold !== undefined && this.#folded.has(mesh)) {
           mesh.geometry.getAttribute(this.#fold.attribute).needsUpdate = true;
+        }
+        if (this.#held.has(mesh)) {
+          mesh.geometry.getAttribute(STYLISED_INSTANCE_ATTRIBUTE).needsUpdate = true;
         }
         // three caches a bounding sphere until it is asked to recompute one,
         // and the instances move every frame. Without this the belt is culled
