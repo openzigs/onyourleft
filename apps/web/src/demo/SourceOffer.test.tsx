@@ -40,10 +40,12 @@ describe('the demo links its two-minute video — #3225', () => {
   it('links the video by name, as a link to YouTube and not an embed', () => {
     expect(DEMO_VIDEO_URL).toBe('https://www.youtube.com/watch?v=lgpE-VbyFa0');
     // The lead is its own span, which `demo.css` leaves to a screen reader in a small frame.
-    const link = new RegExp(
-      `<a class="oyl-demo__video-link" href="${DEMO_VIDEO_URL.replaceAll('?', '\\?')}"[^>]*>(.*?)</a>`,
-    ).exec(markup);
-    expect(link?.[1]).toBe(
+    // Read as text, not through a pattern built from the address.
+    const opening = `<a class="oyl-demo__video-link" href="${DEMO_VIDEO_URL}" target="_blank" rel="noreferrer">`;
+    const start = markup.indexOf(opening);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const inside = markup.slice(start + opening.length, markup.indexOf('</a>', start));
+    expect(inside).toBe(
       '<span class="oyl-demo__video-lead">Watch the two-minute </span>demo on YouTube',
     );
     expect(markup).not.toMatch(/<iframe/);
