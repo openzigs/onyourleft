@@ -1359,6 +1359,15 @@ interface PreviewAsked {
   readonly rider: SimulatedRider;
   readonly routeId: string;
   readonly position: RidingPosition;
+  /**
+   * The corridor the picker had ready for the route at the press — the
+   * tablet check on PR #3261. The preview's screen is a new one, which reads
+   * the corridor again, and it starts as soon as its routes are read: long
+   * before that read ends, so with nothing handed over a preview rode with no
+   * map data at all (no mapped buildings, no street names). As an ordinary
+   * press does (ADR 0054 D-2.4), it rides what was ready when it was pressed.
+   */
+  readonly corridor?: CorridorState | undefined;
 }
 
 /**
@@ -3409,7 +3418,12 @@ function GameScreen({
       // from what was ready for this route — and never changed during it
       // (ADR 0054 D-2.4). Leaving `choosing` below abandons a read still
       // running; one that ends anyway changes nothing this ride draws.
-      const ready = corridorStateRef.current;
+      // A preview rides the corridor its picker had ready (@see PreviewAsked.corridor)
+      // where its own screen's read has not ended.
+      const ready =
+        corridorStateRef.current?.kind === 'ready'
+          ? corridorStateRef.current
+          : (preview?.corridor ?? corridorStateRef.current);
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
@@ -3647,6 +3661,7 @@ function GameScreen({
       captureSensors,
       inventedSensors,
       level,
+      preview,
     ],
   );
 
@@ -5581,7 +5596,14 @@ function GameScreen({
                   // control, and the preview's new screen would leave a
                   // control granted to this one with nothing to release it.
                   if (startingRef.current) return;
-                  onPreview({ rider, routeId: route.id, position: sitting });
+                  // The tablet check on PR #3261: and what the picker had
+                  // read, which the press holds to this route's own.
+                  onPreview({
+                    rider,
+                    routeId: route.id,
+                    position: sitting,
+                    corridor: corridorStateRef.current,
+                  });
                 }
           }
           // #1221: whether this ride will be saved, said under Ride. The
