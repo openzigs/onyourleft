@@ -111,11 +111,13 @@ async function open(
   map: 'street' | 'outline',
   route: 'full' | 'compact' = 'full',
   town: 'north' | 'east' = 'north',
+  extra: readonly string[] = [],
 ): Promise<void> {
   const query = [
     ...(map === 'outline' ? ['map=outline'] : []),
     ...(route === 'compact' ? ['route=compact'] : []),
     ...(town === 'east' ? ['town=east'] : []),
+    ...extra,
   ].join('&');
   const response = await page.goto(
     `${HARNESS_ORIGIN}/street-map.html${query === '' ? '' : `?${query}`}`,
@@ -443,6 +445,112 @@ for (const viewport of VIEWPORTS) {
 }
 
 /**
+ * #2415 — THE TILE'S GRADIENT FOLLOWS THE RIDER'S TEXT SIZE where the setting
+ * applies, a tablet's corners layout (`theme.css` §"#2415"), and on a phone
+ * stays the normal size, as Settings says the setting does there. At every
+ * viewport above and the upright tablet, at each of the three sizes, with the
+ * gradient held at `-19.9`, its widest ordinary value (`theme.css` §"THE HUD'S
+ * TEXT SIZE"): the digits are the size the step gives them, and the label is
+ * whole on the tile and ends above the rider's mark, as #2385 holds it at the
+ * normal size.
+ */
+const TEXT_SIZE_VIEWPORTS = [
+  ...VIEWPORTS,
+  { name: 'an upright tablet', width: 800, height: 1280, grows: false },
+] as const;
+
+/** The tile's digits at the normal size (`theme.css` §"THE COMPACT ROUTE PANEL"): 1.5 rem. */
+const TILE_DIGITS_PIXELS = 24;
+
+/** The primary readings' steps on a tablet (§"THE HUD'S TEXT SIZE"): 4.375 and 5 rem over 3.815. */
+const TABLET_TEXT_STEPS = { normal: 1, large: 4.375 / 3.815, 'extra-large': 5 / 3.815 } as const;
+
+/** Where the text size applies: a corners layout 46 rem wide and 47 rem tall or more. */
+function textSizeApplies(viewport: { readonly width: number; readonly height: number }): boolean {
+  return viewport.width >= 736 && viewport.height >= 752;
+}
+
+for (const viewport of TEXT_SIZE_VIEWPORTS) {
+  test(`#2415 the tile's gradient follows the text size, and fits the tile — ${viewport.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const seen: string[] = [];
+    for (const size of ['normal', 'large', 'extra-large'] as const) {
+      const query = ['grade=-19.9', ...(size === 'normal' ? [] : [`text=${size}`])];
+      await open(page, 'street', 'full', 'north', query);
+      const full = (await boxes(page)).route;
+      await open(page, 'street', 'compact', 'north', query);
+      const route = (await boxes(page)).route;
+      if (full === undefined || route === undefined) throw new Error(`no route panel at ${size}`);
+      // The panel inside the full panel's box at the same size, so it covers
+      // no road the full one leaves clear (#2385), and clear of the rider.
+      expect(route.left, `${size}: the panel's left`).toBeGreaterThanOrEqual(full.left - 0.5);
+      expect(route.top, `${size}: the panel's top`).toBeGreaterThanOrEqual(full.top - 0.5);
+      expect(route.left + route.width, `${size}: the panel's right`).toBeLessThanOrEqual(
+        full.left + full.width + 0.5,
+      );
+      expect(route.top + route.height, `${size}: the panel's bottom`).toBeLessThanOrEqual(
+        full.top + full.height + 0.5,
+      );
+      const panel = {
+        ...route,
+        right: route.left + route.width,
+        bottom: route.top + route.height,
+      };
+      const stage = { name: viewport.name, width: viewport.width, height: viewport.height };
+      expect(overlap(panel, riderBox({ ...stage, unstagedFails: false })), 'over the rider').toBe(
+        false,
+      );
+      const measured = await page.evaluate(() => {
+        const box = (element: Element | null | undefined) => {
+          if (element === null || element === undefined) return undefined;
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        };
+        const label = document.querySelector('.oyl-hud__tile-grade');
+        const digits = label?.querySelector('.oyl-hud__digits');
+        return {
+          text: document.querySelector('.oyl-hud')?.getAttribute('data-oyl-hud-text') ?? '',
+          value: label?.getAttribute('data-oyl-tile-grade') ?? '',
+          digits:
+            digits === null || digits === undefined
+              ? 0
+              : parseFloat(getComputedStyle(digits).fontSize),
+          label: box(label),
+          tile: box(document.querySelector('.oyl-hud__plan-svg')),
+          mark: box(document.querySelector('.oyl-hud__plan-svg circle')),
+        };
+      });
+      const { label, tile, mark } = measured;
+      if (label === undefined || tile === undefined || mark === undefined) {
+        throw new Error(`no label, tile or mark at ${size}: ${JSON.stringify(measured)}`);
+      }
+      seen.push(
+        `${size} ${measured.digits.toFixed(1)} px, label ${(label.right - label.left).toFixed(0)} × ` +
+          `${(label.bottom - label.top).toFixed(0)} on a ${(tile.right - tile.left).toFixed(0)} × ` +
+          `${(tile.bottom - tile.top).toFixed(0)} px tile, ` +
+          `${(mark.top - label.bottom).toFixed(1)} px above the mark`,
+      );
+      // The page drew what was asked: the size, and the widest value.
+      expect(measured.text).toBe(size);
+      expect(measured.value).toBe('-19.9');
+      const step = textSizeApplies(viewport) ? TABLET_TEXT_STEPS[size] : 1;
+      expect(measured.digits, `the digits at ${size}`).toBeCloseTo(TILE_DIGITS_PIXELS * step, 1);
+      // Whole on the tile, and clear of the rider's mark under it.
+      expect(label.left, `${size}: left`).toBeGreaterThanOrEqual(tile.left - 0.5);
+      expect(label.top, `${size}: top`).toBeGreaterThanOrEqual(tile.top - 0.5);
+      expect(label.right, `${size}: right`).toBeLessThanOrEqual(tile.right + 0.5);
+      expect(label.bottom, `${size}: the label ends above the mark`).toBeLessThanOrEqual(mark.top);
+    }
+    console.log(
+      `#2415 the tile's gradient at ${viewport.name} (${String(viewport.width)}×${String(viewport.height)}): ` +
+        seen.join('; '),
+    );
+  });
+}
+
+/**
  * The sheet covers the whole box, in the layouts where the box is widest —
  * #2380's review: `stacked` gives the panel the screen's full width at 5 rem
  * tall, 766 px at 800×340 against a 400 px sheet when the reach was ±2.5 km.
@@ -594,8 +702,9 @@ async function paintsOn(
   frames: number,
   metresPerFrame: number,
   route: 'full' | 'compact' = 'full',
+  extra: readonly string[] = [],
 ) {
-  await open(page, 'street', route);
+  await open(page, 'street', route, 'north', extra);
   await browser.startTracing(page, { categories: ['devtools.timeline'] });
   const ridden = await page.evaluate(
     async ([count, step]) => window.__oylStreetMap?.ride?.(count, step, true),
@@ -641,32 +750,46 @@ test('#2380 moving the street map does not paint it again: once per 250 m, not o
   );
 });
 
-test('#2385 the compact tile’s gradient changes without painting the map again', async ({
-  page,
-  browser,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  // As above, with the compact tile and a gradient that swings (the harness's
-  // note), so the label over the map changes on nearly every frame.
-  const frames = 60;
-  const { ridden, map, all } = await paintsOn(page, browser, frames, 5, 'compact');
-  expect(ridden.frames).toBe(frames);
-  expect(ridden.views).toBeGreaterThan(frames - 2);
-  // The label did change, most frames: a count of the label's own writes.
-  expect(ridden.grades).toBeGreaterThan(frames / 2);
-  expect(all).toBeGreaterThan(frames);
-  // And the map is still painted per new sheet, not per change of the label.
-  expect(map).toBeLessThanOrEqual(ridden.regions + 2);
-  expect(map).toBeGreaterThanOrEqual(1);
-  expect(map).toBeLessThan(ridden.grades / 10);
-  // Nothing the label changes is in the map's drawing.
-  expect(ridden.drawnWithin).toBe(0);
-  console.log(
-    `#2385 ${String(frames)} paced frames of 5 m with the compact tile, 1280×800: ` +
-      `${String(ridden.grades)} changes of the gradient on it, ${String(ridden.regions)} sheets, ` +
-      `${String(map)} paints of the street map (${String(all)} paints in all)`,
+// #2415: and again at extra large, where the label is drawn larger on a
+// tablet (`theme.css` §"#2415"): a larger label over the map must not paint
+// the map either.
+for (const size of ['normal', 'extra-large'] as const) {
+  test(
+    size === 'normal'
+      ? '#2385 the compact tile’s gradient changes without painting the map again'
+      : '#2415 the compact tile’s gradient changes without painting the map again, at extra large',
+    async ({ page, browser }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      // As above, with the compact tile and a gradient that swings (the harness's
+      // note), so the label over the map changes on nearly every frame.
+      const frames = 60;
+      const { ridden, map, all } = await paintsOn(
+        page,
+        browser,
+        frames,
+        5,
+        'compact',
+        size === 'normal' ? [] : [`text=${size}`],
+      );
+      expect(ridden.frames).toBe(frames);
+      expect(ridden.views).toBeGreaterThan(frames - 2);
+      // The label did change, most frames: a count of the label's own writes.
+      expect(ridden.grades).toBeGreaterThan(frames / 2);
+      expect(all).toBeGreaterThan(frames);
+      // And the map is still painted per new sheet, not per change of the label.
+      expect(map).toBeLessThanOrEqual(ridden.regions + 2);
+      expect(map).toBeGreaterThanOrEqual(1);
+      expect(map).toBeLessThan(ridden.grades / 10);
+      // Nothing the label changes is in the map's drawing.
+      expect(ridden.drawnWithin).toBe(0);
+      console.log(
+        `#2385 ${String(frames)} paced frames of 5 m with the compact tile, 1280×800, ${size}: ` +
+          `${String(ridden.grades)} changes of the gradient on it, ${String(ridden.regions)} sheets, ` +
+          `${String(map)} paints of the street map (${String(all)} paints in all)`,
+      );
+    },
   );
-});
+}
 
 test('#2290 what a paced ride costs the engine, map and outline — published, not asserted', async ({
   page,

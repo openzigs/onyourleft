@@ -14749,6 +14749,54 @@ html:has(.oyl-open-world__go) {
   color: var(--oyl-color-hud-grade-wall);
 }
 
+/* #2415: THE GRADIENT FOLLOWS THE RIDER'S TEXT SIZE, where the setting
+   applies (§"THE HUD'S TEXT SIZE": a tablet's corners layout, 46 rem wide
+   and 47 rem tall or more; on a phone it changes nothing, and Settings says
+   so). In the Focus arrangement the tile can be the only gradient on the
+   screen, so it takes the primary readings' own steps, 4.375 and 5 rem over
+   3.815: 1.72 and 1.97 rem over 1.5. The sign stays half the digits, as it
+   is everywhere (`.oyl-hud__sign`); the unit and its glyph keep the HUD's
+   small size.
+
+   The tile's 6 rem least width is the normal size's widest label and room
+   (§"THE TILE'S SIZE"), so it takes the same steps: measured with `-19.9`,
+   the label is 86 px at the normal size, 94 at large and 102 at extra large,
+   and the upright tablet's tile was 96 px at all three, so at extra large
+   the label ran 6 px off it. At 6.88 and 7.86 rem (110 and 126 px) it keeps
+   the normal size's 10 px and more. A wider tile is the larger one only
+   where its box is narrower than that; at 1280×800 it is 128 px already.
+
+   Its height cannot grow: it is the plan view's box, 80 px upright on the
+   tablet, inside the full panel (§"THE TILE'S SIZE"), with the rider's mark
+   in its middle, its top 33.2 px down. At the normal line height (1.1) the
+   label was 35 px tall at extra large and ran 1 px over the mark, so at the
+   two larger steps the line is the digits' own size: the label measured 28
+   and 31 px tall, 6.1 and 2.1 px above the mark there. The line's height
+   is set by the font size rather than by the font's own metrics, and the
+   mark's place is the tile's geometry.
+   `street-map.browser.spec.ts` §"#2415" measures the label on the tile and
+   clear of the rider's mark, and the panel inside the full panel's box and
+   clear of the rider, at every viewport it lays out, at each size. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-hud--text-large .oyl-hud__tile-grade {
+    font-size: calc(1.5rem * 4.375 / 3.815);
+    line-height: 1;
+  }
+
+  .oyl-hud--text-extra-large .oyl-hud__tile-grade {
+    font-size: calc(1.5rem * 5 / 3.815);
+    line-height: 1;
+  }
+
+  .oyl-hud--text-large .oyl-hud__route--compact .oyl-hud__tile .oyl-hud__plan-svg {
+    min-width: calc(6rem * 4.375 / 3.815);
+  }
+
+  .oyl-hud--text-extra-large .oyl-hud__route--compact .oyl-hud__tile .oyl-hud__plan-svg {
+    min-width: calc(6rem * 5 / 3.815);
+  }
+}
+
 /*
  * #2604: the owner's Status in the Operate area — a description list laid out
  * as cards, as `.oyl-ride-summary` lays out a ride's, at the body size: some
