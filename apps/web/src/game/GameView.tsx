@@ -4441,11 +4441,11 @@ function GameScreen({
         }
         // #2319: a solo lap race's whole lap of the rider's own loop, offered
         // to the store, which keeps it if it is the fastest. A lap time and
-        // nothing else (ADR 0060 D-12.2). Never a capture's in-memory lap.
+        // nothing else (ADR 0060 D-12.2). Never a simulated rider's, a capture
+        // included: `bestLapRef` is unset for one, where the ride begins.
         const best = bestLapRef.current;
         const raceLap =
           best === undefined ||
-          capture !== undefined ||
           crossed.kind !== 'lap' ||
           lapRaceRef.current === undefined ||
           laps === undefined
