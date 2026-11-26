@@ -562,6 +562,47 @@ test.describe('#1014 — a screen of sections uses a tablet’s width', { tag: N
     console.log(`[#1014] ${TABLET_IN_THE_SHELL.name}\n${report.join('\n')}`);
   });
 
+  /**
+   * #2194, item 6: which column of the pair each of the ride's analysis
+   * sections sits in. Nothing else checks it: moving the power curve from the
+   * first column to the second turned only the route-sentences record red,
+   * and taking that record again would have hidden the move. So the curve, the
+   * time in zone and the laps table are held inside the pair's first child, and
+   * drawn left of the second — the DOM and the layout both.
+   */
+  test(`activity-detail — ${TABLET_IN_THE_SHELL.name}: the curve, time in zone and laps sit in the pair’s first column (#2194)`, async ({
+    page,
+  }) => {
+    await open(page, TABLET_IN_THE_SHELL);
+    const route = widened('activity-detail');
+    const seen = await layoutAt(page, await hashOf(page, route), 'main');
+    expect(seen.h1, 'activity-detail did not render its own page').toBe(route.title);
+    const places = await page.evaluate(
+      (selectors) => {
+        const second = document.querySelector('main .oyl-sections--pair > :nth-child(2)');
+        const secondLeft = second?.getBoundingClientRect().left ?? Number.NaN;
+        return selectors.map((selector) => {
+          const found = [...document.querySelectorAll(`main ${selector}`)];
+          return {
+            selector,
+            count: found.length,
+            inFirst: found.filter(
+              (each) => each.closest('.oyl-sections--pair > :first-child') !== null,
+            ).length,
+            leftOfSecond: found.filter((each) => each.getBoundingClientRect().left < secondLeft)
+              .length,
+          };
+        });
+      },
+      ['[data-oyl-curve-slot]', '[data-oyl-zones-slot]', '.oyl-table--laps'],
+    );
+    expect(places).toEqual([
+      { selector: '[data-oyl-curve-slot]', count: 1, inFirst: 1, leftOfSecond: 1 },
+      { selector: '[data-oyl-zones-slot]', count: 1, inFirst: 1, leftOfSecond: 1 },
+      { selector: '.oyl-table--laps', count: 1, inFirst: 1, leftOfSecond: 1 },
+    ]);
+  });
+
   test(`upright — ${TABLET_UPRIGHT.name}: two columns where content allows`, async ({ page }) => {
     await open(page, TABLET_UPRIGHT);
     const report: string[] = [];
