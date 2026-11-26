@@ -28,7 +28,14 @@ import {
 } from './realistic-budget';
 import { chainLinkFacts } from './realistic-bytes-testing';
 import type { ScatterItem } from './scatter';
-import { ageScale, fenceFoldOf, instanceBuild, rockSeat, ROCK_SEAT } from './scenery-plan';
+import {
+  ageScale,
+  drawnScale,
+  fenceFoldOf,
+  instanceBuild,
+  rockSeat,
+  ROCK_SEAT,
+} from './scenery-plan';
 import { STRUCTURE_FOOTPRINTS } from './settlements';
 import {
   builtFenceGeometry,
@@ -47,6 +54,7 @@ import {
   sceneryFitMetres,
   STONE_WALL_COPES,
   stoneWallGeometry,
+  treeCanBeSeen,
   type RealisticShape,
 } from './three-renderer';
 
@@ -351,6 +359,52 @@ describe('how big and how built an instance is drawn — #3252', () => {
     const size = (sceneryFitMetres('tree-broadleaf') * 1.2) / oak.extent;
     expect(drawn.up).toBeCloseTo(size, 6);
     expect(drawn.across).toBeCloseTo(size, 6);
+    belt.dispose();
+  });
+});
+
+describe('a tree is ranked by the size it is drawn at — #3252’s review', () => {
+  it('ranks, and so draws, a tree whose DRAWN crown reaches the view where its scale alone does not', () => {
+    const world = aWorld();
+    const lime = shapeOf(world, 'grown_lime');
+    // How far the shape reaches from its trunk and above its base, in its own units.
+    let reach = 0;
+    let top = 0;
+    for (const part of lime.parts) {
+      part.geometry.computeBoundingBox();
+      const box = part.geometry.boundingBox;
+      if (box === null) continue;
+      reach = Math.max(
+        reach,
+        Math.hypot(
+          Math.max(Math.abs(box.min.x), Math.abs(box.max.x)),
+          Math.max(Math.abs(box.min.z), Math.abs(box.max.z)),
+        ),
+      );
+      top = Math.max(top, box.max.y);
+    }
+    const fit = sceneryFitMetres('tree-broadleaf') / lime.extent;
+    // Walk the edge of the view for a place where the rule itself says so.
+    const found = (() => {
+      for (let x = 6; x < 90; x += 0.25) {
+        for (let z = -30; z < 60; z += 0.25) {
+          const tree = item('tree-broadleaf', { setting: 'park', x, z });
+          const drawn = drawnScale(tree);
+          const [across, up] = [drawn.across, drawn.up];
+          if (
+            !treeCanBeSeen(tree, POSE, reach * fit, top * fit) &&
+            treeCanBeSeen(tree, POSE, reach * fit * across, top * fit * up)
+          ) {
+            return tree;
+          }
+        }
+      }
+      throw new Error('no such place');
+    })();
+    const belt = new RealisticVegetationBelt(world);
+    belt.update([found], POSE);
+    // In the frame at all, and then seen because of its drawn size: its full level is drawn.
+    expect(nearMeshOf(belt, lime).count).toBe(1);
     belt.dispose();
   });
 });

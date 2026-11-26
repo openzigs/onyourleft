@@ -672,9 +672,8 @@ import {
 } from './instance-tint';
 import { GROWN_SPECIES, growTree, type GrownMesh, type GrownSpecies } from './grown-trees';
 import {
-  ageScale,
+  drawnScale,
   fenceFoldOf,
-  instanceBuild,
   PLAN_SLOTS,
   rockSeat,
   SCENERY_SETTINGS,
@@ -16418,8 +16417,7 @@ export class RealisticVegetationBelt {
   #drawn = 0;
   /** The item being placed's packed tint — #621. @see packedInstanceTint */
   #tint = 0;
-  /** #3252: the item being placed's build, its seat if it is a rock, and its far band's matrix. */
-  readonly #build = { height: 1, girth: 1 };
+  /** #3252: the item being placed's seat if it is a rock, and its far band's matrix. */
   readonly #seat = { sink: 0, tilt: 0, azimuth: 0 };
   readonly #tiltAxis = new Vector3();
   readonly #tilt = new Quaternion();
@@ -16777,9 +16775,11 @@ export class RealisticVegetationBelt {
         const variant = shapeIndexOf(each, item);
         const shape = each.shapes[variant] as RealisticShape;
         const reach = each.reach[variant];
-        const size = drawnSize(each, item, shape);
-        const radius = (reach?.across ?? 0) * size;
-        if (!treeCanBeSeen(item, pose, radius, (reach?.up ?? 0) * size)) continue;
+        // #3252's review: by the size it is DRAWN at, its girth and height too.
+        const drawn = drawnScale(item);
+        const radius = ((reach?.across ?? 0) * each.fit * drawn.across) / shape.extent;
+        const height = ((reach?.up ?? 0) * each.fit * drawn.up) / shape.extent;
+        if (!treeCanBeSeen(item, pose, radius, height)) continue;
       }
       this.#seen[index] = 1;
       rankInto(each.ranking, index, Math.hypot(item.x - pose.x, item.z - pose.z));
@@ -16819,17 +16819,18 @@ export class RealisticVegetationBelt {
       const variant = shapeIndexOf(each, item);
       const shape = each.shapes[variant] as RealisticShape;
       const rank = rankOf(each.ranking, index);
-      const size = drawnSize(each, item, shape);
+      // #3252: its fit, its scale, its age and its own build — a little taller
+      // or stouter than the next — from the ONE function every guard reads.
+      const scaled = drawnScale(item);
+      const size = (each.fit * scaled.across) / shape.extent;
+      const tall = (each.fit * scaled.up) / shape.extent;
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
-      // #3252: each instance its own build, a little taller or stouter than the next.
-      const build = instanceBuild(item.setting, item.x, item.z, this.#build);
-      this.#scale.set(size * build.girth, size * build.height, size * build.girth);
+      this.#scale.set(size, tall, size);
       if (each.kind === 'rock') {
         // #3252: a rock sits IN the ground, sunk and tipped, and not on it.
         const seat = rockSeat(item.x, item.z, this.#seat);
-        this.#position.y -=
-          seat.sink * (each.footprint[variant]?.height ?? 0) * size * build.height;
+        this.#position.y -= seat.sink * (each.footprint[variant]?.height ?? 0) * tall;
         this.#tiltAxis.set(Math.cos(seat.azimuth), 0, Math.sin(seat.azimuth));
         this.#quaternion.premultiply(this.#tilt.setFromAxisAngle(this.#tiltAxis, seat.tilt));
       }
@@ -17069,13 +17070,6 @@ function shapeIndexOf(each: VegetationSlot, item: ScatterItem): number {
   return table === undefined
     ? variantOf(item.variant, each.shapes.length)
     : (table[variantOf(item.variant, PLAN_SLOTS)] as number);
-}
-
-/** How big an item is drawn, in its shape's own units: its fit, its scale and its age. */
-function drawnSize(each: VegetationSlot, item: ScatterItem, shape: RealisticShape): number {
-  return (
-    (each.fit * item.scale * ageScale(item.setting, shape.name, item.x, item.z)) / shape.extent
-  );
 }
 
 /**

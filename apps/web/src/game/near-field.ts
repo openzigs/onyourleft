@@ -108,6 +108,7 @@ import {
 import type { PeopleInView, Person } from './people';
 import type { QualitySettings } from './quality';
 import type { SceneryKind, ScatterItem, StructureKind } from './scatter';
+import { drawnScale } from './scenery-plan';
 import { LOT_PORCH_FOOTPRINT, STRUCTURE_FOOTPRINTS } from './settlements';
 
 /** Which world a frame is drawn in. @see QualitySettings.world */
@@ -242,14 +243,18 @@ const STRUCTURE_PLAN_MARGIN_METRES = 0.1;
 export function sceneryReach(kind: SceneryKind, world: DrawnWorld): Reach {
   const naturals = NATURAL_REACH[world];
   if (kind in naturals) return naturals[kind as NaturalKind];
-  const footprint =
-    kind === 'building' ? LOT_PORCH_FOOTPRINT : STRUCTURE_FOOTPRINTS[kind as StructureKind];
+  return structureReach(kind as StructureKind);
+}
+
+/** A structure's box: its footprint and a margin, its foundation and its top. */
+function structureReach(kind: StructureKind): Reach {
+  const footprint = kind === 'building' ? LOT_PORCH_FOOTPRINT : STRUCTURE_FOOTPRINTS[kind];
   return {
     x: footprint.x + STRUCTURE_PLAN_MARGIN_METRES,
     back: footprint.back - STRUCTURE_PLAN_MARGIN_METRES,
     front: footprint.front + STRUCTURE_PLAN_MARGIN_METRES,
     bottom: -STRUCTURE_FOUNDATION_METRES,
-    top: STRUCTURE_TOPS[kind as StructureKind],
+    top: STRUCTURE_TOPS[kind],
   };
 }
 
@@ -261,6 +266,44 @@ export function sceneryReach(kind: SceneryKind, world: DrawnWorld): Reach {
 export function sceneryPlanRadius(kind: SceneryKind, world: DrawnWorld): number {
   const reach = sceneryReach(kind, world);
   return Math.hypot(reach.x, Math.max(-reach.back, reach.front));
+}
+
+/**
+ * How tall each fence that is not the field's stands, in metres — #3252's
+ * review: the chain-link's posts 2.21 m out of the ground (#1274), the
+ * close-board timber fence 1.8 m and the highway noise barrier's posts 3.1 m
+ * (`three-renderer.ts` §`chainLinkFenceGeometry`, §`builtFenceGeometry`).
+ * {@link STRUCTURE_TOPS}' 1.3 m is the field fence's, and held every `fence`
+ * to it. `near-field.test.ts` §"the bounds" reads each off the shape drawn.
+ */
+export const FENCE_TOPS = {
+  'chain-link': 2.25,
+  'timber-fence': 1.8,
+  'noise-barrier': 3.1,
+} as const;
+
+const FENCE_REACH: Readonly<Record<keyof typeof FENCE_TOPS, Reach>> = {
+  'chain-link': { ...structureReach('fence'), top: FENCE_TOPS['chain-link'] },
+  'timber-fence': { ...structureReach('fence'), top: FENCE_TOPS['timber-fence'] },
+  'noise-barrier': { ...structureReach('fence'), top: FENCE_TOPS['noise-barrier'] },
+};
+
+/**
+ * The box an ITEM fits inside, in its own frame, at a scale of 1 —
+ * {@link sceneryReach} of its kind, and for a `fence` that is a chain-link,
+ * a timber fence or a noise barrier that fence's own height
+ * ({@link FENCE_TOPS}). Either world: the stylised one draws the field
+ * fence there, which is inside it.
+ */
+export function itemReach(
+  item: Pick<ScatterItem, 'kind' | 'chainLink' | 'boundary'>,
+  world: DrawnWorld,
+): Reach {
+  if (item.kind === 'fence') {
+    if (item.boundary !== undefined) return FENCE_REACH[item.boundary];
+    if (item.chainLink === true) return FENCE_REACH['chain-link'];
+  }
+  return sceneryReach(item.kind, world);
 }
 
 /** The solid between the eye and a near plane. @see nearPyramid */
@@ -437,8 +480,9 @@ function meetsPyramid(
  * its own `z` along `(sin, 0, cos)` — which is three's rotation about +y.
  */
 export function intrudes(item: ScatterItem, pyramid: NearPyramid, world: DrawnWorld): boolean {
-  const reach = sceneryReach(item.kind, world);
-  const s = item.scale;
+  const reach = itemReach(item, world);
+  // #3252's review: the size it is DRAWN at, across and up, as the renderer sizes it.
+  const { across: s, up } = drawnScale(item);
   const eye = pyramid.points[0] as RigPoint;
   // Let go on distance first: nearly every item is metres away.
   const plan = Math.hypot(reach.x, Math.max(-reach.back, reach.front)) * s;
@@ -454,7 +498,7 @@ export function intrudes(item: ScatterItem, pyramid: NearPyramid, world: DrawnWo
         corners.push(
           vector(
             item.x + (across.x * x + along.x * z) * s,
-            item.y + y * s,
+            item.y + y * up,
             item.z + (across.z * x + along.z * z) * s,
           ),
         );
@@ -709,7 +753,7 @@ function preparedOf(shape: ShapeTriangles): PreparedShape {
 /**
  * Whether any triangle of `shape`, drawn for `item`, meets the pyramid — the
  * question the near plane actually asks. Placed as `three-renderer.ts`' belts
- * place an instance: scaled by `item.scale`, turned by `item.rotation` about
+ * place an instance: scaled by `scenery-plan.ts` §`drawnScale`, turned by `item.rotation` about
  * +y, stood at the item.
  *
  * ⚠️ **It makes no object, and it tests few triangles.** The pyramid lies
@@ -727,9 +771,10 @@ export function shapeMeets(
   shape: ShapeTriangles,
   pyramid: NearPyramid,
 ): boolean {
-  const s = item.scale;
+  // #3252's review: the size it is DRAWN at, across and up, as the renderer sizes it.
+  const { across: s, up } = drawnScale(item);
   // An item drawn at no size has no triangle to cut.
-  if (!(s > 0)) return false;
+  if (!(s > 0) || !(up > 0)) return false;
   const { triangles, spheres } = preparedOf(shape);
   const cos = Math.cos(item.rotation);
   const sin = Math.sin(item.rotation);
@@ -738,9 +783,11 @@ export function shapeMeets(
   const dx = eye.x - item.x;
   const dz = eye.z - item.z;
   const ex = (dx * cos - dz * sin) / s;
-  const ey = (eye.y - item.y) / s;
+  const ey = (eye.y - item.y) / up;
   const ez = (dx * sin + dz * cos) / s;
-  const reach = pyramid.radius / s;
+  // The pyramid's sphere in the shape's frame is an ellipsoid when the item
+  // is drawn taller than wide: its longest half-axis lets nothing go wrongly.
+  const reach = pyramid.radius / Math.min(s, up);
   const count = Math.floor(triangles.length / 9);
   for (let chunk = 0; chunk * 4 < spheres.length; chunk += 1) {
     const cx = (spheres[chunk * 4] as number) - ex;
@@ -754,7 +801,7 @@ export function shapeMeets(
       if (beyondOnAnAxis(triangles, at, ex, ey, ez, reach)) continue;
       for (let corner = 0; corner < 9; corner += 3) {
         const x = (triangles[at + corner] as number) * s;
-        const y = (triangles[at + corner + 1] as number) * s;
+        const y = (triangles[at + corner + 1] as number) * up;
         const z = (triangles[at + corner + 2] as number) * s;
         TRIANGLE[corner] = item.x + x * cos + z * sin;
         TRIANGLE[corner + 1] = item.y + y;

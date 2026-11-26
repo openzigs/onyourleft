@@ -259,7 +259,7 @@ export const GROWN_SPECIES: readonly GrownSpecies[] = [
     host: 'generated_hornbeam_c',
     seed: 3257,
     levels: 2,
-    length: [0.25, 0.7, 0.34, 0],
+    length: [0.4, 0.7, 0.34, 0],
     radius: [0.05, 0.6, 0.6, 0],
     sections: [1, 4, 1, 1],
     children: [9, 6, 0, 0],

@@ -322,10 +322,8 @@ export const AGE_SCALE: Readonly<Partial<Record<ScenerySetting, Readonly<Record<
   };
 
 /**
- * The most {@link ageScale} returns: **1.5**. `near-field.ts` and
- * `scene.ts` §`sideRoadNaturalMargin` clear an item by its `scale`, which
- * this multiplies on the screen only, so it is kept to a figure a canopy
- * carried on a stem clears a verge by.
+ * The most {@link ageScale} returns: **1.5**. Every guard that clears an
+ * item reads {@link drawnScale}, which carries it.
  */
 export const AGE_SCALE_HIGHEST = 1.5;
 
@@ -399,6 +397,72 @@ export function instanceBuild(
   out.girth = 1 + (2 * uniformFrom(key, 1) - 1) * BUILD_BOUND.girth;
   return out;
 }
+
+/** What {@link drawnScale} reads of an item. */
+export interface ScaledItem {
+  readonly kind: string;
+  readonly x: number;
+  readonly z: number;
+  readonly scale: number;
+  readonly variant: number;
+  readonly setting?: ScenerySetting;
+}
+
+/** How big an item is drawn, of its kind's fitted size: across, both ways in plan, and up. */
+export interface DrawnScale {
+  readonly across: number;
+  readonly up: number;
+}
+
+const PLANNED: ReadonlySet<string> = new Set(['tree-broadleaf', 'tree-conifer', 'shrub', 'rock']);
+const BUILD_SCRATCH = { height: 1, girth: 1 };
+const SCALE_SCRATCH = { across: 1, up: 1 };
+
+/**
+ * How big an item is DRAWN, of its kind's fitted size — its `scale`, its
+ * species' age in its setting ({@link ageScale}) and its own build
+ * ({@link instanceBuild}), together.
+ *
+ * ⚠️ **The one statement of it, and every reader takes it from here** —
+ * #3252's review: the renderer sized a tree by all three while the guards
+ * that keep it out of the camera, off a side road and in the ranking read
+ * `scale` alone, so a park's lime drawn 1.5 × 1.1 times wider than its
+ * clearance could stand across a driveway. `three-renderer.ts`
+ * §`RealisticVegetationBelt` draws by this, `near-field.ts` §`intrudes` and
+ * §`shapeMeets` cut by it, and `scene.ts` §`sideRoadNaturalMargin` clears by
+ * it. A structure, a post and every item with no setting is its `scale`,
+ * both ways.
+ *
+ * The species is the one the PLAN names for the item's slot
+ * ({@link shapeNameFor}), whatever shapes a world holds, so a guard that has
+ * no world to ask reads the same number the renderer does.
+ *
+ * ⚠️ Returns ONE object, rewritten by the next call: read it before calling
+ * again. A frame calls this for every item, and allocates nothing.
+ */
+export function drawnScale(item: ScaledItem): DrawnScale {
+  if (item.setting === undefined || !PLANNED.has(item.kind)) {
+    SCALE_SCRATCH.across = item.scale;
+    SCALE_SCRATCH.up = item.scale;
+    return SCALE_SCRATCH;
+  }
+  const shape = shapeNameFor(item.kind as PlannedKind, item.setting, item.variant);
+  const aged = item.scale * ageScale(item.setting, shape, item.x, item.z);
+  const build = instanceBuild(item.setting, item.x, item.z, BUILD_SCRATCH);
+  SCALE_SCRATCH.across = aged * build.girth;
+  SCALE_SCRATCH.up = aged * build.height;
+  return SCALE_SCRATCH;
+}
+
+/**
+ * The most {@link drawnScale} can make of a `scale` of 1, either way: the
+ * oldest tree at its stoutest or its tallest.
+ *
+ * @test-facing held by `scenery-plan.test.ts`, which holds every drawn scale
+ * under it; the guards read {@link drawnScale} for the item in hand
+ */
+export const DRAWN_SCALE_HIGHEST =
+  AGE_SCALE_HIGHEST * (1 + Math.max(BUILD_BOUND.height, BUILD_BOUND.girth));
 
 /**
  * How a rock sits: sunk into the ground by a share of its height, and tipped.

@@ -97,6 +97,7 @@ import {
 } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
+import { drawnScale } from './scenery-plan';
 import {
   gradeCrossingsAt,
   mappedGradeCrossings,
@@ -1486,7 +1487,8 @@ export function sideRoadNaturalMargin(item: ScatterItem): number {
     sceneryPlanRadius(item.kind, 'stylised'),
   );
   const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
-  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
+  // #3252's review: by the size it is DRAWN at, as the renderer sizes it.
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * drawnScale(item).across + sway);
 }
 
 /**

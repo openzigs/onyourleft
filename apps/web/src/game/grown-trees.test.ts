@@ -52,7 +52,7 @@ const RECORDED: Readonly<Record<string, string>> = {
   grown_poplar: '02528cc57ed2b7231c2cedfcc0db6170a7a9980e680011a23ef5bb147327f306',
   grown_spruce: '3af8722839816f6a8b17484e00e52bed6a28f8c364a81e190f79c8caf47bc125',
   grown_thorn: 'f0adc72034f9cd38d95a574493a05164d02278fc068012d89bbe15dd126534b9',
-  grown_laurel: 'ddbcf7d3366512acff54a844274ff897163d1dfe12623ef928fef413a7af5c07',
+  grown_laurel: '23a1e9299f0e40992130b47c621d28325a733c42c201fd1ed2a4256203a1a787',
 };
 
 const GROWN = GROWN_SPECIES.map((species) => ({ species, tree: growTree(species) }));

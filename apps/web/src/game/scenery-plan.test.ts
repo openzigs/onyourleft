@@ -24,6 +24,8 @@ import {
   BOUNDARY_PLAN,
   boundaryFor,
   BUILD_BOUND,
+  DRAWN_SCALE_HIGHEST,
+  drawnScale,
   FENCE_VARIANTS,
   fenceFoldOf,
   fenceVariantOf,
@@ -384,5 +386,65 @@ describe('the setting a frame’s items carry, read off synthetic land — #3252
     });
     expect(bare.length).toBeGreaterThan(50);
     expect(bare.every((item) => !('setting' in item))).toBe(true);
+  });
+});
+
+describe('the ONE drawn size every guard and the renderer read — #3252’s review', () => {
+  const at = (x: number, z: number, extra: object = {}) => ({
+    kind: 'tree-broadleaf',
+    x,
+    z,
+    scale: 1.2,
+    variant: 0,
+    ...extra,
+  });
+
+  it('is the scale, the species’ age there and the instance’s build, across and up', () => {
+    const tree = at(6.5, 132, { setting: 'park' as const });
+    const { across, up } = drawnScale(tree);
+    const age = ageScale('park', 'grown_lime', 6.5, 132);
+    const build = instanceBuild('park', 6.5, 132, { height: 0, girth: 0 });
+    expect(across).toBeCloseTo(1.2 * age * build.girth, 12);
+    expect(up).toBeCloseTo(1.2 * age * build.height, 12);
+    expect(across).not.toBeCloseTo(up, 3);
+    // The species is the slot's own: a park's fourth slot is a poplar, older still.
+    const poplar = drawnScale(at(6.5, 132, { setting: 'park' as const, variant: 3 }));
+    expect(poplar.up).toBeCloseTo(
+      1.2 * ageScale('park', 'grown_poplar', 6.5, 132) * build.height,
+      12,
+    );
+  });
+
+  it('is the scale alone for an item with no setting, a structure and a post', () => {
+    for (const item of [
+      at(6.5, 132),
+      at(6.5, 132, { kind: 'fence', setting: 'park' as const }),
+      at(6.5, 132, { kind: 'post', setting: 'park' as const }),
+    ]) {
+      const { across, up } = drawnScale(item);
+      expect([across, up]).toEqual([1.2, 1.2]);
+    }
+  });
+
+  it('never passes the most a guard has to allow for', () => {
+    expect(DRAWN_SCALE_HIGHEST).toBeCloseTo(1.5 * 1.1, 12);
+    for (const setting of SCENERY_SETTINGS) {
+      for (let slot = 0; slot < PLAN_SLOTS; slot += 1) {
+        for (let place = 0; place < 60; place += 1) {
+          for (const kind of ['tree-broadleaf', 'tree-conifer', 'shrub', 'rock']) {
+            const { across, up } = drawnScale({
+              kind,
+              x: place * 7.3,
+              z: place * 3.1,
+              scale: 1,
+              variant: slot,
+              setting,
+            });
+            expect(Math.max(across, up)).toBeLessThanOrEqual(DRAWN_SCALE_HIGHEST);
+            expect(Math.min(across, up)).toBeGreaterThan(0.7);
+          }
+        }
+      }
+    }
   });
 });
