@@ -610,6 +610,10 @@ describe('a level’s houses agree from the picker to the HUD, and its round is 
     expect(text()).toContain(levelHousesText({ houses, noDelivery: skip }));
     expect(text()).toContain(`${String(houses - skip)} to deliver to, ${String(skip)} to skip`);
     expect(text()).not.toMatch(/Day \d of 7/u);
+    // The card's own course line is the level's own counts, agreeing with the setup's (#2970).
+    const card = document.querySelector('.oyl-chooser__card')?.textContent ?? '';
+    expect(card).toContain(`Delivery: ${levelHousesText({ houses, noDelivery: skip })}`);
+    expect(card).not.toContain('up to');
     await click(rideButton());
     await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
     await pump();
@@ -680,7 +684,7 @@ describe('a level rides in the realistic world whatever Settings chose — the o
         );
       const houses = fixtureAs(FIRST.id).round.houses;
       expect(card(levelRouteId(FIRST.id))?.querySelector('.oyl-chooser__course')?.textContent).toBe(
-        `Delivery: up to ${String(houses)} houses on the round`,
+        `Delivery: ${String(houses)} houses on the round`,
       );
       // A saved route says nothing in the standard world, where it offers no round.
       if (!realistic) {

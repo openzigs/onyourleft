@@ -720,9 +720,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       : undefined;
   const courseOf = (route: RidableRoute): CourseLine | undefined => {
     if (route.id === levelId) {
-      return levelCourse === undefined || deliveryOffer === undefined
-        ? undefined
-        : deliveryCourseLine(levelCourse, deliveryOffer.week);
+      if (levelCourse === undefined || props.level === undefined) return undefined;
+      // #2970: a level's round is its own houses, whatever the week holds, said as
+      // the setup says them below: never the week's smaller count, never "up to".
+      const line = deliveryCourseLine(levelCourse, { houses: props.level.houses });
+      return line.holds === true
+        ? { ...line, text: `Delivery: ${levelHousesText(props.level)}` }
+        : line;
     }
     return courses === undefined
       ? undefined
