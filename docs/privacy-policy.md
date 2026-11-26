@@ -110,7 +110,8 @@ identifier of ours, but the host sees your IP address and roughly which area you
 while it answers. And **if you choose the realistic world**, choosing or saving a route makes this
 app's own code request that route's map tiles from the same host, once for that route, to place
 towns in the game. **Drawing a route** in the route planner, or redrawing part of one, requests the
-heights of the ground along the line from the same host, so the route has its climbs. **An open-world ride** reads the map from the same host as you ride, block by
+heights of the ground along the line from the same host, so the route has its climbs, and, when no
+instance of yours routes it, the squares of a routing map the line crosses, so it can follow roads. **An open-world ride** reads the map from the same host as you ride, block by
 block, so for as long as it goes on the host sees requests that follow where you ride (see below). The record Cloudflare keeps afterwards — your IP address, the time, and your
 device or browser type, not which part of the map — our Cloudflare account can see for up to 7 days. **You can turn it off**: Settings → *Ride map* → *Use map tiles for ride maps and the realistic world’s towns*. With it off the app
 requests nothing from `tiles.openzigs.com`, still draws your route on a plain background, and draws
@@ -273,6 +274,19 @@ own computer, which travels unencrypted when your computer's address starts with
   app requests no heights, and a drawn route is saved flat. A copy of the app built to use a
   map host other than `tiles.openzigs.com` requests no heights from `tiles.openzigs.com`: it reads
   them only from an archive whoever built it chose.
+  **Following roads on a route you draw, with no instance.** When the route planner follows roads
+  for a leg and you are not connected to an instance that routes it, the app works the route out on
+  your device, with a routing engine that runs inside the app, and requests the squares of a routing
+  map the leg crosses from `tiles.openzigs.com`: files of a routing graph there, one file per square.
+  A square is a fixed cell of the graph's own grid, a quarter of a degree a side (about 28 by 22 km
+  in the United States), and never centred on your line, your home or you, so the host can tell
+  roughly which area the route is in, and the name of each file says which square it is. Your
+  waypoints and the line stay on your device. It reads near your privacy zones the same way as
+  anywhere else, so the requests do not show where a zone is. Cloudflare's record of each of these
+  requests is the same as for a map tile, and names the file, and so the square. With map tiles off
+  the app requests no routing map, and the leg is drawn as a straight line. A copy of the app built
+  to use a map host other than `tiles.openzigs.com` requests no routing map from
+  `tiles.openzigs.com`.
   **An open-world ride.** An open-world ride has no route chosen in advance, so it reads the map
   as you go, from the same file on the same host. When it starts, your device requests the tiles of
   the block your start is in and of the eight blocks round it; a block is a fixed square of the map's

@@ -134,6 +134,12 @@ for the tablet measurement [#2009](https://github.com/openzigs/onyourleft/issues
 - **What it does not change.** The world corridor store's reasoning above is untouched: the graph is
   built from an extract, never from the archive or the store, and nothing a rider records goes into
   it. When snapping ships to riders (#2009's build), how its graph is published is decided then.
+- **Since #2734 the route planner routes on it** ([ADR 0097](adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)
+  D-6), from the release `routing/browser-graph.ts` §`PUBLISHED_ROUTING_GRAPH_URL` names. The
+  directory is published as above. A leg the app routes on it is a Produced Work, drawn on the
+  planner's map beside `© OpenStreetMap contributors`, and the Credits screen names OpenStreetMap and
+  the ODbL. A planner whose map engine did not load shows no credit beside its legs. That is a
+  known gap, recorded in #2734's pull request.
 
 ## The lap race's built-in circuits
 

@@ -61,3 +61,6 @@ apps/instance/openapi.json
 # for files whose size is held under the owner's ceilings (D-3.2).
 apps/web/src/game/delivery/levels/data/*.json
 apps/web/src/game/delivery/levels/fixtures/*.json
+# #2734: the synthetic routing graph's manifest records config.json's SHA-256
+# byte for byte, so neither may be reformatted (browser/valhalla-grid/README.md).
+apps/web/browser/valhalla-grid/

@@ -792,3 +792,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   maintenance to 2026, is still open. The in-browser bundle (`apps/web/tools/valhalla`) stays at
   `3.8.3` until its own change moves it.
   ([#2008](https://github.com/openzigs/onyourleft/issues/2008))
+- **2026-11-24** — The in-browser router this ADR's *Consequences* kept possible (*"An offline or
+  in-browser router later — provided the engine is permissive"*) is now a product tier:
+  [ADR 0097](0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md), on the
+  owner's ruling of that day on [#2730](https://github.com/openzigs/onyourleft/issues/2730).
+  Valhalla `3.8.3` (MIT) compiled to WebAssembly by `valhalla-browser` 0.2.1 (MIT) runs in the app
+  when no instance routes a leg, so for that tier the engine is the second shape D-4's table names,
+  *"a WASM build, running in-process"*, and its licence binds: MIT, and none of the fifteen
+  libraries compiled with it is copyleft. D-4's separate process is still the instance's shape, and
+  the sentence of the entry above, *"the app reaches it only through its instance"*, describes the
+  instance tier only. This entry is a pointer and decides nothing itself.
+  ([#2734](https://github.com/openzigs/onyourleft/issues/2734))

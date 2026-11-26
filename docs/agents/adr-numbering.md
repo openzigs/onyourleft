@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,
+  taken by [#2734](https://github.com/openzigs/onyourleft/issues/2734) on 2026-11-24 for in-browser
+  Valhalla as a routing tier when no instance routes a leg, **Accepted** the same day on the owner's
+  ruling on [#2730](https://github.com/openzigs/onyourleft/issues/2730). It supersedes nothing;
+  ADR 0010 gained one dated `## Amendments` pointer. The next free number is **0098**.
   ⚠️ **0096 is [ADR 0096](../adr/0096-the-open-world-names-its-streets-on-the-road-and-in-the-junction-prompt.md)**,
   taken by [#3052](https://github.com/openzigs/onyourleft/issues/3052) on 2026-11-23 for street
   names in the open world, painted on the road and said in the junction prompt. **Accepted** 2026-11-23 on

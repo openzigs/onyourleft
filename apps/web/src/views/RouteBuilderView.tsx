@@ -45,6 +45,7 @@ import type { TrackBounds } from '../map/track';
 import { readMapTilesChoice } from '../map/tiles-preference';
 import {
   addWaypoint,
+  adoptAnswers,
   clear,
   deleteWaypoint,
   draftDistance,
@@ -58,6 +59,12 @@ import {
   type LegMode,
   type RouteDraft,
 } from '../routing/draft';
+import {
+  heightIntervalOf,
+  releaseRouting,
+  ridingChoicesNote,
+  ridingChoicesOf,
+} from '../routing/tiers';
 import { browserDraftStorage, type DraftStorage } from '../routing/draft-storage';
 import { planElevation, type PlannedElevation } from '../routing/elevation';
 import type { RouteHeights } from '../terrain/heights';
@@ -404,9 +411,12 @@ export function RouteBuilderView({
         return;
       }
       void resolveDraft(edit.draft, edit.stale, provider, preferences).then((resolved) => {
-        setHistory((current) =>
-          current.present === edit.draft ? settle(current, resolved) : current,
-        );
+        setHistory((current) => {
+          if (current.present === edit.draft) return settle(current, resolved);
+          // #2734: the rider edited again meanwhile; keep the answers the newer draft still waits for.
+          const adopted = adoptAnswers(current.present, edit.draft, resolved, edit.stale);
+          return adopted === current.present ? current : settle(current, adopted);
+        });
       });
     },
     [provider, preferences],
@@ -420,6 +430,15 @@ export function RouteBuilderView({
     if (isEmpty(draft)) keep.current.forget();
     else keep.current.write(draft);
   }, [draft]);
+
+  // #2734: the in-browser engine's worker and memory are let go as the planner
+  // closes; the next route drawn starts them again.
+  useEffect(
+    () => () => {
+      releaseRouting(provider);
+    },
+    [provider],
+  );
 
   // Legs restored from storage arrive unrouted, so ask for them on mount.
   const restored = useRef(false);
@@ -445,7 +464,8 @@ export function RouteBuilderView({
   const routedLegs = draft.legs.filter((leg) => leg.state === 'routed').length;
   // #2013: with no engine, the terrain archive answers, at its own spacing.
   const heightSource = provider ?? heights;
-  const heightInterval = provider === undefined ? heights?.interval : undefined;
+  // #2734: with no instance the tiers ask the terrain archive, at its own spacing.
+  const heightInterval = provider === undefined ? heights?.interval : heightIntervalOf(provider);
   useEffect(() => {
     if (heightSource === undefined || routedLegs === 0) {
       setElevation(undefined);
@@ -595,7 +615,14 @@ export function RouteBuilderView({
 
   const surfaces = surfaceSummary(draft);
   const unresolved = unresolvedSentence(draft.legs);
-  const risk = strandingRisk(preferences.surface);
+  // #2734: the in-browser engine is told the bicycle only, so with it routing
+  // every leg the surface choice cannot refuse a route, and the screen says
+  // the choice is not applied rather than show it as if it were.
+  const choicesNote = ridingChoicesNote(provider);
+  const risk =
+    provider !== undefined && ridingChoicesOf(provider) === 'not-applied'
+      ? undefined
+      : strandingRisk(preferences.surface);
   const loop = loopReadout(draft, loopTarget, units);
   const summary = routeSummary(draft, elevation, units);
 
@@ -943,10 +970,20 @@ export function RouteBuilderView({
                     >{`${String(index + 1)} to ${String(index + 2)}`}</th>
                     <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
                     <td>{surfaceWord(leg.surface)}</td>
-                    <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
+                    <td
+                      className={
+                        leg.state === 'routed' && leg.failure === undefined
+                          ? 'tw:whitespace-nowrap'
+                          : undefined
+                      }
+                    >
                       {leg.state === 'routed'
                         ? measurementText(formatDistance(leg.distance, units))
                         : (leg.failure?.message ?? 'Being routed')}
+                      {/* #2734: a leg the engine drew straight says why beside its length. */}
+                      {leg.state === 'routed' && leg.failure !== undefined
+                        ? ` ${leg.failure.message}`
+                        : ''}
                       {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
                     </td>
                     <td>
@@ -1000,6 +1037,7 @@ export function RouteBuilderView({
           </p>
           <select
             id="surface-tolerance"
+            aria-describedby={choicesNote === undefined ? undefined : 'riding-choices-note'}
             value={preferences.surface}
             onChange={(event) => {
               setPreferences({ ...preferences, surface: event.target.value as SurfaceTolerance });
@@ -1011,6 +1049,11 @@ export function RouteBuilderView({
               </option>
             ))}
           </select>
+          {choicesNote === undefined ? null : (
+            <p id="riding-choices-note" data-riding-choices="">
+              {choicesNote}
+            </p>
+          )}
           {risk === undefined ? null : (
             <StatusMessage tone="warning" label="This setting can refuse a route">
               {risk}

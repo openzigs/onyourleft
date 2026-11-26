@@ -68,6 +68,7 @@ import {
   type Metres,
   type RidingPreferences,
   type RoutePoint,
+  type RoutedLeg,
   type RouteProfile,
   type RoutingProvider,
   type UnixSeconds,
@@ -76,7 +77,9 @@ import type { PrivacyZoneRecord, RouteId, RouteRecord } from '@onyourleft/store'
 
 import { checkName, type SaveOutcome } from '../routes/save';
 import { routeShare, ROUTE_SHARE_FAULT_TEXT } from '../routes/share';
+import { FreehandFallback } from './draft';
 import { ELEVATION_INTERVAL_METRES, resampleShape } from './elevation';
+import { heightIntervalOf } from './tiers';
 
 /**
  * A saved route's line as it is being edited: its profile, and which of its
@@ -200,20 +203,35 @@ export async function drawStretch(
   preferences: RidingPreferences,
   terrain?: StretchHeights,
 ): Promise<Stretch> {
-  if (provider === undefined) {
+  const straightLine = async (): Promise<Stretch> => {
     if (terrain === undefined) return straightStretch(from, to, heights);
     // No engine, so the line is the straight one; its heights are the ground's.
     const straight = await measuredOver([from, to], from, to, heights, terrain, terrain.interval);
     return straight.measured ? straight : straightStretch(from, to, heights);
+  };
+  if (provider === undefined) return straightLine();
+  let legs: readonly RoutedLeg[];
+  try {
+    legs = await provider.route({
+      waypoints: [{ position: from }, { position: to }],
+      preferences,
+    });
+  } catch (error) {
+    // #2734: an engine that cannot route here now draws the stretch straight, as with none.
+    if (error instanceof FreehandFallback) return straightLine();
+    throw error;
   }
-  const legs = await provider.route({
-    waypoints: [{ position: from }, { position: to }],
-    preferences,
-  });
   const shape: GeographicPosition[] = [from];
   for (const leg of legs) shape.push(...leg.shape);
   shape.push(to);
-  return measuredOver(shape, from, to, heights, provider, metres(ELEVATION_INTERVAL_METRES));
+  return measuredOver(
+    shape,
+    from,
+    to,
+    heights,
+    provider,
+    heightIntervalOf(provider) ?? metres(ELEVATION_INTERVAL_METRES),
+  );
 }
 
 /**

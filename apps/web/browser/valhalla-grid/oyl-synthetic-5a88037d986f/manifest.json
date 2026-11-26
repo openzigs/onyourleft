@@ -1,0 +1,50 @@
+{
+  "archive": {
+    "etag": "\"71e370d9c8671056d528aa834668cd32\"",
+    "headerSha256": "c79661dfd4cafcdd67a27531818b0264fc31d02192f185edb2e0b8232a53050e",
+    "indexSha256": "84702eaa75f45b39d2795efe5ddc6ce3a7ecef074725ed9a6079ebb2ca0ed105",
+    "indexSize": "32",
+    "size": "153600",
+    "url": "graph.tar"
+  },
+  "config": {
+    "sha256": "f16992070fbed597bb3f799c87179d28d20fb26dc446f417367d0a4814bdc7b3",
+    "url": "config.json"
+  },
+  "costings": [
+    "bicycle"
+  ],
+  "coverage": [
+    0,
+    0,
+    0.25,
+    0.25
+  ],
+  "release": "oyl-synthetic-5a88037d986f",
+  "schema": 1,
+  "source": {
+    "attribution": "© OpenStreetMap contributors",
+    "kind": "openstreetmap",
+    "licence": "ODbL-1.0",
+    "licenceUrl": "https://opendatacommons.org/licenses/odbl/1-0/",
+    "notice": "Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL)."
+  },
+  "tiles": {
+    "260641": {
+      "etag": "\"28302e1e18b549175e00658b5f5e841c\"",
+      "offset": "2560",
+      "path": "1/032/580.gph",
+      "sha256": "8101dc0bb79f6b95cbbb240c3b6af959b2ddc9bb7405c1b448348021798d5f4e",
+      "size": "37096"
+    },
+    "4152962": {
+      "etag": "\"823acc609323663b9f5c107d9eb04792\"",
+      "offset": "41472",
+      "path": "2/000/519/120.gph",
+      "sha256": "186d99964d74ed6995c5cb20918466b4a9310d9d7cadeae766e10a39ed2102c3",
+      "size": "105248"
+    }
+  },
+  "valhallaRevision": "a60c7cbfc83e073f50887cd27e0109d02e6b64e5",
+  "valhallaVersion": "3.8.3"
+}

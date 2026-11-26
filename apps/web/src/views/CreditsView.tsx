@@ -12,7 +12,7 @@ import {
 import { parseAssetManifest, type AssetEntry } from '../credits/manifest';
 import { loadShippedLicence, READABLE_LICENCES } from '../credits/licence-documents';
 import { parseNotices, type IncludedSoftware } from '../credits/notices';
-import { loadNoticesDocument } from '../credits/notices-document';
+import { loadNoticesDocument, loadRoutingNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { StatusMessage } from '../design/StatusMessage';
@@ -117,6 +117,13 @@ export interface CreditsViewProps {
    * hand in a fixture document, or one that fails to load.
    */
   readonly noticesDocument?: () => Promise<string>;
+  /**
+   * Reads the in-browser routing engine's licence texts, which the notices
+   * name rather than carry (#2734). Defaults to
+   * `credits/notices-document.ts` §`loadRoutingNoticesDocument`; a prop so a
+   * test can hand in a fixture, or one that fails to load.
+   */
+  readonly routingNoticesDocument?: () => Promise<string>;
   /**
    * Reads one shipped licence text. Defaults to
    * `credits/licence-documents.ts` §`loadShippedLicence`; a prop so a test can
@@ -374,6 +381,7 @@ export function CreditsView({
   manifest,
   notices,
   noticesDocument = loadNoticesDocument,
+  routingNoticesDocument = loadRoutingNoticesDocument,
   licenceText = loadShippedLicence,
   circuitsNotice = loadCircuitsNotice,
   levelsNotice = loadLevelsNotice,
@@ -604,6 +612,19 @@ export function CreditsView({
             failedLabel="Could not open the notices"
             failed="The notices this app carries could not be read just now. The list below is still every package they cover."
             marker={{ 'data-notices-document': '' }}
+          />
+          <p>
+            The route planner&rsquo;s own road-map engine carries the licence texts of the libraries
+            built into it, which the notices name. They are large, so a browser downloads them with
+            the engine rather than with this app.
+          </p>
+          <ReadInPlace
+            load={routingNoticesDocument}
+            summary="Read the road-map engine’s licence texts"
+            reading="Reading the road-map engine’s licence texts."
+            failedLabel="Could not open the engine’s licence texts"
+            failed="The road-map engine’s licence texts could not be read just now. In a browser they are fetched from the network when you open them."
+            marker={{ 'data-routing-notices-document': '' }}
           />
           {software.app.length === 0 || software.problems.length > 0 ? (
             <StatusMessage tone="warning" label="This list may be incomplete">

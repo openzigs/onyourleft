@@ -516,6 +516,47 @@ generate
 assert_exit 'a vendored work asking for a licence text this generator lacks fails' 1
 assert_says 'as NOT005' 'NOT005 realistic/t.wasm is Transcoder@1.50, which asks for the text of EPL-2.0'
 
+# --- A vendored work whose licence texts are written beside it (#2734) ----------------
+#
+# The in-browser routing engine's WebAssembly carries about 2.1 MB of licence
+# texts. They go into a document of their own under routing/, which the
+# precache leaves out, and the notices name it: nothing is dropped.
+
+new_fixture
+mkdir -p "${REACT}/engine"
+printf 'wasm' > "${REACT}/engine/e.wasm"
+SEPARATE='"vendored":{"name":"Engine","version":"3.8.3","licence":"MIT AND BSL-1.0","what":"the engine","document":"routing/third-party.txt","upstream":[{"url":"engine/Boost.txt","read":"2026-11-24","text":"Boost fixture licence text"},{"url":"engine/zlib.txt","read":"2026-11-24","text":"zlib fixture licence text"}]}'
+inputs "{\"noLicenceFile\":{},\"copiedIntoBuild\":[{\"path\":\"routing/e.wasm\",\"package\":\"react\",\"file\":\"engine/e.wasm\",\"by\":\"a plugin\",${SEPARATE}}]}"
+generate
+assert_exit 'a vendored work with a document of its own renders' 0
+assert_document_lacks 'and its licence texts are not in the document' 'Boost fixture licence text'
+assert_document_has 'which names where they are' 'All 2 of them are reproduced in full, word for word, in routing/third-party.txt'
+assert_document_has 'and each one it holds' '  from engine/zlib.txt, read 2026-11-24'
+if grep -qF 'Boost fixture licence text' "${tmp}/apps/web/public/routing/third-party.txt" 2>/dev/null &&
+  grep -qF 'zlib fixture licence text' "${tmp}/apps/web/public/routing/third-party.txt"; then
+  ok 'every one of them is in the document of its own'
+else
+  bad 'every one of them is in the document of its own' "$(cat "${tmp}/apps/web/public/routing/third-party.txt" 2>/dev/null)"
+fi
+run --assume-installed
+assert_exit 'and the check agrees with what it wrote' 0
+printf 'edited\n' >> "${tmp}/apps/web/public/routing/third-party.txt"
+run --assume-installed
+assert_exit 'a hand edit of the document of its own fails' 1
+assert_says 'as NOT006' 'NOT006 apps/web/public/routing/third-party.txt is not what the generator writes'
+rm "${tmp}/apps/web/public/routing/third-party.txt"
+run --assume-installed
+assert_exit 'and so does its absence' 1
+assert_says 'as NOT007' 'NOT007 apps/web/public/routing/third-party.txt is not there'
+
+new_fixture
+mkdir -p "${REACT}/engine"
+printf 'wasm' > "${REACT}/engine/e.wasm"
+inputs '{"noLicenceFile":{},"copiedIntoBuild":[{"path":"routing/e.wasm","package":"react","file":"engine/e.wasm","by":"a plugin","vendored":{"name":"Engine","version":"3.8.3","licence":"MIT","what":"the engine","document":"../escape.txt","upstream":[{"url":"u","read":"r","text":"t"}]}}]}'
+generate
+assert_exit 'a document of its own outside public/ fails' 1
+assert_says 'as NOT005' 'NOT005 routing/e.wasm is Engine@3.8.3, whose notices are to be written to ../escape.txt'
+
 # --- A vendored file the bundler writes into the app's own code (#618's review) --
 #
 # three vendors KTX-Parse and zstddec under examples/jsm/libs/ and KTX2Loader
