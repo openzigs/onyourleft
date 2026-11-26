@@ -109,7 +109,9 @@ const CELL_PHASE = 0.37;
 
 interface Ride {
   readonly profile: RouteProfile;
+  /** The odometer the frames are counted from: the turn, or the bend. */
   readonly turn: number;
+  /** Where in plan the paint is read about: the tip, or the bend's middle. */
   readonly tipX: number;
   readonly tipZ: number;
 }
@@ -122,6 +124,87 @@ function ride(lane: number): Ride {
   const { centre } = frameAt(profile, turn).corridor;
   const tip = centre.reduce((north, point) => (point.z > north.z ? point : north));
   return { profile, turn, tipX: tip.x, tipZ: tip.z };
+}
+
+/**
+ * The fixture for the owner's second capture (PR #3262's tablet check): north
+ * 600 m, a bend of `degrees` to the east, `leg` metres to a one-point
+ * turnaround, and back the same way `lane` metres to the right of it, the
+ * same bend included. A point every 5 m at most, so the bend is the drawn
+ * road's own (`terrain.ts` §`BEND_SMOOTHING_METRES` of rounding), as a route
+ * planner's corner is drawn.
+ */
+function bendThenReversal(degrees: number, leg: number, lane: number): RouteProfile {
+  const turn = (degrees * Math.PI) / 180;
+  const bend = [0, BEND_NORTH_METRES] as const;
+  const way = [Math.sin(turn), Math.cos(turn)] as const;
+  const end = [bend[0] + way[0] * leg, bend[1] + way[1] * leg] as const;
+  // The way back's corner: on both legs' offset lines, `lane` to the right.
+  const across = lane / Math.cos(turn / 2);
+  const corner = [
+    bend[0] + across * Math.cos(turn / 2),
+    bend[1] - across * Math.sin(turn / 2),
+  ] as const;
+  return planRoute([
+    [0, 0],
+    bend,
+    end,
+    [end[0] + way[1] * lane, end[1] - way[0] * lane],
+    corner,
+    [lane, 0],
+  ]);
+}
+
+/** Where {@link bendThenReversal}'s and {@link bendAlone}'s bend is, metres north. */
+const BEND_NORTH_METRES = 600;
+
+/** North 600 m and a bend of `degrees` to the east, then 600 m more. */
+function bendAlone(degrees: number): RouteProfile {
+  const turn = (degrees * Math.PI) / 180;
+  return planRoute([
+    [0, 0],
+    [0, BEND_NORTH_METRES],
+    [Math.sin(turn) * 600, BEND_NORTH_METRES + Math.cos(turn) * 600],
+  ]);
+}
+
+/** A route through `corners`, east and north in metres, a point every 5 m at most. */
+function planRoute(corners: readonly (readonly [number, number])[]): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(30 + 0.002 * points.length),
+    });
+  };
+  push(...(corners[0] as readonly [number, number]));
+  for (let corner = 1; corner < corners.length; corner += 1) {
+    const [fromEast, fromNorth] = corners[corner - 1] as readonly [number, number];
+    const [toEast, toNorth] = corners[corner] as readonly [number, number];
+    const pieces = Math.max(1, Math.ceil(Math.hypot(toEast - fromEast, toNorth - fromNorth) / 5));
+    for (let piece = 1; piece <= pieces; piece += 1) {
+      push(
+        fromEast + ((toEast - fromEast) * piece) / pieces,
+        fromNorth + ((toNorth - fromNorth) * piece) / pieces,
+      );
+    }
+  }
+  return routeProfile(points, { loop: false });
+}
+
+/** A ride read about the bend: the drawn road's point nearest it, the frame there. */
+function atTheBend(profile: RouteProfile): Ride {
+  const turn = BEND_NORTH_METRES;
+  const { centre } = frameAt(profile, turn).corridor;
+  const nearest = centre.reduce((best, point) =>
+    Math.abs(point.along - turn) < Math.abs(best.along - turn) ? point : best,
+  );
+  return { profile, turn, tipX: nearest.x, tipZ: nearest.z };
 }
 
 function frameAt(profile: RouteProfile, odometer: number): ReturnType<typeof sceneFrame> {
@@ -202,6 +285,45 @@ function changed(from: Set<string>, to: Set<string>): number {
   return count;
 }
 
+/**
+ * The paint on every frame from `from` to `to` metres past `at.turn`, and the
+ * frames between with more than {@link SPECK_CELLS} cells that flash: painted
+ * on that frame and on neither neighbour, or on both and not on it.
+ */
+function flashesOver(
+  at: Ride,
+  from: number,
+  to: number,
+): { readonly paint: readonly Set<string>[]; readonly flashes: readonly string[] } {
+  const odometers: number[] = [];
+  for (let odometer = at.turn + from; odometer <= at.turn + to; odometer += FRAME_METRES) {
+    odometers.push(odometer);
+  }
+  const paint = odometers.map((odometer) => paintAt(at, odometer));
+  const flashes: string[] = [];
+  for (let frame = 1; frame + 1 < paint.length; frame += 1) {
+    const before = paint[frame - 1] as Set<string>;
+    const here = paint[frame] as Set<string>;
+    const after = paint[frame + 1] as Set<string>;
+    let flashed = 0;
+    for (const cell of here) if (!before.has(cell) && !after.has(cell)) flashed += 1;
+    for (const cell of before) if (after.has(cell) && !here.has(cell)) flashed += 1;
+    if (flashed > SPECK_CELLS) {
+      flashes.push(`${((odometers[frame] as number) - at.turn).toFixed(2)} m: ${String(flashed)}`);
+    }
+  }
+  return { paint, flashes };
+}
+
+/** How many of `paint`'s frames differ from the one before. */
+function changedFrames(paint: readonly Set<string>[]): number {
+  let changes = 0;
+  for (let frame = 1; frame < paint.length; frame += 1) {
+    if (changed(paint[frame - 1] as Set<string>, paint[frame] as Set<string>) > 0) changes += 1;
+  }
+  return changes;
+}
+
 describe('the paint round a one-point turnaround holds still — #3254', () => {
   it.each(LANES)(
     'draws the same paint round the turn on every frame of the approach, the way back %d m over',
@@ -234,35 +356,85 @@ describe('the paint round a one-point turnaround holds still — #3254', () => {
       // neighbour, or on both and not on it, is a flash. More than
       // {@link SPECK_CELLS} of them on one frame is what the recording saw.
       const at = ride(lane);
-      const odometers: number[] = [];
-      for (let odometer = at.turn - 30; odometer <= at.turn + 20; odometer += FRAME_METRES) {
-        odometers.push(odometer);
-      }
-      const paint = odometers.map((odometer) => paintAt(at, odometer));
-      const flashes: string[] = [];
-      for (let frame = 1; frame + 1 < paint.length; frame += 1) {
-        const before = paint[frame - 1] as Set<string>;
-        const here = paint[frame] as Set<string>;
-        const after = paint[frame + 1] as Set<string>;
-        let flashed = 0;
-        for (const cell of here) if (!before.has(cell) && !after.has(cell)) flashed += 1;
-        for (const cell of before) if (after.has(cell) && !here.has(cell)) flashed += 1;
-        if (flashed > SPECK_CELLS) {
-          flashes.push(
-            `${((odometers[frame] as number) - at.turn).toFixed(2)} m: ${String(flashed)}`,
-          );
-        }
-      }
+      const { paint, flashes } = flashesOver(at, -30, 20);
       expect(flashes).toEqual([]);
       // Non-vacuity: the paint is read through the turn, and it does change
       // there — at the change of pass — so a reading that never changed
       // would not pass for one that holds still.
       expect(Math.min(...paint.map((cells) => cells.size))).toBeGreaterThan(800);
-      let changes = 0;
-      for (let frame = 1; frame < paint.length; frame += 1) {
-        if (changed(paint[frame - 1] as Set<string>, paint[frame] as Set<string>) > 0) changes += 1;
+      expect(changedFrames(paint)).toBeGreaterThan(0);
+    },
+  );
+});
+
+/**
+ * The owner's tablet check of this pull request: the flashing halved, and
+ * what was left was the right-hand edge line on the sharp bend just before
+ * the turnaround, a few pixels off for one frame while the grass and trees
+ * beside it held still. Measured on {@link bendThenReversal} the way back a
+ * metre over, before this was fixed, for a 90° and a 120° bend 15 m before
+ * the turn and a 120° bend 40 m before it: the paint on the bend changed on
+ * the first frame of the approach by 198, 92 and 44 cells, and of the 300
+ * frames from 30 m before the bend to 20 m after it, 207, 145 and 59 held a
+ * single-frame flash.
+ *
+ * Three causes (`terrain.ts` §`turnTip`, §`turnsBack`, §`steadiedAtTurns`).
+ * The tip was found against a heading read off the corridor's sliding row,
+ * which a bend just before the turn swings, so the tip slid and took every
+ * steadied point with it. A bend tight enough for `retracedRows` to report as
+ * a turning point on some frames had its "tip" put out the real one's on
+ * those frames alone. And the 30 m steadied either side of the tip ended on a
+ * bend 40 m before it, where the points beyond slid and those inside did not.
+ */
+describe('the paint on a bend before a one-point turnaround holds still — #3254', () => {
+  const BENDS = [
+    [90, 15],
+    [120, 15],
+    [120, 40],
+  ] as const;
+
+  it.each(BENDS)(
+    'draws the same paint on a %d° bend %d m before the turn on every frame of the approach',
+    (degrees, leg) => {
+      // From 80 m before the bend to 30 m before it: nothing near the bend
+      // moves, so neither may its paint.
+      const at = atTheBend(bendThenReversal(degrees, leg, 1));
+      let previous: Set<string> | undefined;
+      let frames = 0;
+      for (let odometer = at.turn - 80; odometer <= at.turn - 30; odometer += FRAME_METRES) {
+        const paint = paintAt(at, odometer);
+        expect(paint.size, `${(odometer - at.turn).toFixed(2)} m`).toBeGreaterThan(800);
+        if (previous !== undefined) {
+          expect(changed(previous, paint), `${(odometer - at.turn).toFixed(2)} m`).toBe(0);
+        }
+        previous = paint;
+        frames += 1;
       }
-      expect(changes).toBeGreaterThan(0);
+      expect(frames).toBeGreaterThan(290);
+    },
+  );
+
+  it.each(BENDS)(
+    'flashes no paint on a %d° bend %d m before the turn, through the bend',
+    (degrees, leg) => {
+      const at = atTheBend(bendThenReversal(degrees, leg, 1));
+      const { paint, flashes } = flashesOver(at, -30, 20);
+      expect(flashes).toEqual([]);
+      expect(Math.min(...paint.map((cells) => cells.size))).toBeGreaterThan(800);
+    },
+  );
+
+  it.each([90, 120])(
+    'flashes no paint on a %d° bend with no turn after it — the guard on the bend alone',
+    (degrees) => {
+      // No turning point, so nothing is steadied and the points slide round
+      // the bend as on `main`: the paint moves on every frame, a little, and
+      // flashes on none. Green before this change too; it holds the bend
+      // alone to what it was.
+      const at = atTheBend(bendAlone(degrees));
+      const { paint, flashes } = flashesOver(at, -30, 20);
+      expect(flashes).toEqual([]);
+      expect(Math.min(...paint.map((cells) => cells.size))).toBeGreaterThan(800);
     },
   );
 });

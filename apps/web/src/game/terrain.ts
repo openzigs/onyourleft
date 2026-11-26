@@ -1346,14 +1346,31 @@ const RETRACE_TURN_ROWS = 8;
 const RETRACE_TURN_RADIANS = (2 * Math.PI) / 3;
 
 /**
- * How far along the road either side of a turning point
- * {@link steadiedAtTurns} puts the corridor's points at whole steps from the
- * turn, in metres: **30** — #3254. The {@link RETRACE_TURN_ROWS} points a
- * pass's not being drawn is carried to the turn (16 m at the two-metre step)
- * and {@link BEND_SMOOTHING_METRES} beyond them, where the drawn road is
- * straight again, with metres to spare.
+ * How far along the road either side of the tip of a turn
+ * {@link steadiedAtTurns} puts the corridor's points at whole steps from it,
+ * in metres: **100** — #3254.
+ *
+ * ⚠️ **Not the 30 m it was.** That covered the turn itself, and the owner's
+ * second capture (PR #3262's tablet check) put what was left of the flashing
+ * on the sharp bend just before it. Where the stretch steadied ends, the
+ * points beyond it slide and those inside it do not, so a bend across its end
+ * is drawn on a different set of points on every frame: a 120° bend 40 m
+ * before the turn flashed so in `turnaround-markings.test.ts`. A hundred
+ * metres takes in the road the rider sees coming up to the turn, and leaves
+ * the rest of the corridor's points where they were: steadied to the far
+ * end, a turn 400 m ahead would move every point by the rider, and the
+ * ground there with them (`landform.test.ts` §"lets the meeting height go
+ * along the road, far from any seam").
  */
-const TURN_STEADY_METRES = 30;
+const TURN_STEADY_METRES = 100;
+
+/**
+ * How far from the tip of a turn {@link steadiedAtTurns} counts another of
+ * the turning points {@link retracedRows} found as the same turn, in metres:
+ * **60** — #3254. A turn's rows are found twice, as a joint that faces back
+ * and as a tip (@see tipBetween), a few metres apart.
+ */
+const SAME_TURN_METRES = 60;
 
 /**
  * How far either side of a turning point's row {@link turnTip} looks for the
@@ -1363,15 +1380,17 @@ const TURN_STEADY_METRES = 30;
 const TURN_TIP_SEARCH_METRES = BEND_SMOOTHING_METRES + CORRIDOR_STEP_METRES;
 
 /**
- * The corridor's points with every one within {@link TURN_STEADY_METRES} of a
- * turning point (`turning`, as {@link retracedRows} found them) moved to the
- * nearest whole `step` from the tip of that turn ({@link turnTip}) — #3254.
- * Undefined where there is no turning point, or no point moves.
+ * The corridor's points within {@link TURN_STEADY_METRES} of the tip of a
+ * turn ({@link turnTip}) moved to the nearest whole `step` from it: the tip
+ * nearest each point, of the turning points
+ * (`turning`, as {@link retracedRows} found them) whose road really turns
+ * back ({@link turnsBack}) — #3254. Undefined where there is no such turn, or
+ * no point moves.
  *
  * ⚠️ **What made the turnaround flash.** A corridor's points are a fixed
  * distance apart from wherever the rider is, so they slide along the road with
- * the rider and stand somewhere else on it every frame. On a straight or a
- * bend that moves nothing a rider can see. At a turning point it does: the
+ * the rider and stand somewhere else on it every frame. On a straight that
+ * moves nothing a rider can see. At a turning point it does: the
  * road's last ten metres either side of the turn are drawn in its last metre
  * (@see BEND_SMOOTHING_METRES), and the edge lines are laid across normals
  * that swing through half a turn over those few points, so the end of the
@@ -1391,9 +1410,10 @@ const TURN_TIP_SEARCH_METRES = BEND_SMOOTHING_METRES + CORRIDOR_STEP_METRES;
  * frames is clear of the first two, and the fan holds still (#3254).
  *
  * Every corridor point is the same distance from wherever the rider is, so
- * every one is moved by the same amount, half a step either way at most, and the
- * road keeps its order: the points either side of the stretch moved are a
- * step and that amount apart. The first and the last point are not moved, so
+ * every one is moved by the same amount, half a step either way at most, and
+ * the road keeps its order: the points either side of the stretch moved are a
+ * step and that amount apart, as are two turns' points where they meet,
+ * half-way between their tips. The first and the last point are not moved, so
  * the corridor reaches as far as before.
  */
 function steadiedAtTurns(
@@ -1404,19 +1424,21 @@ function steadiedAtTurns(
   step: number,
   smoothing: number,
 ): CorridorPoint[] | undefined {
-  // One tip a turn: a turn's rows found twice, as a joint that faces back and
-  // as a tip (@see tipBetween), are one turn.
   const tips: number[] = [];
   for (const row of turning) {
     const along = (centre[row] as CorridorPoint).along;
-    if (tips.some((tip) => Math.abs(tip - along) <= 2 * TURN_STEADY_METRES)) continue;
-    tips.push(turnTip(profile, origin, along, smoothing));
+    if (tips.some((tip) => Math.abs(tip - along) <= SAME_TURN_METRES)) continue;
+    const tip = turnTip(profile, origin, along, smoothing);
+    if (turnsBack(profile, origin, tip, smoothing)) tips.push(tip);
   }
+  if (tips.length === 0) return undefined;
   let steadied: CorridorPoint[] | undefined;
   for (let row = 1; row + 1 < centre.length; row += 1) {
     const point = centre[row] as CorridorPoint;
-    const tip = tips.find((along) => Math.abs(point.along - along) <= TURN_STEADY_METRES + step);
-    if (tip === undefined) continue;
+    let tip = tips[0] as number;
+    for (const along of tips) {
+      if (Math.abs(point.along - along) < Math.abs(point.along - tip)) tip = along;
+    }
     const at = tip + Math.round((point.along - tip) / step) * step;
     if (!(Math.abs(at - tip) <= TURN_STEADY_METRES) || at === point.along) continue;
     steadied ??= centre.slice();
@@ -1427,17 +1449,77 @@ function steadiedAtTurns(
 
 /**
  * The odometer of the tip of the turn whose row is at `along`: where the
- * drawn road reaches furthest the way it arrives, within
+ * drawn road reaches furthest the way it arrives at the tip, within
  * {@link TURN_TIP_SEARCH_METRES} — #3254. A function of the road and not of
  * where the corridor's points happen to be, so every frame finds the same one
- * to within a few millimetres: `turnaround-markings.test.ts` reads no paint
- * that moves for it.
+ * to within a millimetre: `turnaround-markings.test.ts` reads no paint that
+ * moves for it.
+ *
+ * ⚠️ **The way it arrives AT THE TIP, so the search is run again from the tip
+ * it found until it stays there** (at most {@link TURN_TIP_PASSES} times). One
+ * search reads the heading the road arrives on from the {@link TURN_TIP_SEARCH_METRES}
+ * before the row it starts from, and that row slides with the rider. Where a
+ * bend comes within twice that of the tip, the heading swung as the row slid,
+ * the tip slid with it, and every point placed from it: the owner's second
+ * capture, the edge line on the bend before the turn a few pixels off from one
+ * frame to the next (PR #3262's tablet check). Run from the tip, the heading
+ * is the tip's own, and the passes settle on it whichever row they start from.
+ */
+function turnTip(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  along: number,
+  smoothing: number,
+): number {
+  let tip = along;
+  for (let pass = 0; pass < TURN_TIP_PASSES; pass += 1) {
+    const next = tipFrom(profile, origin, tip, smoothing);
+    const moved = Math.abs(next - tip);
+    tip = next;
+    if (!(moved > TURN_TIP_TOLERANCE_METRES)) break;
+  }
+  return Math.round(tip / TURN_TIP_ROUNDING_METRES) * TURN_TIP_ROUNDING_METRES;
+}
+
+/** The most searches {@link turnTip} runs to settle on a tip: **12**. */
+const TURN_TIP_PASSES = 12;
+
+/**
+ * Whether the drawn road really turns back at `tip`: whether, from
+ * {@link TURN_TIP_SEARCH_METRES} before it to as far after, it ends up less
+ * than that far from where it was — #3254. At a one-point turnaround the two
+ * are the width between the way out and the way back apart, a few metres; a
+ * bend of 120° over the same road leaves them some twenty apart.
+ *
+ * ⚠️ **What it is for.** {@link retracedRows} reports a bend tight enough for
+ * the road beyond it to come near the road before it as a turning point on
+ * some frames and not others, as the points slide. Taken as a turn, that bend's
+ * "tip" put out the real turn's, on those frames alone: the bend 40 m before the
+ * turn in `turnaround-markings.test.ts` then flashed once every two metres.
+ * This is a function of the road at the tip, so it is the same every frame.
+ */
+function turnsBack(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  tip: number,
+  smoothing: number,
+): boolean {
+  const reach = TURN_TIP_SEARCH_METRES;
+  const before = pointAt(profile, origin, tip - reach, smoothing);
+  const after = pointAt(profile, origin, tip + reach, smoothing);
+  return Math.hypot(after.x - before.x, after.z - before.z) < reach;
+}
+
+/**
+ * One search for {@link turnTip}: the odometer within
+ * {@link TURN_TIP_SEARCH_METRES} of `along` where the drawn road reaches
+ * furthest the way it arrives at `along`.
  *
  * Found by golden-section search, which holds because averaged over
  * {@link BEND_SMOOTHING_METRES}, how far the drawn road has come the way it
  * arrived rises to the tip and falls after it.
  */
-function turnTip(
+function tipFrom(
   profile: RouteProfile,
   origin: CorridorOrigin,
   along: number,
@@ -1474,7 +1556,7 @@ function turnTip(
       atLeft = come(left);
     }
   }
-  return Math.round((low + high) / 2 / TURN_TIP_ROUNDING_METRES) * TURN_TIP_ROUNDING_METRES;
+  return (low + high) / 2;
 }
 
 /** How closely {@link turnTip} finds the tip, in metres: a tenth of a millimetre. */
