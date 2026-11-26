@@ -538,8 +538,11 @@ function rideGaps(seed: number): GapSamples {
 }
 
 describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067 D-3)', () => {
-  /** One bot and the rider, items off, the seed fixed, the switch as given. */
-  function oneBot(draft: boolean | undefined): LapRaceRide {
+  /**
+   * One bot and the rider, items off, the seed fixed, the switch as given;
+   * #2967: and the rider's own *Draft* as given, and as many bots as asked.
+   */
+  function oneBot(draft: boolean | undefined, riderDrafts?: boolean, bots = 1): LapRaceRide {
     vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
       <T extends ArrayBufferView>(array: T): T => {
         (array as unknown as Uint32Array)[0] = 7;
@@ -547,7 +550,7 @@ describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067
       },
     );
     const ride = startLapRaceRide({
-      choice: { laps: 3, bots: 1, tier: 'brisk', itemsOn: false },
+      choice: { laps: 3, bots, tier: 'brisk', itemsOn: false },
       profile: LOOP,
       conditions: lapRaceBotConditions(
         LOOP,
@@ -557,6 +560,7 @@ describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067
       lineOffset: 0,
       storage: undefined,
       ...(draft === undefined ? {} : { draft }),
+      ...(riderDrafts === undefined ? {} : { riderDrafts }),
     });
     if (ride === undefined) throw new Error('a loop starts a race');
     return ride;
@@ -630,6 +634,37 @@ describe('the rider gives and takes a draft, with the switch on (#2461, ADR 0067
     // bot in front gets ADR 0038's small lead effect, so it rides further.
     expect(on.ks.some((k) => k < 1)).toBe(true);
     expect(on.ride.bots[0]?.ride.distance).toBeGreaterThan(off.ride.bots[0]?.ride.distance ?? 0);
+  });
+
+  it('holds the rider at 1 with their own Draft off, on the same wheel, and races the field as with it on (#2967)', () => {
+    const declined = oneBot(true, false);
+    expect(declined.riderDrafts).toBe(false);
+    expect(oneBot(true).riderDrafts).toBe(true);
+    const off = onTheWheel(declined);
+    const on = onTheWheel(oneBot(true, true));
+    const none = onTheWheel(oneBot(false));
+    // The same 2 m behind the bot that drafts the rider with it on.
+    expect(on.ks.some((k) => k < 1)).toBe(true);
+    expect(off.ks.every((k) => k === 1)).toBe(true);
+    // The field still drafts: the bot ahead keeps the rider's small lead
+    // effect, so the race is the race with the rider's draft on, to the bit,
+    // and not the race with the switch off.
+    expect(off.ride.bots).toEqual(on.ride.bots);
+    expect(off.ride.race).toEqual(on.ride.race);
+    expect(off.ride.bots[0]?.ride.distance).toBeGreaterThan(none.ride.bots[0]?.ride.distance ?? 0);
+  });
+
+  it('lets the bots draft each other with the rider’s own Draft off (#2967’s third criterion)', () => {
+    // Three bots, the rider left on the line: the bots ride away together.
+    let ride = oneBot(true, false, 3);
+    let botsDrafted = false;
+    for (let tick = 0; tick < 30 / LAP_RACE_TICK_SECONDS; tick += 1) {
+      ride = stepLapRaceRide(ride, { ticks: 1, along: 0 });
+      expect(ride.riderDraft).toBe(1);
+      const factors = lapRaceDraftFactors(ride.race);
+      if (ride.bots.some((bot) => (factors[bot.id] ?? 1) < 1)) botsDrafted = true;
+    }
+    expect(botsDrafted).toBe(true);
   });
 });
 

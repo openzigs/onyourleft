@@ -37,6 +37,9 @@
  * the rider arrives at the next grade sooner. The `k` is read after the frame's
  * steps, so it rides the next frame's, as a room's prediction does. With the
  * switch off, no racer drafts and the race is the race before #2461 to the bit.
+ * With the switch on and the rider's own *Draft* off for the ride (#2967,
+ * {@link LapRaceRideStart.riderDrafts}), the field drafts as before, the bots
+ * behind the rider included, and only the rider's `k` is held at 1.
  * `lap-race-wiring.test.tsx` holds a race with the switch on to an ordinary
  * ride ridden at the same `k`, step for step (D-3.6).
  *
@@ -211,9 +214,17 @@ export interface LapRaceRide {
   /**
    * The rider's draft multiplier `k` on the last tick, from the field's one
    * `fieldDraftFactors` call (#2461): `1` alone, before the first tick, and
-   * always with {@link draft} off. The simulation rides the rider at it.
+   * always with {@link draft} off or {@link riderDrafts} off. The simulation
+   * rides the rider at it.
    */
   readonly riderDraft: number;
+  /**
+   * Whether the rider takes the draft the field gives them (#2967): the
+   * rider's *Draft* in *Your ride*. Off, {@link riderDraft} stays 1 and the
+   * field drafts as {@link draft} says, the bots among themselves and behind
+   * the rider.
+   */
+  readonly riderDrafts: boolean;
   /**
    * Where the drawing lays the field out (#2544, `pack-layout.ts`): each bot's
    * row, a bike length a row, and its place across its lane, stepped with the
@@ -267,6 +278,13 @@ export interface LapRaceRideStart {
    * lap race. Absent, no racer drafts.
    */
   readonly draft?: boolean | undefined;
+  /**
+   * Whether the rider takes the draft the field gives them (#2967,
+   * `rider-draft-preference.ts`). Absent, they do, as every racer does under
+   * {@link draft}. Off, the rider is ridden at `k = 1` and nothing else in the
+   * race changes.
+   */
+  readonly riderDrafts?: boolean | undefined;
   /**
    * The rider's mass, kilograms: the bots read the rider's power as W/kg
    * (#2463, ADR 0067 D-0), as the standings show it. Absent, they read none.
@@ -428,6 +446,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     draft: input.draft === true,
     riderMassKilograms: input.riderMassKilograms,
     riderDraft: 1,
+    riderDrafts: input.riderDrafts !== false,
     // The owner's ruling of 2026-11-13 on #2544: the pack forms on the line.
     // Every bot stands in its place on the grid through the countdown, so the
     // field rolls off together at Go (`pack-layout.ts` §"On the grid").
@@ -622,8 +641,9 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
         used: (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
       });
     }
-    // #2461: the rider's `k` from the same call that drafted the bots.
-    riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
+    // #2461: the rider's `k` from the same call that drafted the bots, and
+    // #2967: 1 when the rider chose no draft, the bots' draft untouched.
+    riderDraft = ride.riderDrafts ? (stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1) : 1;
     // #2544: the field laid out for the drawing, a tick on, the rider where
     // they steered.
     pack = stepPackLayout(

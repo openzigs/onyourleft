@@ -527,8 +527,12 @@ export interface HudInput {
    * is ({@link draftField}). Absent — and no field — on a ride with no solo
    * draft, with the solo draft switched off, and with the rider's display
    * preference off (D-6, R-13). Never on a ride in a room, which has its own.
+   *
+   * `'off'` (#2967): the ride would have drafted the rider and does not,
+   * because the rider chose no draft in *Your ride*. The field reads *Off*,
+   * and the line under it says {@link DRAFT_DECLINED}.
    */
-  readonly soloDraft?: number | undefined;
+  readonly soloDraft?: number | 'off' | undefined;
   /**
    * Whether the rider is in the solo draft — #2426: the simulation's own
    * `draftEvent` state (`simulation.ts` §`GameState.soloDraft.inDraft`), drawn
@@ -1402,7 +1406,17 @@ export const SOLO_DRAFT_KEY = 'solo-draft';
  */
 function draftField(draft: RoomHud['draft'], key: string, inDraft: boolean): HudReading {
   const base = { key, label: DRAFT_LABEL, stale: false } as const;
-  if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
+  if (draft === 'off') {
+    // #2967: a solo ride's draft is off only because the rider said so: the
+    // line says it. A room's is the room maker's, and says nothing more.
+    return {
+      ...base,
+      value: 'Off',
+      unit: '',
+      word: true,
+      ...(key === SOLO_DRAFT_KEY ? { detail: DRAFT_DECLINED } : {}),
+    };
+  }
   if (draft === undefined || !Number.isFinite(draft)) {
     return { ...base, value: NO_READING, unit: '' };
   }
@@ -1432,6 +1446,13 @@ function draftField(draft: RoomHud['draft'], key: string, inDraft: boolean): Hud
  * as an announcement (item 3): a screen reader reads it as part of the field.
  */
 export const IN_THE_DRAFT = 'In the draft';
+
+/**
+ * What the solo Draft field's line says when the rider chose no draft for
+ * the ride — #2967. ⚠️ Draft wording for the owner. Short, for the tablet
+ * tier's narrowest track, where the scale's line under a number already fits.
+ */
+export const DRAFT_DECLINED = 'Your choice';
 
 /** What the gauge's full scale is, in words under the number (#787). ⚠️ Draft wording for the owner. */
 function draftScaleText(fullScalePercent: number): string {
