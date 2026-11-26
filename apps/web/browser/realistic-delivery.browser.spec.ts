@@ -81,6 +81,7 @@ import {
 import { VILLAGE_HOLD_METRES } from '../src/demo/synthetic-road';
 import { THROW_WINDOW_BEFORE_METRES } from '../src/game/delivery/throw';
 import { REALISTIC_DUSK_EXPOSURE_SHARE, REALISTIC_EXPOSURE } from '../src/game/realistic-light';
+import { DUSK_WINDOW_GLOW } from '../src/game/weather-look';
 
 import { NIGHTLY } from './nightly';
 import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
@@ -246,6 +247,8 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
       expect(shade?.[0] ?? 0).toBeGreaterThan((shade?.[2] ?? Infinity) * 1.2);
     }
     expect(back?.rainClearance ?? 0).toBeGreaterThanOrEqual(2.5);
+    // #2968: and the lit rooms' windows were lit, in the one uniform every mapped facade reads.
+    expect(back?.windowGlow).toEqual([...DUSK_WINDOW_GLOW]);
     // #2513: the same load, a real round on it, sighted before each of its houses.
     const { houses, sightings: sighted } = await page.evaluate((leads) => {
       const round = window.__oylRealisticRound;

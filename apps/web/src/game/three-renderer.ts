@@ -801,7 +801,14 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
+import {
+  roadTintIn,
+  WeatherShading,
+  DUSK_LIT_ROOM_SHARE,
+  sunColourIn,
+  weatheredWorld,
+  windowGlowIn,
+} from './weather-look';
 import { BARE_SURFACES, type BareSurface } from './land-class';
 import {
   bareSurfaceColourIn,
@@ -9821,6 +9828,18 @@ const IMPOSTOR_TINT_LINE = 'gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 
 /** The line a broadleaf's mesh turns its autumn at, after its tint. @see withAutumn */
 const MESH_AUTUMN_LINE = 'diffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);';
 
+/**
+ * The line a mapped building's facade adds its lit windows' dusk glow by —
+ * #2968, after the normals, to three's `totalEmissiveRadiance` (the
+ * material's own emissive, black, and no emissive map follows to scale it):
+ * `oylGlow` is the share of the
+ * fragment that is a lit room's window (#1581's one in five), and
+ * `oylWindowGlow` the dusk's light, nought by day.
+ *
+ * @test-facing `weather-look.test.ts` reads it in the facade program
+ */
+export const WINDOW_GLOW_LINE = 'totalEmissiveRadiance += oylWindowGlow * oylGlow;';
+
 /** The materials {@link withWeatherShade} has taught. */
 const WEATHER_SHADED = new WeakSet<Material>();
 
@@ -10202,6 +10221,12 @@ const FOLIAGE = {
    * (`weather-look.ts` §`sceneryShadeIn`). @see withWeatherShade
    */
   oylWeatherShade: { value: new Vector3(1, 1, 1) },
+  /**
+   * #2968: the light a lit room's window gives at a Delivery level's dusk,
+   * linear (`weather-look.ts` §`windowGlowIn`), nought otherwise. Read by the
+   * mapped buildings' facade ({@link WINDOW_GLOW_LINE}).
+   */
+  oylWindowGlow: { value: new Vector3(0, 0, 0) },
   /**
    * PR #2522: how much of the route's own light the frame's sun gives, linear
    * (`weather-look.ts` §`sunShareIn`) — read by the impostors alone, whose
@@ -23659,7 +23684,9 @@ function facadeFragmentGlsl(
   surface: StructureSurface,
 ): string {
   return /* glsl */ `
-  float oylGlass = 0.0;${rooms ? "\n  // #1662: Schlick's Fresnel for the glass, from the eye's slant: the finish reads it.\n  float oylGlassF = oylGlassF0;" : ''}
+  float oylGlass = 0.0;
+  // #2968: how much of the fragment is a room's window lit at dusk, for its glow.
+  float oylGlow = 0.0;${rooms ? "\n  // #1662: Schlick's Fresnel for the glass, from the eye's slant: the finish reads it.\n  float oylGlassF = oylGlassF0;" : ''}
   float oylFlat = 0.0;
   float oylRough = 0.6;
   float oylTilt = 0.0;
@@ -23781,6 +23808,8 @@ function facadeFragmentGlsl(
       float oylShown = ${FACADE_SHOWN_GLSL};
       vec3 oylWall = diffuseColor.rgb;
       float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
+      // #2968: more rooms lit at dusk, on the same hash, so a room lit by day stays lit.
+      float oylDuskLit = step(${glslFloat(1 - DUSK_LIT_ROOM_SHARE)}, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
       ${weathering ? 'float oylStreakAt = mix(oylStreakShare, 1.0, step(abs(oylKind - oylClapboard), 0.5));' : ''}
       vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);${rooms ? "\n      // #1662: the room behind this bay's glass, seeded by where it is on which building.\n      float oylRoomSeed = oylRoomSeedOf(oylCell, vOylTint.xy);" : ''}
       if (oylFlag(oylFlags, oylGlazedFlag) > 0.5) {
@@ -23839,6 +23868,8 @@ function facadeFragmentGlsl(
         ${weathering ? WEATHER_SASH_STREAK_GLSL : ''}
         float oylParts = max(max(max(oylFrameOn, oylSillOn), oylShutterOn), oylSideOn) * (1.0 - oylFade);
         oylGlass = oylPaneOn * (1.0 - oylFade);
+        // #2968: a pane lit at dusk, and far off its share of the bay's mean.
+        oylGlow = oylDuskLit * (oylGlass + oylFade * oylArea);
         oylFlat = max(oylFlat, oylParts);
         oylTilt *= 1.0 - min(1.0, oylParts + oylGlass);
       } else {
@@ -23897,6 +23928,8 @@ function facadeFragmentGlsl(
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
         ${weathering ? WEATHER_CASEMENT_STREAK_GLSL : ''}
         oylGlass = oylPaneShare * (1.0 - oylFade);
+        // #2968: a pane lit at dusk, and far off its share of the bay's mean.
+        oylGlow = oylDuskLit * (oylGlass + oylFade * oylArea);
         oylFlat = max(oylFlat, max(oylOuter, oylSill) * (1.0 - oylFade));
       }${trims ? trimsGlsl(surface) : ''}
       // 3. The shade: under overhanging eaves, and at the wall's foot.
@@ -24297,7 +24330,7 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface, rooms, trimmed)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface, rooms, trimmed)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}\nuniform vec3 oylWindowGlow;`,
       'fragment',
       spliced,
     );
@@ -24315,6 +24348,10 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
       'fragment',
       spliced,
     );
+    // #2968: a lit room's window glows at a Delivery level's dusk
+    // (`weather-look.ts` §`windowGlowIn`), nought otherwise: a uniform and an
+    // add, no draw call. Added after the normals, below.
+    shader.uniforms.oylWindowGlow = FOLIAGE.oylWindowGlow;
     fragment = replacedOrThrown(
       fragment,
       '#include <metalnessmap_fragment>',
@@ -24335,7 +24372,7 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
       fragment,
       '#include <normal_fragment_maps>',
       // #1623: and snow on what faces up, by the surface's own facing, not its map's.
-      `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));\n${ROOF_SNOW_LINE}`,
+      `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));\n${ROOF_SNOW_LINE}\n${WINDOW_GLOW_LINE}`,
       'fragment',
       spliced,
     );
@@ -27662,6 +27699,8 @@ export interface DeliveryWeatherReadback {
   readonly foliageShade: readonly [number, number, number];
   /** The realistic impostors' share of the route's light, the uniform they read. */
   readonly impostorSun: readonly [number, number, number];
+  /** #2968: the light a lit room's window gives, the uniform the mapped facades read. */
+  readonly windowGlow: readonly [number, number, number];
   /** The rain's colour, its material's; absent before a frame carried a round. */
   readonly rainColour: readonly [number, number, number] | undefined;
   /** The nearest any streak stands to the camera across the ground, metres; absent with no rain drawn. */
@@ -28140,6 +28179,8 @@ class ThreeGameView implements GameView {
       // PR #2522: and the weather's shade and light, for the plants and the hedges.
       FOLIAGE.oylWeatherShade.value.set(shade[0], shade[1], shade[2]);
       FOLIAGE.oylImpostorSun.value.set(share[0], share[1], share[2]);
+      // #2968: and the lit rooms' windows, glowing at dusk.
+      FOLIAGE.oylWindowGlow.value.set(...windowGlowIn(this.#weather));
       ATMOSPHERE.oylFogTable.value.set(this.#airOutput);
       ATMOSPHERE.oylFogShare.value = this.#air?.share ?? 0;
       ATMOSPHERE.oylSkyTurn.value = this.#air?.turn ?? 0;
@@ -28406,6 +28447,7 @@ class ThreeGameView implements GameView {
       sceneryShade: this.#scatter.shade(),
       foliageShade: FOLIAGE.oylWeatherShade.value.toArray(),
       impostorSun: FOLIAGE.oylImpostorSun.value.toArray(),
+      windowGlow: FOLIAGE.oylWindowGlow.value.toArray(),
       rainColour: this.#delivery?.rainColour(),
       rainClearance:
         this.#delivery?.rainShown() === true

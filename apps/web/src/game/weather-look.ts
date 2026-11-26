@@ -49,17 +49,34 @@ export const DAY_SUN_COLOUR = 0xffffff;
 /** How high the sun stands at dusk, degrees above the horizon, its bearing kept. */
 export const DUSK_SUN_ELEVATION_DEGREES = 8;
 
-/** What share of its daytime light the sun gives at dusk. */
-export const DUSK_DIRECT_SHARE = 0.55;
+/**
+ * What share of its daytime light the sun gives at dusk. **0.65** since #2968
+ * (0.55 before): the owner's tablet ride of 2026-11-20, *"evening might be a
+ * bit too dark"*.
+ */
+export const DUSK_DIRECT_SHARE = 0.65;
 
-/** What share of its daytime light the sky gives at dusk. */
-export const DUSK_AMBIENT_SHARE = 0.45;
+/** What share of its daytime light the sky gives at dusk. **0.6** since #2968 (0.45 before). */
+export const DUSK_AMBIENT_SHARE = 0.6;
 
-/** The ground's colour at dusk, as a share of its daytime colour, each channel: darker, and warmer. */
-export const DUSK_GROUND_TINT: readonly [number, number, number] = [0.62, 0.52, 0.44];
+/**
+ * The ground's colour at dusk, as a share of its daytime colour, each channel:
+ * darker, and warmer. Lifted by #2968 from `[0.62, 0.52, 0.44]`, its warmth kept.
+ */
+export const DUSK_GROUND_TINT: readonly [number, number, number] = [0.74, 0.63, 0.54];
 
 /** How much thicker the haze is in rain. */
 export const RAIN_FOG_SHARE = 1.8;
+
+/**
+ * How much thicker the haze is in rain AT DUSK — #2968, the owner: *"distance
+ * looks very foggy not sure if it should"*. The dusk's dim light already
+ * shortens what a rider can see, so the rain's haze stacked on it at
+ * {@link RAIN_FOG_SHARE} hid a house at the marker distance (`delivery/in-view.ts`
+ * §`LOW_LIGHT_REVEAL_METRES`, 40 m). This project's own number, for the
+ * owner's approval in #2968's pull request.
+ */
+export const RAIN_DUSK_FOG_SHARE = 1.2;
 
 /** The grey a rain sky is drawn toward, sRGB. */
 export const RAIN_SKY_GREY = 0x6b737c;
@@ -132,7 +149,8 @@ export function weatheredWorld(world: WorldStyle, weather?: DeliveryWeatherFrame
       ...out,
       skyColour: mixed(out.skyColour, RAIN_SKY_GREY, RAIN_GREY_SHARE),
       horizonColour: mixed(out.horizonColour, RAIN_SKY_GREY, RAIN_GREY_SHARE),
-      fogDensity: out.fogDensity * RAIN_FOG_SHARE,
+      // #2968: thinner when the dusk is already dimming the distance.
+      fogDensity: out.fogDensity * (weather.dusk ? RAIN_DUSK_FOG_SHARE : RAIN_FOG_SHARE),
       sun: {
         ...out.sun,
         ambient: out.sun.ambient * RAIN_AMBIENT_SHARE,
@@ -147,10 +165,11 @@ export function weatheredWorld(world: WorldStyle, weather?: DeliveryWeatherFrame
  * The stylised road's paint at dusk, linear, each channel — #2508: the road's
  * colours are its own and unlit (`terrain.ts`), so the dusk's light does not
  * reach them, and an unlit pale road under a dark sky reads as day. About
- * 0.6 of its daytime brightness, a little warm. Its gradient tint keeps its
+ * 0.6 of its daytime brightness, a little warm. Lifted by #2968 from
+ * `[0.36, 0.32, 0.28]`, so the road reads at dusk. Its gradient tint keeps its
  * contrast: every colour on the road is scaled alike.
  */
-export const DUSK_ROAD_TINT: readonly [number, number, number] = [0.36, 0.32, 0.28];
+export const DUSK_ROAD_TINT: readonly [number, number, number] = [0.46, 0.41, 0.36];
 
 /** The stylised road's paint in rain, linear: darker, as a wet road is. */
 export const RAIN_ROAD_TINT: readonly [number, number, number] = [0.7, 0.7, 0.72];
@@ -166,6 +185,37 @@ export function roadTintIn(weather?: DeliveryWeatherFrame): readonly [number, nu
     for (const channel of [0, 1, 2] as const) tint[channel] *= by[channel];
   }
   return tint;
+}
+
+/**
+ * The light a lit room's window gives at dusk, linear — #2968, the owner on
+ * the tablet: *"shouldn't the houses have lights on"*. Added to a mapped
+ * house's facade where its window is a room lit at dusk
+ * ({@link DUSK_LIT_ROOM_SHARE}), after its light, so it is the same at any sun:
+ * a warm lamp-light, which also tells the rider a house is there. The
+ * realistic world's dusk exposure (`realistic-light.ts`
+ * §`REALISTIC_DUSK_EXPOSURE_SHARE`) still scales it. This project's own
+ * number, for the owner's approval in #2968's pull request.
+ */
+export const DUSK_WINDOW_GLOW: readonly [number, number, number] = [0.95, 0.62, 0.28];
+
+/**
+ * The share of a house's windows lit at dusk — #2968: **0.45**, where by day
+ * one in five rooms is lit (`facade.ts` §`litRoomAt`). On the same hash, so a
+ * room lit by day is lit at dusk too, and at 0.45 a house of six windows has
+ * one or more lit about 97 times in a hundred. This project's own number, for
+ * the owner's approval in #2968's pull request.
+ */
+export const DUSK_LIT_ROOM_SHARE = 0.45;
+
+/** No window glows by day. */
+const NO_WINDOW_GLOW: readonly [number, number, number] = Object.freeze<[number, number, number]>([
+  0, 0, 0,
+]);
+
+/** The light a lit room's window gives under `weather`, linear: {@link DUSK_WINDOW_GLOW} at dusk, nought otherwise. */
+export function windowGlowIn(weather?: DeliveryWeatherFrame): readonly [number, number, number] {
+  return weather?.dusk === true ? DUSK_WINDOW_GLOW : NO_WINDOW_GLOW;
 }
 
 /** The colour the sun's lamp is lit in, under `weather`: warm at dusk, white otherwise. */

@@ -85,8 +85,11 @@ export const REALISTIC_EXPOSURE = 1;
  * the sky's and the sun's shares (`weather-look.ts`) and the graded sky
  * ({@link duskSkyTexel}) — and those at 0.45 left the road too dark to ride.
  * This project's own number, for the owner's approval in #2508's pull request.
+ * #2968, the owner's tablet ride of 2026-11-20 (*"evening might be a bit too
+ * dark"*): **0.85**, with the sun's and the sky's dusk shares raised beside
+ * it, so the houses, the road and the markers read and it is still evening.
  */
-export const REALISTIC_DUSK_EXPOSURE_SHARE = 0.7;
+export const REALISTIC_DUSK_EXPOSURE_SHARE = 0.85;
 
 /**
  * How bright the photographed sky is drawn in rain, as a share of its

@@ -1670,6 +1670,24 @@ export function litRoomAt(
 }
 
 /**
+ * Whether the window in bay `cell` of a building of seeded `tint` is lit at
+ * a Delivery level's dusk — #2968, the shader's `oylDuskLit`: the same hash as
+ * {@link litRoomAt}, at least `1 − share`, so a room lit by day is lit at dusk.
+ *
+ * @test-facing held by `weather-look.test.ts`; the product computes it in the shader
+ */
+export function litAtDuskAt(
+  cell: readonly [number, number],
+  tint: readonly [number, number, number],
+  share: number,
+): boolean {
+  return (
+    windowHash(cell[0] + Math.floor(tint[0] * 1000), cell[1] + Math.floor(tint[1] * 1000)) >=
+    1 - share
+  );
+}
+
+/**
  * The seed of the room behind the window in bay `cell` of a building of
  * seeded `tint` — #1662, the shader's `oylRoomSeedOf`: the window's hash with
  * {@link INTERIOR_SALT}'s `room`, so that it is not its lit hash; laid so
