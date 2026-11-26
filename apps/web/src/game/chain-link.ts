@@ -56,7 +56,7 @@ import type { LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { nearestOnDrawnRoad } from './road-grid';
 import type { ScatterItem } from './scatter';
-import { boundaryFor, type BoundaryType } from './scenery-plan';
+import { boundaryFor, fenceVariantOf, type BoundaryType } from './scenery-plan';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
 
@@ -103,12 +103,18 @@ export function timberFencePieces(
 }
 
 /** How a piece says which fence it is. @see ScatterItem.chainLink, ScatterItem.boundary */
-type FenceMark = Pick<ScatterItem, 'chainLink' | 'boundary'>;
+type FenceMark = Pick<ScatterItem, 'chainLink' | 'boundary' | 'variant'>;
 
-/** How a `fence` item says it is a boundary of `type`; the field fence says nothing. */
+/**
+ * How a `fence` item says it is a boundary of `type`: its mark, and the
+ * variant the realistic world draws it as (`scenery-plan.ts` §`FENCE_VARIANTS`).
+ */
 function fenceMarkOf(type: BoundaryType): FenceMark {
-  if (type === 'chain-link') return { chainLink: true };
-  return type === 'timber-fence' || type === 'noise-barrier' ? { boundary: type } : {};
+  const variant = fenceVariantOf(type);
+  if (type === 'chain-link') return { chainLink: true, variant };
+  return type === 'timber-fence' || type === 'noise-barrier'
+    ? { boundary: type, variant }
+    : { variant };
 }
 
 // Which fence each ground gets is the plan's: `scenery-plan.ts` §`BOUNDARY_PLAN`.
@@ -202,7 +208,6 @@ export function noiseBarrierPieces(
             z: bz,
             rotation: Math.atan2(dx, dz),
             scale: 1,
-            variant: 0,
             ...NOISE_BARRIER,
           },
           along: stands.along,
@@ -313,7 +318,6 @@ function standing(
       z: at.z,
       rotation: at.rotation,
       scale: 1,
-      variant: 0,
       ...mark,
     },
     along: near.along,

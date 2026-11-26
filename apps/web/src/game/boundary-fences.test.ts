@@ -118,6 +118,8 @@ describe('the highway noise barrier — #3252', () => {
       );
       expect(piece.item.kind).toBe('fence');
       expect(piece.item.boundary).toBe('noise-barrier');
+      // The variant the realistic world draws a barrier as: a mesh of its own.
+      expect(piece.item.variant).toBe(2);
       expect(piece.item.chainLink).toBeUndefined();
       expect(piece.item.scale).toBe(1);
       // Along the highway, which runs along the road: its length up +z.
@@ -217,6 +219,7 @@ describe('the timber fence — #3252', () => {
       expect(lateral).toBeGreaterThan(11);
       expect(piece.item.kind).toBe('fence');
       expect(piece.item.boundary).toBe('timber-fence');
+      expect(piece.item.variant).toBe(1);
       expect(piece.item.chainLink).toBeUndefined();
     }
     // Its frontage, the edge nearest the road, is fenced end to end.
@@ -247,8 +250,10 @@ describe('both among a frame’s structures — #3252', () => {
     expect(barrier.length).toBeGreaterThanOrEqual(48);
     expect(timber.length).toBeGreaterThan(25);
     for (const item of [...barrier, ...timber]) expect(item.kind).toBe('fence');
-    // And a field's own fence is neither.
-    expect(items.some((item) => item.kind === 'fence' && item.boundary === undefined)).toBe(true);
+    // And a field's own fence is neither, and keeps the first variant.
+    const fields = items.filter((item) => item.kind === 'fence' && item.boundary === undefined);
+    expect(fields.length).toBeGreaterThan(0);
+    for (const item of fields) expect(item.variant).toBe(0);
   });
 
   it('CONTROL: a town with no highway and no allotments carries neither', () => {

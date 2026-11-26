@@ -673,7 +673,7 @@ import {
 import { GROWN_SPECIES, growTree, type GrownMesh, type GrownSpecies } from './grown-trees';
 import {
   ageScale,
-  fenceShapeOf,
+  fenceFoldOf,
   instanceBuild,
   PLAN_SLOTS,
   rockSeat,
@@ -22223,71 +22223,60 @@ export const CHAIN_LINK_SINK_METRES = 0.3;
  *
  * Exported for `realistic-roadside.test.ts`, which runs it.
  */
-export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE} < 3.5 ? ${CHAIN_LINK_PART_ATTRIBUTE} : mod(${CHAIN_LINK_PART_ATTRIBUTE}, 4.0);
-float oylFenceOfPart = ${CHAIN_LINK_PART_ATTRIBUTE} < 0.5 ? 0.0 : (${CHAIN_LINK_PART_ATTRIBUTE} < 3.5 ? 1.0 : floor(${CHAIN_LINK_PART_ATTRIBUTE} * 0.25));
-if (abs(oylFenceOfPart - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
+export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE};
+if (abs(step(0.5, ${CHAIN_LINK_PART_ATTRIBUTE}) - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
 
 /**
- * The part every vertex of a BUILT fence carries in
- * {@link CHAIN_LINK_PART_ATTRIBUTE} — #3252: four times its fence's number in
- * `scenery-plan.ts` §`FENCE_SHAPES`, and how it is painted — nought, the
- * planks' photograph, or one, its own vertex's colour, as the chain-link's
- * frame is. So the timber fence is 8 and the noise barrier 13, and the
- * chain-link's 1 and 2 (#1274) are what they were.
- * {@link CHAIN_LINK_FOLD_GLSL} reads both halves.
- */
-export const BUILT_FENCE_PARTS = { 'timber-fence': 8, 'noise-barrier': 13 } as const;
-
-/**
- * `folded` with the built fences appended — #3252: the timber fence and the
- * noise barrier, in the field fence's ONE instanced shape beside the
- * chain-link ({@link chainLinkFenceGeometry}), each vertex marked with its
- * part ({@link BUILT_FENCE_PARTS}). Each is taken through
- * {@link projectedInMetres} as the field fence's own planks are, so every
- * attribute the fence carries is the same size on all of them; the barrier's
- * colour is then its own parts'. `folded` is released.
+ * A BUILT fence as a shape of its own — #3252: the close-board timber fence
+ * or the highway noise barrier, taken through {@link projectedInMetres} as
+ * the field fence's planks are. Each is a variant of the realistic `fence`
+ * (`scenery-plan.ts` §`FENCE_VARIANTS`), so it is drawn by a mesh of its own
+ * and only where one stands: a frame with no such fence submits none of its
+ * triangles and makes no call for it.
  *
- * What it costs is triangles: every realistic fence instance submits every
- * shape, 459 in all, under the 580 of the heaviest structure that
- * `realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`' term prices a slot at.
+ * ⚠️ **Not folded into the field fence's mesh as the chain-link is.** Folded,
+ * every fence instance in every frame submitted both, 216 triangles a fence,
+ * and the Delivery village's frame went over
+ * `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` by 1 708 on the
+ * pull request's first CI run. A mesh of its own costs a draw call in the
+ * frames that have one and nothing in the frames that do not.
+ *
+ * `like` is the field fence's shape as the belt draws it. Where that carries
+ * the chain-link's part ({@link CHAIN_LINK_PART_ATTRIBUTE}) this does too, so
+ * the same taught material draws it: the timber fence as part 0, the planks'
+ * photograph, and the barrier as part 1, a colour a vertex with no relief,
+ * which is what the chain-link's frame is (`scenery-plan.ts` §`fenceFoldOf`).
  */
-export function withBuiltFences(folded: BufferGeometry): BufferGeometry {
+export function builtFenceGeometry(
+  fence: 'timber-fence' | 'noise-barrier',
+  like: BufferGeometry,
+): BufferGeometry {
   const tile = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES.planks);
-  const timber = projectedInMetres(timberFenceGeometry(), tile, 1, false);
-  const barrier = noiseBarrierParts().map((part) => {
-    const projected = projectedInMetres(part.geometry(), tile, 1, false);
-    const colour = new Color(part.colour);
-    const colours = projected.getAttribute('color');
-    for (let at = 0; at < colours.count; at += 1) colours.setXYZ(at, colour.r, colour.g, colour.b);
-    return projected;
-  });
-  const built: readonly (readonly [BufferGeometry, number])[] = [
-    [timber, BUILT_FENCE_PARTS['timber-fence']],
-    ...barrier.map((each) => [each, BUILT_FENCE_PARTS['noise-barrier']] as const),
-  ];
-  const held = folded.getAttribute('position').count;
-  const vertices = built.reduce(
-    (sum, [geometry]) => sum + geometry.getAttribute('position').count,
-    held,
-  );
-  const geometry = new BufferGeometry();
-  for (const name of Object.keys(folded.attributes)) {
-    const source = folded.getAttribute(name);
-    const size = source.itemSize;
-    const out = new Float32Array(vertices * size);
-    out.set(source.array);
-    let first = held;
-    for (const [each, part] of built) {
-      const from = each.getAttribute(name) as BufferAttribute | undefined;
-      const count = each.getAttribute('position').count;
-      if (name === CHAIN_LINK_PART_ATTRIBUTE) out.fill(part, first, first + count);
-      else if (from !== undefined) out.set(from.array, first * size);
-      first += count;
-    }
-    geometry.setAttribute(name, new BufferAttribute(out, size));
+  let geometry: BufferGeometry;
+  if (fence === 'timber-fence') {
+    geometry = projectedInMetres(timberFenceGeometry(), tile, 1, false);
+  } else {
+    const parts = noiseBarrierParts().map((part) => {
+      const projected = projectedInMetres(part.geometry(), tile, 1, false);
+      const colour = new Color(part.colour);
+      const colours = projected.getAttribute('color');
+      for (let at = 0; at < colours.count; at += 1) {
+        colours.setXYZ(at, colour.r, colour.g, colour.b);
+      }
+      return projected;
+    });
+    const joined = mergeGeometries(parts);
+    for (const each of parts) each.dispose();
+    if (joined === null) throw new Error('the noise barrier could not be merged');
+    geometry = joined;
   }
-  for (const [each] of built) each.dispose();
-  folded.dispose();
+  if (like.getAttribute(CHAIN_LINK_PART_ATTRIBUTE) !== undefined) {
+    const vertices = geometry.getAttribute('position').count;
+    geometry.setAttribute(
+      CHAIN_LINK_PART_ATTRIBUTE,
+      new BufferAttribute(new Float32Array(vertices).fill(fence === 'noise-barrier' ? 1 : 0), 1),
+    );
+  }
   geometry.computeBoundingSphere();
   return geometry;
 }
@@ -22528,8 +22517,16 @@ export class RealisticStructureBelts {
         if (kind === 'fence' && chainLink !== undefined) {
           const folded = chainLinkFenceGeometry(shapes[0] as BufferGeometry, chainLink.geometry);
           (shapes[0] as BufferGeometry).dispose();
-          // #3252: and the timber fence and the noise barrier, in the same draw.
-          shapes[0] = withBuiltFences(folded);
+          shapes[0] = folded;
+        }
+        // #3252: the timber fence and the noise barrier, each a variant of
+        // the fence with a mesh of its own, after the fence's height is read.
+        if (kind === 'fence') {
+          const field = shapes[0] as BufferGeometry;
+          shapes.push(
+            builtFenceGeometry('timber-fence', field),
+            builtFenceGeometry('noise-barrier', field),
+          );
         }
         models.set(kind, shapes);
       }
@@ -22544,8 +22541,8 @@ export class RealisticStructureBelts {
                 kind: 'fence',
                 materials: chainLinkMaterials(surface, textures, chainLink.wire),
                 attribute: CHAIN_LINK_SHAPE_ATTRIBUTE,
-                // #3252: the field fence, the chain-link, the timber fence or the barrier.
-                shapeOf: fenceShapeOf,
+                // #3252: and the noise barrier is drawn in its vertices' colours, as the chain-link is.
+                shapeOf: fenceFoldOf,
               },
             }
           : {}),

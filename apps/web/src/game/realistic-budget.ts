@@ -334,11 +334,12 @@ export const REALISTIC_TRIANGLES: Readonly<
    * 580 of the heaviest structure that {@link REALISTIC_STRUCTURE_ITEMS}'
    * term prices every structure slot at — the frame's sum does not move.
    *
-   * ⚠️ **Since #3252 the same mesh carries two fences more**, built from
-   * numbers: a close-board timber fence (96 triangles) and a highway noise
-   * barrier (120), so every realistic fence instance submits 459 — still
-   * under the 580, and `scenery-shapes.test.ts` holds the folded mesh to
-   * `structure`. This figure is the chain-link's own and did not move.
+   * ⚠️ **#3252's timber fence and noise barrier are NOT in this mesh.**
+   * Folded here as first written, every fence instance submitted 216
+   * triangles more and the Delivery village's frame went 1 708 over
+   * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}. Each is a variant of the fence
+   * with a mesh of its own (96 and 120 triangles), drawn only where one
+   * stands: `three-renderer.ts` §`builtFenceGeometry`.
    */
   'chain-link': 180,
 };

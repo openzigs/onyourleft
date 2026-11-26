@@ -441,7 +441,7 @@ export function rockSeat(
 /**
  * The boundaries the realistic world builds, and the setting each stands in.
  * `three-renderer.ts` builds each from numbers (`BOUNDARY_STYLE`,
- * `boundaryFenceShapes`); nothing is downloaded.
+ * `stoneWallGeometry`, `builtFenceGeometry`); nothing is downloaded.
  */
 export type BoundaryType =
   'stone-wall' | 'hedge' | 'post-and-rail' | 'timber-fence' | 'chain-link' | 'noise-barrier';
@@ -477,23 +477,32 @@ export function boundaryFor(setting: BoundarySetting): BoundaryType {
 }
 
 /**
- * The fences the realistic world folds into the field fence's ONE instanced
- * draw (`three-renderer.ts` §`RealisticStructureBelts`), in the order of
- * their shape number there: a `fence` item is the first unless it says
- * otherwise (`scatter.ts` §`ScatterItem.chainLink`, `.boundary`).
+ * The shapes the realistic world draws a `fence` item as, by its `variant`:
+ * the field's post-and-rail, the timber fence, the noise barrier. The
+ * chain-link is not here: it is folded into the first's mesh
+ * (`three-renderer.ts` §`chainLinkFenceGeometry`, #1274). The stylised world
+ * has one fence, and folds every variant into it.
  */
-export const FENCE_SHAPES = [
+export const FENCE_VARIANTS = [
   'post-and-rail',
-  'chain-link',
   'timber-fence',
   'noise-barrier',
 ] as const satisfies readonly BoundaryType[];
 
-/** Which of {@link FENCE_SHAPES} a `fence` item is drawn as. */
-export function fenceShapeOf(item: {
+/** The `variant` a `fence` item of a boundary type carries: 0 for the field's and the chain-link. */
+export function fenceVariantOf(type: BoundaryType): number {
+  return Math.max(0, (FENCE_VARIANTS as readonly BoundaryType[]).indexOf(type));
+}
+
+/**
+ * Whether a `fence` item is drawn in its own vertices' colours and not the
+ * planks' photograph — 1 for the chain-link and the noise barrier, 0 for the
+ * field fence and the timber fence. It is what the fence's material is told
+ * for each instance (`three-renderer.ts` §`ScatterFold`).
+ */
+export function fenceFoldOf(item: {
   readonly chainLink?: true;
   readonly boundary?: 'timber-fence' | 'noise-barrier';
 }): number {
-  if (item.chainLink === true) return FENCE_SHAPES.indexOf('chain-link');
-  return item.boundary === undefined ? 0 : FENCE_SHAPES.indexOf(item.boundary);
+  return item.chainLink === true || item.boundary === 'noise-barrier' ? 1 : 0;
 }

@@ -24,8 +24,9 @@ import {
   BOUNDARY_PLAN,
   boundaryFor,
   BUILD_BOUND,
-  FENCE_SHAPES,
-  fenceShapeOf,
+  FENCE_VARIANTS,
+  fenceFoldOf,
+  fenceVariantOf,
   instanceBuild,
   PLAN_SLOTS,
   ROCK_SEAT,
@@ -317,17 +318,20 @@ describe('which boundary a setting gets — #3252', () => {
     expect(new Set(Object.values(BOUNDARY_PLAN)).size).toBe(6);
   });
 
-  it('numbers the fences one instanced draw carries, the field fence first', () => {
-    expect([...FENCE_SHAPES]).toEqual([
-      'post-and-rail',
-      'chain-link',
-      'timber-fence',
-      'noise-barrier',
-    ]);
-    expect(fenceShapeOf({})).toBe(0);
-    expect(fenceShapeOf({ chainLink: true })).toBe(1);
-    expect(fenceShapeOf({ boundary: 'timber-fence' })).toBe(2);
-    expect(fenceShapeOf({ boundary: 'noise-barrier' })).toBe(3);
+  it('gives each built fence a variant of its own, and the chain-link the field fence’s', () => {
+    expect([...FENCE_VARIANTS]).toEqual(['post-and-rail', 'timber-fence', 'noise-barrier']);
+    expect(fenceVariantOf('post-and-rail')).toBe(0);
+    expect(fenceVariantOf('chain-link')).toBe(0);
+    expect(fenceVariantOf('timber-fence')).toBe(1);
+    expect(fenceVariantOf('noise-barrier')).toBe(2);
+    expect(fenceVariantOf('hedge')).toBe(0);
+  });
+
+  it('draws the chain-link and the barrier in their own vertices’ colours, and the others in planks', () => {
+    expect(fenceFoldOf({})).toBe(0);
+    expect(fenceFoldOf({ chainLink: true })).toBe(1);
+    expect(fenceFoldOf({ boundary: 'timber-fence' })).toBe(0);
+    expect(fenceFoldOf({ boundary: 'noise-barrier' })).toBe(1);
   });
 });
 
