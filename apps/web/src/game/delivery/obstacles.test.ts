@@ -19,7 +19,10 @@ import {
   type Crash,
   CRASH_SCORE_DELTA,
   CROSSING_OBSTACLE_KINDS,
+  LEVEL_PARKED_CAR_SHARE,
   LEVEL_STANDING_KINDS,
+  levelCarCount,
+  levelMovingCount,
   levelObstacleMix,
   MOVING_HAZARD_KINDS,
   FEWER_OBSTACLES_KEEP_ONE_IN,
@@ -743,6 +746,36 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
     expect(levelObstacleMix(round, 3_000).most).toBe(6);
     expect(levelObstacleMix(round, 2_999).most).toBe(6);
     expect(levelObstacleMix(round, 3_001).most).toBe(7);
+  });
+
+  it('makes exactly its share moving and three in four of the rest parked cars, which ones seeded — #2969', () => {
+    expect(LEVEL_PARKED_CAR_SHARE).toBe(0.75);
+    expect([0, 1, 2, 3, 4, 5].map(levelCarCount)).toEqual([0, 1, 2, 3, 3, 4]);
+    const mix = levelObstacleMix({ hazardsPerKilometre: { static: 5, moving: 2 } }, 2_800);
+    const span = { from: 0, to: 2_800 };
+    const carSlots = new Set<string>();
+    for (let seed = 0; seed < 200; seed += 1) {
+      const placed = placeObstacles(span, seed, 'normal', true, mix);
+      const moving = placed.filter((obstacle) => MOVING_HAZARD_KINDS.includes(obstacle.kind));
+      const cars = placed.filter((obstacle) => obstacle.kind === 'parked-car');
+      const bins = placed.filter((obstacle) => obstacle.kind === 'bin');
+      expect(placed).toHaveLength(20);
+      expect(moving, `seed ${String(seed)}`).toHaveLength(levelMovingCount(mix, 20));
+      expect(levelMovingCount(mix, 20)).toBe(6);
+      expect(cars, `seed ${String(seed)}`).toHaveLength(levelCarCount(14));
+      expect(bins).toHaveLength(14 - levelCarCount(14));
+      carSlots.add(placed.map((obstacle) => (obstacle.kind === 'parked-car' ? 'c' : '.')).join(''));
+    }
+    // Which slots are cars is the seed's, not a fixed pattern.
+    expect(carSlots.size).toBeGreaterThan(100);
+    // A level with no moving hazards stands every slot, and one with no static none.
+    const still = levelObstacleMix({ hazardsPerKilometre: { static: 5, moving: 0 } }, 2_000);
+    expect(levelMovingCount(still, 10)).toBe(0);
+    expect(
+      placeObstacles({ from: 0, to: 2_000 }, 3, 'normal', true, still).filter(
+        (obstacle) => obstacle.kind === 'parked-car',
+      ),
+    ).toHaveLength(levelCarCount(10));
   });
 
   it('places none for a level with no static hazards, and none with the assist at none', () => {

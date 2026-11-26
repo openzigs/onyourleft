@@ -4901,6 +4901,9 @@ function GameScreen({
           structureItems: structureItemsRef.current,
           // #1541: the people the rung draws — none but on the realistic top rung.
           people: peopleRef.current,
+          // #2969: and on both verges of a built-in level's round, which maps
+          // no footway and builds no village street.
+          vergeWalkers: deliveryRef.current?.onLevel === true,
           // #2722: other cyclists on the road, on a free ride or a workout
           // only — never in a room, a lap race, a Delivery round, or beside
           // the pacer or a ghost — and, through `people`, only where the rung

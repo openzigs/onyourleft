@@ -40,7 +40,7 @@ import {
 } from '@onyourleft/map-features';
 
 import { CIRCUIT_HEIGHTS_DATASET, CIRCUIT_LICENCE } from '../../circuits/circuit-file';
-import { OBSTACLE_SPACING_METRES } from '../obstacles';
+import { LEVEL_SHORTEST_STRETCH_METRES } from '../obstacles';
 import { FEWEST_DELIVERY_HOUSES, MOST_HOUSES } from '../round';
 import { THROW_WINDOW_AFTER_METRES, THROW_WINDOW_BEFORE_METRES } from '../throw';
 
@@ -71,14 +71,16 @@ export const LEVEL_MOST_STEP_METRES = 50;
 export const LEVEL_LENGTH_TOLERANCE_METRES = 25;
 
 /**
- * The most hazards of one kind a kilometre a level may ask for: one every
- * `obstacles.ts` §`OBSTACLE_SPACING_METRES`. What a round places is
+ * The most hazards of one kind a kilometre a level may ask for: **8**, the
+ * whole stretches of `obstacles.ts` §`LEVEL_SHORTEST_STRETCH_METRES` a
+ * kilometre holds. It was 4, one every `obstacles.ts`
+ * §`OBSTACLE_SPACING_METRES` (a rider's own route's), until #2969 asked for
+ * one every 150 to 200 m on the levels. What a round places is
  * `obstacles.ts` §`levelObstacleMix`'s count, this density over the round's
- * span rounded up and held to its fewest and most, so its stretches can be a
- * little shorter than that spacing, never shorter than
+ * span rounded up and held to its fewest and most, never more than one each
  * §`LEVEL_SHORTEST_STRETCH_METRES` (review of PR #2378, round 6).
  */
-export const LEVEL_MOST_HAZARDS_PER_KILOMETRE = 1000 / OBSTACLE_SPACING_METRES;
+export const LEVEL_MOST_HAZARDS_PER_KILOMETRE = Math.floor(1000 / LEVEL_SHORTEST_STRETCH_METRES);
 
 /**
  * The most of a round's houses that may be ones that must not get a parcel

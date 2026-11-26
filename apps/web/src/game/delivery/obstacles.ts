@@ -114,9 +114,10 @@
  * hands {@link placeObstacles} its {@link ObstacleMix}: how many obstacles a
  * kilometre, from its `round.hazardsPerKilometre.static`, and what share of
  * them stand. Its standing obstacles are drawn from
- * {@link LEVEL_STANDING_KINDS}, a parked car or a bin. Since the owner's
+ * {@link LEVEL_STANDING_KINDS}, a parked car or a bin, three in four of them
+ * cars since #2969 ({@link LEVEL_PARKED_CAR_SHARE}). Since the owner's
  * ruling of 2026-11-08 a level round's count is held to a range
- * ({@link levelObstacleMix}: level 1 always 2 or 3), and its span is cut into
+ * ({@link levelObstacleMix}; since #2969 level 1 is 2 to 11), and its span is cut into
  * that many equal stretches, none shorter than
  * {@link LEVEL_SHORTEST_STRETCH_METRES}. The one-in-each-stretch rule is
  * unchanged, so no distance has more than one lane blocked, a car's whole length
@@ -352,6 +353,16 @@ export function parkedCarStands(side: 'left' | 'right'): number {
 
 /** The kinds a level's round stands in a lane (#2362, ADR 0065 D-10.1), in the order placement draws from. */
 export const LEVEL_STANDING_KINDS: readonly ObstacleKind[] = Object.freeze(['parked-car', 'bin']);
+
+/**
+ * The share of a level round's standing obstacles that are parked cars, the
+ * rest bins — #2969, the owner's tablet ride of 2026-11-20 (*"not seeing
+ * cars"*): **three in four**, rounded up, so a round with any standing
+ * obstacle has at least one car. It was a seeded coin before, so a round could
+ * stand nothing but bins. Which of them are cars is seeded. This project's own
+ * number, for the owner's approval in #2969's pull request.
+ */
+export const LEVEL_PARKED_CAR_SHARE = 0.75;
 
 /**
  * One obstacle on the round, in memory for the ride only: one that crosses
@@ -824,10 +835,9 @@ export interface ObstacleMix {
  * A level round's mix (#2362): its static and moving hazards a kilometre
  * together, every static one standing, held to between
  * {@link LEVEL_FEWEST_OBSTACLES} and the density over the whole level's
- * length, rounded up, and never fewer than the fewest: Morning Round's 1 a
- * kilometre on 2.1 km is 2 to 3, Busy Round's 2 on 3.0 km is 2 to 6. Since
- * #2364 its moving hazards are their share of that count; a level with none
- * places exactly what it placed before.
+ * length, rounded up: since #2969 Morning Round's 5 a kilometre on 2.1 km is
+ * 2 to 11, and a round places its density over its own span, one every 200 m
+ * of it. Since #2364 its moving hazards are their share of that count.
  */
 export function levelObstacleMix(
   round: Pick<LevelRound, 'hazardsPerKilometre'>,
@@ -835,14 +845,50 @@ export function levelObstacleMix(
 ): ObstacleMix {
   const { static: standing, moving } = round.hazardsPerKilometre;
   const perKilometre = standing + moving;
+  const most = Math.max(LEVEL_FEWEST_OBSTACLES, Math.ceil((lengthMetres / 1000) * perKilometre));
   return {
     perKilometre,
     standingShare: 1,
     fewest: LEVEL_FEWEST_OBSTACLES,
-    most: Math.max(LEVEL_FEWEST_OBSTACLES, Math.ceil((lengthMetres / 1000) * perKilometre)),
-    // #2364: each slot is a moving hazard at the level's share of moving ones.
+    most,
+    // #2364: that share of the round's slots are moving hazards.
     movingShare: perKilometre > 0 ? moving / perKilometre : 0,
   };
+}
+
+/**
+ * How many of a level round's `count` slots are moving hazards — #2969: its
+ * share of them, rounded to the nearest, so a round of a given count always
+ * has the same number. It was a seeded coin a slot before, so a round could
+ * draw all of them moving and stand no car at all.
+ */
+export function levelMovingCount(mix: ObstacleMix, count: number): number {
+  return Math.round(count * (mix.movingShare ?? 0));
+}
+
+/**
+ * How many of a level round's `standing` obstacles are parked cars — #2969:
+ * {@link LEVEL_PARKED_CAR_SHARE} of them, rounded up.
+ */
+export function levelCarCount(standing: number): number {
+  return Math.ceil(standing * LEVEL_PARKED_CAR_SHARE);
+}
+
+/**
+ * The `chosen` of `count` slots drawn lowest on draw `draw` of each slot's
+ * hash: a seeded choice of exactly that many. Ties, which a 32-bit draw all
+ * but never makes, go to the earlier slot.
+ */
+function seededChoice(
+  base: number,
+  slots: readonly number[],
+  chosen: number,
+  draw: number,
+): ReadonlySet<number> {
+  const ranked = [...slots].sort(
+    (a, b) => uniformFrom(mixInto(base, a), draw) - uniformFrom(mixInto(base, b), draw) || a - b,
+  );
+  return new Set(ranked.slice(0, chosen));
 }
 
 export interface ObstaclePlacementInput {
@@ -901,12 +947,25 @@ export function placeObstacles(
   const standingShare = mix === undefined ? STANDING_OBSTACLE_SHARE : mix.standingShare;
   // Its own stream of the round's seed, so obstacles do not follow the target pick.
   const base = mixInto(fmix32(seed), OBSTACLE_STREAM);
+  const slots = Array.from({ length: count }, (_, slot) => slot);
+  // #2364, #2969: a level's moving hazards, exactly their share of the slots,
+  // which ones from a draw nothing else reads; then three in four of the
+  // standing rest parked cars, which ones from the kind's own draw.
+  const moving =
+    steering && mix !== undefined
+      ? seededChoice(base, slots, levelMovingCount(mix, count), 7)
+      : new Set<number>();
+  const standing = slots.filter(
+    (slot) => steering && !moving.has(slot) && uniformFrom(mixInto(base, slot), 4) < standingShare,
+  );
+  const cars =
+    mix === undefined
+      ? new Set<number>()
+      : seededChoice(base, standing, levelCarCount(standing.length), 6);
   const obstacles: Obstacle[] = [];
-  for (let slot = 0; slot < count; slot += 1) {
+  for (const slot of slots) {
     const hash = mixInto(base, slot);
-    // #2364: a level's moving hazard, from draws nothing else reads, so a
-    // level with none places exactly what it placed before.
-    if (steering && mix !== undefined && uniformFrom(hash, 7) < (mix.movingShare ?? 0)) {
+    if (moving.has(slot)) {
       obstacles.push(movingHazard(hash, from + slot * spacing, spacing));
       continue;
     }
@@ -919,12 +978,9 @@ export function placeObstacles(
       OBSTACLE_SIGHT_METRES +
       uniformFrom(hash, 0) * (spacing - OBSTACLE_SIGHT_METRES);
     if (steering && uniformFrom(hash, 4) < standingShare) {
+      // #2969: a level's are its seeded cars, and bins the rest.
       const stands =
-        mix === undefined
-          ? kind
-          : (LEVEL_STANDING_KINDS[
-              Math.floor(uniformFrom(hash, 6) * LEVEL_STANDING_KINDS.length)
-            ] as ObstacleKind);
+        mix === undefined ? kind : (LEVEL_STANDING_KINDS[cars.has(slot) ? 0 : 1] as ObstacleKind);
       // A parked car stands at the kerb: in the first lane or the last, never
       // the middle, and at its kerb side rather than on its middle.
       if (stands === 'parked-car') {

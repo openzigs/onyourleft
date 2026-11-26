@@ -327,9 +327,10 @@ describe('parseLevelFile — #2361', () => {
         'round.throwWindow.afterMetres must be between 0 and 1',
       ],
       [
-        'more hazards than one every 250 m',
-        (raw: Raw): unknown => ((raw.round.hazardsPerKilometre as Raw).moving = 5),
-        'round.hazardsPerKilometre.moving must be between 0 and 4',
+        // #2969: one each shortest stretch, 120 m, eight whole ones a kilometre.
+        'more hazards than one every 120 m',
+        (raw: Raw): unknown => ((raw.round.hazardsPerKilometre as Raw).moving = 9),
+        'round.hazardsPerKilometre.moving must be between 0 and 8',
       ],
       [
         'a hazard kind the roster does not have',

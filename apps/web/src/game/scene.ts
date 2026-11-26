@@ -184,6 +184,7 @@ import {
   groundOf,
   peopleAt,
   streetWalks,
+  vergeWalks,
   type PeopleInView,
   type Person,
   type WalkKind,
@@ -548,6 +549,14 @@ export interface SceneInput {
    * carriageway. Optional the safe way round, for {@link centreline}'s reason.
    */
   readonly peopleOnTheRoad?: boolean | undefined;
+  /**
+   * Whether people walk both verges of the road as well — #2969
+   * (`people.ts` §`vergeWalks`): `GameView` says so on a built-in level's
+   * Delivery round, whose corridor maps no footway and builds no village
+   * street, so nobody walked it. Absent, or `false`, walks only the streets
+   * and the mapped footways, as before. Scenery only.
+   */
+  readonly vergeWalkers?: boolean | undefined;
   /**
    * Whether this ride may put other cyclists on the road — #2722
    * (`scenery-cyclists.ts`): `GameView` says so on a free ride or a workout,
@@ -1179,6 +1188,8 @@ function people(
       ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
     );
   }
+  // #2969: and both verges, on a level's round, which has neither.
+  if (input.vergeWalkers === true) lines.push(...vergeWalks(profile, origin, road, rule));
   const placed = peopleAt(lines, {
     x: camera.x,
     z: camera.z,
