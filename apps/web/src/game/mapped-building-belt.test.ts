@@ -90,9 +90,11 @@ import {
   refillMappedBuildings,
   ROOF_SNOW,
   setMappedBuildingsMerged,
+  WINDOW_GLOW_LINE,
   WorldLamps,
 } from './three-renderer';
 import { WREATH_BERRY, WREATH_GREEN } from './decorations';
+import { DUSK_LIT_ROOM_SHARE } from './weather-look';
 import { glslFunction } from './glsl-testing';
 
 /** A texture three would have loaded: the fields a material and a release read. */
@@ -234,6 +236,45 @@ describe('the mapped buildings’ materials — #1549', () => {
     expect(shader.fragmentShader).toContain(
       'diffuseColor.rgb = vColor.rgb * mix(oylRailingGap, 1.0, oylOn);',
     );
+  });
+
+  it('adds a lit room’s window glow after the normals, reading the one uniform the view sets at dusk — #2968', () => {
+    const belt = aBelt();
+    const material = belt.materialOf('brick');
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material?.onBeforeCompile(shader as never, undefined as never);
+    const fragment = shader.fragmentShader;
+    expect(fragment).toContain('uniform vec3 oylWindowGlow;');
+    expect(fragment).toContain('float oylGlow = 0.0;');
+    // Both of a wall's windows, the sash and the casement, a room lit at dusk only.
+    const set = 'oylGlow = oylDuskLit * (oylGlass + oylFade * oylArea);';
+    expect(fragment.split(set)).toHaveLength(3);
+    expect(fragment).toContain(
+      `float oylDuskLit = step(${String(1 - DUSK_LIT_ROOM_SHARE)}, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));`,
+    );
+    expect(fragment.indexOf('float oylDuskLit')).toBeLessThan(fragment.indexOf(set));
+    // Added to the light after the facade and the normals, once.
+    expect(fragment.split(WINDOW_GLOW_LINE)).toHaveLength(2);
+    expect(fragment.indexOf(WINDOW_GLOW_LINE)).toBeGreaterThan(
+      fragment.indexOf('#include <normal_fragment_maps>'),
+    );
+    // One uniform for every facade, the one the view writes: a second material reads the same object.
+    const other = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    belt.materialOf('render')?.onBeforeCompile(other as never, undefined as never);
+    expect(other.uniforms['oylWindowGlow']).toBeDefined();
+    expect(other.uniforms['oylWindowGlow']).toBe(shader.uniforms['oylWindowGlow']);
   });
 
   it('reads the sun’s direction from the lamps that light the scene — #1588', () => {

@@ -467,7 +467,7 @@ describe('the photographed sky at a Delivery level’s dusk — #2508', () => {
   const CLOUD = [7.6, 7.8, 8.2] as const;
 
   it('pins the dusk’s exposure, its rain sky and its grade, for the owner’s approval', () => {
-    expect(REALISTIC_DUSK_EXPOSURE_SHARE).toBe(0.7);
+    expect(REALISTIC_DUSK_EXPOSURE_SHARE).toBe(0.85);
     expect(REALISTIC_RAIN_SKY_SHARE).toBe(0.7);
     expect(DUSK_SKY_HORIZON).toEqual([2.6, 1.15, 0.62]);
     expect(RAIN_SKY_GREYING).toBe(0.8);

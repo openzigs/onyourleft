@@ -23,6 +23,9 @@ import {
   DUSK_SUN_ELEVATION_DEGREES,
   RAIN_AMBIENT_SHARE,
   RAIN_DIRECT_SHARE,
+  DUSK_LIT_ROOM_SHARE,
+  DUSK_WINDOW_GLOW,
+  RAIN_DUSK_FOG_SHARE,
   RAIN_FOG_SHARE,
   RAIN_GREY_SHARE,
   RAIN_ROAD_TINT,
@@ -33,8 +36,13 @@ import {
   sunColourIn,
   weatheredWorld,
   WeatherShading,
+  windowGlowIn,
 } from './weather-look';
-import type { WorldStyle } from './world';
+import { LOW_LIGHT_REVEAL_METRES } from './delivery/in-view';
+import { litAtDuskAt, litRoomAt } from './facade';
+import { REALISTIC_DUSK_EXPOSURE_SHARE, REALISTIC_VALLEY_HAZE } from './realistic-light';
+import { VIEW_AHEAD_METRES } from './terrain';
+import { FOG_OCCLUSION_AT_VIEW_END, type WorldStyle } from './world';
 
 /** A clear day's world: a blue sky over a pale horizon, the sun 40° up in the south-west. */
 const DAY: WorldStyle = {
@@ -71,15 +79,18 @@ describe('a Delivery level’s dusk and rain, as the world a frame is drawn in �
     expect(DUSK_SUN_COLOUR).toBe(0xffa060);
     expect(DAY_SUN_COLOUR).toBe(0xffffff);
     expect(DUSK_SUN_ELEVATION_DEGREES).toBe(8);
-    expect(DUSK_DIRECT_SHARE).toBe(0.55);
-    expect(DUSK_AMBIENT_SHARE).toBe(0.45);
-    expect(DUSK_GROUND_TINT).toEqual([0.62, 0.52, 0.44]);
+    expect(DUSK_DIRECT_SHARE).toBe(0.65);
+    expect(DUSK_AMBIENT_SHARE).toBe(0.6);
+    expect(DUSK_GROUND_TINT).toEqual([0.74, 0.63, 0.54]);
     expect(RAIN_FOG_SHARE).toBe(1.8);
+    // #2968: the rain's haze at dusk, and the lit rooms' glow.
+    expect(RAIN_DUSK_FOG_SHARE).toBe(1.2);
+    expect(DUSK_WINDOW_GLOW).toEqual([0.95, 0.62, 0.28]);
     expect(RAIN_SKY_GREY).toBe(0x6b737c);
     expect(RAIN_GREY_SHARE).toBe(0.55);
     expect(RAIN_DIRECT_SHARE).toBe(0.5);
     expect(RAIN_AMBIENT_SHARE).toBe(0.8);
-    expect(DUSK_ROAD_TINT).toEqual([0.36, 0.32, 0.28]);
+    expect(DUSK_ROAD_TINT).toEqual([0.46, 0.41, 0.36]);
     expect(RAIN_ROAD_TINT).toEqual([0.7, 0.7, 0.72]);
   });
 
@@ -160,7 +171,11 @@ describe('a Delivery level’s dusk and rain, as the world a frame is drawn in �
   it('draws rain at dusk as the dusk, then the rain', () => {
     const both = weatheredWorld(DAY, { rain: true, dusk: true });
     const dusk = weatheredWorld(DAY, { rain: false, dusk: true });
-    expect(both).toEqual(weatheredWorld(dusk, { rain: true, dusk: false }));
+    // #2968: but for the haze, which the rain thickens less at dusk.
+    expect(both).toEqual({
+      ...weatheredWorld(dusk, { rain: true, dusk: false }),
+      fogDensity: dusk.fogDensity * RAIN_DUSK_FOG_SHARE,
+    });
     expect(both.sun.direct).toBeCloseTo(DAY.sun.direct * DUSK_DIRECT_SHARE * RAIN_DIRECT_SHARE, 12);
     expect(sunColourIn({ rain: true, dusk: true })).toBe(DUSK_SUN_COLOUR);
   });
@@ -377,5 +392,94 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
     expectAsGiven(DAY);
     expect(light.shade).toBe(shade);
     expect(light.share).toBe(share);
+  });
+});
+
+describe('the Evening Round, lighter, less hazy, its houses lit — #2968', () => {
+  /**
+   * A route's haze at sea level, its densest (`world.ts` §`SEA_LEVEL_FOG_DENSITY`,
+   * restated from its two inputs), in the realistic world's valley, where it is
+   * thickest (`realistic-light.ts` §`REALISTIC_VALLEY_HAZE`).
+   */
+  const SEA_LEVEL = Math.sqrt(-Math.log(1 - FOG_OCCLUSION_AT_VIEW_END)) / VIEW_AHEAD_METRES;
+  const ROUTE: WorldStyle = { ...DAY, fogDensity: SEA_LEVEL };
+  /** How much of a house `metres` off the haze takes (three's `FogExp2`), in the valley. */
+  const hazeAt = (world: WorldStyle, metres: number): number =>
+    1 - Math.exp(-((world.fogDensity * REALISTIC_VALLEY_HAZE * metres) ** 2));
+
+  it('lets a house at the marker distance through the haze in rain at dusk: at most 7 %, half what it was', () => {
+    const now = hazeAt(weatheredWorld(ROUTE, { rain: true, dusk: true }), LOW_LIGHT_REVEAL_METRES);
+    // Before #2968 the rain's haze at dusk was its daytime 1.8 times.
+    const before =
+      1 - Math.exp(-((SEA_LEVEL * 1.8 * REALISTIC_VALLEY_HAZE * LOW_LIGHT_REVEAL_METRES) ** 2));
+    expect(now).toBeLessThan(0.07);
+    expect(now).toBeLessThan(before / 2);
+    // And the distance thins: at 150 m it takes under two thirds of a house, where it took nearly all.
+    expect(hazeAt(weatheredWorld(ROUTE, { rain: true, dusk: true }), 150)).toBeLessThan(0.65);
+    expect(1 - Math.exp(-((SEA_LEVEL * 1.8 * REALISTIC_VALLEY_HAZE * 150) ** 2))).toBeGreaterThan(
+      0.85,
+    );
+    // Rainy Round, rain by day, keeps its haze: the owner's complaint was the two stacked.
+    expect(weatheredWorld(ROUTE, { rain: true, dusk: false }).fogDensity).toBeCloseTo(
+      SEA_LEVEL * RAIN_FOG_SHARE,
+      12,
+    );
+  });
+
+  it('lights a house at dusk with over twice the share of its daylight it had', () => {
+    /** A house's light at dusk, as a share of its daylight: the exposure, the weather's shade and the sun. */
+    const houseLight = (exposure: number, world: WorldStyle): number => {
+      const shade = sceneryShadeIn(DAY, { rain: false, dusk: true });
+      const luminance = 0.2126 * shade[0] + 0.7152 * shade[1] + 0.0722 * shade[2];
+      const sun = (world.sun.ambient + world.sun.direct) / (DAY.sun.ambient + DAY.sun.direct);
+      return exposure * luminance * sun;
+    };
+    const now = houseLight(
+      REALISTIC_DUSK_EXPOSURE_SHARE,
+      weatheredWorld(DAY, { rain: false, dusk: true }),
+    );
+    expect(now).toBeGreaterThan(0.15);
+    // Still evening: well under half its daylight.
+    expect(now).toBeLessThan(0.5);
+    // Before #2968: an exposure of 0.7, the sun's and the sky's 0.55 and 0.45,
+    // and the ground's [0.62, 0.52, 0.44] in sRGB, about 0.25 of its light.
+    const beforeSun =
+      (DAY.sun.ambient * 0.45 + DAY.sun.direct * 0.55) / (DAY.sun.ambient + DAY.sun.direct);
+    const linear = (share: number): number => share ** 2.2;
+    const beforeShade = 0.2126 * linear(0.62) + 0.7152 * linear(0.52) + 0.0722 * linear(0.44);
+    expect(now).toBeGreaterThan(2 * 0.7 * beforeShade * beforeSun);
+  });
+
+  it('lights 45 % of windows at dusk on the day’s own hash, every room lit by day among them', () => {
+    expect(DUSK_LIT_ROOM_SHARE).toBe(0.45);
+    let lit = 0;
+    let both = 0;
+    let day = 0;
+    const tint: [number, number, number] = [0.31, 0.72, 0.5];
+    for (let x = 0; x < 60; x += 1) {
+      for (let y = 0; y < 50; y += 1) {
+        const dusk = litAtDuskAt([x, y], tint, DUSK_LIT_ROOM_SHARE);
+        const byDay = litRoomAt([x, y], tint);
+        if (dusk) lit += 1;
+        if (byDay) day += 1;
+        if (dusk && byDay) both += 1;
+      }
+    }
+    expect(lit / 3000).toBeGreaterThan(0.4);
+    expect(lit / 3000).toBeLessThan(0.5);
+    // A room lit by day stays lit.
+    expect(both).toBe(day);
+  });
+
+  it('glows a lit room’s window at dusk, warm, and never by day or in rain alone', () => {
+    expect(windowGlowIn({ rain: false, dusk: true })).toEqual(DUSK_WINDOW_GLOW);
+    expect(windowGlowIn({ rain: true, dusk: true })).toEqual(DUSK_WINDOW_GLOW);
+    expect(windowGlowIn({ rain: true, dusk: false })).toEqual([0, 0, 0]);
+    expect(windowGlowIn({ rain: false, dusk: false })).toEqual([0, 0, 0]);
+    expect(windowGlowIn()).toEqual([0, 0, 0]);
+    // Warm: red over green over blue.
+    const [r, g, b] = DUSK_WINDOW_GLOW;
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThan(b);
   });
 });
