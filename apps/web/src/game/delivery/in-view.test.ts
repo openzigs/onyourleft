@@ -21,6 +21,7 @@ import {
   type DeliveryDrawInput,
 } from './in-view';
 import {
+  drawnObstacleAcross,
   obstacleAcross,
   obstacleAlong,
   startObstacles,
@@ -441,6 +442,44 @@ describe('a Delivery frame’s pieces — #1814', () => {
     expect(drawn[2]?.yaw).toBeCloseTo(0, 6);
     expect(drawn[2]?.z).toBeCloseTo(RIDER + 70, 6);
     expect(drawn[2]?.x).toBeCloseTo(2.4, 6);
+  });
+
+  it('draws an oncoming rider steering round a rider a crash holds, and in its lane with nobody held — #3077', () => {
+    const oncoming: Obstacle = {
+      kind: 'oncoming-rider',
+      along: RIDER + 80,
+      from: 'right',
+      startAfter: 0,
+      to: 1.75,
+      rides: -5,
+    };
+    let state = startObstacles([oncoming]);
+    for (let tick = 0; tick < 80; tick += 1) {
+      state = stepObstacles(state, {
+        rider: { along: RIDER, lateral: 0, speed: 0 },
+        obstacles: [oncoming],
+      }).state;
+    }
+    const seconds = (state.tick - (state.startedAt[0] ?? 0)) * DELIVERY_TICK_SECONDS;
+    // Held where the oncoming rider has ridden to, in its lane, fallen to the right.
+    const held = {
+      along: obstacleAlong(oncoming, seconds),
+      lateral: 1.75,
+      fallenTo: 1,
+      seconds: 1,
+    } as const;
+    const [steered] = deliveryInView(
+      input({ obstacles: [oncoming], obstacleState: state, held }),
+    ).obstacles;
+    const [inLane] = deliveryInView(
+      input({ obstacles: [oncoming], obstacleState: state }),
+    ).obstacles;
+    // Due north, so a metre right of the centre line is a metre west (−x).
+    expect(inLane?.x).toBeCloseTo(-1.75, 6);
+    expect(steered?.x).toBeCloseTo(-drawnObstacleAcross(oncoming, seconds, held), 6);
+    // Passed on the road's middle side, a whole body and the gap clear of them.
+    expect(-(steered?.x ?? 0)).toBeLessThan(1.75 - 0.9);
+    expect(steered?.z).toBeCloseTo(inLane?.z ?? Number.NaN, 9);
   });
 
   it('places on a bend by distance along the corridor, across its own normal, at the road’s height', () => {

@@ -33,6 +33,7 @@ import {
   carPullingOut,
   clearOfParkedCars,
   CRASH_SCORE_DELTA,
+  drawnObstacleAcross,
   FEWER_OBSTACLES_KEEP_ONE_IN,
   levelObstacleMix,
   MOVING_HAZARD_KINDS,
@@ -42,6 +43,10 @@ import {
   obstacleAcross,
   obstacleAlong,
   obstacleFootprint,
+  ONCOMING_PASSING_GAP_METRES,
+  ONCOMING_RIDER_METRES_PER_SECOND,
+  ONCOMING_SWERVE_METRES,
+  ONCOMING_SWERVE_SECONDS,
   PARKED_CAR_CLEARANCE_METRES,
   parkedCarStands,
   placeObstacles,
@@ -825,3 +830,96 @@ function outlinesMeet(a: readonly Point[], b: readonly Point[]): boolean {
     });
   });
 }
+
+describe('an oncoming rider steers round a rider a crash holds — #3077, ADR 0094 D-3.3', () => {
+  const KERB_LANE = LANE_OFFSETS_METRES.at(-1) as number;
+  /** Another rider out from the right kerb into its lane at 100 m, riding toward the rider. */
+  const ONCOMING: LaneObstacle = {
+    kind: 'oncoming-rider',
+    along: 100,
+    from: 'right',
+    startAfter: 0,
+    to: KERB_LANE,
+    rides: -ONCOMING_RIDER_METRES_PER_SECOND,
+  };
+  /** Lying at 80 m in the same kerb lane, fallen to its edge of the road: the right. */
+  const HELD = { along: 80, lateral: KERB_LANE, fallenTo: 1, seconds: 1 } as const;
+  const { halfLength, halfWidth } = OBSTACLE_KINDS['oncoming-rider'];
+  /** Every tick from set going until it is well past the held rider. */
+  const TICKS = Array.from({ length: 160 }, (_, tick) => tick * DELIVERY_TICK_SECONDS);
+  /** The two are level along the road at `seconds`: their lengths overlap. */
+  const level = (seconds: number): boolean => {
+    const along = obstacleAlong(ONCOMING, seconds);
+    return (
+      along - halfLength < HELD.along + RIDER_AHEAD_METRES &&
+      along + halfLength > HELD.along - RIDER_BEHIND_METRES
+    );
+  };
+
+  it('is never drawn through them: level with them it is the gap clear, on the road’s middle side', () => {
+    const clear = RIDER_HALF_WIDTH_METRES + halfWidth + ONCOMING_PASSING_GAP_METRES;
+    const levelTicks = TICKS.filter(level);
+    // Non-vacuity: it rides through where they lie, and would be drawn through them.
+    expect(levelTicks.length).toBeGreaterThan(5);
+    for (const seconds of levelTicks) {
+      expect(obstacleAcross(ONCOMING, seconds)).toBeCloseTo(HELD.lateral, 9);
+      const drawn = drawnObstacleAcross(ONCOMING, seconds, HELD);
+      // Fallen to the right, passed on the left.
+      expect(HELD.lateral - drawn).toBeCloseTo(clear, 9);
+    }
+    // Fallen to the left, passed on the right.
+    const leftFall = { ...HELD, fallenTo: -1 } as const;
+    for (const seconds of levelTicks) {
+      expect(drawnObstacleAcross(ONCOMING, seconds, leftFall) - HELD.lateral).toBeCloseTo(clear, 9);
+    }
+  });
+
+  it('eases out before it reaches them and back after, never a jump, and is where it rides beyond that', () => {
+    let before = drawnObstacleAcross(ONCOMING, 0, HELD);
+    let moved = 0;
+    for (const seconds of TICKS) {
+      const drawn = drawnObstacleAcross(ONCOMING, seconds, HELD);
+      // No more than a third of a metre sideways a tick: drawn steering, not a cut.
+      expect(Math.abs(drawn - before)).toBeLessThan(0.35);
+      before = drawn;
+      const along = obstacleAlong(ONCOMING, seconds);
+      const apart = Math.max(
+        HELD.along - RIDER_BEHIND_METRES - (along + halfLength),
+        along - halfLength - (HELD.along + RIDER_AHEAD_METRES),
+      );
+      if (apart >= ONCOMING_SWERVE_METRES) {
+        expect(drawn).toBe(obstacleAcross(ONCOMING, seconds));
+      } else if (drawn !== obstacleAcross(ONCOMING, seconds)) {
+        moved += 1;
+      }
+    }
+    // It swerved, over more ticks than it was level for.
+    expect(moved).toBeGreaterThan(TICKS.filter(level).length);
+  });
+
+  it('eases out over ONCOMING_SWERVE_SECONDS from the crash when it is level with them as it starts', () => {
+    const seconds = TICKS.find(level) as number;
+    const at = (crashSeconds: number): number =>
+      drawnObstacleAcross(ONCOMING, seconds, { ...HELD, seconds: crashSeconds });
+    expect(at(0)).toBeCloseTo(obstacleAcross(ONCOMING, seconds), 9);
+    expect(at(ONCOMING_SWERVE_SECONDS / 2)).toBeLessThan(obstacleAcross(ONCOMING, seconds) - 0.1);
+    expect(at(ONCOMING_SWERVE_SECONDS / 2)).toBeGreaterThan(at(ONCOMING_SWERVE_SECONDS) + 0.1);
+    expect(at(ONCOMING_SWERVE_SECONDS)).toBeCloseTo(at(1), 9);
+  });
+
+  it('moves nothing with nobody held, nothing but an oncoming rider, and one already clear of them', () => {
+    for (const seconds of TICKS) {
+      expect(drawnObstacleAcross(ONCOMING, seconds, undefined)).toBe(
+        obstacleAcross(ONCOMING, seconds),
+      );
+      // Held in the other kerb lane: the oncoming rider is clear already.
+      const far = { ...HELD, lateral: -KERB_LANE, fallenTo: -1 } as const;
+      expect(drawnObstacleAcross(ONCOMING, seconds, far)).toBe(obstacleAcross(ONCOMING, seconds));
+    }
+    // A dog crossing where the rider lies is drawn where it runs (#3077 leaves it).
+    const dog: Obstacle = { kind: 'dog', along: HELD.along, from: 'left', startAfter: 0 };
+    for (const seconds of TICKS) {
+      expect(drawnObstacleAcross(dog, seconds, HELD)).toBe(obstacleAcross(dog, seconds));
+    }
+  });
+});

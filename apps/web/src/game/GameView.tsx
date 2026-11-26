@@ -5039,6 +5039,17 @@ function GameScreen({
                   sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
                   // A car's indicator is lit steadily, not flashing, under reduced motion.
                   steadyIndicators: reducedMotionRef.current,
+                  // #3077, ADR 0094 D-3.3: while a crash draws the rider down,
+                  // where they lie, for an oncoming rider to steer round them.
+                  held:
+                    crashRef.current === undefined || crashShownRef.current === undefined
+                      ? undefined
+                      : {
+                          along: roundDrawnDistance,
+                          lateral: round.steer.offset,
+                          fallenTo: crashRef.current.side,
+                          seconds: (crashClockRef.current - crashRef.current.atMs) / 1000,
+                        },
                 }),
               };
         // #1902, #1906: a lap race's pick-ups and puddles, on the frame's own corridor.
