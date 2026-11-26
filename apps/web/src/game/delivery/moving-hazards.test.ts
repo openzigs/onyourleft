@@ -874,6 +874,18 @@ describe('an oncoming rider steers round a rider a crash holds — #3077, ADR 00
     }
   });
 
+  it('moves nothing for an oncoming rider already clear on the side they fell to (a centre-lane fall, a kerb-lane rider)', () => {
+    // Fell right from the centre lane; the rider is in the right kerb lane, 1.75 m off.
+    const centre = { along: 80, lateral: 0, fallenTo: 1, seconds: 1 } as const;
+    const levelTicks = TICKS.filter(level);
+    expect(levelTicks.length).toBeGreaterThan(5);
+    for (const seconds of TICKS) {
+      expect(drawnObstacleAcross(ONCOMING, seconds, centre)).toBe(
+        obstacleAcross(ONCOMING, seconds),
+      );
+    }
+  });
+
   it('eases out before it reaches them and back after, never a jump, and is where it rides beyond that', () => {
     let before = drawnObstacleAcross(ONCOMING, 0, HELD);
     let moved = 0;

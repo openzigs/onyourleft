@@ -176,6 +176,7 @@
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
 import type { ObstacleSetting } from './assist-preference';
+import { CRASH_LEAN_RADIANS } from './crash-look';
 import type { LevelRound } from './levels/level-file';
 import { LANE_OFFSETS_METRES } from './steer';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
@@ -1182,6 +1183,13 @@ export const ONCOMING_PASSING_GAP_METRES = 0.5;
 export const ONCOMING_SWERVE_METRES = 4;
 
 /**
+ * How tall the bicycle that falls is, metres — #3077: **1**, so lying at
+ * `CRASH_LEAN_RADIANS` it covers this times the lean's sine to the side they
+ * fell to. This project's own number, a drawing only.
+ */
+export const ONCOMING_FALLEN_BICYCLE_METRES = 1;
+
+/**
  * How long an oncoming rider already level with the rider when the crash
  * starts takes to steer clear, seconds — #3077: **0.25**. The rider it crashed
  * into is level with them by the very contact, so its swerve is eased in over
@@ -1225,8 +1233,14 @@ export function drawnObstacleAcross(
   const passes = -held.fallenTo;
   const clear =
     held.lateral + passes * (RIDER_HALF_WIDTH_METRES + halfWidth + ONCOMING_PASSING_GAP_METRES);
-  // Already clear on that side: it rides on where it is.
+  // Already clear on the passing side: it rides on where it is.
   if ((across - clear) * passes >= 0) return across;
+  // Or already clear on the side they fell to, past what the fallen bicycle
+  // covers: it was never going through them, so it is not pulled across.
+  const fallenClear =
+    held.lateral +
+    held.fallenTo * (ONCOMING_FALLEN_BICYCLE_METRES * Math.sin(CRASH_LEAN_RADIANS) + halfWidth);
+  if ((across - fallenClear) * held.fallenTo >= 0) return across;
   // Eased in by distance as it comes up to them and by time from the crash.
   const share =
     (1 - apart / ONCOMING_SWERVE_METRES) *
