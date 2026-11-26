@@ -4624,6 +4624,8 @@ function GameScreen({
           along: simulation.state.ride.distance,
           speed: simulation.state.ride.speed,
           throwTo: throwAskedRef.current,
+          // #3076: the stop is spent on the clock the crash is drawn on.
+          clockMs: crashClock,
         });
         throwAskedRef.current = undefined;
         deliveryRef.current = stepped.ride;

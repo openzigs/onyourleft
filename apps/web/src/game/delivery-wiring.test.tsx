@@ -535,6 +535,8 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
         along: frame.along,
         speed: frame.speed,
         throwTo: asked,
+        // #3076: the crash clock, as `GameView` hands it: every frame's wall clock.
+        clockMs: (index + 1) * FRAME_MS,
       });
       asked = undefined;
       ride = stepped.ride;
@@ -547,7 +549,7 @@ function scriptFor(seed: number, shadow: readonly ShadowFrame[]): Script | undef
     // #3021, ADR 0094: aimed from where the round DRAWS the rider, which a
     // crash holds back and pays out, and never while they are down, when a
     // throw is refused.
-    if (ride.stopTicks > 0) return;
+    if (ride.stopSeconds > 0) return;
     const paying = ride.crashOffset < 0;
     const here = ride.along;
     const ahead = (shadow[index + 1]?.along ?? Infinity) - frame.along;
@@ -1067,38 +1069,75 @@ describe('a crash drawn inside a game ride — #2454', () => {
     for (const sight of sights) expect(sight.detail === 'Crashed').toBe(sight.lean > 74.9);
   });
 
-  it('keeps a rider who paused while down still down on resume, and gets them back up after', async () => {
+  /** A scripted ride paused for `pauseMs` on the first frame drawn down, and resumed. */
+  async function pausedWhileDown(pauseMs: number): Promise<{
+    readonly sights: readonly Sight[];
+    /** #3076: where each sight drew the rider along the road, by the sight's index. */
+    readonly alongs: readonly (number | undefined)[];
+    /** The index of the first sight after the pause. */
+    readonly resumedAt: number;
+    /** How many sights after the pause still said "Crashed". */
+    readonly up: number;
+  }> {
     const drawn: SceneFrame[] = [];
     const sights: Sight[] = [];
+    const alongs: (number | undefined)[] = [];
     let resumedAt: number | undefined;
     await rideTheTrace({
       delivery: true,
       drawn,
       onFrame: watching(drawn, sights, async () => {
+        alongs[sights.length - 1] = drawnAlongInputs.at(-1);
         const down = sights.at(-1);
         if (resumedAt !== undefined || down === undefined || down.lean < 70) return;
-        // Down: pause for longer than a whole crash, and ride on.
+        // Down: pause, and ride on.
         await clickThrough(buttonStarting('Pause'));
         // The paused loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
         pending = [];
-        nowMs += 3_000;
+        nowMs += pauseMs;
         await clickThrough(buttonStarting('Resume'));
         resumedAt = sights.length;
       }),
     });
     expect(resumedAt).toBeDefined();
+    const at = resumedAt ?? 0;
+    const up = sights.slice(at).findIndex((sight) => sight.detail !== 'Crashed');
+    return { sights, alongs, resumedAt: at, up };
+  }
+
+  it('keeps a rider who paused while down still down on resume, and gets them back up after', async () => {
+    // A pause longer than a whole crash.
+    const { sights, alongs, resumedAt, up } = await pausedWhileDown(3_000);
     const after = sights.slice(resumedAt);
     // Still down on the first frame after the pause, and "Crashed" says so…
     expect(after[0]?.lean).toBeGreaterThan(70);
     expect(after[0]?.detail).toBe('Crashed');
     // …then on the way up, still "Crashed", and back on the bike within the
     // crash's CRASH_SECONDS (1.8 s), with "Crashed" gone.
-    const up = after.findIndex((sight) => sight.detail !== 'Crashed');
     expect(up).toBeGreaterThan(1);
     expect(up).toBeLessThanOrEqual(8);
     expect(after.slice(1, up).some((sight) => sight.lean < 70)).toBe(true);
     expect(after[up]?.lean).toBeLessThan(45);
     expect(after[up]?.detail).toMatch(/^Day \d of 7$/u);
+    // #3076: held where they lay on the resume frame, whose catch-up burst
+    // went to the offset and not the stop. Here the burst takes the offset to
+    // the bound a frame later, which ends the stop there (D-3.2).
+    expect(alongs[resumedAt]).toBeCloseTo(alongs[resumedAt - 1] ?? Number.NaN, 2);
+  });
+
+  it('holds a rider who paused while down where they lay until they are back up, the resume frame’s catch-up spending none of the stop (#3076, D-3.4)', async () => {
+    // A pause whose catch-up, with the rest of the stop, keeps inside the 25 m bound.
+    const { sights, alongs, resumedAt, up } = await pausedWhileDown(1_000);
+    const heldAt = alongs[resumedAt - 1];
+    expect(heldAt).toBeDefined();
+    expect(sights[resumedAt]?.lean).toBeGreaterThan(70);
+    // Down for the rest of the crash on its own clock: more than half its 9 frames.
+    expect(up).toBeGreaterThan(4);
+    const whileDown = alongs.slice(resumedAt, resumedAt + up);
+    expect(whileDown).toHaveLength(up);
+    for (const along of whileDown) expect(along).toBeCloseTo(heldAt ?? Number.NaN, 2);
+    // Up, they ride on from there.
+    expect(alongs[resumedAt + up + 1]).toBeGreaterThan((heldAt ?? Infinity) + 1);
   });
 
   it('starts the next ride upright, with no “Crashed”, after a ride ended while down', async () => {
