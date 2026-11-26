@@ -53,7 +53,7 @@ import {
   type RiderBody,
   type UnitSystem,
 } from '@onyourleft/store';
-import type { Kilograms, UnixSeconds } from '@onyourleft/domain';
+import type { GeographicPosition, Kilograms, UnixSeconds } from '@onyourleft/domain';
 
 import { Wordmark } from '../brand/Brand';
 import { ScreenHelp, ScreenNotes } from '../design/ScreenHelp';
@@ -523,6 +523,12 @@ export interface AppShellProps {
    */
   readonly openWorld?: OpenWorldStartPort | undefined;
   /**
+   * Where the rider rides, read from this device's store (#3184,
+   * `routing/riding-place.ts`): the route planner opens a new route's map
+   * around it. `undefined` with no local store.
+   */
+  readonly ridingPlace?: (() => Promise<GeographicPosition | undefined>) | undefined;
+  /**
    * The routing engine the drawing canvas asks for roads (#70, #71).
    *
    * Since #2008, the rider's instance's Valhalla (`instance/routing-port.ts`)
@@ -798,6 +804,8 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+          // #3184: a new route opens where the rider rides, read on the device.
+          ridingPlace={props.ridingPlace}
         />
       );
     case 'open-world':
