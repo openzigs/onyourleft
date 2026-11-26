@@ -892,6 +892,10 @@ test.describe('the demo, built and served — #1648', () => {
         await expect(frame.locator('.oyl-hud__fields--secondary')).toBeHidden();
         await expect(frame.getByRole('button', { name: 'Pause' })).toBeInViewport({ ratio: 1 });
         await expect(frame.getByRole('link', { name: 'Source code' })).toBeInViewport();
+        // #3225: the video link stays on screen in every small frame, and costs no line there.
+        const video = frame.getByRole('link', { name: 'Watch the two-minute demo on YouTube' });
+        await expect(video).toBeInViewport({ ratio: 1 });
+        await expect(video).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lgpE-VbyFa0');
         await expect(frame.getByText('Demo: scripted riders, not a real ride')).toBeInViewport();
       }
 
@@ -908,7 +912,13 @@ test.describe('the demo, built and served — #1648', () => {
         ),
       );
       expect(reachable).toEqual(
-        expect.arrayContaining(['Pause', 'Stop', 'Source code', 'Third-party notices']),
+        expect.arrayContaining([
+          'Pause',
+          'Stop',
+          'Source code',
+          'Third-party notices',
+          'Watch the two-minute demo on YouTube',
+        ]),
       );
       // From the host page: the frame is all it has, so the first Tab goes into it.
       const focused: string[] = [];
@@ -944,7 +954,14 @@ test.describe('the demo, built and served — #1648', () => {
           expect(Math.min(...at.size), at.text).toBeGreaterThanOrEqual(44);
         }
       }
-      expect(focused).toEqual(expect.arrayContaining(['Pause', 'Stop', 'Source code']));
+      expect(focused).toEqual(
+        expect.arrayContaining([
+          'Pause',
+          'Stop',
+          'Source code',
+          'Watch the two-minute demo on YouTube',
+        ]),
+      );
       await frame.getByRole('button', { name: 'Pause' }).focus();
       await page.keyboard.press('Enter');
       await expect.poll(async () => (await last(frame))?.state).toBe('paused');

@@ -166,6 +166,11 @@ not crop, cover or restyle away any of these.
 - **The source offer.** The line under the stage links the source code, the licence
   (AGPL-3.0-or-later) and the third-party notices. The demo's code is conveyed to every visitor's
   browser, so AGPL-3.0 §6 applies as it does to the app (ADR 0025). Serve `licences/` with the rest.
+  The same line carries a plain link, _Watch the two-minute demo on YouTube_
+  ([#3225](https://github.com/openzigs/onyourleft/issues/3225)). It is a link and never an
+  embed: the page's policy (`default-src 'self'`) refuses a third-party frame and is unchanged. In
+  a frame under 432 px tall the link reads _Demo on YouTube_ on screen, so it costs the stage no
+  line; its name is whole for a screen reader.
 - **The label.** _Demo: scripted riders, not a real ride_, above the stage.
 - **The map credit, with `route`.** A preset ridden on a baked route shows **© OpenStreetMap
   contributors** in the HUD, and a _Map data_ disclosure beside the stage with the ODbL notice, the
