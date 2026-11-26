@@ -878,7 +878,7 @@ const KEEPS_THE_MEASURE: Partial<Record<RouteId, string>> = {
   'route-editor':
     '#2007’s editor, one column read in order — the change to a part, its map, the whole-route ' +
     'changes, the save — built beside #2067 rather than after it; whether it becomes a pair as ' +
-    'the route builder did is the owner’s to rule',
+    'the route builder did is the owner’s to rule (#2261)',
   'open-world':
     '#2889’s start picker, one column read in order — the pin and its map, a saved route, a past ' +
     'ride, then the start; whether it becomes a pair as the route builder did is the owner’s to ' +
