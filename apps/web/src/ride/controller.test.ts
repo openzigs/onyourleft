@@ -9707,6 +9707,52 @@ describe('#2080 — the HUD’s lap splits are the saved ride’s laps', () => {
     expect([fromSaved.last, fromSaved.best]).toEqual([shown.last, shown.best]);
     rig.controller.dispose();
   });
+
+  it('shows the lap in progress’s average power, which at the line is the lap’s saved figure — #2263', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    // No lap open yet: no figure, as there is no lap time.
+    await ride(rig, 2);
+    expect(hud.rideLapAveragePower?.()).toBeUndefined();
+    rig.bench.rider.set({ power: watts(300) });
+    await ride(rig, 2);
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 6);
+    // The lap's own readings only: the ride's before the line are not in it.
+    expect(hud.rideLapAveragePower?.()).toBe(watts(300));
+    expect(lapSplits([], hud.rideLapSeconds?.(), hud.rideLapAveragePower?.()).now.power).toBe(
+      '300 W',
+    );
+    // A harder second half, and the figure moves with it, second by second.
+    rig.bench.rider.set({ power: watts(200) });
+    await ride(rig, 6);
+    const live = hud.rideLapAveragePower?.();
+    expect(live).toBeGreaterThan(200);
+    expect(live).toBeLessThan(300);
+    const atTheLine = lapSplits([], hud.rideLapSeconds?.(), live).now;
+
+    const laps = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    expect(laps).toHaveLength(1);
+    // *Now* at the line is what *Last* shows once it is crossed.
+    expect(lapSplits(laps, hud.rideLapSeconds?.()).last.power).toBe(atTheLine.power);
+    // The next lap begins again from its own first reading.
+    await ride(rig, 3);
+    expect(hud.rideLapAveragePower?.()).toBe(watts(200));
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    // No lap open once the ride is over.
+    expect(hud.rideLapAveragePower?.()).toBeUndefined();
+    // Read back through the store, as the ride's page reads it (§5).
+    const saved = await harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved[0]?.averagePower).toBe(live);
+    rig.controller.dispose();
+  });
 });
 
 describe('#548 — after a ride is stopped and saved, another can be started', () => {

@@ -1179,6 +1179,35 @@ describe('the lap splits panel — #2080', () => {
     expect(button('Show standings')).toBeUndefined();
   });
 
+  it('shows the lap in progress’s average power, as the recorder hands it in — #2263', async () => {
+    mounted = await mount(
+      <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} lapPower={watts(243)} />,
+    );
+    expect(rows()[0]).toEqual(['Now', '3', '1:15', '243 W']);
+  });
+
+  it('is not drawn when the rider turned the lap splits off, and leaves no swap in a race — #2263', async () => {
+    const hidden = { hidden: ['laps' as const], textSize: 'normal' as const };
+    mounted = await mount(
+      <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} layout={hidden} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        profile={loop}
+        laps={laps}
+        lapSeconds={75}
+        standings={standings}
+        layout={hidden}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__standings')).not.toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    expect(button('Show laps')).toBeUndefined();
+  });
+
   it('is not drawn on a point-to-point route', async () => {
     const profile = route();
     mounted = await mount(

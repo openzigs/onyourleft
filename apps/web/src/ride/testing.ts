@@ -106,6 +106,7 @@ export function idleSnapshot(): RideSnapshot {
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
+    courseLapAveragePower: undefined,
     manualLap: { available: false, last: undefined },
     sampleCount: 0,
     totals: undefined,

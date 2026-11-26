@@ -210,11 +210,11 @@ for (const viewport of [
         return { text: (each.textContent ?? '').trim(), width: box.width, height: box.height };
       }),
     );
-    // Four panels, three sizes, the two arrangements (#2383), the two route
+    // Five panels (#2263: the lap splits), three sizes, the two arrangements (#2383), the two route
     // panels (#2385), the totals strip (#2387), the two ways to show power
     // (#2420), the two Delivery layouts (#2514), the climb callout (#2593)
     // and the ride controls' auto-hide (#2600).
-    expect(choices).toHaveLength(18);
+    expect(choices).toHaveLength(19);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);
@@ -226,7 +226,7 @@ for (const viewport of OVERLAY_VIEWPORTS) {
   test(`#2079 the HUD with every panel a rider may hide hidden — ${viewport.name}`, async ({
     browser,
   }) => {
-    const page = await sharedRide(browser, viewport, '?hide=readings,route,graph,standings');
+    const page = await sharedRide(browser, viewport, '?hide=readings,route,graph,standings,laps');
     for (const [how, seen] of await bothWays(page)) {
       expect(layoutFaults(seen, viewport), how).toEqual([]);
       const names = seen.items.map((each) => each.name);

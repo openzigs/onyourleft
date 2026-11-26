@@ -2153,6 +2153,11 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     await rideUntil(() => rows()[1]?.[1] === '2');
     const shown = rows();
     expect(shown[0]?.slice(0, 2)).toEqual(['Now', '3']);
+    // #2263: and the lap in progress's average power, the recorder's own over
+    // the third lap's readings — every one of them at 320 W.
+    for (let second = 0; second < 3; second += 1) await rideOneSecond();
+    expect(rows()[0]?.slice(1, 2)).toEqual(['3']);
+    expect(rows()[0]?.[3]).toBe('320 W');
 
     await endAndSaveOnTheHud(rig.controller);
     await flush();

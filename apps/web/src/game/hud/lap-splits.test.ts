@@ -3,7 +3,8 @@
 /**
  * #2080 — a loop's lap splits: the lap in progress, the last and the best,
  * from the recording's own laps and nothing else. `ride/controller.test.ts`
- * §"#2080" reads the same rows from a saved ride.
+ * §"#2080" reads the same rows from a saved ride, and §"#2263" the lap in
+ * progress's power.
  */
 
 import { metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
@@ -42,6 +43,21 @@ describe('lapSplits — #2080', () => {
       time: '1:15',
       power: '—',
     });
+  });
+
+  it('shows the lap in progress’s average power so far — #2263', () => {
+    expect(lapSplits([lap(300, 210)], 42, watts(238)).now).toEqual({
+      label: 'Now',
+      lap: '2',
+      time: '0:42',
+      power: '238 W',
+    });
+    // No reading in the lap yet: a dash, never `0 W`.
+    expect(lapSplits([lap(300, 210)], 3, undefined).now.power).toBe('—');
+    // A reading of nought watts is a reading.
+    expect(lapSplits([], 3, watts(0)).now.power).toBe('0 W');
+    // No lap open: a dash, whatever figure is handed in.
+    expect(lapSplits([lap(300, 210)], undefined, watts(238)).now.power).toBe('—');
   });
 
   it('says the last lap and the best, each with its number, time and average power', () => {

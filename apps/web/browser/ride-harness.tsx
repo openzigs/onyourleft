@@ -1216,6 +1216,8 @@ const TRAINER: GameTrainerPort = {
   // #1312. @see LAP_ENDED
   courseLine: (event) => (LAP_ENDED && event.kind === 'lap' ? HARNESS_LAPS : undefined),
   rideLapSeconds: () => (LAP === 'ended' || LAP === 'riding' ? 59 * 60 + 59 : undefined),
+  // #2263: the lap in progress's average power, as wide as the laps' own.
+  rideLapAveragePower: () => (LAP === 'ended' || LAP === 'riding' ? watts(342) : undefined),
   runningWorkout: () => GRAPH,
   // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
   workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
