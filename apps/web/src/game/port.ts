@@ -483,7 +483,7 @@ export interface SceneFrame {
    * the rider, placed on the drawn road — #679 (`gantry.ts` §`linesNear`).
    * Empty everywhere else on a route, which is what makes them cost nothing
    * there. ⚠️ Since #966 BOTH worlds draw them — the stylised world the
-   * gantries and barriers without lettering, so that the start gate can carry
+   * gantries and barriers without lettering, so that the gates can carry
    * the wordmark (`logo-board.ts`) there too — and a reviewer who remembers
    * "only the realistic world draws them" is reading the old file.
    */

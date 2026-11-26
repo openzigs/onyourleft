@@ -262,14 +262,22 @@ describe('billboards — #966', () => {
 
   it('is outside a circuit, measured from the circuit’s own middle', () => {
     // Independently of the turn's sign: a circuit's inside is toward its middle.
-    for (const profile of [circuitRoute(400), circuitRoute(400, undefined, 'right')]) {
+    // #976: 320 m circuits, a quarter clear of the 1/400 straight-road
+    // threshold. A 400 m one turns about 1/399.5 where its boards stand, so a
+    // little smoothing would hand them to the hashed side and this would pass
+    // or fail on the hash. (Not the 300 m ones: the left-hand one has no
+    // board, measured, and a circuit with none asserts nothing here.)
+    for (const profile of [circuitRoute(320), circuitRoute(320, undefined, 'right')]) {
       const road = drawnRoad(profile);
       const middleX = road.reduce((sum, [x]) => sum + x, 0) / road.length;
       const middleZ = road.reduce((sum, [, z]) => sum + z, 0) / road.length;
+      const origin = corridorOrigin(profile);
       const boards = all(profile);
       expect(boards.length).toBeGreaterThan(0);
       for (const board of boards) {
-        expect(Math.hypot(board.x - middleX, board.z - middleZ)).toBeGreaterThan(400);
+        const turn = turnAt(profile, origin, distanceOnRoute(profile, board.along)) ?? 0;
+        expect(Math.abs(turn)).toBeGreaterThan(1.2 * STRAIGHT_RADIANS_PER_METRE);
+        expect(Math.hypot(board.x - middleX, board.z - middleZ)).toBeGreaterThan(320);
       }
     }
   });
