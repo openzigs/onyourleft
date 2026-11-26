@@ -1050,6 +1050,20 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * The average power of the lap in progress, kept current — #2263, the lap
+ * splits' *Now* row. The recorder's figure, subscribed for
+ * {@link useRideLapSeconds}'s reason.
+ */
+function useRideLapAveragePower(trainer: GameTrainerPort | undefined): Watts | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideLapAveragePower?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * The rider's own threshold heart rate, read once as the game opens — #2760,
  * for the AI pacer's heart-rate zone. `undefined` while it is read and when
  * none is set: the zone is then left out. @see GamePort.ownThresholdHeartRate
@@ -1725,7 +1739,13 @@ function GameScreen({
    * during render (PR #3160's review). `undefined` on every other ride.
    */
   const [captureFigures, setCaptureFigures] = useState<
-    | { readonly seconds: number; readonly lapSeconds: number; readonly totals: RideTotals }
+    | {
+        readonly seconds: number;
+        readonly lapSeconds: number;
+        /** #2263: the lap in progress's average power. */
+        readonly lapPower: Watts | undefined;
+        readonly totals: RideTotals;
+      }
     | undefined
   >(undefined);
   /** #3153: a capture ride's frames and events, for the capture tool. @see CaptureLog */
@@ -2043,6 +2063,8 @@ function GameScreen({
   const elapsedSeconds = useRideElapsedSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
+  /** @see useRideLapAveragePower */
+  const lapPower = useRideLapAveragePower(props.trainer);
   /** @see useRideTotals */
   const rideTotals = useRideTotals(props.trainer);
   /** @see useOwnThresholdPower */
@@ -3256,6 +3278,7 @@ function GameScreen({
         setCaptureFigures({
           seconds: recording.seconds,
           lapSeconds: recording.lapSeconds,
+          lapPower: recording.lapAveragePower,
           totals: recording.totals(),
         });
         // #3153: and its log, its scripted presses and its workout's first picture.
@@ -4157,6 +4180,7 @@ function GameScreen({
           setCaptureFigures({
             seconds: capture.seconds,
             lapSeconds: capture.lapSeconds,
+            lapPower: capture.lapAveragePower,
             totals: capture.totals(),
           });
         }
@@ -4412,6 +4436,7 @@ function GameScreen({
           setCaptureFigures({
             seconds: capture.seconds,
             lapSeconds: capture.lapSeconds,
+            lapPower: capture.lapAveragePower,
             totals: capture.totals(),
           });
         }
@@ -5825,6 +5850,8 @@ function GameScreen({
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         // #3153, the review of PR #3160: a capture's from its last line.
         lapSeconds={captureFigures?.lapSeconds ?? lapSeconds}
+        // #2263: and the lap's average power so far, the recorder's again.
+        lapPower={captureFigures === undefined ? lapPower : captureFigures.lapPower}
         // #2080: and every lap it has stated, for the lap splits panel.
         laps={rideLaps}
         // #2076: the ride so far, the recorder's again. @see useRideTotals

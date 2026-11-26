@@ -2067,6 +2067,8 @@ const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
   route: 'The route panel',
   graph: 'The last ten minutes of power and heart rate',
   standings: 'A race’s standings',
+  // #2263. ⚠️ New rider-facing words, for the owner's approval.
+  laps: 'Lap splits on a loop: this lap, the last and the best',
 };
 
 /** #2383: what each arrangement is called here. */

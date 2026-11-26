@@ -43,7 +43,7 @@ test.afterEach(async () => {
 
 /** What the panel says of the harness's laps: lap 4 under way, lap 3 the last, lap 2 the best. */
 const HARNESS_ROWS = [
-  ['Now', '4', '59:59', '—'],
+  ['Now', '4', '59:59', '342 W'],
   ['Last', '3', '59:59', '342 W'],
   ['Best', '2', '57:55', '342 W'],
 ];

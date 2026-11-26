@@ -108,6 +108,25 @@ export class CaptureRecording {
   }
 
   /**
+   * #2263: the average power of the lap in progress — the lap splits' *Now*
+   * row — over the seconds kept since the last line crossed, by the rule the
+   * recorder works a lap's out by (`recording/laps.ts` §`stretchFigures`: the
+   * readings that exist, rounded to a whole watt). `undefined` with none yet.
+   */
+  get lapAveragePower(): Watts | undefined {
+    let total = 0;
+    let count = 0;
+    for (let at: number = this.#lapFrom.movingTime; at < this.#power.length; at += 1) {
+      const reading = this.#power[at];
+      if (reading !== undefined) {
+        total += reading;
+        count += 1;
+      }
+    }
+    return count === 0 ? undefined : watts(Math.round(total / count));
+  }
+
+  /**
    * #3153, the review of PR #3160: the game said where its course's line is
    * (`trainer-port.ts` §`GameTrainerPort.courseLine`, which a capture has no
    * port for). A `lap` ends the lap in progress at the second kept last, with

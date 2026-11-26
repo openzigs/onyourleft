@@ -1542,8 +1542,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a loop's lap splits (#2080): the lap in progress, the
                         last lap and the best, from the laps `courseLine`
                         returned and the recorder's lap time only, so they are
-                        the saved ride's rows; on a loop only, in a race's
-                        standings' place and swapped with them
+                        the saved ride's rows; the lap in progress's power is
+                        the recorder's own average over it (#2263,
+                        `RideSnapshot.courseLapAveragePower`); on a loop only,
+                        in a race's standings' place and swapped with them, and
+                        turned off in Settings as its own panel (`laps`)
     src/game/hud/look-ahead.ts
                         the next 2 km of road on the HUD (#2075, #2291): the
                         road a line at a FIXED scale (200 m of height across the

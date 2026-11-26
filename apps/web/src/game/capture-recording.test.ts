@@ -132,6 +132,26 @@ describe('a capture ride’s laps — #3153, the review of PR #3160', () => {
     );
   });
 
+  it('averages the lap in progress’s power from the last line crossed, as the lap is ended — #2263', () => {
+    const recording = new CaptureRecording();
+    expect(recording.lapAveragePower).toBeUndefined();
+    recording.sample(1, SAMPLES[0] as CaptureSample);
+    recording.sample(2, SAMPLES[1] as CaptureSample);
+    expect(recording.lapAveragePower).toBe(watts(225));
+    const stretch = { distance: metres(17), ascent: metres(2), partial: false };
+    const live = recording.lapAveragePower;
+    const laps = recording.courseLine({ kind: 'lap', again: true, ...stretch });
+    // At the line it is the figure the lap is ended with.
+    expect(laps?.[0]?.averagePower).toBe(live);
+    // The next lap has no reading yet: no figure, never nought.
+    expect(recording.lapAveragePower).toBeUndefined();
+    recording.sample(3, SAMPLES[2] as CaptureSample);
+    expect(recording.lapAveragePower).toBe(watts(300));
+    // A skipped second is a gap, not a reading of nought.
+    recording.sample(5, SAMPLES[0] as CaptureSample);
+    expect(recording.lapAveragePower).toBe(watts(250));
+  });
+
   it('ends no lap on a line event that is not one', () => {
     const recording = new CaptureRecording();
     recording.sample(1, SAMPLES[0] as CaptureSample);

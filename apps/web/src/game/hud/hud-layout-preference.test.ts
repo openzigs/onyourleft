@@ -60,7 +60,7 @@ describe('the HUD layout preference (#2079)', () => {
   });
 
   it('offers no way to hide the notices, the controls or the primary readings', () => {
-    expect(HUD_PANELS).toEqual(['readings', 'route', 'graph', 'standings']);
+    expect(HUD_PANELS).toEqual(['readings', 'route', 'graph', 'standings', 'laps']);
     // A stored name it does not know hides nothing.
     localStorage.setItem(
       HUD_LAYOUT_STORAGE_KEY,

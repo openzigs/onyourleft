@@ -31,6 +31,13 @@
  * finished yet: *Last* and *Best* read dashes. A lap with no power reading
  * reads a dash for its power — never `0 W`, which would be a reading.
  *
+ * ## The lap in progress's power — #2263
+ *
+ * The recorder's own average over the lap so far (`ride/controller.ts`
+ * §`RideSnapshot.courseLapAveragePower`), by the rule a lap's figure is
+ * worked out by when it ends, so *Now* at the line is what *Last* then
+ * shows. A dash with no lap open, whatever figure is handed in.
+ *
  * Pure: no clock, no state.
  */
 
@@ -89,8 +96,13 @@ function row(label: string, laps: readonly LapFigures[], index: number | undefin
     lap: String(index + 1),
     // A lap ridden while the recording was paused has no time to state.
     time: shownSeconds(lap.movingTime) === 0 ? NO_READING : formatDuration(lap.movingTime),
-    power: lap.averagePower === undefined ? NO_READING : `${String(lap.averagePower)} W`,
+    power: powerText(lap.averagePower),
   };
+}
+
+/** An average power as the panel shows it: `231 W`, or a dash with none. */
+function powerText(power: number | undefined): string {
+  return power === undefined || !Number.isFinite(power) ? NO_READING : `${String(power)} W`;
 }
 
 /**
@@ -101,10 +113,13 @@ function row(label: string, laps: readonly LapFigures[], index: number | undefin
  *   of `GameTrainerPort.courseLine`, or the saved ride's rows.
  * @param lapSeconds the recorder's time on the lap in progress, or
  *   `undefined` with no lap open (nothing recording, or the ride over).
+ * @param lapPower the recorder's average power over the lap in progress —
+ *   #2263 — or `undefined` with no reading in it yet.
  */
 export function lapSplits(
   laps: readonly LapFigures[],
   lapSeconds: number | undefined,
+  lapPower?: number,
 ): LapSplitsView {
   let last: number | undefined;
   for (let index = laps.length - 1; index >= 0; index -= 1) {
@@ -134,8 +149,8 @@ export function lapSplits(
       // The lap in progress follows every lap the recording has finished.
       lap: open ? String((last ?? -1) + 2) : NO_READING,
       time: open ? formatDuration(lapSeconds) : NO_READING,
-      // The recording states a lap's average when the lap ends, and not before.
-      power: NO_READING,
+      // #2263: the recorder's average over the lap so far.
+      power: open ? powerText(lapPower) : NO_READING,
     },
     last: row(LAP_SPLITS_TEXT.last, laps, last),
     best: row(LAP_SPLITS_TEXT.best, laps, best),

@@ -623,6 +623,15 @@ export interface GameTrainerPort {
    */
   rideLapSeconds?(): number | undefined;
   /**
+   * The average power of the course lap in progress — #2263, the lap splits'
+   * *Now* row: `RideSnapshot.courseLapAveragePower`, the recorder's readings
+   * since the line by the rule the lap's own figure is worked out by when it
+   * ends, so *Now* at the line is what *Last* then shows. `undefined` with no
+   * lap open, nothing recording, or no power reading in the lap yet. Read
+   * through {@link watchRide}, and optional for {@link courseLine}'s reason.
+   */
+  rideLapAveragePower?(): Watts | undefined;
+  /**
    * The recording under this game ride, as the end-of-ride question needs it
    * — #2349: `undefined` when nothing is being recorded, and otherwise
    * whether it holds anything to save (`recording/finish.ts`: one sample).
@@ -704,6 +713,8 @@ interface GameTrainerSource {
     readonly elapsedSeconds?: number;
     /** #1312. @see GameTrainerPort.rideLapSeconds */
     readonly courseLapSeconds?: number | undefined;
+    /** #2263. @see GameTrainerPort.rideLapAveragePower */
+    readonly courseLapAveragePower?: Watts | undefined;
     /** #2076. @see GameTrainerPort.rideTotals */
     readonly totals?: RideTotals | undefined;
     /** #2381, round 3. @see notRecordedReason. Optional for {@link keepAliveFailed}'s reason. */
@@ -944,6 +955,13 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       const snapshot = controller?.getSnapshot();
       return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
         ? snapshot.courseLapSeconds
+        : undefined;
+    },
+    rideLapAveragePower: () => {
+      // #2263: the phase and the power from one snapshot, as the lap's time is.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.courseLapAveragePower
         : undefined;
     },
     rideMovingSeconds: () => {

@@ -130,7 +130,12 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
-import { RunningPowerZoneTime, RunningRideTotals, type RideTotals } from '../recording/totals';
+import {
+  RunningLapPower,
+  RunningPowerZoneTime,
+  RunningRideTotals,
+  type RideTotals,
+} from '../recording/totals';
 import {
   recoverableRides,
   unreadableRecordings,
@@ -643,6 +648,15 @@ export interface RideSnapshot {
    * recording under it.
    */
   readonly courseLapSeconds: number | undefined;
+  /**
+   * The average power of the course lap in progress — #2263, the HUD's lap
+   * splits' *Now* row: the recorder's own power readings since the rider last
+   * crossed the line, by the rule the lap's figure is worked out by when it
+   * ends (`recording/totals.ts` §`RunningLapPower`). `undefined` when no lap
+   * is open, as {@link courseLapSeconds} is, and while the lap has no power
+   * reading — a dash, never `0 W`.
+   */
+  readonly courseLapAveragePower: Watts | undefined;
   /**
    * The ride screen's *Lap* — #1318. `available` exactly when
    * {@link RideController.markLap} would take a lap: a ride recording or
@@ -2804,6 +2818,60 @@ export function createRideController(options: RideControllerOptions): RideContro
     return zoneTimeMemo.time;
   };
 
+  /**
+   * #2263: the lap in progress's average power, folded from the samples since
+   * the last time (`RunningLapPower`) and worked out again only when the
+   * recording has moved on, as {@link totalsMemo} is. A lap begun again, or
+   * another recording, is a new fold.
+   */
+  let lapPowerMemo:
+    | {
+        readonly recorder: Recorder;
+        readonly from: LapMark;
+        readonly samples: number;
+        readonly end: number;
+        readonly running: RunningLapPower;
+        readonly average: Watts | undefined;
+      }
+    | undefined;
+  const lapPowerOf = (current: Recorder | undefined): Watts | undefined => {
+    const from = lapFrom;
+    const startedAt = current?.session.startedAt;
+    if (current === undefined || from === undefined || startedAt === undefined) return undefined;
+    const samples = current.session.sampleCount;
+    // The slots the lap would own were the line crossed now: the rule its
+    // figure is worked out by when it ends, so the two are one number.
+    const slots = lapSlots(
+      { startedAt, sampleInterval: current.sampleInterval, sampleCount: samples },
+      from,
+      markOf(current),
+    );
+    if (
+      lapPowerMemo?.recorder !== current ||
+      lapPowerMemo.from !== from ||
+      lapPowerMemo.samples !== samples ||
+      lapPowerMemo.end !== slots.end
+    ) {
+      const running =
+        lapPowerMemo?.recorder === current && lapPowerMemo.from === from
+          ? lapPowerMemo.running
+          : // The lap's first slot, uncapped: a slot not yet kept is still its first.
+            new RunningLapPower(
+              current.session,
+              Math.floor((from.at - startedAt) / current.sampleInterval),
+            );
+      lapPowerMemo = {
+        recorder: current,
+        from,
+        samples,
+        end: slots.end,
+        running,
+        average: running.average(slots.end),
+      };
+    }
+    return lapPowerMemo.average;
+  };
+
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
     const paired = pairedTrainerEntry();
@@ -2821,6 +2889,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         lapFrom === undefined || session === undefined
           ? undefined
           : Math.max(0, session.movingTime - lapFrom.movingTime),
+      courseLapAveragePower: lapPowerOf(recorder),
       manualLap: {
         available: session !== undefined && rideInProgress(phase) && manualFrom !== undefined,
         last: lastManualLap,

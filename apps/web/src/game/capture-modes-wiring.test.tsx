@@ -429,8 +429,10 @@ describe('a capture over a course’s line — #3153, the review of PR #3160', (
       (row) => row.textContent,
     );
     // Lap 1 ended on the line at 25 s; lap 2 is three seconds old, not 28.
+    // #2263: and the lap in progress has its own average power, over its own
+    // three seconds of the script, not lap 1's.
     expect(rows.slice(0, 2)).toEqual([
-      'Now Lap 2 Time 0:03 Avg power —',
+      'Now Lap 2 Time 0:03 Avg power 238 W',
       'Last Lap 1 Time 0:25 Avg power 263 W',
     ]);
     expect(field('Elapsed')).toBe('0:00:28');

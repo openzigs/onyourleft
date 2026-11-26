@@ -310,16 +310,24 @@ class Running<F extends SlotFold<F>> {
   readonly #source: RunningSource;
   readonly #held: F;
   /** How many leading slots {@link #held} has had: the sealed ones, once each. */
-  #folded = 0;
+  #folded: number;
 
-  constructor(source: RunningSource, start: F) {
+  /**
+   * `from` is the first slot folded — #2263: a lap in progress begins part-way
+   * through the recording, and the slots before it are never read.
+   */
+  constructor(source: RunningSource, start: F, from = 0) {
     this.#source = source;
     this.#held = start;
+    this.#folded = from;
   }
 
-  /** A fold that has had every slot so far, in order. */
-  now(): F {
-    const count = this.#source.sampleCount;
+  /**
+   * A fold that has had every slot so far, in order — or, with `end`, every
+   * slot before it (#2263: a lap owns the slots up to the one it ends in).
+   */
+  now(end = Number.POSITIVE_INFINITY): F {
+    const count = Math.min(this.#source.sampleCount, end);
     const sealed = Math.min(this.#source.sealedCount, count);
     const slice = this.#source.slice(this.#folded, count);
     let at = 0;
@@ -421,6 +429,55 @@ export class RunningRideTotals {
   /** The ride so far, with `laps` the laps so far and the lap in progress last. @see rideTotals */
   totals(laps: readonly Pick<RecordedCourseLap, 'ascent'>[]): RideTotals {
     return this.#running.now().totals(laps);
+  }
+}
+
+/** The power readings that exist, added up and counted, one slot at a time. */
+class PowerMeanFold implements SlotFold<PowerMeanFold> {
+  total = 0;
+  count = 0;
+
+  add(channels: RecordedChannels<StreamChannelValue>, at: number): void {
+    const power = channels.power?.[at];
+    if (power !== undefined) {
+      this.total += power;
+      this.count += 1;
+    }
+  }
+
+  copy(): PowerMeanFold {
+    const next = new PowerMeanFold();
+    next.total = this.total;
+    next.count = this.count;
+    return next;
+  }
+}
+
+/**
+ * The average power of the lap in progress — #2263, the lap splits' *Now*
+ * row: the readings from the lap's first slot to the last one kept, worked
+ * out from the samples since the last time, as {@link RunningRideTotals} is.
+ * The rule a lap's own figure is worked out by when it ends (`laps.ts`
+ * §`stretchFigures`): the mean of the readings that exist, rounded to a whole
+ * watt, so a lap's *Now* figure at the line is the figure *Last* then shows.
+ * One per lap: a lap that begins again is a new fold.
+ */
+export class RunningLapPower {
+  readonly #running: Running<PowerMeanFold>;
+
+  /** `from` is the lap's first slot in the recording (`laps.ts` §`lapSlots`). */
+  constructor(source: RunningSource, from: number) {
+    this.#running = new Running(source, new PowerMeanFold(), Math.max(0, from));
+  }
+
+  /**
+   * The lap's average power over its slots before `end` — the slot it would
+   * end in, were the line crossed now (`laps.ts` §`lapSlots`) — or
+   * `undefined` while it has no reading.
+   */
+  average(end: number): Watts | undefined {
+    const fold = this.#running.now(end);
+    return averageOf({ total: fold.total, work: 0, count: fold.count });
   }
 }
 

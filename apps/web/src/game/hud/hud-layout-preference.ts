@@ -7,9 +7,10 @@
  *
  * ## What may be hidden, and what may not
  *
- * Four panels, by name ({@link HUD_PANELS}): the **secondary readings**, the
+ * Five panels, by name ({@link HUD_PANELS}): the **secondary readings**, the
  * **route panel** (the elevation strip and the plan), the **recent graph**
- * (#2078) and a race's **standings**. ⚠️ **Never the notices**, and there is
+ * (#2078), a race's **standings** and, since #2263, a loop's **lap splits**
+ * (#2080), which share the standings' place and are turned off on their own. ⚠️ **Never the notices**, and there is
  * no key here that could name them: the notices cell is where the HUD's safety
  * sentences stand (an eased workout target, a recording that may stop with the
  * screen off — `a11y/kept-visible.a11y.test.tsx` §`GAME_RIDING_KEPT_VISIBLE`),
@@ -96,7 +97,7 @@
 import type { PreferenceStorage } from './announce-preference';
 
 /** The panels a rider may hide. @see the module note on what may not be. */
-export const HUD_PANELS = ['readings', 'route', 'graph', 'standings'] as const;
+export const HUD_PANELS = ['readings', 'route', 'graph', 'standings', 'laps'] as const;
 
 /** One of {@link HUD_PANELS}. */
 export type HudPanelId = (typeof HUD_PANELS)[number];

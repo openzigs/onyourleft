@@ -55,6 +55,7 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
+import type { Watts } from '@onyourleft/domain';
 import { Fragment, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
@@ -127,6 +128,11 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    * demo renders `HudCore` alone and has none).
    */
   readonly laps?: readonly LapFigures[] | undefined;
+  /**
+   * The recorder's average power over the lap in progress — #2263, the lap
+   * splits' *Now* row (`GameTrainerPort.rideLapAveragePower`). Absent, a dash.
+   */
+  readonly lapPower?: Watts | undefined;
   /**
    * The last ten minutes of power and heart rate — #2078, `recent-trace.ts`'s
    * ring as `GameView` last read it, written once a second. Absent, no graph
@@ -440,6 +446,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     onReplansOff,
     standings,
     laps,
+    lapPower,
     corridor,
     ...shared
   } = props;
@@ -473,6 +480,8 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
   // #2514: a Delivery round's game strip draws no lap table. @see deliveryGame
   const splitsShown =
     laps !== undefined &&
+    // #2263: the rider may turn the splits off in Settings, as the standings.
+    panelShown(props.layout ?? DEFAULT_HUD_LAYOUT, 'laps') &&
     planLap(props.profile, props.state.ride.distance) !== undefined &&
     !deliveryGame(props.layout ?? DEFAULT_HUD_LAYOUT, props.delivery);
   const swap = (to: 'standings' | 'laps'): ReactNode =>
@@ -491,7 +500,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     ) : undefined;
   const splits =
     laps === undefined || !splitsShown ? null : (
-      <LapSplits splits={lapSplits(laps, props.lapSeconds)} swap={swap('standings')} />
+      <LapSplits splits={lapSplits(laps, props.lapSeconds, lapPower)} swap={swap('standings')} />
     );
   return (
     <HudCore

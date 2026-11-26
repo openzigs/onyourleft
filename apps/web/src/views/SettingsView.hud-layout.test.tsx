@@ -89,17 +89,27 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     expect(readHudLayout(localStorage).hidden).toEqual(['standings']);
   });
 
+  it('turns a loop’s lap splits off on their own, kept on the device and read back — #2263', async () => {
+    await settings();
+    expect(choice('Lap splits').checked).toBe(true);
+    await press(choice('Lap splits'));
+    expect(readHudLayout(localStorage).hidden).toEqual(['laps']);
+    await settings();
+    expect(choice('Lap splits').checked).toBe(false);
+    expect(choice('A race’s standings').checked).toBe(true);
+  });
+
   it('offers no way to hide power, the ride controls or a notice', async () => {
     await settings();
     const offered = queryAll(document, '.oyl-hud-layout__choice').map((each) =>
       (each.textContent ?? '').trim(),
     );
-    // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
+    // Five panels (#2263: the lap splits), three sizes, (#2383) two arrangements, (#2385) two route
     // panels, (#2387) the strip, (#2420) two ways to show power and (#2514)
     // two Delivery layouts, (#2593) the climb callout — none of which hides it —
     // and (#2600) the ride controls' auto-hide, which only hides them until the
     // screen is touched.
-    expect(offered).toHaveLength(18);
+    expect(offered).toHaveLength(19);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
