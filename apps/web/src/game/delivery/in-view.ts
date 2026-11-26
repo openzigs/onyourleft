@@ -70,6 +70,16 @@
  * clear weather. The frame also carries the round's weather
  * ({@link DeliveryInView.weather}) for the renderer's rain and light.
  *
+ * ## A parcel's landing, marked (#2577)
+ *
+ * For `ride-round.ts` §`LANDING_SHOWN_SECONDS` after a parcel comes down, a
+ * marker of its own stands where it did: a `'delivered'` mark on the house
+ * that caught it, at the doorstep its marker stood on, and a `'missed'` mark
+ * where a parcel no house caught came down, or on the house that must not get
+ * a parcel that caught one. Told apart by shape, never by colour alone: a
+ * ring for a hit, a cross for a miss (`three-renderer.ts` §`markerShape`). It
+ * is drawn in rain and at dusk as in daylight: the rider has just thrown there.
+ *
  * ## Nothing here leaves the ride
  *
  * Positions are held in memory for the frame (DL11), and nothing here formats
@@ -92,6 +102,7 @@ import {
   type Obstacle,
   type ObstacleState,
 } from './obstacles';
+import type { ParcelLanded } from './ride-round';
 import type { Round } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -157,6 +168,8 @@ export interface DeliveryDrawInput {
    * (`port.ts` §`DeliveryCarMotion.indicatorSeconds`). Flashing unless given.
    */
   readonly steadyIndicators?: boolean;
+  /** #2577: the parcels that came down lately, each marked where it did. None unless given. */
+  readonly landed?: readonly ParcelLanded[];
 }
 
 /** A place on the corridor, and which way the road runs there. */
@@ -237,6 +250,12 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
     markers.push({ x: house.x, y: house.y, z: house.z, yaw: house.yaw, kind: 'no-delivery' });
   }
 
+  // #2577: where each parcel came down lately, a hit on its house and a miss where it fell.
+  for (const landed of input.landed ?? []) {
+    const mark = landedMark(landed, input.targets, input.noDelivery ?? [], centre);
+    if (mark !== undefined) markers.push(mark);
+  }
+
   const parcels: DeliveryPiece[] = [];
   const flight = PARCEL_FLIGHT_SECONDS;
   for (const parcel of input.throws.inFlight) {
@@ -305,6 +324,33 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
   return input.weather === undefined
     ? { parcels, markers, obstacles }
     : { parcels, markers, obstacles, weather: input.weather };
+}
+
+/**
+ * The mark a landing leaves (#2577): on the house that caught it, where its
+ * marker stood, or, for a parcel no house caught, on the ground where it came
+ * down. `undefined` off the frame's corridor.
+ */
+function landedMark(
+  landed: ParcelLanded,
+  targets: readonly DeliveryTarget[],
+  noDelivery: readonly DeliveryTarget[],
+  centre: readonly CorridorPoint[],
+): DeliveryMarkerPiece | undefined {
+  const kind = landed.kind === 'delivered' ? 'delivered' : 'missed';
+  const house =
+    landed.house === undefined
+      ? undefined
+      : landed.kind === 'delivered'
+        ? targets.find((target) => target.position === landed.house)
+        : noDelivery[landed.house];
+  if (house !== undefined) {
+    if (onCorridor(centre, house.distance) === undefined) return undefined;
+    return { x: house.x, y: house.y, z: house.z, yaw: house.yaw, kind };
+  }
+  const at = onCorridor(centre, landed.along);
+  if (at === undefined) return undefined;
+  return { ...placed(at, landed.side === 'right' ? landed.across : -landed.across, 0, 0), kind };
 }
 
 /**

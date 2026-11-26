@@ -119,6 +119,17 @@ const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
     { hz: 880, at: 0.15, seconds: 0.16 },
   ],
   distance: [{ hz: 330, at: 0, seconds: 0.2 }],
+  // #2577: a Delivery parcel's landing — a hit rises a fifth, bright, and a
+  // miss falls a fourth, low, so the two are told apart by their direction as
+  // well as their pitch.
+  delivered: [
+    { hz: 659.25, at: 0, seconds: 0.08 },
+    { hz: 987.77, at: 0.09, seconds: 0.14 },
+  ],
+  missed: [
+    { hz: 349.23, at: 0, seconds: 0.1 },
+    { hz: 261.63, at: 0.11, seconds: 0.16 },
+  ],
   // #946: the menus' sounds. Each is over within MENU_CUE_SECONDS, from its
   // first note's start to its last note's end, so a press is never followed
   // by a sound longer than the press — UI-sound guidance puts these at about
@@ -138,6 +149,8 @@ const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
 const BUS_OF: Readonly<Record<CueName, 'effects' | 'cues'>> = {
   interval: 'cues',
   distance: 'cues',
+  delivered: 'cues',
+  missed: 'cues',
   select: 'effects',
   confirm: 'effects',
   back: 'effects',

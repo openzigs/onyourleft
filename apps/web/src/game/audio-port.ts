@@ -25,8 +25,12 @@
  * Android WebView, and a tone is not a sentence.
  */
 
-/** The ride's two short sounds. Their shapes are `web-audio.ts`'s, and this project's own. */
-export type RideCueName = 'interval' | 'distance';
+/**
+ * The ride's short sounds. Their shapes are `web-audio.ts`'s, and this
+ * project's own. Since #2577 a Delivery parcel's landing has two: a hit's
+ * rising pair and a miss's falling one.
+ */
+export type RideCueName = 'interval' | 'distance' | 'delivered' | 'missed';
 
 /**
  * The menus' three short sounds — #946: a soft *select*, a *confirm* and a

@@ -13396,13 +13396,32 @@ const DELIVERY_PAINT = {
   mailbox: 0x3d5a73,
   mailboxFlag: 0xc0392b,
   mailboxGlow: 0xff8a00,
+  // #2577: a landing's marks, a hit's green and a miss's red, this project's own.
+  delivered: 0x3fd46b,
+  missed: 0xe8432f,
 } as const;
 
 /**
  * The markers a house wears, in order: a marker's kind is its index in both
  * attributes ({@link withObstacleKinds}) — #2365.
  */
-const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = ['house', 'mailbox', 'no-delivery'];
+const DELIVERY_MARKER_ORDER: readonly DeliveryMarkerKind[] = [
+  'house',
+  'mailbox',
+  'no-delivery',
+  'delivered',
+  'missed',
+];
+
+/**
+ * A landing's marks, metres — #2577, this project's own: a hit is a wide
+ * glowing green ring `ring` across on the step the house's marker stood on,
+ * `band` either side of its middle; a miss is a flat red cross `cross` long
+ * and `bar` wide lying where the parcel came down. Shapes apart, a ring and a
+ * cross, never colour alone, and flat on the ground: 24 and 4 triangles, so
+ * every marker instance, which submits every kind, costs 28 more.
+ */
+const LANDING_MARK_METRES = { ring: 0.95, band: 0.14, cross: 1.4, bar: 0.22 } as const;
 
 /**
  * A mailbox marker's and a no-delivery sign's sizes, metres — #2365, this
@@ -13598,6 +13617,25 @@ function signRing(radius: number, band: number): BufferGeometry {
   return both;
 }
 
+/**
+ * A miss's flat cross — #2577: two bars {@link LANDING_MARK_METRES} `cross`
+ * long and `bar` wide, crossed at right angles, lying 4 cm over the ground and
+ * facing up, so the chase camera sees their front faces. 4 triangles.
+ */
+function landingCross(): BufferGeometry {
+  const { cross, bar } = LANDING_MARK_METRES;
+  const one = new PlaneGeometry(bar, cross).rotateX(-Math.PI / 2).rotateY(Math.PI / 4);
+  // 5 mm over the first, so where they cross the two never share a plane.
+  const other = one
+    .clone()
+    .rotateY(Math.PI / 2)
+    .translate(0, 0.005, 0);
+  const both = mergeGeometries([one.toNonIndexed(), other.toNonIndexed()]).translate(0, 0.04, 0);
+  one.dispose();
+  other.dispose();
+  return both;
+}
+
 /** How much taller than wide the marker's diamond is. */
 const MARKER_DIAMOND_STRETCH = 1.4;
 
@@ -13738,6 +13776,19 @@ function markerShape(trim = true): BufferGeometry {
       colour: DELIVERY_PAINT.hazard,
       glows: true,
       kind: kind('no-delivery'),
+    },
+    // #2577: a parcel's landing — a wide ring on the step for a hit, a flat cross for a miss.
+    {
+      made: stepRing(LANDING_MARK_METRES.ring / 2, LANDING_MARK_METRES.band / 2),
+      colour: DELIVERY_PAINT.delivered,
+      glows: true,
+      kind: kind('delivered'),
+    },
+    {
+      made: landingCross(),
+      colour: DELIVERY_PAINT.missed,
+      glows: true,
+      kind: kind('missed'),
     },
   ];
   return deliveryShape(parts, trim ? 'trim' : 'keep');
@@ -14808,7 +14859,8 @@ function prefersReducedMotion(): boolean {
 
 /**
  * The triangles in the markers' one geometry — #2507: **180**, a doorstep's
- * 44, a mailbox's 80 and a no-delivery sign's 56. It was 184 (the sign's 96
+ * 44, a mailbox's 80 and a no-delivery sign's 56; **208** since #2577 added a
+ * landing's two marks, a hit's ring (24) and a miss's cross (4). It was 184 (the sign's 96
  * until its torus became {@link signRing}'s flat ring, 40 fewer); PR #2518's
  * trim for the village frame left out the 10 faces that look straight down
  * from under the eye, 174, until the owner's ruling of 2026-11-13 that the
@@ -14824,7 +14876,7 @@ function prefersReducedMotion(): boolean {
  * @test-facing `delivery-belt.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_MARKER_TRIANGLES = 180;
+export const DELIVERY_MARKER_TRIANGLES = 208;
 
 /**
  * The triangles in the realistic world's obstacle geometry — #2540: **1 610**,

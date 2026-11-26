@@ -110,6 +110,13 @@ export interface DeliveryOwed {
   readonly skip: { readonly index: number; readonly text: string } | undefined;
   /** The houses that must not get a parcel already said, by their place in the round's list. */
   readonly skipped: readonly number[];
+  /** #2577: the points the deliveries owed earned, said with them. */
+  readonly earned: number;
+  /** #2577: parcels no house caught since the last miss sentence. */
+  readonly wasted: number;
+  /** #2577: parcels a house that must not get one caught since the last miss sentence, and the points they cost. */
+  readonly wrongHouses: number;
+  readonly wrongPoints: number;
 }
 
 /** Nothing owed: the start of a round. */
@@ -123,6 +130,10 @@ export const NOTHING_OWED: DeliveryOwed = Object.freeze({
   warned: Object.freeze([]),
   skip: undefined,
   skipped: Object.freeze([]),
+  earned: 0,
+  wasted: 0,
+  wrongHouses: 0,
+  wrongPoints: 0,
 });
 
 /**
@@ -337,6 +348,61 @@ export function oweRoundChange(owed: DeliveryOwed, before: Round, after: Round):
   return { ...owed, delivered, missed, left: roundTally(after).expecting };
 }
 
+/**
+ * A parcel's landing, as `delivery/ride-round.ts` §`ParcelLanded` reports it —
+ * #2577: what it was and the points it moved the score by. Stated here, not
+ * imported, as `fields.ts` states the next house.
+ */
+export interface LandedParcel {
+  readonly kind: 'delivered' | 'missed' | 'no-delivery';
+  readonly points: number;
+}
+
+/**
+ * Owe what a parcel's landing earned or cost — #2577: a delivery's points,
+ * said with its house ("Delivered to the 3rd house: 1 point."); a parcel no
+ * house caught, said as a miss ("A parcel missed."); and one a house that
+ * must not get a parcel caught, with what it cost. Every landing with a sound
+ * has its sentence (`audio-cues.ts` §"A sound is never the only carrier").
+ * After the round's end, nothing.
+ */
+export function oweLanded(owed: DeliveryOwed, landed: LandedParcel): DeliveryOwed {
+  if (owed.roundOver !== undefined) return owed;
+  switch (landed.kind) {
+    case 'delivered':
+      return { ...owed, earned: owed.earned + landed.points };
+    case 'missed':
+      return { ...owed, wasted: owed.wasted + 1 };
+    case 'no-delivery':
+      return {
+        ...owed,
+        wrongHouses: owed.wrongHouses + 1,
+        wrongPoints: owed.wrongPoints + landed.points,
+      };
+  }
+}
+
+/** `1 point`, `2 points`. */
+function points(count: number): string {
+  return `${String(count)} ${count === 1 ? 'point' : 'points'}`;
+}
+
+/** What a miss sentence says, before any house missed: the parcels that missed, and the wrong houses (#2577). */
+function parcelsMissed(owed: DeliveryOwed): readonly string[] {
+  const said: string[] = [];
+  if (owed.wasted > 0) {
+    said.push(owed.wasted === 1 ? 'A parcel missed.' : `${String(owed.wasted)} parcels missed.`);
+  }
+  if (owed.wrongHouses > 0) {
+    const went =
+      owed.wrongHouses === 1
+        ? 'A parcel went to a house that gets none'
+        : `${String(owed.wrongHouses)} parcels went to houses that get none`;
+    said.push(owed.wrongPoints < 0 ? `${went}: ${points(-owed.wrongPoints)} off.` : `${went}.`);
+  }
+  return said;
+}
+
 /** Owe a crash (#1811's). After the round's end, nothing. */
 export function oweCrash(owed: DeliveryOwed): DeliveryOwed {
   if (owed.roundOver !== undefined) return owed;
@@ -438,16 +504,24 @@ export function deliveryEvents(owed: DeliveryOwed): readonly AnnouncementEvent[]
           : `Crashed into ${String(owed.crashes)} obstacles.`,
     });
   }
-  if (owed.missed.length > 0) {
+  const missedParcels = parcelsMissed(owed);
+  if (owed.missed.length > 0 || missedParcels.length > 0) {
     events.push({
       kind: 'delivery-missed',
-      text: `Missed ${theHouses(owed.missed)}. ${housesLeft(owed.left)}`,
+      text: [
+        ...missedParcels,
+        ...(owed.missed.length > 0
+          ? [`Missed ${theHouses(owed.missed)}. ${housesLeft(owed.left)}`]
+          : []),
+      ].join(' '),
     });
   }
   if (owed.delivered.length > 0) {
+    // #2577: and what it earned, so a rider hears the reward as well as the house.
+    const earned = owed.earned > 0 ? `: ${points(owed.earned)}` : '';
     events.push({
       kind: 'delivery-delivered',
-      text: `Delivered to ${theHouses(owed.delivered)}. ${housesLeft(owed.left)}`,
+      text: `Delivered to ${theHouses(owed.delivered)}${earned}. ${housesLeft(owed.left)}`,
     });
   }
   return events;
@@ -476,9 +550,9 @@ export function deliverySpoken(
     case 'delivery-crash':
       return { ...owed, crashes: 0 };
     case 'delivery-missed':
-      return { ...owed, missed: [] };
+      return { ...owed, missed: [], wasted: 0, wrongHouses: 0, wrongPoints: 0 };
     case 'delivery-delivered':
-      return { ...owed, delivered: [] };
+      return { ...owed, delivered: [], earned: 0 };
     default:
       return owed;
   }

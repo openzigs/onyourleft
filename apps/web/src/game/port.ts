@@ -720,9 +720,11 @@ export interface DeliveryWeatherFrame {
 /**
  * Which marker a house wears — #2365: a doorstep's, a mailbox's at the kerb,
  * or a house that must not get a parcel's. Told apart by shape, never by
- * colour alone (ADR 0065 D-10.5).
+ * colour alone (ADR 0065 D-10.5). Since #2577 also where a parcel came down,
+ * for a moment: `'delivered'` on the house it reached, `'missed'` where it fell
+ * short or on a house that must not get one (`delivery/in-view.ts`).
  */
-export type DeliveryMarkerKind = 'house' | 'mailbox' | 'no-delivery';
+export type DeliveryMarkerKind = 'house' | 'mailbox' | 'no-delivery' | 'delivered' | 'missed';
 
 /** A house's marker, and which (#2365). Absent, a doorstep's. */
 export interface DeliveryMarkerPiece extends DeliveryPiece {

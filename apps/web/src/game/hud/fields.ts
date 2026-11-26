@@ -492,6 +492,23 @@ export interface DeliveryHud {
    * §`deliveryEvents`', as before. Absent is not crashed.
    */
   readonly crashed?: boolean | undefined;
+  /**
+   * The latest parcel's landing while it is shown — #2577, from
+   * `delivery/ride-round.ts` §`DeliveryRide.landed`: the Score field says
+   * under the score whether it reached the house and what it earned
+   * ({@link LANDED_TEXT}), for `ride-round.ts` §`LANDING_SHOWN_SECONDS`.
+   * "Crashed" wins while a crash is drawn. Absent, nothing landed lately.
+   */
+  readonly landed?: LandedHud | undefined;
+}
+
+/**
+ * A parcel's landing on the HUD — #2577: what it was and the points it moved
+ * the score by. Stated here rather than imported, for {@link NextHouseHud}'s reason.
+ */
+export interface LandedHud {
+  readonly kind: 'delivered' | 'missed' | 'no-delivery';
+  readonly points: number;
 }
 
 /** Everything the HUD needs. */
@@ -1358,9 +1375,30 @@ function deliveryReadings(
       detail:
         delivery.crashed === true
           ? CRASHED_TEXT
-          : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+          : delivery.landed !== undefined
+            ? landedDetail(delivery.landed)
+            : `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
     },
   ];
+}
+
+/**
+ * What the Score field says under the score for a moment after a parcel
+ * lands — #2577, new rider-facing wording for the owner's approval: a word
+ * for what happened, then the points it moved the score by, when it moved it.
+ */
+export const LANDED_TEXT: Readonly<Record<LandedHud['kind'], string>> = Object.freeze({
+  delivered: 'Delivered',
+  missed: 'Missed',
+  'no-delivery': 'Wrong house',
+});
+
+/** `Delivered +1`, `Missed`, `Wrong house −1`: the minus sign, not a hyphen. */
+function landedDetail(landed: LandedHud): string {
+  const word = LANDED_TEXT[landed.kind];
+  if (landed.points > 0) return `${word} +${String(landed.points)}`;
+  if (landed.points < 0) return `${word} \u2212${String(-landed.points)}`;
+  return word;
 }
 
 /**

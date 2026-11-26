@@ -124,6 +124,8 @@ import { urbanClassMap } from './urban-class';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { writeRealisticWorldChoice } from './world-preference';
 import { endRideAnswer } from './end-ride-testing';
+import { recordingOutput, type RecordingOutput } from './audio-testing';
+import { CUES_STORAGE_KEY, DEFAULT_CUES } from './cue-preference';
 
 /**
  * What `GameView` offered the announcer, kind by kind — `trainer-wiring.test.tsx`'s
@@ -600,6 +602,8 @@ async function rideTheTrace(options: {
   readonly controller?: ControllerPort | undefined;
   /** Filled with the distance each frame's input drew the rider at, by frame index (#3021). */
   readonly drawnAlong?: Map<number, number | undefined> | undefined;
+  /** The ride's sounds, a recording double (#2577). The platform's own unless given. */
+  readonly sounds?: RecordingOutput | undefined;
 }): Promise<void> {
   stubSeed(script.seed);
   mounted = await mount(
@@ -610,6 +614,7 @@ async function rideTheTrace(options: {
       renderer={() => Promise.resolve(capturingRenderer(options.drawn ?? []))}
       now={() => nowMs}
       delivery={options.delivery}
+      {...(options.sounds === undefined ? {} : { sounds: options.sounds })}
       {...(options.room ?? {})}
     />,
   );
@@ -654,6 +659,8 @@ interface RideResult {
   readonly drawnAlong: ReadonlyMap<number, number | undefined>;
   /** The Next house field's value after each frame, in order (#3021: held while the rider is). */
   readonly nextHouses: readonly (string | undefined)[];
+  /** Every short sound the ride played, in order (#2577), with the rider's sounds on. */
+  readonly cues: readonly string[];
 }
 
 /** The scripted ride, start to *End ride*, read and unmounted. */
@@ -670,8 +677,12 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   const scoreDetails: (string | undefined)[] = [];
   const drawnAlong = new Map<number, number | undefined>();
   const nextHouses: (string | undefined)[] = [];
+  // #2577: the rider's sounds on, into a recording double.
+  localStorage.setItem(CUES_STORAGE_KEY, JSON.stringify({ ...DEFAULT_CUES, enabled: true }));
+  const sounds = recordingOutput();
   await rideTheTrace({
     delivery,
+    sounds,
     trainer: trainerPort(writes),
     drawn,
     steered,
@@ -684,6 +695,7 @@ async function rideOnce(delivery: boolean): Promise<RideResult> {
   });
   const read = {
     steered,
+    cues: sounds.calls.flatMap((call) => (call.kind === 'playCue' ? [call.cue] : [])),
     scoreDetails,
     drawnAlong,
     nextHouses,
@@ -773,6 +785,28 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(ride.drawn.at(-1)?.delivery?.markers).toEqual([]);
     expect(ride.drawn.some((frame) => (frame.delivery?.parcels.length ?? 0) > 0)).toBe(true);
     expect(ride.drawn.some((frame) => (frame.delivery?.obstacles.length ?? 0) > 0)).toBe(true);
+  });
+
+  it('shows each parcel’s landing under the score with its point, says it, and plays a hit’s sound for it — #2577', async () => {
+    const ride = await withRound();
+    const plain = await without();
+    const tally = roundTally(script.ride.round);
+    // A hit: the Score field said it, with the point it earned, for a while after each delivery.
+    expect(ride.scoreDetails).toContain('Delivered +1');
+    expect(ride.said.some((text) => /^Delivered to the 1st house: 1 point\./.test(text))).toBe(
+      true,
+    );
+    // Heard: one hit's sound a delivered parcel, at least one landed on each house delivered.
+    const hits = ride.cues.filter((cue) => cue === 'delivered').length;
+    expect(hits).toBeGreaterThanOrEqual(1);
+    expect(hits).toBeLessThanOrEqual(tally.delivered);
+    // The frames marked it at the house, the mark gone again by the ride's end.
+    expect(
+      ride.drawn.some((frame) => frame.delivery?.markers.some((each) => each.kind === 'delivered')),
+    ).toBe(true);
+    expect(ride.drawn.at(-1)?.delivery?.markers).toEqual([]);
+    // An ordinary ride throws nothing, so it plays no landing sound and draws no mark.
+    expect(plain.cues.filter((cue) => cue === 'delivered' || cue === 'missed')).toEqual([]);
   });
 
   it('sends the trainer the same writes, each grade at the same time, with the round as without it (DL5)', async () => {

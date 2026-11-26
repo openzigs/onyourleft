@@ -37,6 +37,7 @@ import {
   deliverySpoken,
   ordinal,
   oweCrash,
+  oweLanded,
   oweRoundChange,
   OBSTACLE_AHEAD_METRES,
   obstacleAheadSentence,
@@ -470,5 +471,63 @@ describe('a standing obstacle ahead, said in words — #2362, ADR 0065 D-10.9', 
   it('owes nothing after the round’s end', () => {
     const over = oweRoundOver(NOTHING_OWED, endRound(FRESH_WEEK, startRound(3)), 0);
     expect(oweObstacleAhead(over, ROUND, 460)).toBe(over);
+  });
+});
+
+describe('what a parcel’s landing earned, in words — #2577', () => {
+  it('says the point a delivery earned with its house, and settles it once said', () => {
+    const delivered = recordDelivery(startRound(3), 0);
+    const owed = oweLanded(oweRoundChange(NOTHING_OWED, startRound(3), delivered), {
+      kind: 'delivered',
+      points: 1,
+    });
+    expect(deliveryEvents(owed)).toEqual([
+      { kind: 'delivery-delivered', text: 'Delivered to the 1st house: 1 point. 2 houses left.' },
+    ]);
+    const said = deliverySpoken(owed, 'delivery-delivered');
+    expect(said.earned).toBe(0);
+    expect(deliveryEvents(said)).toEqual([]);
+    // Two before the first is said: one sentence, both points.
+    const two = oweLanded(oweRoundChange(owed, delivered, recordDelivery(delivered, 1)), {
+      kind: 'delivered',
+      points: 1,
+    });
+    expect(deliveryEvents(two)[0]?.text).toBe(
+      'Delivered to the 1st and 2nd houses: 2 points. 1 house left.',
+    );
+  });
+
+  it('says a parcel no house caught as a miss, alone or before a house missed, and settles both once said', () => {
+    const owed = oweLanded(NOTHING_OWED, { kind: 'missed', points: 0 });
+    expect(deliveryEvents(owed)).toEqual([{ kind: 'delivery-missed', text: 'A parcel missed.' }]);
+    const twice = oweLanded(owed, { kind: 'missed', points: 0 });
+    expect(deliveryEvents(twice)[0]?.text).toBe('2 parcels missed.');
+    const house = oweRoundChange(twice, startRound(2), recordMiss(startRound(2), 0));
+    expect(deliveryEvents(house)[0]?.text).toBe(
+      '2 parcels missed. Missed the 1st house. 1 house left.',
+    );
+    const said = deliverySpoken(house, 'delivery-missed');
+    expect(said.wasted).toBe(0);
+    expect(deliveryEvents(said)).toEqual([]);
+  });
+
+  it('says a parcel at a house that must not get one, with the point it cost when it cost one', () => {
+    const cost = oweLanded(NOTHING_OWED, { kind: 'no-delivery', points: -1 });
+    expect(deliveryEvents(cost)[0]?.text).toBe(
+      'A parcel went to a house that gets none: 1 point off.',
+    );
+    const free = oweLanded(NOTHING_OWED, { kind: 'no-delivery', points: 0 });
+    expect(deliveryEvents(free)[0]?.text).toBe('A parcel went to a house that gets none.');
+    expect(deliverySpoken(cost, 'delivery-missed')).toEqual(NOTHING_OWED);
+  });
+
+  it('owes nothing after the round’s end, whose sentence is the last word', () => {
+    const over = oweRoundOver(
+      NOTHING_OWED,
+      endRound(FRESH_WEEK, recordDelivery(startRound(1), 0)),
+      1,
+    );
+    expect(oweLanded(over, { kind: 'missed', points: 0 })).toBe(over);
+    expect(oweLanded(over, { kind: 'delivered', points: 1 })).toBe(over);
   });
 });
