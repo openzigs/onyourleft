@@ -688,6 +688,44 @@ describe('the realistic page’s `map-pois` lever — #2975', () => {
   });
 });
 
+describe('the realistic page’s `parked-cars` lever — #3278', () => {
+  const town = neighbourhoodFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  /** The cars of the page's frame for `query` at `distance`, as `realistic-harness.ts` builds it. */
+  // The lever changes no plan, so the town is planned once for every frame here.
+  let planned: ReturnType<typeof plannedTown> | undefined;
+  const carsAt = (query: string, distance: number) => {
+    const config = parseConfig(query);
+    planned ??= plannedTown(town, []);
+    const { land, plans, urban } = planned;
+    return rideFrame({
+      profile: town.profile,
+      origin: town.origin,
+      distance,
+      elapsed: 1,
+      rung: top,
+      peopleOff: true,
+      parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
+      town: {
+        corridor: town.corridor,
+        land,
+        buildings: mappedBuildingsOf(plans),
+        lots: mappedTown(town.corridor, plans, urban),
+      },
+    }).parkedCars;
+  };
+
+  it('parks cars along the neighbourhood’s streets, and with the lever off parks none', () => {
+    const product = [1_100, 1_900].map((at) => carsAt('?town=streets', at));
+    for (const view of product) expect(view?.cars.length ?? 0).toBeGreaterThan(0);
+    // The streets the route never touches are 50 m and more off it: cars at their kerbs.
+    expect(product.some((view) => view?.cars.some((car) => car.spot === 'kerb'))).toBe(true);
+    expect(carsAt('?town=streets&levers=-parked-cars', 1_100)).toBeUndefined();
+    // A Delivery round's parked cars are its own: the page asks for none of these.
+    expect(carsAt('?town=streets&delivery=3', 1_100)).toBeUndefined();
+  });
+});
+
 describe('the realistic page’s `nearby-streets` lever — #2973', () => {
   const town = neighbourhoodFixture();
   const top = REALISTIC_LADDER[0] as QualitySettings;

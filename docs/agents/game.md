@@ -1868,6 +1868,53 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`
                         (80) nearest first, in their own term
                         §`REALISTIC_PARK_FIELD_TRIANGLES`; page `town=fields`
+    src/game/parked-cars.ts
+                        the parked cars of an ordinary ride (#3278): SCENERY,
+                        never an obstacle and never read by a simulation or
+                        the trainer. Placed from what is already planned — a
+                        mapped house's garage driveway (`FootprintPlan.driveway`),
+                        a shop's apron deep enough for a car and a doorway,
+                        and the kerb of a mapped `minor` or `major` side
+                        street with a building on it (`nearby-streets.ts`'
+                        pieces) — hashed from the ride's seed and the place,
+                        so a replay draws the same street. A car's whole box
+                        keeps `PARKED_CAR_ROAD_CLEAR_METRES` (4.5 m: the
+                        carriageway and a metre) off the middle of ANY
+                        stretch of the ridden road, behind a city centre's
+                        pavement, and clear of every footprint, every other
+                        street's surface, every mapped footway, water and
+                        every other car. ⚠️ **None at the kerb of the ridden
+                        road** (the village's and the city's street of
+                        `streets.ts`): three lanes and the racing line leave
+                        0.4 m inside each kerb, so a procedural village has no
+                        car and its frozen frame is untouched. ⚠️ **None at
+                        any kerb on an open-world ride** (`ParkedCarSite.kerbs`):
+                        every street there may be ridden next, and a car also
+                        keeps 4.5 m off the middle of each. ⚠️ **None on a
+                        `service` road**: the tiles cannot tell a driveway or
+                        a parking aisle from an alley (ADR 0091 D-3).
+                        Streets are read off the map's own lines
+                        (`WorldCorridor.streets`), never a frame's side
+                        roads, so a car does not come and go with them.
+                        `scene.ts` asks about the road 40 m ahead of the
+                        rider, and again only when that enters another 16 m
+                        cell; ≤ `PARKED_CARS_MAX` (36) nearest first, the
+                        nearest ≤ `PARKED_CARS_NEAR_MAX` (12) within 60 m
+                        with their wheels, the rest the body alone, out to
+                        150 m. Drawn by `three-renderer.ts`
+                        §`ParkedCarBelt`: ONE merged mesh and one call of its
+                        own, each car its OWN body's triangles (never the
+                        Delivery roster, where every instance submits every
+                        kind), rebuilt only when the list changes, inside
+                        `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES`
+                        (13 440, in the worst frame's sum) and
+                        §`REALISTIC_PARKED_CAR_DRAW_CALLS` (1). Realistic
+                        world only; the bodies and atlas are #2847's committed
+                        `cars.glb` and `cars_atlas_256.ktx2`, no new file.
+                        `SceneFrame.parkedCars`, said by `SceneInput.parkedCars`
+                        (`GameView`: every ride but a Delivery round); lever
+                        `-parked-cars`, pages `town=houses`, `town=commercial`
+                        and `town=streets`.
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as

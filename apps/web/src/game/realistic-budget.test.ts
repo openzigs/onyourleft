@@ -45,6 +45,8 @@ import {
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
+  REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_BODIES,
   TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
@@ -73,7 +75,11 @@ import {
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_PARK_DRESSING_TRIANGLES,
   REALISTIC_PARK_FIELD_TRIANGLES,
+  REALISTIC_PARKED_CAR_DRAW_CALLS,
+  REALISTIC_PARKED_CAR_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_VILLAGE_DRAW_CALLS,
+  REALISTIC_WOODED_DRAW_CALLS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_RIDER_SILHOUETTE_BYTES,
@@ -86,8 +92,10 @@ import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
 import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
+import { PARKED_CARS_MAX, PARKED_CARS_NEAR_MAX } from './parked-cars';
 import {
   chainLinkFacts,
+  deliveryCarFacts,
   fileImageSize,
   fileKtx2Facts,
   modelFacts,
@@ -689,6 +697,99 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     // Non-vacuity: a real share — room for an item of eight boxes on each of
     // two full villages' 116 anchors.
     expect(REALISTIC_DECORATION_TRIANGLES).toBeGreaterThanOrEqual(116 * 8 * 12);
+  });
+
+  it('holds it with a street of parked cars at their ceiling too, in the fullest frame the caps allow — #3278', () => {
+    // The cars' row, priced off the committed file and not off the renderer:
+    // each body's own triangles, and its four wheels'.
+    const cars = deliveryCarFacts(join(SHIPPED, REALISTIC_DELIVERY_CAR));
+    const trianglesOf = (name: string): number => {
+      const node = cars.nodes.find((each) => each.name === name);
+      if (node === undefined) throw new Error(`the cars have no ${name}`);
+      return node.geometry.position.length / 9;
+    };
+    const bodies = REALISTIC_DELIVERY_CAR_BODIES.map((name) => ({
+      far: trianglesOf(`${name}-body`),
+      near:
+        trianglesOf(`${name}-body`) +
+        ['front-left', 'front-right', 'back-left', 'back-right'].reduce(
+          (sum, wheel) => sum + trianglesOf(`${name}-wheel-${wheel}`),
+          0,
+        ),
+    }));
+    const parked =
+      PARKED_CARS_NEAR_MAX * Math.max(...bodies.map((body) => body.near)) +
+      (PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX) * Math.max(...bodies.map((body) => body.far));
+    console.log(
+      `#3278: parked cars at their caps ${String(parked)} triangles ` +
+        `(${String(PARKED_CARS_NEAR_MAX)} near, ${String(PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX)} far), ` +
+        `ceiling ${String(REALISTIC_PARKED_CAR_TRIANGLES)}`,
+    );
+    // The ceiling is the caps' worst, exactly: a body re-cut heavier, or a cap
+    // raised, is a red test and not a quiet rise.
+    expect(parked).toBe(REALISTIC_PARKED_CAR_TRIANGLES);
+    // Non-vacuity: a real term — a street's worth of whole bodies.
+    expect(parked).toBeGreaterThan(10_000);
+    expect(Math.min(...bodies.map((body) => body.far))).toBeGreaterThanOrEqual(200);
+    // The fullest frame the product can draw, with its own trees: every
+    // structure at its ceiling, a room's remote riders at THEIR ceiling, a
+    // full belt of park pieces, a holiday's decorations at theirs — none of
+    // which excludes a street of cars — and the cars.
+    const frame = worstFrame();
+    const base =
+      frame.vegetation +
+      frame.riders +
+      frame.structureItems * REALISTIC_TRIANGLES.structure +
+      frame.blobs +
+      frame.gantries +
+      frame.lamps;
+    const fullest =
+      base +
+      REALISTIC_REMOTE_TRIANGLES +
+      PARK_DRESSING_TRIANGLES +
+      PARK_FIELD_TRIANGLES +
+      REALISTIC_DECORATION_TRIANGLES;
+    console.log(
+      `#3278: the fullest frame ${String(fullest)} triangles before the cars, ` +
+        `${String(fullest + REALISTIC_PARKED_CAR_TRIANGLES)} with them, of ` +
+        `${String(REALISTIC_FRAME_TRIANGLES)}`,
+    );
+    expect(fullest + REALISTIC_PARKED_CAR_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // And at every structure's heaviest shape as built, the #506 case.
+    expect(
+      frame.vegetation +
+        frame.riders +
+        frame.structureItems * frame.heaviestStructure +
+        frame.blobs +
+        frame.gantries +
+        frame.lamps +
+        PARK_DRESSING_TRIANGLES +
+        REALISTIC_PARKED_CAR_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #1283: with EITHER set's trees, since the owner's page can load both —
+    // the frame #1283's own case prices, and the cars with it.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const loaded = worstFrame(trees);
+      expect(
+        loaded.vegetation +
+          loaded.riders +
+          loaded.structureItems * REALISTIC_TRIANGLES.structure +
+          loaded.blobs +
+          loaded.gantries +
+          loaded.lamps +
+          REALISTIC_PARKED_CAR_TRIANGLES,
+        trees,
+      ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    }
+    // Non-vacuity: the sum is the frame's and not a term of it — without the
+    // cars' row it is under the frame by less than three streets of them.
+    expect(REALISTIC_FRAME_TRIANGLES - fullest).toBeLessThan(3 * REALISTIC_PARKED_CAR_TRIANGLES);
+    // No ceiling was raised to make the room.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    expect(REALISTIC_VILLAGE_DRAW_CALLS).toBe(50);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
+    // One call of their own, and none on the village's frozen frame, which has no car.
+    expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
