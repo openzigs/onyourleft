@@ -89,7 +89,7 @@ for everyone, `test:workerd` included), each for about 0.2 s of a ~20-minute job
 *fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
 that dependency's install script run on the runner. The controls that keep it acceptable are all
 already in place — `pull_request` rather than its target-context counterpart, `permissions: contents:
-read`, no secret at all (since #1231's GHCR mirror the job holds none), `persist-credentials: false`, and the first-time-contributor approval
+read`, no secret at all (since #1231's GHCR mirror the job holds none; since #3205 one step before the install holds the private-term list, and a fork's run is not given it), `persist-credentials: false`, and the first-time-contributor approval
 gate — and the residual exposure is runner CPU and outbound network, which is inherent to running an
 install in CI at all. Read the block anyway when reviewing a fork's pull request.
 
