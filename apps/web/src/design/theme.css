@@ -14510,9 +14510,17 @@ html:has(.oyl-open-world__go) {
  * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
  *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
  *   leaning rider's box.
- * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ * - **60 rem wide and 48 rem tall** (the 4:3 tablet, 1024×768): three
  *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
- *   under the rider.
+ *   under the rider, 19 px with the Pixel Tablet's 32 px bottom inset.
+ *   Not 40 rem (#2417): the two rows are a fixed 104 px tall while the room
+ *   under the rider's feet is a fifth of the height, so a short 16:10 tablet,
+ *   1024×640 or 960×640, had them 17 px under the rider with no insets and
+ *   7 px over it with that inset; 44 rem (1024×704) left 6 px, less than the
+ *   HUD's 8 px gap and within a runner's fonts of the rider. One row of five
+ *   needs 464 px (five 5 rem cells and their gaps), more than the road
+ *   between the panels under 78 rem, so a tablet that short gives the strip
+ *   way.
  * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
  *   68 rem tall or more):
  *   on the actions panel, in its column, by the rule after these
@@ -14551,7 +14559,7 @@ html:has(.oyl-open-world__go) {
   }
 }
 
-@media (min-width: 60rem) and (min-height: 40rem), (min-width: 78rem) and (height > 30rem) {
+@media (min-width: 60rem) and (min-height: 48rem), (min-width: 78rem) and (height > 30rem) {
   .oyl-game--riding .oyl-hud__totals {
     display: grid;
     position: absolute;
