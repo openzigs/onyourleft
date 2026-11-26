@@ -82,7 +82,12 @@ function Chooser(options: Options): JSX.Element {
     <main>
       <RoutePicker
         routes={[LEVEL, ...(options.own ?? OWN)]}
-        level={{ routeId: LEVEL.id, credit: OSM_ATTRIBUTION, houses: FIXTURE.round.houses }}
+        level={{
+          routeId: LEVEL.id,
+          credit: OSM_ATTRIBUTION,
+          houses: FIXTURE.round.houses,
+          noDelivery: 0,
+        }}
         picked={picked}
         onPick={setPicked}
         units="metric"

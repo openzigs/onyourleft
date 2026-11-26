@@ -22,7 +22,14 @@ import { circuitRouteId, isLevelRouteId, levelRouteId, routeId } from '@onyourle
 import { ODBL_LICENCE_URL, ODBL_NOTICE } from '../../../map/basemap';
 import { modulesUnder } from '../../cannot-reach-trainer-testing';
 import { SHIPPED_LEVEL_FILES, SHIPPED_LEVELS } from '../../shipped-levels';
+import { FOOTPRINT_MAX_VERTICES, footprintPlans } from '../../footprint-buildings';
+import { landClassMask } from '../../land-class';
+import { mappedBuildingsOf } from '../../mapped-buildings';
+import { corridorOrigin } from '../../terrain';
+import { urbanClassMap } from '../../urban-class';
 import { roundHousesOn } from '../courses';
+import { startDeliveryRide } from '../ride-round';
+import { noDeliveryCount } from '../targets';
 import { DEFAULT_THROW_WINDOW } from '../throw';
 import { LEVEL_HOUSE_MARGIN } from '../../../../tools/delivery-levels/author-level';
 import { levelFileSizes, levelSizeFindings } from '../../../../tools/delivery-levels/level-sizes';
@@ -179,6 +186,7 @@ describe('levelLibrary reads a level’s own file — #2361, D-2.5', () => {
       name: 'Fixture Lane',
       lengthMetres: 2000,
       houses: 6,
+      noDelivery: 0,
     }));
     const library = levelLibrary(
       {
@@ -202,6 +210,7 @@ describe('levelLibrary reads a level’s own file — #2361, D-2.5', () => {
       name: 'Fixture Lane',
       lengthMetres: 2000,
       houses,
+      noDelivery: 0,
     });
     const library = levelLibrary(
       {
@@ -245,10 +254,10 @@ describe('levelLibrary: the listing is not the level — #2362, D-2.5', () => {
   }
 
   const LISTED: readonly LevelListing[] = [
-    { id: 'second', name: 'Second Lane', lengthMetres: 2000, houses: 6 },
-    { id: 'first', name: 'First Lane', lengthMetres: 2000, houses: 4 },
+    { id: 'second', name: 'Second Lane', lengthMetres: 2000, houses: 6, noDelivery: 0 },
+    { id: 'first', name: 'First Lane', lengthMetres: 2000, houses: 4, noDelivery: 0 },
     // Listed, and shipped by no file: never offered.
-    { id: 'missing', name: 'Missing Lane', lengthMetres: 2000, houses: 5 },
+    { id: 'missing', name: 'Missing Lane', lengthMetres: 2000, houses: 5, noDelivery: 0 },
   ];
 
   it('lists from the catalogue alone, in unlock order, and reads no file to do it', () => {
@@ -295,6 +304,8 @@ describe('the shipped level files — #2361, D-3.2, D-6.2 and D-7', () => {
           name: file.name,
           lengthMetres: file.lengthMetres,
           houses: file.round.houses,
+          // #2970: how many of them get no parcel, as every ride of the level picks them.
+          noDelivery: noDeliveryCount(file.round.houses, file.round.noDeliveryShare),
         }))
         .sort((a, b) => a.id.localeCompare(b.id)),
     );
@@ -350,6 +361,37 @@ describe('the shipped level files — #2361, D-3.2, D-6.2 and D-7', () => {
       expect(roundHousesOn(levelCorridor(file), levelRoute(file).profile)).toBeGreaterThanOrEqual(
         file.round.houses + LEVEL_HOUSE_MARGIN,
       );
+    });
+  }
+
+  // #2970: one case a level, as above, so no one case plans every level's footprints.
+  for (const file of inUnlockOrder()) {
+    it(`${file.id} places the houses its catalogue entry says, to deliver to and to skip, as a ride picks them (#2970)`, () => {
+      const listing = LEVEL_CATALOGUE.find((level) => level.id === file.id);
+      const profile = levelRoute(file).profile;
+      const corridor = levelCorridor(file);
+      const land = landClassMask(corridor);
+      const { plans } = footprintPlans(
+        corridor,
+        land,
+        profile,
+        corridorOrigin(profile),
+        FOOTPRINT_MAX_VERTICES,
+        urbanClassMap(corridor, land, profile),
+      );
+      const ride = startDeliveryRide({
+        buildings: mappedBuildingsOf(plans),
+        profile,
+        origin: corridorOrigin(profile),
+        riderDistance: 0,
+        lineOffset: 0,
+        storage: undefined,
+        level: { ...file.round, lengthMetres: file.lengthMetres, id: file.id },
+        seed: 2970,
+      });
+      // The HUD's "N left" at the start is the round's houses; the rest are the ones to skip.
+      expect(ride?.round.houses.length).toBe((listing?.houses ?? 0) - (listing?.noDelivery ?? 0));
+      expect(ride?.noDeliveryTargets.length).toBe(listing?.noDelivery);
     });
   }
 

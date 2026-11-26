@@ -9,7 +9,9 @@
  * load every level to show one line each. The picker reads this instead: a
  * level's id, its name, its length and the houses on its round, which are
  * the file's own `id`, `name`, `lengthMetres` and `round.houses`, written
- * down when the file is drawn. `levels.test.ts` reads every shipped file and
+ * down when the file is drawn, and since #2970 how many of those houses get
+ * no parcel, `targets.ts` §`noDeliveryCount` of them at the file's
+ * `round.noDeliveryShare`. `levels.test.ts` reads every shipped file and
  * holds each entry here to it, field for field, and holds that every file
  * has an entry and every entry a file, so a redraw that changes a length is
  * a red test until this is changed too.
@@ -29,6 +31,26 @@ export interface LevelListing {
   readonly lengthMetres: number;
   /** The houses on the level's round (`round.houses`). */
   readonly houses: number;
+  /**
+   * How many of {@link houses} must not get a parcel (#2365), so are not
+   * among the houses the HUD counts as left — #2970: `targets.ts`
+   * §`noDeliveryCount` of `round.houses` at `round.noDeliveryShare`. A level
+   * places every house it asks for (ADR 0065 D-5.4), so this is the count
+   * every ride of it has.
+   */
+  readonly noDelivery: number;
+}
+
+/**
+ * A level's houses, in words, as the picker and the setup say them — #2970,
+ * for the owner's approval: *"10 houses on the round: 7 to deliver to, 3 to
+ * skip"*, so the 7 the HUD then counts as left is the round's own number. A
+ * level with none to skip says *"4 houses on the round"*, as before.
+ */
+export function levelHousesText(level: Pick<LevelListing, 'houses' | 'noDelivery'>): string {
+  const houses = `${String(level.houses)} ${level.houses === 1 ? 'house' : 'houses'} on the round`;
+  if (level.noDelivery === 0) return houses;
+  return `${houses}: ${String(level.houses - level.noDelivery)} to deliver to, ${String(level.noDelivery)} to skip`;
 }
 
 /**
@@ -37,10 +59,46 @@ export interface LevelListing {
  * approval.
  */
 export const LEVEL_CATALOGUE: readonly LevelListing[] = Object.freeze([
-  Object.freeze({ id: 'morning-round', name: 'Morning Round', lengthMetres: 2138, houses: 4 }),
-  Object.freeze({ id: 'busy-round', name: 'Busy Round', lengthMetres: 2998, houses: 6 }),
-  Object.freeze({ id: 'corner-round', name: 'Corner Round', lengthMetres: 2708, houses: 7 }),
-  Object.freeze({ id: 'mailbox-round', name: 'Mailbox Round', lengthMetres: 3840, houses: 8 }),
-  Object.freeze({ id: 'rainy-round', name: 'Rainy Round', lengthMetres: 3696, houses: 9 }),
-  Object.freeze({ id: 'evening-round', name: 'Evening Round', lengthMetres: 2731, houses: 10 }),
+  Object.freeze({
+    id: 'morning-round',
+    name: 'Morning Round',
+    lengthMetres: 2138,
+    houses: 4,
+    noDelivery: 0,
+  }),
+  Object.freeze({
+    id: 'busy-round',
+    name: 'Busy Round',
+    lengthMetres: 2998,
+    houses: 6,
+    noDelivery: 0,
+  }),
+  Object.freeze({
+    id: 'corner-round',
+    name: 'Corner Round',
+    lengthMetres: 2708,
+    houses: 7,
+    noDelivery: 0,
+  }),
+  Object.freeze({
+    id: 'mailbox-round',
+    name: 'Mailbox Round',
+    lengthMetres: 3840,
+    houses: 8,
+    noDelivery: 2,
+  }),
+  Object.freeze({
+    id: 'rainy-round',
+    name: 'Rainy Round',
+    lengthMetres: 3696,
+    houses: 9,
+    noDelivery: 2,
+  }),
+  Object.freeze({
+    id: 'evening-round',
+    name: 'Evening Round',
+    lengthMetres: 2731,
+    houses: 10,
+    noDelivery: 3,
+  }),
 ]);
