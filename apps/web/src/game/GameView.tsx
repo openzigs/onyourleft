@@ -299,6 +299,7 @@ import { END_RIDE_TEXT, EndRideQuestion, type EndRideStep } from '../ride/EndRid
 import { readDeliveryProgress } from './delivery/delivery-progress';
 import { countCourses } from './delivery/courses';
 import type { LevelFile } from './delivery/levels/level-file';
+import { chosenSky, type LevelWeatherChoice } from './delivery/levels/level-weather';
 import {
   levelCorridor,
   levelOfRouteId,
@@ -1674,6 +1675,8 @@ function GameScreen({
    * one.
    */
   const [position, setPosition] = useState<RidingPosition>(DEFAULT_RIDING_POSITION);
+  /** #2578: the weather a level's round rides in, chosen in the setup; the level's own unless changed. */
+  const [levelWeather, setLevelWeather] = useState<LevelWeatherChoice>('level');
   const [withWind, setWithWind] = useState(false);
   const [windSpeed, setWindSpeed] = useState('');
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
@@ -3550,6 +3553,8 @@ function GameScreen({
                     ? undefined
                     : {
                         ...levelRidden.file.round,
+                        // #2578: in the weather and light the setup chose.
+                        ...chosenSky(levelWeather, levelRidden.file.round),
                         lengthMetres: levelRidden.file.lengthMetres,
                         id: levelRidden.file.id,
                       },
@@ -3674,6 +3679,7 @@ function GameScreen({
       captureSensors,
       inventedSensors,
       level,
+      levelWeather,
     ],
   );
 
@@ -5527,6 +5533,12 @@ function GameScreen({
                   routeId: level.route.id,
                   credit: OSM_ATTRIBUTION,
                   houses: level.file.round.houses,
+                  // #2578: the round's weather, the level's own unless chosen.
+                  weather: {
+                    own: level.file.round,
+                    chosen: levelWeather,
+                    onChoose: setLevelWeather,
+                  },
                 }
           }
           releaseNotice={trainerNow?.releaseFault}

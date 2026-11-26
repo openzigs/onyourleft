@@ -87,6 +87,11 @@ import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realis
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
+import {
+  LEVEL_WEATHER_CHOICES,
+  type LevelSky,
+  type LevelWeatherChoice,
+} from './delivery/levels/level-weather';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
@@ -425,7 +430,45 @@ export interface LevelOffer {
    * never one of the rider's routes' counts (review of PR #2378, round 3).
    */
   readonly houses: number;
+  /**
+   * #2578: the round's weather and light to choose, beside the round's
+   * switch. `undefined` offers no choice.
+   */
+  readonly weather?: LevelWeatherOffer | undefined;
 }
+
+/**
+ * The weather and light a level's round rides in, as the setup offers it —
+ * #2578: the level's own (its file's, `own`), or clear, rain or dusk.
+ */
+export interface LevelWeatherOffer {
+  readonly own: LevelSky;
+  readonly chosen: LevelWeatherChoice;
+  readonly onChoose: (choice: LevelWeatherChoice) => void;
+}
+
+/**
+ * The words of the weather choice — #2578, for the owner's approval: the
+ * project's own. The level's own names what it is, so a rider can tell
+ * whether choosing it changes anything.
+ */
+export const LEVEL_WEATHER_TEXT = {
+  legend: 'Weather',
+  level: (own: LevelSky): string => `Level’s own: ${skyName(own)}`,
+  clear: 'Clear',
+  rain: 'Rain',
+  dusk: 'Dusk',
+  hint: 'In rain and at dusk a house’s marker shows only once you are close to it. The weather changes nothing your trainer is sent.',
+} as const;
+
+/** A weather and light in words: *"clear"*, *"rain"*, *"dusk"* or *"rain at dusk"*. */
+function skyName(sky: LevelSky): string {
+  if (sky.weather === 'rain') return sky.light === 'dusk' ? 'rain at dusk' : 'rain';
+  return sky.light === 'dusk' ? 'dusk' : 'clear';
+}
+
+/** The weather choice's hint — #2578. One chooser a page, so a fixed id. */
+export const LEVEL_WEATHER_HINT_ID = 'oyl-chooser-level-weather-hint';
 
 /**
  * The rider-facing words of a built-in level in the setup — #2362, round 2,
@@ -993,6 +1036,10 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             // #2294: said beside the switch too, for the route chosen.
             chosenCourse={courseOf(chosen)}
           />
+        )}
+        {/* #2578: on a level, the round's weather, under its switch. */}
+        {!onLevel || props.level?.weather === undefined ? null : (
+          <LevelWeatherControl offer={props.level.weather} />
         )}
         {lapRace === undefined || chosen.profile.loop ? null : lapRace}
       </div>
@@ -1818,6 +1865,46 @@ function DeliveryControl(props: {
       </p>
       <p id={DELIVERY_HINT_ID} className="tw:m-0">
         {props.onLevel === true ? DELIVERY_CHOICE_TEXT.levelHint : DELIVERY_CHOICE_TEXT.hint}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The weather a level's round rides in — #2578: four options, so chips, as
+ * the lap race's bot tiers are, not a segmented control (`theme.css`
+ * §`.oyl-segmented` stops at three), the level's own first and chosen unless
+ * the rider picks another. A drawing and the markers' reveal only; the hint says the
+ * trainer is not touched (`delivery/levels/level-weather.ts`).
+ */
+function LevelWeatherControl(props: { readonly offer: LevelWeatherOffer }): JSX.Element {
+  const label = (choice: LevelWeatherChoice): string =>
+    choice === 'level' ? LEVEL_WEATHER_TEXT.level(props.offer.own) : LEVEL_WEATHER_TEXT[choice];
+  return (
+    <div className="oyl-game__weather tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <fieldset className="oyl-chips tw:mb-0">
+        <legend>{LEVEL_WEATHER_TEXT.legend}</legend>
+        <div className="oyl-chips__options">
+          {LEVEL_WEATHER_CHOICES.map((choice) => (
+            <label key={choice} htmlFor={`oyl-level-weather-${choice}`}>
+              <input
+                type="radio"
+                id={`oyl-level-weather-${choice}`}
+                name="oyl-level-weather"
+                value={choice}
+                checked={props.offer.chosen === choice}
+                aria-describedby={LEVEL_WEATHER_HINT_ID}
+                onChange={() => {
+                  props.offer.onChoose(choice);
+                }}
+              />
+              {label(choice)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p id={LEVEL_WEATHER_HINT_ID} className="tw:m-0">
+        {LEVEL_WEATHER_TEXT.hint}
       </p>
     </div>
   );
