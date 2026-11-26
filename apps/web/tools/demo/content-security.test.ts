@@ -49,6 +49,19 @@ describe('the demo page refuses the network — #1645', () => {
     expect(DEMO_PAGE).not.toMatch(/'unsafe-inline'/);
   });
 
+  it('names no YouTube origin and holds no frame: the video is a link, never an embed (#3225)', () => {
+    const content =
+      /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i.exec(DEMO_PAGE)?.[1] ??
+      '';
+    expect(content).not.toBe('');
+    expect(content).not.toMatch(/youtube|ytimg|googlevideo/i);
+    // No directive widens frames or images past the page's own origin.
+    const policy = policyOf(DEMO_PAGE);
+    expect(policy.has('frame-src')).toBe(false);
+    expect(policy.has('child-src')).toBe(false);
+    expect(DEMO_PAGE).not.toMatch(/<iframe|youtube|ytimg/i);
+  });
+
   it('allows the theme script, as the build writes it, by its hash', () => {
     const built = withInlineScriptHashes(
       withThemeSelection(DEMO_PAGE, '/index.html'),

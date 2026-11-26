@@ -732,3 +732,40 @@ describe('the demo page’s captions — #3074', { timeout: RIDE_TIMEOUT_MS }, (
     expect(card()).toBeNull();
   });
 });
+
+describe('the demo page links the two-minute video — #3225', () => {
+  const VIDEO = 'https://www.youtube.com/watch?v=lgpE-VbyFa0';
+  const links = (): HTMLAnchorElement[] =>
+    [...(mounted?.container.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].filter((each) =>
+      each.href.includes('youtube'),
+    );
+
+  it('shows one plain link to the video, which says it opens YouTube', async () => {
+    await page({ search: '?preset=sprint' });
+    expect(links()).toHaveLength(1);
+    const [link] = links();
+    expect(link?.getAttribute('href')).toBe(VIDEO);
+    expect(link?.textContent).toBe('Watch the two-minute demo on YouTube');
+    // A navigation, never an embed: the page's own policy would refuse a frame.
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toContain('noreferrer');
+  });
+
+  it('is a link only: no frame, no media element, and YouTube named nowhere but in that link', async () => {
+    await page({ search: '?preset=sprint' });
+    const container = mounted?.container;
+    expect(container?.querySelector('iframe, embed, object, video, img')).toBeNull();
+    for (const link of links()) link.remove();
+    expect(container?.innerHTML ?? '').not.toMatch(/youtube|ytimg/i);
+  });
+
+  it('keeps the link when the stage is paused for reduced motion', async () => {
+    await page({ search: '?preset=sprint', reducedMotion: true });
+    expect(links()).toHaveLength(1);
+  });
+
+  it('control: the video render, which is the video itself, does not link it', async () => {
+    await page({ search: '?preset=sprint&render' });
+    expect(links()).toHaveLength(0);
+  });
+});

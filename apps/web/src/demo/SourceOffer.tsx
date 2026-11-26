@@ -18,6 +18,16 @@ export const DEMO_LICENCE_URL = `${SOURCE_CODE_URL}/blob/main/LICENSE`;
 /** The notices document, relative to the page, so it works from any path. */
 export const DEMO_NOTICES_PATH = './licences/third-party.txt';
 
+/**
+ * The two-minute demo video on YouTube — #3225. A link, never an embed: the
+ * page's policy (`demo/index.html`: `default-src 'self'`) refuses a third-party
+ * frame, and a player would load YouTube's cookies; navigating to an address is
+ * not something the policy governs, so it is unchanged. It opens in a new tab
+ * because the demo is usually an iframe of another site, and YouTube refuses
+ * to be framed.
+ */
+export const DEMO_VIDEO_URL = 'https://www.youtube.com/watch?v=lgpE-VbyFa0';
+
 /** The offer, as the page's footer. */
 export function DemoSourceOffer() {
   return (
@@ -40,7 +50,10 @@ export function DemoSourceOffer() {
         <a href={DEMO_LICENCE_URL} target="_blank" rel="noreferrer">
           Licence (AGPL-3.0-or-later)
         </a>{' '}
-        · <a href={DEMO_NOTICES_PATH}>Third-party notices</a>
+        · <a href={DEMO_NOTICES_PATH}>Third-party notices</a> ·{' '}
+        <a href={DEMO_VIDEO_URL} target="_blank" rel="noreferrer">
+          Watch the two-minute demo on YouTube
+        </a>
       </p>
     </footer>
   );
