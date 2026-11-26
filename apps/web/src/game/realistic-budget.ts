@@ -1130,6 +1130,74 @@ export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
 export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
+ * The most pieces of railway track a frame draws — #3253 (`rail-track.ts`):
+ * **32**, nearest the rider first, each at most 40 m of one mapped line, so
+ * 1 280 m of track in view.
+ */
+export const RAIL_TRACK_PIECES_PER_FRAME = 32;
+
+/**
+ * How many of those may carry their sleepers and their rails' three faces:
+ * the nearest **8**, and only within `rail-track.ts` §`RAIL_TRACK_NEAR_METRES`
+ * of the rider. The rest draw a sleeper-toned strip and each rail's one
+ * upright face.
+ */
+export const RAIL_TRACK_NEAR_PIECES = 8;
+
+/**
+ * The most triangles a piece with its sleepers is: **350**. Ten steps of bed
+ * (a shoulder, the crown and a shoulder: 6) and of two rails of three faces
+ * (12) are 180, 40 m holds at most 67 sleepers of one quad (134), and a level
+ * crossing cuts at most two steps in two at the carriageway's edges
+ * (`rail-track.ts` §`CROSSING_CUTS_PER_PIECE`: 36 more). A deck is cut by no
+ * crossing and stands on at most four piers of two faces (16) instead.
+ */
+export const RAIL_TRACK_NEAR_PIECE_TRIANGLES = 350;
+
+/**
+ * The most a piece without is: **144**. Ten steps of bed (6), a strip (2) and
+ * two rails of one face (4), and the same two cuts (24).
+ */
+export const RAIL_TRACK_FAR_PIECE_TRIANGLES = 144;
+
+/** The most level crossings a frame stands signs at: the nearest **4**. */
+export const RAIL_CROSSINGS_PER_FRAME = 4;
+
+/**
+ * The most triangles one level crossing's signs are: **120**. Each of its two
+ * is a post (4), a crossbuck's two boards (4), a pair of lights (12) and a
+ * gate (12) where the map tags them: 64 at the most, both ways.
+ */
+export const RAIL_CROSSING_FURNITURE_TRIANGLES = 120;
+
+/**
+ * The most triangles a frame's railway may add — #3253: **6 736**, the pieces
+ * above at their heaviest and every crossing's signs. A class of its own, as
+ * [ADR 0099](../../../../docs/adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)
+ * D-4.1 asks of a thing no existing class fits: the track is built in code
+ * (`rail-track.ts`) and is no model, so none of {@link REALISTIC_TRIANGLES}'
+ * per-model ceilings is its.
+ *
+ * ⚠️ **No draw call and no ceiling above is raised.** The track is side roads:
+ * `three-renderer.ts` §`SideRoadBelt` draws it in the road's material in the
+ * call it already makes, with no texture. Like every side road, #2660's level
+ * crossings and #2973's nearby streets (8 192 a frame), it is **outside
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame**, which counts none of the
+ * road's mesh; unlike a village side road it is drawn only where a corridor
+ * maps a railway, so only in the realistic world. So this number bounds the
+ * track and is NOT evidence that a frame with track in it holds its rate: the
+ * tablet's reading on a ride past a mapped line is the owner's, owed before
+ * #3253 merges, and nothing here has measured it.
+ *
+ * @test-facing held by `rail-track.test.ts`, which builds the heaviest pieces
+ * and a frame of more railway than fits, and counts the belt's own mesh
+ */
+export const REALISTIC_RAIL_TRACK_TRIANGLES =
+  RAIL_TRACK_NEAR_PIECES * RAIL_TRACK_NEAR_PIECE_TRIANGLES +
+  (RAIL_TRACK_PIECES_PER_FRAME - RAIL_TRACK_NEAR_PIECES) * RAIL_TRACK_FAR_PIECE_TRIANGLES +
+  RAIL_CROSSINGS_PER_FRAME * RAIL_CROSSING_FURNITURE_TRIANGLES;
+
+/**
  * The most triangles a frame's village streets may add — #1535's pavements,
  * #1564's paths to the front doors and #1536's street furniture: **34 304**
  * in the realistic world since the owner's ruling of 2026-11-05 on #1274

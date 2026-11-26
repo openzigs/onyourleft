@@ -34,7 +34,9 @@
  * - **Level crossings** ({@link levelCrossings}, #2660): where a mapped
  *   railway (`WorldCorridor.rails`) crosses the route at grade, found by the
  *   same rules, each arm a stretch of track. Kept apart from the mapped
- *   junctions, so a street's consumers never read a track as a street.
+ *   junctions, so a street's consumers never read a track as a street. Since
+ *   #3253 `rail-track.ts` draws the railway, and reads these for where a
+ *   crossing is.
  * - **Unpaved ways** ({@link mappedTracks}, #2695): where a mapped `track` or
  *   `bridleway` (`WorldCorridor.paths`, `kind_detail`) leaves the route, found
  *   by the same rules, each arm a gravel or earth way. Kept apart from the
@@ -74,8 +76,10 @@
  * gauge, each its upright face, carried on across the carriageway to the
  * route's centreline at {@link RAIL_ON_ROAD_METRES}, and no
  * give-way line. Its `across` is nought, so #628's wheel tracks and dust are
- * never on it. ⚠️ **No crossbuck, signal or barrier, and no track that runs
- * beside the route without crossing it**: those need meshes of their own.
+ * never on it. ⚠️ **Since #3253 no ride draws this arm**: `rail-track.ts`
+ * draws the track along the whole line, sleepers and all, the crossing's
+ * surface and its crossbucks, in this same mesh, and `scene.ts` hands
+ * {@link sideRoadsAt} no level crossing.
  *
  * An unpaved way's arm (#2695) is drawn the same way in the same mesh, at its
  * own narrower width, in {@link GRAVEL} or {@link EARTH} rather than the
@@ -874,9 +878,13 @@ const crossingsFound = new WeakMap<
  * street's junction beside it and a street's consumers — a pavement's mouth,
  * the footways' breaks — never read a track as a street.
  *
- * Drawn by {@link sideRoadsAt} with the side roads, in their one mesh and
- * under their frame bound ({@link SIDE_ROADS_PER_FRAME}): ballast, two rails
- * on it, and the rails carried across the carriageway ({@link armMesh}).
+ * ⚠️ **Since #3253 a frame's railway is `rail-track.ts`'**: the track along
+ * every mapped line in view, the crossing's surface and its signs with it,
+ * still in the side roads' one mesh. `scene.ts` no longer hands these
+ * junctions to {@link sideRoadsAt}; `rail-track.ts` reads them for where a
+ * crossing is and which way its track runs. {@link sideRoadsAt} still draws
+ * one it IS handed as #2660 did — ballast, two rails on it, and the rails
+ * carried across the carriageway ({@link armMesh}) — which no ride now does.
  * Built once per corridor, the same array after.
  */
 export function levelCrossings(
@@ -1208,6 +1216,38 @@ function smooth(share: number): number {
   return s * s * (3 - 2 * s);
 }
 
+/** What {@link standingBesideRoad} answers. */
+export interface StandingBesideRoad {
+  /** The road's height on the carriageway, the ground's past the ramp, blended between. No lift. */
+  readonly standing: number;
+  /** The drawn ground's own height there (`landform.ts` §`terrainHeightAt`). */
+  readonly ground: number;
+  /** How far through the ramp: `0` on the carriageway, `1` from {@link SIDE_ROAD_RAMP_METRES} off its edge. */
+  readonly share: number;
+}
+
+/**
+ * The height a thing that meets the main road stands at, beside the point of
+ * the drawn road `near` is: the road's own height on the carriageway,
+ * blending to the drawn ground's across {@link SIDE_ROAD_RAMP_METRES} out
+ * from the road's edge, then the ground's. What a side road's vertex stands
+ * on ({@link heightAt}) and, since #3253, what a railway's track does
+ * (`rail-track.ts`): ONE formula, so a track is on the heights the road and
+ * its side roads are on, never floating over them or sunk under them.
+ */
+export function standingBesideRoad(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  near: NearestOnRoad,
+  land: LandClassMask,
+): StandingBesideRoad {
+  const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
+  const road = elevationAt(profile, distanceOnRoute(profile, near.along)) - origin.elevation;
+  const share = smooth((Math.abs(near.lateral) - ROAD_HALF_WIDTH_METRES) / SIDE_ROAD_RAMP_METRES);
+  return { standing: road + (ground - road) * share, ground, share };
+}
+
 /**
  * The height a side road's vertex stands at, the lift above: the main road's
  * height blending to the ground's across {@link SIDE_ROAD_RAMP_METRES} out
@@ -1233,10 +1273,8 @@ function heightAt(
 ): { readonly y: number; readonly ground: number } {
   const near = nearestOnDrawnRoad(profile, origin, x, z, SIDE_ROAD_METRES + 40);
   if (near === undefined) return { y: SIDE_ROAD_LIFT_METRES, ground: 0 };
-  const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
-  const road = elevationAt(profile, distanceOnRoute(profile, near.along)) - origin.elevation;
-  const ramp = smooth((Math.abs(near.lateral) - ROAD_HALF_WIDTH_METRES) / SIDE_ROAD_RAMP_METRES);
-  const standing = road + (ground - road) * ramp + SIDE_ROAD_LIFT_METRES;
+  const { standing: blended, ground } = standingBesideRoad(profile, origin, seed, near, land);
+  const standing = blended + SIDE_ROAD_LIFT_METRES;
   const sunk = ground - SIDE_ROAD_SINK_METRES;
   const y = standing + (sunk - standing) * smooth(fadingAt(out));
   return { y, ground };

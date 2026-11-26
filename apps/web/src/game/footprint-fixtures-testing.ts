@@ -1397,6 +1397,14 @@ export const NEIGHBOURHOOD_TO = 2_100;
  *   of `railway` land 30 m wide, with houses' `residential` land either side.
  * - **1 700 m**: a second line at grade, crossing at 60°.
  * - **2 000 m**: a line on a bridge, the control: no level crossing.
+ *
+ * Since #3253, for the track itself (`rail-track.ts`):
+ *
+ * - the crossing at 1 200 m is **tagged** with lights and gates
+ *   (`WorldCorridor.railCrossings`), and the one at 1 700 m is not, so it is
+ *   a crossbuck alone;
+ * - **2 250 m to 2 850 m**: a line beside the road, 14 m off its left, that
+ *   never crosses it.
  */
 export function railFixture(latitude = FIXTURE_LATITUDE): {
   readonly profile: RouteProfile;
@@ -1415,6 +1423,7 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
       [along + lean, 200],
     ]);
   };
+  const tagged = ringBeside(profile, origin, [[1_200, 0]]);
   return {
     profile,
     origin,
@@ -1436,6 +1445,17 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
         { kindDetail: 'rail', grade: 'ground', line: across(1_200, 0) },
         { kindDetail: 'rail', grade: 'ground', line: across(1_700, 30) },
         { kindDetail: 'rail', grade: 'bridge', line: across(2_000, 0) },
+        {
+          kindDetail: 'rail',
+          grade: 'ground',
+          line: ringBeside(profile, origin, [
+            [2_250, -14],
+            [2_850, -14],
+          ]),
+        },
+      ],
+      railCrossings: [
+        { x: tagged[0] as number, z: tagged[1] as number, lights: true, gates: true },
       ],
     },
   };

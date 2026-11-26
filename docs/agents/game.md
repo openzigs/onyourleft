@@ -2385,15 +2385,35 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is broken at its crossroads with dropped kerbs.
                         ⚠️ **Since #2660 a level crossing** wherever a mapped
                         railway (`WorldCorridor.rails`) crosses the route at
-                        grade (§`levelCrossings`): ballast and two rails a
-                        side road's length off each side, the rails carried
-                        across the carriageway, in the same mesh under the
-                        same frame bound — no crossbuck, signal or barrier.
+                        grade (§`levelCrossings`) is FOUND here; since #3253
+                        `rail-track.ts` draws it, and `scene.ts` hands
+                        `sideRoadsAt` none.
                         ⚠️ **Since #2695 an unpaved way** wherever a mapped
                         `track` or `bridleway` (`WorldCorridor.paths`) leaves
                         the route (§`mappedTracks`): gravel or earth, 3 m or
                         2 m wide, no give-way line, joined as a side road is,
                         in the same mesh under the same frame bound
+    src/game/rail-track.ts
+                        railway track (#3253, ADR 0099 D-1: built in code, no
+                        model and no texture) — every mapped line of
+                        `WorldCorridor.rails` at grade or on a bridge, out to
+                        the fog: a ballast bed with shoulders, sleepers every
+                        0.6 m and two rails at standard gauge; at a level
+                        crossing the road's surface across the bed and a
+                        crossbuck each way, with lights and a gate ONLY where
+                        `WorldCorridor.railCrossings` tags them (⚠️ no decoder
+                        fills that yet, so a real map's crossings are
+                        crossbucks alone); on a bridge a deck carrying the
+                        same track, level across its span and 6.4 m over the
+                        route where it crosses it. ⚠️ **Grounded on
+                        `cross-streets.ts` §`standingBesideRoad`**, the one
+                        formula a side road stands on: never a height of its
+                        own. ⚠️ **Side roads, not a belt of its own**:
+                        `scene.ts` appends the pieces in view to the frame's
+                        `sideRoads`, so `SideRoadBelt` draws them in its ONE
+                        call and the clearances keep the scenery off. At most
+                        `realistic-budget.ts` §`REALISTIC_RAIL_TRACK_TRIANGLES`
+                        a frame, chosen again every 40 m. Page `town=rail`.
     src/game/nearby-streets.ts
                         nearby streets (#2973) — the mapped `ground` streets
                         off the route drawn out to the fog (400 m): a street
