@@ -89,7 +89,12 @@ import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from 
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
-import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
+import {
+  AI_BOTS_RACE_TEXT,
+  LAP_RACE_MOST_BOTS,
+  LAP_RACE_MOST_LAPS,
+  type LapRaceChoice,
+} from './lap-race/choice';
 import { isOpenWorldRouteId } from './open-world/route-id';
 import {
   PREVIEW_DEFAULT_WATTS,
@@ -312,6 +317,10 @@ export const AI_BOTS_TEXT = {
  * The AI bots switch, and the consent it asks for — #2710. A race chosen with
  * it and no consent is the seeded race: the consent is asked here, on the
  * first race, and again after a withdrawal or a change of model address.
+ *
+ * #2868: chosen with the consent given, the race will be against AI bots, and
+ * the line the standings used to carry for the whole race says so here,
+ * worded as it was (`lap-race/choice.ts` §`AI_BOTS_RACE_TEXT`).
  */
 function AiBotsControl(props: {
   readonly ai: AiBotsOffer;
@@ -376,6 +385,7 @@ function AiBotsControl(props: {
           </button>
         </>
       ) : null}
+      {chosen && ai.consented ? <p className="tw:m-0">{AI_BOTS_RACE_TEXT.racing}</p> : null}
       <p role="status" className="tw:m-0">
         {ai.problem ? AI_BOTS_TEXT.problem : ''}
       </p>

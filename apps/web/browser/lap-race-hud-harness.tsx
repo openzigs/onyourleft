@@ -86,7 +86,7 @@ import {
 } from '../src/game/hud/hud-layout-preference';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from '../src/game/lap-race/choice';
-import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
+import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/choice';
 import type { GameState } from '../src/game/simulation';
 import type { LapFigures } from '../src/recording/laps';
 
@@ -359,8 +359,10 @@ const STAGES: readonly {
  * with no input and its standings take the room they leave.
  * `corner-middle`'s never do: its rider holds an item, which holds them drawn
  * (ADR 0075 D-5), so it is the same page's control. `&note=ai` puts the AI bots' sentence under the
- * standings' summary (#2710), two lines the list then has less room by — the
- * corner as a race against a rider's own model draws it.
+ * standings' summary (#2710), two lines the list then has less room by. Since
+ * #2868 the one sentence the standings carry is that AI bots are not
+ * available (`ride-race.ts` §`lapRaceStandingsNote`): a race against a
+ * rider's own model draws none, and one the instance refused draws this.
  */
 const SEARCH = new URLSearchParams(window.location.search);
 const CORNER = SEARCH.get('corner') === 'race';
@@ -465,7 +467,7 @@ function Corner(): JSX.Element {
             lapRace={hudOf(race)}
             standings={{
               ...lapRaceStandings(hudOf(race)),
-              ...(AI_NOTE ? { note: AI_BOTS_RACE_TEXT.racing } : {}),
+              ...(AI_NOTE ? { note: AI_BOTS_RACE_TEXT.unavailable } : {}),
             }}
           />
         </section>

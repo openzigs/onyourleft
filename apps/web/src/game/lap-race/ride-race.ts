@@ -141,7 +141,7 @@ import type { RaceBotInput } from '../scene';
 
 import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
 import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './assist-preference';
-import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
+import { AI_BOTS_RACE_TEXT, LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
 import {
   answerLapRaceModel,
@@ -875,20 +875,24 @@ export function lapRaceHud(
 }
 
 /**
- * What the standings say of a race's AI bots (#2710), or `undefined` for a
- * seeded race: that they are racing, or — when the instance refused the
- * race's start — that they are not available now (ADR 0071 D-6.3).
- * ⚠️ Draft wording for the owner's approval with the screenshots.
+ * What the HUD's notice cell says of a race's AI bots (#2710), or `undefined`
+ * for a seeded race: `choice.ts` §`AI_BOTS_RACE_TEXT`, that they are racing,
+ * or that they are not available now (ADR 0071 D-6.3).
  */
-export const AI_BOTS_RACE_TEXT = {
-  racing: 'AI bots: your instance’s model picks their moves.',
-  unavailable: 'AI bots are not available right now. The bots race on their own.',
-} as const;
-
-/** @see AI_BOTS_RACE_TEXT */
 export function lapRaceModelNote(ride: LapRaceRide): string | undefined {
   if (ride.model === undefined) return undefined;
   return ride.model.unavailable === undefined
     ? AI_BOTS_RACE_TEXT.racing
     : AI_BOTS_RACE_TEXT.unavailable;
+}
+
+/**
+ * What the standings say of a race's AI bots — #2868: only that they are not
+ * available now (ADR 0071 D-6.3), or `undefined`. That they are racing is
+ * said on the pre-race screen (`StageChooser.tsx` §`AiBotsControl`) and in
+ * the notice cell ({@link lapRaceModelNote}), so the two lines it took under
+ * the standings' summary are the list's while the controls are drawn.
+ */
+export function lapRaceStandingsNote(ride: LapRaceRide): string | undefined {
+  return ride.model?.unavailable === undefined ? undefined : AI_BOTS_RACE_TEXT.unavailable;
 }

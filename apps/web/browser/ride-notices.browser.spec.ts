@@ -37,7 +37,7 @@ import {
   TABLET_VIEWPORTS,
 } from './ride-stage';
 
-import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
+import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/choice';
 import { pacerSayProblem } from '@onyourleft/domain';
 
 import { AI_PACER_LINE } from './ai-pacer-line';
@@ -503,18 +503,17 @@ test.describe('keep the screen on, beside every notice that stays — #647', () 
  * #2710 — A LAP RACE'S AI BOTS LINE IS SEEN AT 1024×600.
  *
  * `?lap=riding&ai=racing`: a solo lap race with AI bots, the consent given
- * (`ride-harness.tsx` §`AI_BOTS`). The standings carry the line for the whole
- * race, but they are drawn on a tablet only (ADR 0051 D-7; `theme.css` §"A
- * RACE'S STANDINGS"): under 47 rem tall they are a 1×1 box a screen reader
- * reaches and nobody sees. So the notice cell carries it from the press, for
- * `GameView` §`STANDING_NOTICE_SECONDS` of ride (`GameView` §`aiBotsNotice`).
+ * (`ride-harness.tsx` §`AI_BOTS`). The standings are drawn on a tablet only
+ * (ADR 0051 D-7; `theme.css` §"A RACE'S STANDINGS"), and since #2868 they do
+ * not carry this line: it is said on the pre-race screen. So the notice cell
+ * carries it from the press, for `GameView` §`STANDING_NOTICE_SECONDS` of
+ * ride (`GameView` §`aiBotsNotice`).
  *
  * Held at the narrowest wide screen, beside the race's own countdown notice:
  * every copy of the line on the page is found, and one of them must be laid
  * out, whole on the stage, the topmost thing at each of its corners, over no
  * other panel, no control and not the leaning rider. The control takes the
- * notice away and requires no copy of the line left visible: the standings'
- * own is the hidden one.
+ * notice away and requires no copy of the line left visible.
  */
 const AI_BOTS_RACING_LINE = AI_BOTS_RACE_TEXT.racing;
 
@@ -584,7 +583,7 @@ test.describe('a lap race’s AI bots line is seen on the HUD at 1024×600 — #
   }) => {
     await openRide(page, viewport, '?lap=riding&ai=racing');
     const lines = await aiBotsLines(page);
-    // The standings' copy is there, and hidden: the reason for the notice.
+    // No copy outside the notice is visible: since #2868 the standings carry none.
     expect(lines.filter((each) => !each.inNotices).every((each) => !seenLine(each))).toBe(true);
     const shown = lines.find((each) => each.inNotices && seenLine(each));
     expect(shown, `no visible copy of the line: ${JSON.stringify(lines)}`).toBeDefined();
