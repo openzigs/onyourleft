@@ -39,7 +39,12 @@ import {
   CROSSBUCK_WHITE,
   CROSSING_PANEL,
   DECK_CLEARANCE_METRES,
+  ABUTMENT,
+  ABUTMENT_SEAT_METRES,
+  ABUTMENT_WING_BACK_METRES,
   BALLAST_OVERGROWN,
+  EMBANKMENT_GRASS,
+  EMBANKMENT_RUN,
   DECK_FLANGE,
   DECK_GIRDER,
   DECK_GIRDER_METRES,
@@ -686,6 +691,8 @@ describe('a rail bridge — #3253', () => {
         DECK_SPAN_HALF_METRES + 0.01,
       );
     }
+    // Level from abutment to abutment: its foot 30 m each side averages its foot over the road.
+    expect((girderFootAt(-30) + girderFootAt(30)) / 2).toBeCloseTo(girderFootAt(0), 1);
     // Both sides of the deck.
     expect(new Set(webs.map((quad) => Math.sign(centre(quad).along - at))).size).toBe(2);
     const dark = quads.filter(is(DECK_FLANGE));
@@ -777,35 +784,115 @@ describe('a rail bridge — #3253', () => {
       for (const each of cap) {
         expect(each.foot).toBeCloseTo(face.top, 3);
         expect(each.top - each.foot).toBeCloseTo(DECK_PIER_CAP_METRES[2], 3);
-        expect(each.top).toBeCloseTo(girderFootAt(here.lateral), 1);
+        // The girder's underside exactly: it neither stops short of it nor pokes through.
+        expect(each.top).toBeCloseTo(girderFootAt(here.lateral), 3);
       }
       // Wider than the shaft under it, both ways.
       expect(cap.map((each) => Number(each.high.toFixed(2))).sort()).toEqual([
         DECK_PIER_CAP_METRES[1],
         DECK_PIER_CAP_METRES[0],
       ]);
+      // Wider than the deck, so both girders bear on it.
+      expect(DECK_PIER_CAP_METRES[0]).toBeGreaterThan(BALLAST_CROWN_METRES + 0.2);
       expect(DECK_PIER_CAP_METRES[0]).toBeGreaterThan(DECK_PIER_METRES[0]);
       expect(DECK_PIER_CAP_METRES[1]).toBeGreaterThan(DECK_PIER_METRES[1]);
     }
   });
 
-  it('is an abutment past its span, and is met by track that climbs to it between walls', () => {
-    const walls = quads.filter(is(TRACK_WALL));
-    expect(walls.length).toBeGreaterThan(0);
-    for (const quad of walls) {
-      expect(Math.min(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeGreaterThan(
-        DECK_SPAN_HALF_METRES - 0.01,
+  it('ends at a short abutment under the girder’s bearing, with a wing wall each side turned back', () => {
+    const concrete = quads.filter(is(ABUTMENT));
+    // A face and two wings at each end of the span.
+    expect(concrete).toHaveLength(6);
+    const faceHeight = ABUTMENT_SEAT_METRES - DECK_KERB_METRES;
+    for (const quad of concrete) {
+      // At the span's end, and stained toward its foot.
+      const here = centre(quad);
+      expect(Math.abs(Math.abs(here.lateral) - DECK_SPAN_HALF_METRES)).toBeLessThan(
+        ABUTMENT_WING_BACK_METRES,
+      );
+      expect(quad.shade).not.toEqual(quad.colour);
+      // Short: from under the ballast to its seat, never a wall down to the ground.
+      const ys = quad.corners.map((corner) => corner.y);
+      expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(faceHeight, 2);
+      expect(Math.min(...ys) - groundAt(here.along, here.lateral)).toBeGreaterThan(
+        DECK_CLEARANCE_METRES - ABUTMENT_SEAT_METRES - 1,
+      );
+      // Its foot is the seat: just under the girder that bears on it.
+      const side = Math.sign(here.lateral);
+      expect(girderFootAt(side * (DECK_SPAN_HALF_METRES - 0.5)) - Math.min(...ys)).toBeGreaterThan(
+        0.5,
+      );
+      expect(girderFootAt(side * (DECK_SPAN_HALF_METRES - 0.5)) - Math.min(...ys)).toBeLessThan(
+        1.2,
       );
     }
-    // The abutment: where the girder ends a wall stands from the deck down into the ground.
-    for (const side of [-1, 1]) {
-      const face = walls
-        .flatMap((quad) => quad.corners)
-        .filter((corner) => Math.abs(corner.lateral - side * DECK_SPAN_HALF_METRES) < 0.01);
-      expect(face.length).toBeGreaterThan(0);
-      const ys = face.map((corner) => corner.y);
-      expect(Math.min(...ys)).toBeLessThan(groundAt(at, side * DECK_SPAN_HALF_METRES));
-      expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(DECK_CLEARANCE_METRES - 1);
+    const wings = concrete.filter((quad) => span(quad, (c) => c.lateral) > 1);
+    expect(wings).toHaveLength(4);
+    for (const quad of wings) {
+      // Turned back into the bank, away from the road, and falling with it.
+      expect(span(quad, (c) => c.lateral)).toBeCloseTo(ABUTMENT_WING_BACK_METRES + 0.05, 1);
+      expect(Math.max(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeCloseTo(
+        DECK_SPAN_HALF_METRES + ABUTMENT_WING_BACK_METRES,
+        1,
+      );
+      expect(span(quad, (c) => c.along)).toBeGreaterThan(3);
+    }
+  });
+
+  it('is carried past its span on a grass embankment whose sides fall at 1 in 2, and no wall', () => {
+    expect(EMBANKMENT_RUN).toBe(2);
+    // No concrete wall anywhere: #3270's two blank walls are gone.
+    expect(quads.filter(is(TRACK_WALL))).toEqual([]);
+    const banks = quads.filter(is(EMBANKMENT_GRASS));
+    const sides = banks.filter(
+      (quad) =>
+        Math.min(...quad.corners.map((c) => Math.abs(c.lateral))) > DECK_SPAN_HALF_METRES + 3,
+    );
+    expect(sides.length).toBeGreaterThan(40);
+    let tallest = 0;
+    for (const quad of sides) {
+      // Two corners on the bed's edge and two at the bank's foot.
+      const edge = quad.corners.filter(
+        (c) => Math.abs(Math.abs(c.along - at) - BALLAST_CROWN_METRES / 2) < 0.01,
+      );
+      const feet = quad.corners.filter((c) => !edge.includes(c));
+      expect(edge).toHaveLength(2);
+      expect(feet).toHaveLength(2);
+      for (const foot of feet) {
+        const top = edge.sort(
+          (p, q) => Math.abs(p.lateral - foot.lateral) - Math.abs(q.lateral - foot.lateral),
+        )[0] as Corner;
+        const fall = top.y - foot.y;
+        const run = Math.abs(foot.along - at) - BALLAST_CROWN_METRES / 2;
+        tallest = Math.max(tallest, fall);
+        // In the ground at its foot…
+        const under = groundAt(foot.along, foot.lateral);
+        expect(foot.y).toBeLessThan(under);
+        expect(foot.y).toBeGreaterThan(under - 0.1);
+        // …and 1 in 2, to what the ground's own fall across the bank's width adds.
+        if (fall < 1) continue;
+        expect(run / fall).toBeGreaterThan(1.6);
+        expect(run / fall).toBeLessThan(2.4);
+      }
+    }
+    // The scenery is kept off the whole bank, not the bed alone.
+    expect(Math.max(...roads.flatMap((road) => Array.from(road.halfWidths)))).toBeGreaterThan(10);
+    // Non-vacuity: the bank beside the abutment is most of the deck's height.
+    expect(tallest).toBeGreaterThan(DECK_CLEARANCE_METRES - 1.5);
+    // Under the span the bank comes forward from the abutment's seat to the ground, as grass.
+    const fronts = banks.filter(
+      (quad) =>
+        Math.max(...quad.corners.map((c) => Math.abs(c.lateral))) < DECK_SPAN_HALF_METRES + 0.01,
+    );
+    expect(fronts.length).toBeGreaterThanOrEqual(2);
+    for (const quad of fronts.filter((each) => span(each, (c) => c.along) > 10)) {
+      const laterals = quad.corners.map((c) => Math.abs(c.lateral));
+      const ys = quad.corners.map((c) => c.y);
+      const fall = Math.max(...ys) - Math.min(...ys);
+      expect((Math.max(...laterals) - Math.min(...laterals)) / fall).toBeGreaterThan(1.6);
+      expect((Math.max(...laterals) - Math.min(...laterals)) / fall).toBeLessThan(2.4);
+      // It stops short of the carriageway.
+      expect(Math.min(...laterals)).toBeGreaterThan(half + 2);
     }
     // Where the mapped bridge ends the track beside it is at its height: no step.
     const crownAt = (lateral: number, deck: boolean): number => {
@@ -841,6 +928,8 @@ describe('a rail bridge — #3253', () => {
     expect(seen.filter(is(DECK_GIRDER)).length).toBe(webs.length);
     expect(seen.filter(is(DECK_RAILING)).length).toBe(webs.length);
     expect(seen.filter(is(PIER_FOOT))).toHaveLength(8);
+    // Each abutment is one face, and the bank's front under it.
+    expect(seen.filter(is(ABUTMENT))).toHaveLength(2);
     // With no cap its shaft runs up to the girder: as high as the cap's top is, near.
     const topOf = (each: readonly Quad[], lateral: number): number =>
       each

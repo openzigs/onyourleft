@@ -2407,7 +2407,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         same track on a plate girder with its ballast's edge
                         and a railing, on capped piers, level across its span
                         and 6.8 m over the route where it crosses it (an open
-                        span 32 m each side, an abutment and walls past it); a
+                        span 32 m each side, ending at a short abutment in a
+                        grass embankment that falls at 1 in 2); a
                         `disused` line rusted and grown over, with no sign at
                         its crossing. ⚠️ **Grounded on
                         `cross-streets.ts` §`standingBesideRoad`**, the one

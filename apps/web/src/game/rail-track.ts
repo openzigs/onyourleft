@@ -39,8 +39,10 @@
  *   instead of following them.
  *   Where it crosses the route it clears the road by
  *   {@link DECK_CLEARANCE_METRES} ({@link overLift}) as an open span
- *   {@link DECK_SPAN_HALF_METRES} each side, on two piers a side; past that
- *   it is an abutment, and the track climbs to it between walls.
+ *   {@link DECK_SPAN_HALF_METRES} each side, on two piers a side; it ends at
+ *   an abutment — a short face under the girder's bearing with a wing wall
+ *   each side — in a grass embankment whose sides fall at 1 in
+ *   {@link EMBANKMENT_RUN}, and the track climbs to it on that bank.
  * - **A disused line** keeps its track, rusted and grown over
  *   ({@link BALLAST_OVERGROWN}), and stands no sign at a crossing.
  *
@@ -186,8 +188,31 @@ export const DECK_PIERS_FROM_CROSSING_METRES = [8, 24] as const;
  */
 export const DECK_CLEARANCE_METRES = 6.8;
 
-/** How far each side of the route's crossing a rail bridge holds its full height, in metres: **14**. */
-export const DECK_LEVEL_METRES = 14;
+/**
+ * How far each side of the route's crossing a rail bridge holds its full
+ * height, in metres: its whole open span, {@link DECK_SPAN_HALF_METRES} — a
+ * girder is level from abutment to abutment, and the climb is the bank's.
+ */
+export const DECK_LEVEL_METRES = DECK_SPAN_HALF_METRES;
+
+/** How many metres out an embankment's side runs for each metre it falls: **2**, as `overpasses.ts`' banks do. */
+export const EMBANKMENT_RUN = 2;
+
+/** The farthest an embankment's side runs out, in metres: **20**. */
+export const EMBANKMENT_MAX_RUN_METRES = 20;
+
+/**
+ * How far under the track an abutment's seat is, in metres: **2.4** — the
+ * ballast's edge, the girder and a short face under its bearing. Below the
+ * seat the bank comes forward under the span as grass.
+ */
+export const ABUTMENT_SEAT_METRES = 2.4;
+
+/** How far past the bed each side an abutment's face runs, in metres: **0.5**. */
+export const ABUTMENT_CHEEK_METRES = 0.5;
+
+/** How far back into the bank an abutment's wing wall is turned, in metres: **2**. */
+export const ABUTMENT_WING_BACK_METRES = 2;
 
 /** Over how many metres past that the track comes down to the ground: **150**. */
 export const DECK_RAMP_METRES = 150;
@@ -195,14 +220,14 @@ export const DECK_RAMP_METRES = 150;
 /** A deck that crosses no route stands on a pier every this many stations: **6**, so every 24 m. */
 export const DECK_PIER_EVERY_STATIONS = 6;
 
-/** A pier under its cap, in metres across the track and along it: **1.6** by **0.9**. */
-export const DECK_PIER_METRES = [1.6, 0.9] as const;
+/** A pier under its cap, in metres across the track and along it: **2.2** by **1.2**. */
+export const DECK_PIER_METRES = [2.2, 1.2] as const;
 
 /** How much wider a pier is at its foot than under its cap: **1.4** times, a batter both ways. */
 export const DECK_PIER_BATTER = 1.4;
 
-/** A pier's cap, in metres across the track, along it and deep: **2.8** by **1.3** by **0.45**. */
-export const DECK_PIER_CAP_METRES = [2.8, 1.3, 0.45] as const;
+/** A pier's cap, in metres across the track, along it and deep: **3.8** by **1.6** by **0.45** — wider than the deck, so both girders bear on it. */
+export const DECK_PIER_CAP_METRES = [3.8, 1.6, 0.45] as const;
 
 /** A deck's girder must be this far over the ground for a pier to stand under it, in metres: **1**. */
 export const DECK_PIER_OVER_METRES = 1;
@@ -257,9 +282,13 @@ export const DECK_RAILING = linearColour(0x9da3a4);
 export const PIER_CAP = linearColour(0xa3a097);
 /** A pier's foot: its concrete stained by the ground. */
 export const PIER_FOOT = linearColour(0x5f5d55);
+/** An embankment's side: grass, in the road's material — the ground's own photograph is not this mesh's. */
+export const EMBANKMENT_GRASS = linearColour(0x4f6b38);
+/** An abutment's concrete: older and darker than a pier's. */
+export const ABUTMENT = linearColour(0x6b6860);
 /** A disused line's ballast: grown over. */
 export const BALLAST_OVERGROWN = linearColour(0x56613f);
-/** The concrete wall under track that climbs to a bridge. */
+/** A pier's concrete, under its cap. */
 export const TRACK_WALL = linearColour(0x86837b);
 /** A crossbuck's boards and a gate's white bands. */
 export const CROSSBUCK_WHITE = linearColour(0xe9e7df);
@@ -662,6 +691,8 @@ interface Row {
   readonly distance: number;
   /** What its centre stands over: the road on the carriageway, the ground past the ramp. */
   readonly under: number;
+  /** How far across the track its farther foot is, in metres: what the scenery keeps off. */
+  readonly reach: number;
   /** A deck's row in its open span: a girder on piers. A deck's other rows are an abutment's walls. */
   readonly open: boolean;
   /** How far from where its track's bridge crosses the route; `Infinity` where it crosses none. */
@@ -744,11 +775,9 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       const stood = standingAt(ground, px, pz, centre.near.distance + Math.abs(offset) + 1);
       return stood === undefined ? undefined : { x: px, z: pz, stood };
     };
-    const foot = lifted || piece.deck ? half : half + BALLAST_SHOULDER_METRES;
-    const points = [at(-foot), at(-half), at(half), at(foot)];
-    const [fl, l, r, fr] = points;
-    if (fl === undefined || l === undefined || r === undefined || fr === undefined)
-      return undefined;
+    const l = at(-half);
+    const r = at(half);
+    if (l === undefined || r === undefined) return undefined;
     let level: number | undefined;
     if (piece.deck && piece.span !== undefined && spanEnds !== undefined) {
       const from = spanEnds.from?.y ?? spanEnds.to?.y ?? centre.y;
@@ -762,7 +791,19 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       lift +
       SIDE_ROAD_LIFT_METRES;
     const top = { left: crown(l.stood), right: crown(r.stood) };
-    // A wall's foot or a shoulder's is in the ground; an open span's side is drawn from its crown.
+    // A shoulder falls to the ground beside the bed; track over the ground is on a bank, whose
+    // side runs out two metres for each it falls.
+    const runOf = (crownHere: number, stood: Standing): number =>
+      lifted || piece.deck
+        ? Math.min(
+            EMBANKMENT_MAX_RUN_METRES,
+            Math.max(BALLAST_SHOULDER_METRES, EMBANKMENT_RUN * (crownHere - stood.ground)),
+          )
+        : BALLAST_SHOULDER_METRES;
+    const runs = { left: runOf(top.left, l.stood), right: runOf(top.right, r.stood) };
+    const fl = at(-half - runs.left);
+    const fr = at(half + runs.right);
+    if (fl === undefined || fr === undefined) return undefined;
     const footOf = (stood: Standing): number => stood.ground - FOOT_METRES;
     return {
       x,
@@ -777,6 +818,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       lifted,
       distance: centre.near.distance,
       under: centre.y,
+      reach: half + Math.max(runs.left, runs.right),
       open,
       over,
     };
@@ -841,12 +883,10 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       fascia(a, b, -1);
       fascia(a, b, 1);
     } else {
-      const wall = a.lifted || b.lifted;
-      const side = wall ? TRACK_WALL : BALLAST_SHOULDER;
-      // A wall is stained toward its foot, as a pier is; a shoulder is one tone.
-      const foot = wall ? PIER_FOOT : side;
-      mesh.quad(side, a.left, b.left, b.footLeft, a.footLeft, foot);
-      mesh.quad(side, a.right, b.right, b.footRight, a.footRight, foot);
+      // Over the ground the track is on a grass bank; on it, its ballast's shoulder.
+      const side = a.lifted || b.lifted || piece.deck ? EMBANKMENT_GRASS : BALLAST_SHOULDER;
+      mesh.quad(side, a.left, b.left, b.footLeft, a.footLeft);
+      mesh.quad(side, a.right, b.right, b.footRight, a.footRight);
     }
     mesh.quad(paved ? CROSSING_PANEL : crownColour, a.left, b.left, b.right, a.right);
     // Far off, an open span is its girder and its railing: what is on its deck is over the rider's eye.
@@ -921,7 +961,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     // The scenery keeps off the bed, but nothing is kept off the carriageway for it.
     if ((a.distance + b.distance) / 2 > ROAD_WIDTH_METRES / 2) {
       segments.push(a.x, a.z, b.x, b.z);
-      halfWidths.push(half + BALLAST_SHOULDER_METRES);
+      halfWidths.push(Math.max(a.reach, b.reach));
     }
   };
   /**
@@ -996,12 +1036,98 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       }
     }
   };
+  /**
+   * An abutment, where an open span's last row `end` meets the bank that
+   * runs on through `bank` — #3253: a short concrete face under the girder's
+   * bearing, {@link ABUTMENT_SEAT_METRES} under the track at its foot, with a
+   * wing wall each side turned back into the bank; and below that seat the
+   * bank comes forward under the span as grass, at the bank's own slope.
+   * Where the track is no higher than the seat the face stands in the ground
+   * and there is no slope. Far off the face and its wings are one face.
+   */
+  const abutment = (end: Row, bank: Row): void => {
+    const length = Math.hypot(end.x - bank.x, end.z - bank.z);
+    if (!(length > 0)) return;
+    // Forward: out of the bank, under the span.
+    const ux = (end.x - bank.x) / length;
+    const uz = (end.z - bank.z) / length;
+    const crown = (end.left[1] + end.right[1]) / 2;
+    const top = crown - DECK_KERB_METRES;
+    const foot = end.under - FOOT_METRES;
+    const seated = crown - foot > ABUTMENT_SEAT_METRES + 0.5;
+    const seat = seated ? crown - ABUTMENT_SEAT_METRES : foot;
+    const at = (across: number, y: number, forward = 0): Point => [
+      end.x + end.ax * across + ux * forward,
+      y,
+      end.z + end.az * across + uz * forward,
+    ];
+    const cheek = half + ABUTMENT_CHEEK_METRES;
+    // Where the bank's side is at the seat's height.
+    const shoulder = half + EMBANKMENT_RUN * (crown - seat);
+    if (near) {
+      mesh.quad(
+        ABUTMENT,
+        at(-cheek, top, 0.05),
+        at(cheek, top, 0.05),
+        at(cheek, seat, 0.05),
+        at(-cheek, seat, 0.05),
+        PIER_FOOT,
+      );
+      for (const sign of [-1, 1]) {
+        mesh.quad(
+          ABUTMENT,
+          at(sign * cheek, top, 0.05),
+          at(sign * shoulder, seat + 0.3, -ABUTMENT_WING_BACK_METRES),
+          at(sign * shoulder, seat, -ABUTMENT_WING_BACK_METRES),
+          at(sign * cheek, seat, 0.05),
+          PIER_FOOT,
+        );
+      }
+    } else {
+      mesh.quad(
+        ABUTMENT,
+        at(-half, top),
+        at(half, top),
+        at(shoulder, seat),
+        at(-shoulder, seat),
+        PIER_FOOT,
+      );
+    }
+    if (!seated) return;
+    // The ground under the span is not the ground at the abutment: the front runs out to
+    // where it meets it, found in two steps.
+    let run = EMBANKMENT_RUN * (seat - foot);
+    let ahead = foot;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const toe = at(0, 0, run);
+      const stood = standingAt(ground, toe[0], toe[2], end.distance + run + 1);
+      ahead = (stood?.ground ?? end.under) - FOOT_METRES;
+      run = Math.min(EMBANKMENT_MAX_RUN_METRES, Math.max(0, EMBANKMENT_RUN * (seat - ahead)));
+    }
+    mesh.quad(
+      EMBANKMENT_GRASS,
+      at(-shoulder, seat),
+      at(shoulder, seat),
+      at(end.reach, ahead, run),
+      at(-end.reach, ahead, run),
+    );
+    if (!near) return;
+    // The corner each side, between the bank's side and its front.
+    for (const [sign, low] of [
+      [-1, end.footLeft],
+      [1, end.footRight],
+    ] as const) {
+      const corner = at(sign * end.reach, ahead, run);
+      mesh.quad(EMBANKMENT_GRASS, at(sign * shoulder, seat), low, corner, corner);
+    }
+  };
   let cuts = 0;
   let a = rowAt(0);
   for (let index = 1; index < count; index += 1) {
     const b = rowAt(index);
     if (a !== undefined && b !== undefined) {
       piers(a, b, Math.round(piece.fromMetres / RAIL_TRACK_STEP_METRES) + index - 1);
+      if (a.open !== b.open) abutment(a.open ? a : b, a.open ? b : a);
       const from = piece.fromMetres + (index - 1) * RAIL_TRACK_STEP_METRES;
       // Where a step leaves or enters the carriageway it is cut there, so the
       // road's surface stops at the road's edge and not a step past it.

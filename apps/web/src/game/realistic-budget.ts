@@ -1153,7 +1153,9 @@ export const RAIL_TRACK_NEAR_PIECES = 8;
  * the girder's web, its flange, the railing and a stiffener, five quads a
  * side (20) — and of two rails of one face (4) are 260; 40 m holds at most 67
  * sleepers of one quad (134); and at most three piers of a shaft and a cap
- * (8 each: 24): 418. A piece on the ground is at most 350: ten steps of bed
+ * (8 each: 24): 418. A piece that holds a span's end has a step fewer of
+ * fascia and an abutment of a face, two wings, the bank's front and its two
+ * corners (12), and is under that. A piece on the ground is at most 350: ten steps of bed
  * (6) and of two rails of three faces (12), the sleepers, and a level
  * crossing's two cuts at the carriageway's edges (`rail-track.ts`
  * §`CROSSING_CUTS_PER_PIECE`: 36).
@@ -1163,7 +1165,8 @@ export const RAIL_TRACK_NEAR_PIECE_TRIANGLES = 420;
 /**
  * The most a piece without is: **152**, a bridge's open span. Ten steps of
  * crown (2) and of a fascia of three quads a side (12), and three piers of a
- * shaft alone (4 each). A piece on the ground is at most 144: ten steps of
+ * shaft alone (4 each); a span's end is an abutment's one face and the
+ * bank's front (4) in place of a step's fascia. A piece on the ground is at most 144: ten steps of
  * bed (6), a strip (2) and two rails of one face (4), and the same two cuts
  * (24).
  */
