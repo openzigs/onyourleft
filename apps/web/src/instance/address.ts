@@ -42,6 +42,8 @@
  * accepted all three as though nothing had been typed after the host.
  */
 
+import { platformCapacitor, shellKind, type ShellKind } from '../support/capacitor';
+
 /** An address this app may talk to. */
 export interface InstanceAddress {
   readonly kind: 'accepted';
@@ -76,6 +78,30 @@ export const ADDRESS_REFUSAL_TEXT: Readonly<Record<AddressRefusal, string>> = {
     'Type the instance’s address on its own — https://ride.example — with no path, query or ' +
     'name before it.',
 };
+
+/**
+ * {@link ADDRESS_REFUSAL_TEXT}'s sentence for `why`, in this shell — #3239.
+ *
+ * Only `not-encrypted` differs: it names the Android app as one that cannot
+ * reach a plain `http://` instance, which is true there and in a browser, and
+ * reads wrong inside the iOS app. There it says only what is true everywhere.
+ * ⚠️ **Draft wording for the owner.**
+ *
+ * @param kind read from the real Capacitor global unless a caller says
+ */
+export function addressRefusalText(
+  why: AddressRefusal,
+  kind: ShellKind | undefined = shellKind(platformCapacitor()),
+): string {
+  if (why === 'not-encrypted' && kind === 'ios') {
+    return (
+      'That address starts with http://, which is not encrypted: anybody on the network between ' +
+      'you and the instance could read your sign-in. Use the address that starts with https://. ' +
+      'Only an instance on this computer — localhost — may use http://.'
+    );
+  }
+  return ADDRESS_REFUSAL_TEXT[why];
+}
 
 /** The hosts that are this machine, where `http:` never crosses a network. */
 const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]'];
