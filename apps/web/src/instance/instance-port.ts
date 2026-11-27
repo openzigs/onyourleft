@@ -61,7 +61,7 @@ import {
 import { webCryptoHpkePrimitives, webCryptoSha256, webCryptoVerifier } from '@onyourleft/store';
 
 import type { AccountChangeEntry } from './account-change-notices';
-import { ADDRESS_REFUSAL_TEXT, instanceAddress } from './address';
+import { addressRefusalText, instanceAddress } from './address';
 import {
   createInstanceClock,
   instanceHttp,
@@ -1335,7 +1335,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     }
     const decision = instanceAddress(target);
     if (decision.kind === 'refused') {
-      return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+      return { kind: 'refused', text: addressRefusalText(decision.why) };
     }
     const cardText = invite?.card ?? card?.trim() ?? '';
     if (cardText !== '') {
@@ -1480,7 +1480,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
       const decision = instanceAddress(parsed.card.origin);
       if (decision.kind === 'refused') {
-        return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+        return { kind: 'refused', text: addressRefusalText(decision.why) };
       }
       if (decision.origin !== parsed.card.origin) {
         return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-offer'] };
@@ -1530,7 +1530,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
       const decision = instanceAddress(parsed.card.origin);
       if (decision.kind === 'refused') {
-        return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+        return { kind: 'refused', text: addressRefusalText(decision.why) };
       }
       if (decision.origin !== parsed.card.origin) {
         return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['not-a-claim'] };
