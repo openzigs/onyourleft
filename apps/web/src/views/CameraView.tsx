@@ -75,7 +75,7 @@ import {
   CONSENT_STATEMENT,
   type ConsentRefusal,
 } from '../camera/consent';
-import { ANALYSIS_FAILURE_TEXT } from '../camera/analysis-port';
+import { analysisFailureText } from '../camera/analysis-port';
 import {
   endpointDecision,
   ENDPOINT_REFUSAL_TEXT,
@@ -875,7 +875,8 @@ export function analysisSentence(state: AnalysisState): string | undefined {
         ? 'Your computer answered, and understood the request. The picture was not kept unless this ride’s keep is on.'
         : `Your computer answered (${String(state.characters)} characters), but not with the one word it was asked for. Check that the model can read pictures. What it said is not shown.`;
     case 'failed':
-      return ANALYSIS_FAILURE_TEXT[state.failure];
+      // #3239: the iOS app's own sentence where it differs.
+      return analysisFailureText(state.failure);
   }
 }
 

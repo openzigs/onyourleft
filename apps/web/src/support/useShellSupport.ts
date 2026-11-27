@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Seconds } from '@onyourleft/domain';
 
-import { SHELL_ANSWER_TIMEOUT, UNANSWERED_SHELL_SUPPORT } from './shell-support';
+import { platformCapacitor, shellKind } from './capacitor';
+import { SHELL_ANSWER_TIMEOUT, unansweredShellSupport } from './shell-support';
 import type { ShellSupport, ShellSupportPort } from './shell-support-port';
 
 /** @see useShellSupport */
@@ -188,7 +189,8 @@ export function useShellSupport(
     };
 
     const cancelDeadline = (settings.current.schedule ?? browserSchedule)(() => {
-      deliver(UNANSWERED_SHELL_SUPPORT);
+      // #3239: said of the iOS app's device in the iOS app.
+      deliver(unansweredShellSupport(shellKind(platformCapacitor())));
     }, settings.current.answerWithin ?? SHELL_ANSWER_TIMEOUT);
 
     void latest.current.readShellSupport().then((next) => {

@@ -38,6 +38,8 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { missingValue, option } from '../options';
+
 import { BOT_RACES, rideBotRace } from './bot-races';
 import { BOT_PASS_MARK, botRaceShortfalls, scoreBotRace, type Shortfall } from './bot-score';
 import { ollamaAsk, recordedAsk, recording, type Ask, type ModelCall } from './model-call';
@@ -62,13 +64,6 @@ const USAGE =
 export interface HarnessOptions {
   readonly now?: () => Date;
   readonly print?: (line: string) => void;
-}
-
-/** `args` with the option `name` and its value taken out, and the value. */
-function option(args: readonly string[], name: string): [readonly string[], string | undefined] {
-  const at = args.indexOf(name);
-  if (at < 0) return [args, undefined];
-  return [[...args.slice(0, at), ...args.slice(at + 2)], args[at + 1]];
 }
 
 const shortfallLine = (short: readonly Shortfall[]): string =>
@@ -209,8 +204,19 @@ export async function main(
   const mostSeconds = secondsArg === undefined ? undefined : Number(secondsArg);
   const [command, ...extra] = rest;
   const known = command === 'bots' || command === 'pacer' || command === 'all';
+  const flags = [
+    '--host',
+    '--url',
+    '--model',
+    '--race',
+    '--record',
+    '--replay',
+    '--results',
+    '--seconds',
+  ];
   if (
     !known ||
+    missingValue(args, flags) !== undefined ||
     extra.length > 0 ||
     (mostSeconds !== undefined && !(Number.isInteger(mostSeconds) && mostSeconds > 0)) ||
     (host !== undefined && url !== undefined) ||

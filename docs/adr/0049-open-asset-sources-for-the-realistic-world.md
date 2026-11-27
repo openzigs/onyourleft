@@ -457,3 +457,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   2026-11-26 recorded on pull request #3256. No asset is adopted by it. The tables above are
   unedited. `admitted-sources.test.ts` reads ADR 0099's rows after ADR 0085's, and `sources.ts`
   §`ADMITTED_SOURCES` carries them last. ([#3250](https://github.com/openzigs/onyourleft/issues/3250))
+- **2026-11-26** — **The scanned broadleaves were deleted on the owner's ruling, without the tablet
+  measurement D-1 names.** D-1's last bullet says a generated tree *"replaces a decimated scan only
+  where the tablet measurement says it should"*. For the broadleaves that is no longer how it went.
+  Since #1283 a ride has drawn the generated oaks and hornbeams, and the two Poly Haven scans they
+  replaced (`island_tree_02`, `tree_small_02`) stayed committed behind the owner's page for
+  validation 0002's rows AH-1283-1 to AH-1283-5 to judge. Those rows were never run. On 2026-11-26,
+  with the realistic set 231 387 bytes under its build ceiling and three lanes adding models, the
+  owner approved item 1 of #1293, dropping the scanned broadleaves, as that issue records. So the
+  scans, their `ASSETS.toml` rows, their recipe and the lever that loaded them are deleted,
+  10 616 301 bytes, and there is no switch back. What still stands, unchanged: the ruling is about
+  the broadleaves alone, so the scanned firs are still committed behind
+  `levers=-generated-conifers` and D-1's bullet still holds them until the owner's AH-1294 rows or
+  a ruling of their own; a generated tree is still held to `realistic-budget.ts` like any other;
+  and no source is admitted or barred by this entry.
+  ([#1293](https://github.com/openzigs/onyourleft/issues/1293))

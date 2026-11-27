@@ -14,7 +14,7 @@ import {
   createOpenBikeControlClient,
   createWebBluetoothTransport,
 } from '@onyourleft/sensors/web-bluetooth';
-import { metres, unixSeconds } from '@onyourleft/domain';
+import { metres, seconds, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
   cameraFrameId,
@@ -38,7 +38,7 @@ import {
   type RideController,
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
-import { createShellRideController } from './ride/shell-ride-controller';
+import { androidRecordingService, createShellRideController } from './ride/shell-ride-controller';
 import { createShellSteeringController } from './ride/shell-steering-controller';
 import {
   createSteeringController,
@@ -59,7 +59,7 @@ import {
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { ownThresholdHeartRateFrom, ownThresholdPowerFrom } from './game/own-threshold';
-import { isNativeShell, platformCapacitor } from './support/capacitor';
+import { isNativeShell, platformCapacitor, shellKind } from './support/capacitor';
 import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
 import {
   createUpdateWatcher,
@@ -68,7 +68,7 @@ import {
 } from './offline/update';
 import { AppShell, VIEW_GROUPS } from './shell/AppShell';
 import { createMenuSounds } from './shell/menu-sounds';
-import { createMenuMusic, MENU_MUSIC_TRACK } from './shell/menu-music';
+import { createMenuMusic, MENU_MUSIC_TRACK, shellMenuMusicAutoplay } from './shell/menu-music';
 import { readMusicAndMaster } from './game/audio-mix';
 import { readMenuSoundPreference } from './shell/menu-sound-preference';
 import { sharedCueOutput } from './game/web-audio';
@@ -122,8 +122,7 @@ import {
 } from './camera/retired-hosted-key';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
-import { documentForeground, SecureWindow } from './camera/secure-window';
-import { NO_SECURE_WINDOW } from './camera/secure-window-port';
+import { documentForeground, SecureWindow, shellSecureWindowPort } from './camera/secure-window';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
 import {
@@ -191,7 +190,7 @@ import {
   instanceEraser,
   type InstancePort,
 } from './instance/instance-port';
-import type { LoadedFrom } from './instance/instance-pin';
+import { loadedFromShell, type LoadedFrom } from './instance/instance-pin';
 import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createOperatePort, type OperatePort } from './instance/operate-port';
@@ -431,7 +430,10 @@ async function buildPlatform(
     },
   };
 
-  if (isNativeShell(platformCapacitor())) {
+  // #1755: any native shell — Android or iOS — gets the Capacitor transport;
+  // what only Android has is asked of `capacitor` below, plugin by plugin.
+  const capacitor = platformCapacitor();
+  if (isNativeShell(capacitor)) {
     const mobile = await import('@onyourleft/mobile');
     const plugin = mobile.capacitorBlePort();
     // #2669. ONE memory, which the transport asks about, the controller
@@ -460,7 +462,9 @@ async function buildPlatform(
     // question beside it. Built in `ride/shell-ride-controller.ts` rather than
     // here because both are optional options, which `check:wiring` cannot see
     // supplied and nothing tests in this file; see that module's header.
-    const rideController = createShellRideController(mobile, {
+    // #1755: `RecordingService` is the Android shell's alone; the iOS app's
+    // controller has no keep-alive, as a browser's has none.
+    const rideController = createShellRideController(androidRecordingService(capacitor, mobile), {
       ...shared,
       transport,
       remembered: rememberedSensors,
@@ -529,7 +533,8 @@ async function buildPlatform(
       // #2357. Its own plugin, `AutoplayPlugin.java`: the WebView's setting,
       // read back, so the menus' music starts with no tap only where the
       // platform lets it. Asked once, and not awaited: the shell does not wait for it.
-      menuMusicAutoplay: mobile.capacitorAutoplayAllowed(mobile.capacitorAutoplayPlugin()),
+      // #1755: Android's alone; the iOS app keeps the first-press rule.
+      menuMusicAutoplay: shellMenuMusicAutoplay(capacitor, mobile),
       // #2047: the plugin reads no Battery Service, so the shell shows no level.
       battery: undefined,
     };
@@ -950,12 +955,18 @@ function buildGamePort(
           name: route.name,
           profile: route.profile,
           attempts: attempts.length,
-          bestSeconds: fastestAttempt(
-            attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
-          )?.movingSeconds,
+          // #2319: the loop's best lap, kept on the route.
+          bestLapSeconds: route.bestLap,
         });
       }
       return rows;
+    },
+    // #2319: a lap race's lap of one of the rider's loops, kept on the route if
+    // it is the fastest (`ActivityStore.recordBestLap`). ⚠️ An optional member,
+    // so dropping this line is green in `check:wiring`;
+    // `game/lap-race/best-lap-wiring.test.ts` is what goes red.
+    recordBestLap: async (route: string, lap: number): Promise<void> => {
+      await store.recordBestLap(LOCAL_ATHLETE, routeId(route), seconds(lap));
     },
     loadGhost: async (route: string): Promise<GhostTrack | undefined> => {
       // ⚠️ The athlete is what makes this the rider's OWN attempt, and it is not
@@ -1300,7 +1311,7 @@ function buildInstancePort(): InstancePort | undefined {
  * device, and in no copy a website served.
  */
 function loadedFrom(): LoadedFrom {
-  return { native: isNativeShell(platformCapacitor()), href: globalThis.location.href };
+  return loadedFromShell(platformCapacitor(), globalThis.location.href);
 }
 
 /**
@@ -1796,16 +1807,9 @@ function buildSidePictures():
  * Capacitor.
  */
 async function buildSecureWindow(): Promise<SecureWindow> {
-  if (!isNativeShell(platformCapacitor())) {
-    return new SecureWindow(NO_SECURE_WINDOW, documentForeground());
-  }
-  const mobile = await import('@onyourleft/mobile');
-  const secureWindowPlugin = mobile.capacitorSecureWindowPlugin();
+  // #1755: the Android shell only — the iOS app has no `SecureWindow` plugin.
   return new SecureWindow(
-    {
-      setSecureWindow: async (secure) =>
-        mobile.setCapacitorSecureWindow(secureWindowPlugin, secure),
-    },
+    await shellSecureWindowPort(platformCapacitor(), async () => import('@onyourleft/mobile')),
     documentForeground(),
   );
 }
@@ -2063,6 +2067,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
             : { systemSettings: platform.systemSettings })}
           {...(platform.steering === undefined ? {} : { steering: platform.steering })}
           nativeShell={isNativeShell(platformCapacitor())}
+          shellKind={shellKind(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(sideSnapshots === undefined ? {} : { sideSnapshots })}
