@@ -413,7 +413,14 @@ import {
   type BuildingFamily,
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
-import { chainLinkPieces, fencedGrounds, type ChainLinkPiece } from './chain-link';
+import {
+  chainLinkPieces,
+  fencedGrounds,
+  noiseBarrierPieces,
+  timberFencedGrounds,
+  timberFencePieces,
+  type ChainLinkPiece,
+} from './chain-link';
 import {
   JUNCTION_MIN_ANGLE_DEGREES,
   JUNCTION_TOLERANCE_METRES,
@@ -6429,6 +6436,8 @@ export function mappedTown(
   const commercial = new Map<number, Map<number, boolean>>();
   // #1274: the grounds a chain-link fence stands beside, and its pieces by route.
   const grounds = fencedGrounds(corridor.landUse);
+  // #3252: the allotments and gardens a timber fence stands beside.
+  const boarded = timberFencedGrounds(corridor.landUse);
   // Keyed by the profile alone: the pieces' heights also depend on the origin,
   // seed and land, which every caller holds fixed for a whole ride. A caller
   // that varies them for one profile must not share this town.
@@ -6440,15 +6449,22 @@ export function mappedTown(
     chainLinkAt(profile, origin, seed, land) {
       const known = chainLinks.get(profile);
       if (known !== undefined) return known;
-      const pieces = chainLinkPieces(grounds, {
+      const route = {
         profile,
         origin,
         seed,
         land,
         roadside: FIELD_EDGE_LATERAL_METRES,
         piece: BOUNDARY_PIECE_METRES,
-        cityCentre: (along) => urban?.classAt(along) === 'city-centre',
-      });
+        cityCentre: (along: number) => urban?.classAt(along) === 'city-centre',
+      };
+      // #3252: and the timber fences and the highways' noise barriers, which
+      // are fences of the same piece, placed and budgeted as the chain-link is.
+      const pieces = [
+        ...chainLinkPieces(grounds, route),
+        ...timberFencePieces(boarded, route),
+        ...noiseBarrierPieces(corridor.streets, route),
+      ];
       chainLinks.set(profile, pieces);
       return pieces;
     },

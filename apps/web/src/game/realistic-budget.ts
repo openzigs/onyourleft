@@ -369,6 +369,14 @@ export const REALISTIC_TRIANGLES: Readonly<
    * fence instance submits the field fence's 84 and these: 243, under the
    * 580 of the heaviest structure that {@link REALISTIC_STRUCTURE_ITEMS}'
    * term prices every structure slot at — the frame's sum does not move.
+   *
+   * ⚠️ **#3252's timber fence and noise barrier are NOT in this mesh.**
+   * Folded here as first written, every fence instance submitted 216
+   * triangles more and the Delivery village's frame went 1 708 over
+   * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}. They share ONE mesh of their
+   * own, the fence's second variant (96 and 120 triangles, folded as these
+   * are), drawn only where one stands: `three-renderer.ts`
+   * §`builtFenceGeometry`, {@link REALISTIC_STRUCTURE_MESHES}.
    */
   'chain-link': 180,
 };
@@ -388,6 +396,40 @@ export const REALISTIC_TRIANGLES: Readonly<
  * frame sum in `realistic-budget.test.ts` read it too)
  */
 export const REALISTIC_BICYCLE_TRIANGLES = 12_000;
+
+/**
+ * The most triangles a tree or a bush GROWN in code may have, at each level —
+ * #3252, ADR 0099 D-4 item 1: a class of its own, with a test, in the pull
+ * request that adds it (`grown-trees.ts`, held by `grown-trees.test.ts`,
+ * which grows every species and counts).
+ *
+ * ⚠️ **Each figure is the heaviest COMMITTED generated tree of its kind,
+ * rounded up to the hundred, and not the class's ceiling** — a generated oak
+ * is 6 692 at full detail and 2 208 at its middle level, a generated fir
+ * 4 792 and 878 ({@link REALISTIC_TRIANGLES}, "measured"). So a grown tree
+ * standing in any of `tree-levels.ts`' slots is no heavier than the tree
+ * that could already stand there, the worst frame's vegetation is what it
+ * was, and {@link REALISTIC_FRAME_TRIANGLES} and
+ * {@link REALISTIC_REMOTE_TRIANGLES} are not asked for anything
+ * (ADR 0099 D-4 item 4). A bush is a quarter of {@link REALISTIC_TRIANGLES}'
+ * `shrub`, which the scanned shrubs fill.
+ *
+ * What a grown species costs beyond its triangles: no file, no texture and
+ * no byte of {@link REALISTIC_BUILD_BYTES} — it wears a committed tree's
+ * maps — and no far draw call, because its far band is its host's impostor
+ * in the host's own mesh. It costs the time to grow it when the world loads,
+ * about 40 ms for all six on a laptop, which nothing here bounds, and its
+ * geometry's bytes on the GPU.
+ *
+ * @test-facing held by `grown-trees.test.ts`, which grows every species and
+ * counts each level against it, and `scenery-shapes.test.ts`; the generator
+ * is handed each species' own numbers and never asks what the ceiling is
+ */
+export const REALISTIC_GROWN_TRIANGLES = {
+  'tree-broadleaf': { full: 6_700, middle: 2_300 },
+  'tree-conifer': { full: 4_800, middle: 900 },
+  shrub: { full: 1_650 },
+} as const;
 
 /**
  * How many SHRUBS and ROCKS are drawn as meshes in one frame — the nearest
@@ -874,7 +916,8 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * of §`REALISTIC_BOUNDARY_PARTS`: a house 4 surfaces (brick, tiles, timber,
  * glass), a church 4 (stone, slate, timber, glass), a row of shops 4 (brick,
  * slate, timber, glass), a barn 2 (timber, iron) and a shed 1, each in two
- * shapes — 30 — and a wall, a hedge and a fence 1 each and a signpost 2.
+ * shapes — 30 — and a wall, a hedge and a fence 1 each and a signpost 2;
+ * and since #3252 a fence 2 (below).
  *
  * ⚠️ **15 → 35 with #500, deliberately, and what it costs is not 20 draw
  * calls.** A mesh with no instance this frame is not drawn (three's
@@ -901,10 +944,41 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * is a red test and an edit here, rather than a draw call nobody decided to
  * spend.
  *
+ * ## 35 → 36 with #3252, by the owner's ruling of 2026-11-26
+ *
+ * The fence has a second shape: the built fences, a close-board timber fence
+ * and a highway noise barrier, in one mesh between them (`three-renderer.ts`
+ * §`builtFenceGeometry`). It is one mesh and not none because the other way
+ * to draw them, folded into the field fence's mesh as the chain-link is, put
+ * 216 triangles on every fence in every frame and took the Delivery village
+ * over {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}; and one and not two because
+ * the two fold into each other. What it costs a frame is ONE draw call where
+ * a built fence stands — beside mapped allotments or a garden, or along a
+ * mapped highway past built-up land — and nothing anywhere else: the named
+ * views' ceilings ({@link REALISTIC_WOODED_DRAW_CALLS},
+ * {@link REALISTIC_VILLAGE_DRAW_CALLS}, {@link DELIVERY_VILLAGE_DRAW_CALLS})
+ * are untouched, and the frames they are held at draw none.
+ *
+ * ADR 0099 D-4 item 3 says no draw-call ceiling is raised for a model without
+ * a tablet measurement first. This figure is, in its own words above, "a
+ * statement of what is built" that an added shape is meant to grow by an
+ * edit here; but it does bound draw calls, so whether it may stand at 36 was
+ * the owner's to rule on, and was put to the owner on the pull request.
+ *
+ * **The owner's ruling, 2026-11-26**, as the maintainer session recorded it
+ * on pull request #3274
+ * ([comment](https://github.com/openzigs/onyourleft/pull/3274#issuecomment-7207127166)),
+ * verbatim: *"`REALISTIC_STRUCTURE_MESHES` 36 is allowed for the timber fence
+ * and noise barrier. The tablet frame check on the trees ride confirms it; if
+ * frames suffer there, the two come out. Record this beside the constant."*
+ * So 36 stands, for those two fences and nothing else, and it rests on that
+ * ride: no figure from it is recorded here, and a frame that suffers there
+ * takes the two fences out and this back to 35.
+ *
  * @test-facing held by `three-renderer.test.ts` §"#482", which counts the
  * meshes `RealisticStructureBelts` actually builds against it
  */
-export const REALISTIC_STRUCTURE_MESHES = 35;
+export const REALISTIC_STRUCTURE_MESHES = 36;
 
 /**
  * The triangles the realistic structures may spend in a frame, procedural and
