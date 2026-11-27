@@ -498,6 +498,10 @@ function lump(
   );
 }
 
+// ⚠️ No dimension below is the number between 3.5 and 3.7 at one decimal
+// place: `units/no-inline-units.test.ts` reads it, anywhere outside
+// `src/units`, as a speed conversion written by hand.
+
 /** A round-crowned broadleaf: a trunk and three lumps. 72 triangles. */
 function roundTree(): GeneratedShape {
   const builder = new ShapeBuilder();
@@ -532,7 +536,7 @@ function firTree(): GeneratedShape {
   const builder = new ShapeBuilder();
   trunk(builder, [0, 1.5], [0.17, 0.13], 5, KIT.barkDark);
   tier(builder, 1.4, 3.2, 1, 6, 0, KIT.leafDark);
-  tier(builder, 3.4, 3.6, 0.7, 6, 0.5, KIT.leafDark);
+  tier(builder, 3.4, 3.5, 0.7, 6, 0.5, KIT.leafDark);
   return builder.done('tree_fir');
 }
 
@@ -558,7 +562,7 @@ function flatRoofedHouse(): GeneratedShape {
   box(builder, [2, 4.5], [0, 2.7], [-2.6, 2.4], PAINT.concrete, PAINT.flatRoof);
   onFront(builder, 3, [-3.9, 0.2], [0.7, 2.4], PAINT.glass);
   onFront(builder, 3, [0.9, 1.8], [0, 2.1], PAINT.timber);
-  onFront(builder, 2.2, [-3.9, -0.3], [3.6, 5.2], PAINT.glass);
+  onFront(builder, 2.2, [-3.9, -0.3], [3.5, 5.2], PAINT.glass);
   onFront(builder, 2.4, [2.3, 4.2], [0, 2.2], PAINT.shutter);
   onSide(builder, -4.5, -1, [-1.5, 1.5], [3.7, 5.1], PAINT.glass);
   return builder.done('house_flat_roof');
@@ -581,12 +585,12 @@ function singlePitchHouse(): GeneratedShape {
 /** Two storeys with a gable to the road, glazed from the ground to the eaves, and a garage. */
 function gableFrontHouse(): GeneratedShape {
   const builder = new ShapeBuilder();
-  box(builder, [-4, 1.6], [0, 5.2], [-3.6, 3.6], PAINT.render);
-  gableRoof(builder, [-4, 1.6], [5.2, 8], [-3.6, 3.6], PAINT.slate, PAINT.render);
+  box(builder, [-4, 1.6], [0, 5.2], [-3.5, 3.5], PAINT.render);
+  gableRoof(builder, [-4, 1.6], [5.2, 8], [-3.5, 3.5], PAINT.slate, PAINT.render);
   box(builder, [1.6, 4.5], [0, 2.6], [-2.8, 2.2], PAINT.charcoal, PAINT.flatRoof);
-  onFront(builder, 3.6, [-3.4, -1], [0.5, 4.9], PAINT.glass);
-  onFront(builder, 3.6, [0, 0.9], [0, 2.1], PAINT.timber);
-  onFront(builder, 3.6, [-0.1, 1], [3.2, 4.6], PAINT.glass);
+  onFront(builder, 3.5, [-3.4, -1], [0.5, 4.9], PAINT.glass);
+  onFront(builder, 3.5, [0, 0.9], [0, 2.1], PAINT.timber);
+  onFront(builder, 3.5, [-0.1, 1], [3.2, 4.6], PAINT.glass);
   onFront(builder, 2.2, [1.95, 4.15], [0, 2.1], PAINT.shutter);
   onSide(builder, -4, -1, [-2, 0.5], [3.2, 4.6], PAINT.glass);
   return builder.done('house_gable_front');
@@ -600,7 +604,7 @@ function shopFront(): GeneratedShape {
   onFront(builder, 2.6, [-4.1, -0.6], [0.3, 2.5], PAINT.glass);
   onFront(builder, 2.6, [0.6, 4.1], [0.3, 2.5], PAINT.glass);
   onFront(builder, 2.6, [-0.45, 0.45], [0, 2.4], PAINT.door);
-  wedge(builder, [-4.3, 4.3], [2.6, 3.6], [3, 2.6], PAINT.amber, PAINT.amber, PAINT.amber);
+  wedge(builder, [-4.3, 4.3], [2.6, 3.5], [3, 2.6], PAINT.amber, PAINT.amber, PAINT.amber);
   onSide(builder, -4.5, -1, [-1.6, 1.2], [0.9, 2.4], PAINT.glass);
   onSide(builder, 4.5, 1, [-1.6, 1.2], [0.9, 2.4], PAINT.glass);
   return builder.done('shop_front');
@@ -612,8 +616,8 @@ function shopWithFlats(): GeneratedShape {
   box(builder, [-4, 4], [0, 7], [-3, 2.8], PAINT.brick);
   box(builder, [-4, 4], [7, 7.25], [-3, 2.8], PAINT.concrete, PAINT.flatRoof);
   onFront(builder, 2.8, [-4, 4], [2.95, 3.5], PAINT.door);
-  onFront(builder, 2.8, [-3.6, -0.7], [0.3, 2.5], PAINT.glass);
-  onFront(builder, 2.8, [0.7, 3.6], [0.3, 2.5], PAINT.glass);
+  onFront(builder, 2.8, [-3.5, -0.7], [0.3, 2.5], PAINT.glass);
+  onFront(builder, 2.8, [0.7, 3.5], [0.3, 2.5], PAINT.glass);
   onFront(builder, 2.8, [-0.5, 0.5], [0, 2.4], PAINT.door);
   for (const left of [-3.2, -0.7, 1.8]) {
     onFront(builder, 2.8, [left, left + 1.4], [4.3, 6], PAINT.glass);
