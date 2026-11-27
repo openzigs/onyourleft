@@ -202,6 +202,16 @@ describe('what the sync port offers (#1195)', () => {
     expect(website.sync.availability()).toEqual({ kind: 'closed', text: WEB_BUILD_TEXT });
     expect(await website.sync.sync()).toEqual({ kind: 'refused', text: WEB_BUILD_TEXT });
     expect(net.seen).toEqual([]);
+    // The owner's wording of 2026-11-26 (#1755), read back from what the
+    // website copy shows: the On Your Left app, never one platform's.
+    const closed = website.sync.availability();
+    if (closed.kind !== 'closed') throw new Error(`expected closed, got ${closed.kind}`);
+    expect(closed.text).toBe(
+      'Encrypted features are not offered in a copy of the app loaded from a website, because ' +
+        'whoever serves a website’s code could change it to take the encryption out. Use the On ' +
+        'Your Left app, or a copy of the app saved on this device.',
+    );
+    expect(closed.text).not.toMatch(/Android/);
   });
 });
 

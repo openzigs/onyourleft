@@ -136,6 +136,7 @@ import type { MenuSounds } from './menu-sounds';
 import type { OtherPlayer } from './other-player';
 import { OtherPlayerControls } from './OtherPlayerControls';
 import { useAndroidBack } from './android-back';
+import type { ShellKind } from '../support/capacitor';
 import { rideBack, RideBackContext } from './ride-back';
 import { rideLeave, RideLeaveContext } from './ride-leave';
 import {
@@ -278,11 +279,18 @@ export interface AppShellProps {
    */
   readonly steering?: SteeringController | undefined;
   /**
-   * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
-   * read by `main.tsx`. #1438: History's footer says what deletes the rides on
-   * this platform. `undefined` reads as a browser.
+   * Running inside a native shell, Android's or iOS's —
+   * `support/capacitor.ts` §`isNativeShell`, read by `main.tsx`. #1438:
+   * History's footer says what deletes the rides on this platform.
+   * `undefined` reads as a browser.
    */
   readonly nativeShell?: boolean | undefined;
+  /**
+   * Which native shell — `support/capacitor.ts` §`shellKind`, read by
+   * `main.tsx` (#1755). `'ios'` installs none of `MainActivity`'s hooks:
+   * Android's back press (`android-back.ts`) has no caller there.
+   */
+  readonly shellKind?: ShellKind | undefined;
   /**
    * The camera, its consent and whether it is running (#382).
    *
@@ -1091,8 +1099,9 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // #2349: and hands it to the ride screen on show, whose end-of-ride
   // question it opens or answers with *Keep riding* (`ride-back.ts`).
   const [rideBackPresses] = useState(rideBack);
+  // #1755: never in the iOS app, which has no `MainActivity` to call it.
   useAndroidBack(
-    props.nativeShell === true,
+    props.nativeShell === true && props.shellKind !== 'ios',
     () => {
       const phase = props.rideController?.getSnapshot().phase;
       return {

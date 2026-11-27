@@ -152,6 +152,25 @@ function device(send: InstanceSend, storage = deviceStorage()) {
 }
 
 describe('an address the app will not use sends nothing — #777', () => {
+  it('says why in the iOS app without naming Android (#3239)', async () => {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'ios' });
+    try {
+      const send = vi.fn() as unknown as InstanceSend;
+      const { port } = device(send);
+      const outcome = await port.connect('http://ride.example', 'Anna');
+      expect(outcome).toEqual({
+        kind: 'refused',
+        text:
+          'That address starts with http://, which is not encrypted: anybody on the network ' +
+          'between you and the instance could read your sign-in. Use the address that starts ' +
+          'with https://. Only an instance on this computer — localhost — may use http://.',
+      });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('refuses http:// to another machine before any request, and says why', async () => {
     const send = vi.fn() as unknown as InstanceSend;
     const { port, storage, log } = device(send);

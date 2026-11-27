@@ -38,6 +38,7 @@
 
 import type * as Mobile from '@onyourleft/mobile';
 
+import { isAndroidShell, type CapacitorGlobal } from '../support/capacitor';
 import {
   createRideController,
   type RideController,
@@ -54,9 +55,11 @@ export type ShellRecordingService = Pick<
 >;
 
 /**
- * The ride controller inside the Android shell: `options` plus the
- * `connectedDevice` foreground service (#524) and the notification permission
- * its notification needs (#526), both over ONE `RecordingService` plugin.
+ * The ride controller inside a native shell: `options` plus, in the Android
+ * shell, the `connectedDevice` foreground service (#524) and the notification
+ * permission its notification needs (#526), both over ONE `RecordingService`
+ * plugin. `mobile` is `undefined` in a shell with no such plugin — #1755,
+ * {@link androidRecordingService}.
  *
  * The two are set after the spread, so nothing in `options` can replace them.
  *
@@ -68,18 +71,47 @@ export type ShellRecordingService = Pick<
  * `restoreRemembered` asks the transport for nothing when none are kept.
  */
 export function createShellRideController(
-  mobile: ShellRecordingService,
+  mobile: ShellRecordingService | undefined,
   options: Omit<RideControllerOptions, 'keepAlive' | 'notificationPermission' | 'remembered'> & {
     readonly remembered: RememberedSensors;
   },
 ): ShellRideController {
-  const recordingService = mobile.capacitorRecordingServicePlugin();
   const controller = createRideController({
     ...options,
-    keepAlive: mobile.recordingServiceKeepAlive(recordingService),
-    notificationPermission: mobile.recordingServiceNotificationPermission(recordingService),
+    // #1755: with no `RecordingService` — the iOS app — no keep-alive at all,
+    // which is the browser's: the controller asks nothing and the ride records.
+    ...(mobile === undefined ? {} : recordingServiceOptions(mobile)),
   });
   return Object.assign(controller, { restored: controller.restoreRemembered() });
+}
+
+/** The keep-alive and the notification question, over ONE `RecordingService` plugin. */
+function recordingServiceOptions(
+  mobile: ShellRecordingService,
+): Pick<RideControllerOptions, 'keepAlive' | 'notificationPermission'> {
+  const recordingService = mobile.capacitorRecordingServicePlugin();
+  return {
+    keepAlive: mobile.recordingServiceKeepAlive(recordingService),
+    notificationPermission: mobile.recordingServiceNotificationPermission(recordingService),
+  };
+}
+
+/**
+ * The `RecordingService` half of `@onyourleft/mobile`, in the shell that has
+ * one — #1755.
+ *
+ * `RecordingService.java` is Android's `connectedDevice` foreground service,
+ * registered in `MainActivity`; the iOS app has no such plugin, and its first
+ * call would fail inside the bridge. So outside the Android shell this is
+ * `undefined`, and {@link createShellRideController} builds the controller
+ * with no keep-alive, as a browser's is. A native shell that names no known
+ * platform is not Android either (`support/capacitor.ts` §`shellKind`).
+ */
+export function androidRecordingService(
+  capacitor: CapacitorGlobal | undefined,
+  mobile: ShellRecordingService,
+): ShellRecordingService | undefined {
+  return isAndroidShell(capacitor) ? mobile : undefined;
 }
 
 /**

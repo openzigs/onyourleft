@@ -21,6 +21,7 @@ import {
   routeFilesIn,
 } from '../../browser/demo-route-fixture';
 import { NO_LAND_CLASS } from '../game/land-class';
+import type { FootprintPlanOptions } from '../game/footprint-buildings';
 import type { SceneInput } from '../game/scene';
 import { INITIAL_QUALITY, qualitySettings } from '../game/quality';
 import { loadBakedRoute, type BakedRoute } from './baked-route';
@@ -28,6 +29,19 @@ import { createDemoPlayer } from './player';
 import { CLIMB_PRESET } from './presets';
 import { startDemoStage, type DemoSnapshot } from './stage';
 import { fakeDrawnWorld, fakeRenderer, SteppedFrames, type FakeView } from './stage-testing';
+
+/** The options every `footprintPlans` call was handed, in order — #3334. */
+const planned: (FootprintPlanOptions | undefined)[] = [];
+vi.mock('../game/footprint-buildings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../game/footprint-buildings')>();
+  return {
+    ...actual,
+    footprintPlans: (...args: Parameters<typeof actual.footprintPlans>) => {
+      planned.push(args[6]);
+      return actual.footprintPlans(...args);
+    },
+  };
+});
 
 /** Every input `sceneFrame` was handed, in order: what the scene was given, read back. */
 const inputs: SceneInput[] = [];
@@ -63,7 +77,13 @@ afterAll(() => {
 
 describe('the demo player on a baked route — #1652', () => {
   it('rides the route’s road, and hands the scene its corridor, land and mapped town', () => {
+    planned.length = 0;
     const player = createDemoPlayer(CLIMB_PRESET, { reducedMotion: false, route });
+    // #3334: planned once, and with the downtown kit's wraps left on (the planner's own
+    // default): the demo's stage draws the realistic world (`stage.ts`), which draws them.
+    // The fixture route has no block a wrap fits, so the option is what is read here.
+    expect(planned.length).toBe(1);
+    expect(planned[0]?.facadeKit).not.toBe(false);
     expect(player.profile).toBe(route.profile);
     expect(player.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
     const frame = player.frame(RUNG);

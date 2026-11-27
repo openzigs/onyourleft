@@ -1868,6 +1868,58 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`
                         (80) nearest first, in their own term
                         §`REALISTIC_PARK_FIELD_TRIANGLES`; page `town=fields`
+    src/game/parked-cars.ts
+                        the parked cars of an ordinary ride (#3278): SCENERY,
+                        never an obstacle and never read by a simulation or
+                        the trainer. Placed from what is already planned — a
+                        mapped house's garage driveway (`FootprintPlan.driveway`),
+                        a shop's apron deep enough for a car and a doorway,
+                        and the kerb of a mapped `minor` or `major` side
+                        street with a building on it (`nearby-streets.ts`'
+                        pieces) — hashed from the ride's seed and the place,
+                        so a replay draws the same street. A car's whole box
+                        keeps `PARKED_CAR_ROAD_CLEAR_METRES` (4.5 m: the
+                        carriageway and a metre) off the middle of ANY
+                        stretch of the ridden road, behind a city centre's
+                        pavement, and clear of every footprint, every other
+                        street's surface, every mapped footway, water and
+                        every other car. ⚠️ **None at the kerb of the ridden
+                        road** (the village's and the city's street of
+                        `streets.ts`): three lanes and the racing line leave
+                        0.4 m inside each kerb, so a procedural village has no
+                        car and its frozen frame is untouched. ⚠️ **None at
+                        any kerb on an open-world ride** (`ParkedCarSite.kerbs`):
+                        every street there may be ridden next, and a car also
+                        keeps 4.5 m off the middle of each. ⚠️ **None on a
+                        `service` road**: the tiles cannot tell a driveway or
+                        a parking aisle from an alley (ADR 0091 D-3).
+                        Streets are read off the map's own lines
+                        (`WorldCorridor.streets`), never a frame's side
+                        roads, so a car does not come and go with them.
+                        `scene.ts` asks about the road 40 m ahead of the
+                        rider, and again only when that enters another 16 m
+                        cell; ≤ `PARKED_CARS_MAX` (36) nearest first, out to
+                        150 m. ⚠️ **Wheels go by the RIDER's place, not the
+                        cell's** (`parkedCarsSeenFrom`, asked every frame, a
+                        distance a car): the ≤ `PARKED_CARS_NEAR_MAX` (12)
+                        nearest the rider within 60 m, the rest the body
+                        alone — by the cell, 40 m up the road, the car beside
+                        the rider stood on empty arches on a dense street. It
+                        hands back the same list until a level changes.
+                        Drawn by `three-renderer.ts`
+                        §`ParkedCarBelt`: ONE merged mesh and one call of its
+                        own, each car its OWN body's triangles (never the
+                        Delivery roster, where every instance submits every
+                        kind), rebuilt only when the list changes, inside
+                        `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES`
+                        (13 440, in the worst frame's sum) and
+                        §`REALISTIC_PARKED_CAR_DRAW_CALLS` (1). Realistic
+                        world only; the bodies and atlas are #2847's committed
+                        `cars.glb` and `cars_atlas_256.ktx2`, no new file.
+                        `SceneFrame.parkedCars`, said by `SceneInput.parkedCars`
+                        (`GameView`: every ride but a Delivery round); lever
+                        `-parked-cars`, pages `town=houses`, `town=commercial`
+                        and `town=streets`.
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
@@ -2197,6 +2249,78 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         in the glass's otherwise unread `uv`
                         (`buildings.ts` §`glassPaneCoordinates`);
                         `-lot-realism` builds both out
+    src/game/facade-kit.ts
+                        a mapped footprint wrapped in modular facade pieces
+                        (#3334, the owner's direction of 2026-11-26): 39
+                        pieces from Quaternius's CC0 Downtown City MegaKit
+                        (ADR 0099 D-1), in ONE GLB and one 2048 px atlas
+                        (`realistic-assets.ts` §`REALISTIC_DOWNTOWN_KIT`,
+                        `tools/realistic/blender/process_downtown_kit.py`).
+                        `kitKindOf`: beside a `town` or `city-centre` stretch
+                        and never on farmland, a commercial footprint is a
+                        `retail` strip (one storey), a `shop` (two or three)
+                        or an `office` (four or more), and a terrace's house
+                        of two to four storeys a `townhouse`; every other
+                        footprint, and every one beside a `village`, `rural`
+                        or unclassed stretch, keeps what it draws today.
+                        `kitStyleOf` chooses each building's own look, seeded
+                        from its footprint: its skin from its extrusion's
+                        wall (the kit's brick; `render`, the brick pieces
+                        walled in the kit's concrete; `stone`, its cream
+                        trim; `metal`), its window, cornice, shop front,
+                        door, an awning or a sign band, pilasters, and a
+                        fire escape on some brick fronts. `kitPaletteOf`
+                        colours it from the plan's OWN paints: every vertex
+                        carries a class (wall, trim, accent, fixed) and the
+                        atlas is baked neutral where the building colours it.
+                        `wrapFootprint` walks the footprint's OWN outline: 2 m
+                        bays, each piece stretched to its bay and its storey,
+                        a shop front and the door on the edge facing the
+                        street, windows above, plain party walls, a plinth, a
+                        cornice as tall as the parapet, a flat roof.
+                        ⚠️ A wrap holds `REALISTIC_KIT_WRAP_TRIANGLES`, 3 000
+                        (the house models' price a building; it was the
+                        structure class's 640, and most bays were flat
+                        cards): every bay starts as a two-triangle CARD, then
+                        a door, cornice and window are chosen that put the
+                        WHOLE street front in RELIEF, the kit's own geometry,
+                        and the rest is spent a row at a time. ⚠️ A wrap is
+                        some thirty times its extrusion (2 785 against 78 on
+                        the terrace fixture), so `selectMappedBuildings`
+                        draws only the nearest `MAPPED_KIT_NEAR_MAX` (6) as
+                        wraps, a side of the street in turn (by which way
+                        each door faces), nearest the point 14 m up the road
+                        from the RIDER (`nearWraps`; never the road's
+                        ranking), asked again every `MAPPED_KIT_STRIDE_METRES`
+                        (10 m) and the belt refilled when the answer changes,
+                        so wraps keep beside the rider through a 100 m chunk
+                        (⚠️ a refill up to every 10 m on a street of wraps);
+                        `MAPPED_KIT_TRIANGLES` (18 000),
+                        out of the pooled 23 040 which is NOT raised, and one
+                        wrap fewer wherever a wrap would cost the frame a
+                        building or a procedural structure. What they take
+                        is the field boundaries' (31 structures left become
+                        5; `mapped-kit-belt.test.ts` holds each figure).
+                        Drawn at the near level only, as a model is
+                        (`FootprintPlan.kit`; its extrusion is its far level
+                        and the same height); never where a house model fits
+                        (the brick shop stays), on a part, or under a pitched
+                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        as a mapped shop is. One more draw call for
+                        every wrap in view, counted INSIDE
+                        `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
+                        the belt writes the wraps after the models in the
+                        models' own buffer and `kitMesh` draws that range in
+                        the house models' program with the kit's atlas bound
+                        (`three-renderer.ts` §`writeKitWrap`). Its bytes are
+                        `realistic-budget.ts` §`REALISTIC_DOWNTOWN_KIT_SURFACES`.
+                        The look pair is `town=terrace` against
+                        `levers=-facade-kit` (houses to 1 200 m, shops and
+                        offices beyond), or `town=city-street`, whose street
+                        front is #1637's lots (NOT `town=city`: its front is
+                        procedural house lots, which no wrap reaches).
+                        ⚠️ No tablet has drawn it: the frame check and the
+                        owner's look are owed
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
