@@ -303,6 +303,31 @@ describe('with Home’s week chart throwing while rendering — #2049', () => {
     const table = weekTable();
     expect(table?.querySelectorAll('tbody tr')).toHaveLength(7);
     expect(table?.closest('details')).toBeNull();
+    // #2261: the words that go with the table (`ChartSlot` `alongside`) stand
+    // with it — the days ridden and the week before, before the table and not
+    // tucked away either — so a chart that throws takes none of them with it.
+    const week = document.querySelector('main .oyl-home__week');
+    const days = [...(week?.querySelectorAll('p') ?? [])].find(
+      (each) => each.textContent === 'You rode on 2 of the last seven days.',
+    );
+    expect(days, 'the days-ridden sentence went with the chart').toBeDefined();
+    const before = [...(week?.querySelectorAll('.oyl-home__before') ?? [])].map(
+      (each) => each.textContent,
+    );
+    expect(before, 'the week before went with the chart').toEqual([
+      'Week before: 0',
+      'Week before: 0:00',
+      'Week before: 0',
+    ]);
+    for (const words of [days, week?.querySelector('.oyl-home__before-facts')]) {
+      expect(words?.closest('details')).toBeNull();
+      expect(
+        table === undefined || words === undefined || words === null
+          ? 0
+          : words.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING,
+        'the words come before the table',
+      ).not.toBe(0);
+    }
     // The rest of Home: its title, Next up, the last ride and the week's totals.
     expect(document.querySelector('main h1')?.textContent).toBe('Home');
     expect(document.querySelector('main .oyl-next-up')).not.toBeNull();

@@ -692,6 +692,12 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   if (openWorld !== null && openWorld !== 'port') {
     throw new Error(`reflow harness: ?openworld must be "port", not ${openWorld}`);
   }
+  // #2261: `?failread=power`, the ride's power read refused, so a slot whose
+  // read failed is laid out (`list-detail.browser.spec.ts` §"#2194").
+  const failedRead = new URLSearchParams(window.location.search).get('failread');
+  if (failedRead !== null && failedRead !== 'power') {
+    throw new Error(`reflow harness: ?failread must be "power", not ${failedRead}`);
+  }
   return (
     <PopulatedShell
       populated={populated}
@@ -702,6 +708,7 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
       {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
       {...(release === 'refused' ? { gameTrainer: REFUSED_RELEASE } : {})}
       {...(openWorld === 'port' ? { openWorld: OPEN_WORLD_PORT } : {})}
+      {...(failedRead === 'power' ? { failedRead } : {})}
       transfer={transfer}
       map={realMap}
       basemap={{

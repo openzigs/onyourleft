@@ -798,6 +798,8 @@ export function ActivityDetailView({
         traces and laps, then everything else this device holds about it —
         in the order they are read. Inside a list–detail pane (embedded) the
         pane is the column, and the two groups simply follow each other.
+        #2194: the power curve, the time in zone and the laps are the first
+        column's, and `sections.browser.spec.ts` (nightly) holds them there.
       */}
       <div className={embedded ? undefined : 'oyl-sections oyl-sections--pair'}>
         <div>
