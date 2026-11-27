@@ -16,12 +16,14 @@ import { isLineRole, LINE_PHASES, RIDER_ROLES, type LinePhase, type RiderRole } 
 import rotationSource from './rotation.ts?raw';
 import {
   ROTATION_BOT_PULL_MS,
+  ROTATION_CATCH_UP_SHARE,
   ROTATION_CLIMB_HOLD_METRES,
   ROTATION_EASE_SHARE,
   ROTATION_FADE_DWELL_MS,
   ROTATION_FORMING_MOST_MS,
   ROTATION_RIDER_GRACE_MS,
   ROTATION_RIDER_PULL_MS,
+  ROTATION_RIDER_WHEEL_BAND_METRES,
   ROTATION_WINDOW_MS,
   startRotation,
   stepRotation,
@@ -503,6 +505,54 @@ describe('changing → latching → steady', () => {
       members: { ...view.members, b1: { distanceM: lastM - 0.9, speedMps: 8 } },
     };
     expect(stepRotation(latching, near).state.phase).toBe('steady');
+  });
+});
+
+describe('a latching member is asked to close up, and the line does not freeze', () => {
+  it('a latching bot is asked for more than the line speed, an easing one for less', () => {
+    const { windows } = rideLine({ line: FIVE_BOTS, seed: 2, seconds: 60 });
+    const latching = windows.find((window) => window.phase === 'latching') as LineWindow;
+    const group = latching.view.groupSpeedMps;
+    expect(latching.demands['b1']).toBeCloseTo(group * (1 + ROTATION_CATCH_UP_SHARE), 9);
+    const easing = windows.find((window) => window.roles['b1'] === 'drifting-back') as LineWindow;
+    expect(easing.demands['b1']).toBeCloseTo(group * (1 - ROTATION_EASE_SHARE), 9);
+  });
+
+  it.each([30, 40, 45])('bots riding what they are asked keep rotating at %i km/h', (kmh) => {
+    const { windows } = rideLine({
+      line: FIVE_BOTS,
+      seed: 3,
+      seconds: 600,
+      groupSpeed: () => kmh / 3.6,
+    });
+    expect(changes(windows).length).toBeGreaterThanOrEqual(10);
+    const latched = windows.filter((window) => window.phase === 'latching').length;
+    expect(latched).toBeLessThan(windows.length / 4);
+  });
+
+  it('a rider aside, who cannot be asked to close up, is on the wheel inside the wider band', () => {
+    const line = [RIDER, bot('b1'), bot('b2'), bot('b3')];
+    const { windows } = rideLine({ line, seed: 1, seconds: 60, rider: { signalAfterMs: 5_000 } });
+    const at = windows.findIndex((window) => window.phase === 'latching');
+    const latching = rideLine({
+      line,
+      seed: 1,
+      seconds: at + 1,
+      rider: { signalAfterMs: 5_000 },
+    }).state;
+    expect(latching.aside).toBe('you');
+    const view = viewOf(latching, (at + 1) * ROTATION_WINDOW_MS);
+    const lastM = view.members['b3']?.distanceM as number;
+    const back = (metres: number): RotationView => ({
+      ...view,
+      members: { ...view.members, you: { distanceM: lastM - metres, speedMps: 8 } },
+    });
+    expect(stepRotation(latching, back(ROTATION_RIDER_WHEEL_BAND_METRES + 0.5)).state.phase).toBe(
+      'latching',
+    );
+    expect(stepRotation(latching, back(ROTATION_RIDER_WHEEL_BAND_METRES - 0.5)).state.phase).toBe(
+      'steady',
+    );
   });
 });
 

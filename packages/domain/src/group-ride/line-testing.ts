@@ -11,6 +11,7 @@
 import type { BotEnergy } from '../lap-race/wbal';
 import type { LinePhase, RiderRole } from './roles';
 import {
+  ROTATION_CATCH_UP_SHARE,
   ROTATION_EASE_SHARE,
   ROTATION_WINDOW_MS,
   startRotation,
@@ -157,7 +158,6 @@ export function rideLine(script: LineScript): {
           : group
         : (step.demands[front] as number);
     const aside = state.aside;
-    const asideSpeed = group * (1 - ROTATION_EASE_SHARE);
 
     // The steps inside the window read the line moving on; they decide nothing.
     for (let tick = 1; tick < ticks; tick += 1) {
@@ -178,16 +178,18 @@ export function rideLine(script: LineScript): {
       speed.set(id, frontSpeed);
     }
     if (aside !== null) {
+      // A bot rides what it is asked, in both roles; the rider, who is not
+      // asked, eases and closes up by the same shares.
       const role = step.roles[aside];
       const was = distance.get(aside) as number;
-      if (role === 'latching') {
-        // Back up to speed, closing onto the last wheel within the window.
-        distance.set(aside, Math.min(ahead - SCRIPT_WHEEL_GAP_METRES, was + group + 1));
-        speed.set(aside, group);
-      } else {
-        distance.set(aside, was + asideSpeed);
-        speed.set(aside, asideSpeed);
-      }
+      const asked =
+        step.demands[aside] ??
+        group * (role === 'latching' ? 1 + ROTATION_CATCH_UP_SHARE : 1 - ROTATION_EASE_SHARE);
+      // It cannot pass the last wheel: it closes up to it and no further.
+      const at =
+        role === 'latching' ? Math.min(ahead - SCRIPT_WHEEL_GAP_METRES, was + asked) : was + asked;
+      distance.set(aside, at);
+      speed.set(aside, asked);
     }
   }
   return { windows, state };
