@@ -23,7 +23,9 @@
  *   is `corridor.ts` §`planCorridor` of the route's line, so a reader recomputes
  *   it;
  * - `features`: `corridor.ts` §`packedCorridorFeatures` — the very value the
- *   rider's store gzips (`v: 8` since #2688 added a pitch's sport; `v: 7`
+ *   rider's store gzips (`v: 9` since #3245 added a street's name under `n`,
+ *   which a bake never asks for, so a bundle names no street; `v: 8` since
+ *   #2688 added a pitch's sport; `v: 7`
  *   since #2975 added a footprint's POI class under `p`; `v: 6` since #2660
  *   added the railway lines; `v: 5`
  *   since #2659 added the water lines; `v: 4`

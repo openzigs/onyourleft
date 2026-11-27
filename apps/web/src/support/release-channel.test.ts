@@ -11,8 +11,22 @@ describe('the release channel a build was made for (#1745)', () => {
     expect(readReleaseChannel({ VITE_OYL_RELEASE_CHANNEL: ' direct\n' })).toBe('direct');
   });
 
+  it('reads the iOS app’s two, the App Store and TestFlight (#3239)', () => {
+    expect(readReleaseChannel({ VITE_OYL_RELEASE_CHANNEL: 'app-store' })).toBe('app-store');
+    expect(readReleaseChannel({ VITE_OYL_RELEASE_CHANNEL: 'testflight' })).toBe('testflight');
+  });
+
   it('claims no channel for a build that set none, or set something else', () => {
-    for (const value of [undefined, '', 'Play', 'apk', 'github']) {
+    for (const value of [
+      undefined,
+      '',
+      'Play',
+      'apk',
+      'github',
+      'App Store',
+      'TestFlight',
+      'ios',
+    ]) {
       expect(
         readReleaseChannel({ VITE_OYL_RELEASE_CHANNEL: value }),
         String(value),

@@ -30,6 +30,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { RecordingCheckpointStore } from '../recording/recorder';
+import { RIDE_NOTIFICATION_REFUSED } from './controller';
 import { createRememberedSensors } from './remembered-sensors';
 import {
   androidRecordingService,
@@ -236,6 +237,43 @@ describe('#1755 — the iOS app’s ride controller asks for no RecordingService
     await settle();
     expect(plugin.calls.filter((call) => call === 'start')).toEqual(['start']);
     expect(shell.constructed()).toBe(1);
+    controller.dispose();
+  });
+});
+
+/**
+ * #3239: `RIDE_NOTIFICATION_REFUSED` names Android's notification, and the iOS
+ * app never says it, because it asks no notification question at all: it has
+ * no `RecordingService` (#1755). Read back as the ride's own snapshot.
+ */
+describe('#3239 — the iOS app never says Android’s notification refusal', () => {
+  /** A plugin whose rider says no to the notification. */
+  function refusing(): RecordingServicePlugin {
+    return {
+      start: async () => Promise.resolve(),
+      stop: async () => Promise.resolve(),
+      notificationPermission: async () => Promise.resolve({ state: 'prompt' }),
+      requestNotificationPermission: async () => Promise.resolve({ state: 'denied' }),
+    };
+  }
+
+  it('records with no notification notice in the iOS app', async () => {
+    const ios = { isNativePlatform: () => true, getPlatform: () => 'ios' };
+    const controller = controllerOver(androidRecordingService(ios, shellWith(refusing()).mobile));
+    await controller.start();
+    await settle();
+    expect(controller.getSnapshot().notificationNotice).toBeUndefined();
+    controller.dispose();
+  });
+
+  it('says it in the Android shell, where the question was asked', async () => {
+    const android = { isNativePlatform: () => true, getPlatform: () => 'android' };
+    const controller = controllerOver(
+      androidRecordingService(android, shellWith(refusing()).mobile),
+    );
+    await controller.start();
+    await settle();
+    expect(controller.getSnapshot().notificationNotice).toBe(RIDE_NOTIFICATION_REFUSED);
     controller.dispose();
   });
 });

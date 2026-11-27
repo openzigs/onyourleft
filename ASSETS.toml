@@ -638,78 +638,6 @@ script = "apps/web/tools/realistic/encode-ktx2.ts"
 tool = "KTX-Software v4.4.2"
 
 [[asset]]
-path = "apps/web/public/realistic/island_tree_02.glb"
-source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "be1736af0ab3421246201cd54d8c78737ff4b1fd066111416128f74accec3cce"
-modified = "one object of the pack (island_tree_02); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that; then its embedded maps encoded as KTX2 (KHR_texture_basisu) by KTX-Software v4.4.2 — colour maps as Basis Universal ETC1S, with alpha where the map has it, and normal maps as UASTC with Zstandard, each with its full mipmap chain; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/island_tree_02"
-inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/island_tree_02-impostor.ktx2"
-source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "a27ec535d3ad0d9b6f03a1404d3de976da175df53583e3db4cf8192018522a39"
-modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan; then encoded as KTX2 (Basis Universal ETC1S with alpha, sRGB, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/island_tree_02"
-inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/island_tree_02-impostor-normals.ktx2"
-source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "1432d5cb1783b28eb155867ccaad2c929196fa2f6021b5fa3764c98aa96dbbed"
-modified = "the eight views of the full scan the impostor strip is rendered from, as NORMALS: Cycles' normal pass on one thread, in the plant's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector; then encoded as KTX2 (Basis Universal UASTC with Zstandard, linear, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/island_tree_02"
-inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/tree_small_02.glb"
-source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "4ad16e210ad7a72a26d07d957b2e4873e8678e32393370dcc858f2d3f954c38b"
-modified = "one object of the pack (tree_small_02); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that; then its embedded maps encoded as KTX2 (KHR_texture_basisu) by KTX-Software v4.4.2 — colour maps as Basis Universal ETC1S, with alpha where the map has it, and normal maps as UASTC with Zstandard, each with its full mipmap chain; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/tree_small_02"
-inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/tree_small_02-impostor.ktx2"
-source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "aa4634ed9f77ec3eae3106fd26820fd1a505e264ade0a2b03fdfdeddf146a360"
-modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan; then encoded as KTX2 (Basis Universal ETC1S with alpha, sRGB, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/tree_small_02"
-inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/tree_small_02-impostor-normals.ktx2"
-source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "89d4beeb373ec8d12ea8ad4cf764f61ec9b776f4c711681dc850c58639e9ba64"
-modified = "the eight views of the full scan the impostor strip is rendered from, as NORMALS: Cycles' normal pass on one thread, in the plant's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector; then encoded as KTX2 (Basis Universal UASTC with Zstandard, linear, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
-input = "https://polyhaven.com/a/tree_small_02"
-inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
 path = "apps/web/public/realistic/fir_sapling_medium_a.glb"
 source = "Poly Haven, fir_sapling_medium by Rob Tuytel (photography); Rico Cilliers (modeling); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"
@@ -780,30 +708,6 @@ input = "https://polyhaven.com/a/fir_sapling_medium"
 inputsha256 = "1f989c2eac759273e9d847a4df26a92e46448483cf0633485dcbce6e4a47010b"
 script = "apps/web/tools/realistic/blender/process_tree.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
-
-[[asset]]
-path = "apps/web/public/realistic/island_tree_02-middle.glb"
-source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "258fa4dd6b52cebd74906f485b3a40098a704d5f06bec6229b11b0d9185f09b8"
-modified = "one object of the pack (island_tree_02), as the tree's middle level of detail: foliage thinned by whole cards and each survivor grown, wood collapse-decimated or, where that stalls, thinned by whole pieces with the largest kept, to at most 6000 triangles in all; ambient occlusion baked into a vertex colour, and every image dropped — it wears the near file's maps"
-input = "https://polyhaven.com/a/island_tree_02"
-inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3"
-
-[[asset]]
-path = "apps/web/public/realistic/tree_small_02-middle.glb"
-source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
-licence = "CC0-1.0"
-read = "2026-09-22"
-sha256 = "425df14671c5d1ecc6ec16deae77cfcc1c0dd93c123c783e66c6fff44a0d3a43"
-modified = "one object of the pack (tree_small_02), as the tree's middle level of detail: foliage thinned by whole cards and each survivor grown, wood collapse-decimated or, where that stalls, thinned by whole pieces with the largest kept, to at most 6000 triangles in all; ambient occlusion baked into a vertex colour, and every image dropped — it wears the near file's maps"
-input = "https://polyhaven.com/a/tree_small_02"
-inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
-script = "apps/web/tools/realistic/blender/process_tree.py"
-tool = "Blender 4.4.3"
 
 [[asset]]
 path = "apps/web/public/realistic/fir_sapling_medium_a-middle.glb"
@@ -2736,6 +2640,38 @@ modified = "the cars' one atlas, made in the same run as the cars: the pack's ow
 input = "https://ggbot.itch.io/psx-style-cars"
 inputsha256 = "25a31cfa53976cbdae38d8c1b6e8216d5191f2e6f5769e6af82a98b1cbb91e97"
 script = "apps/web/tools/realistic/blender/process_vehicle.py"
+tool = "Blender 4.4.3, then KTX-Software v4.4.2"
+
+# #3334: the facade pieces a mapped footprint in a town is wrapped in, pieces of Quaternius's CC0 Downtown City MegaKit, and their atlas (ADR 0099 D-1).
+# The kit's own page (`input`) read "License CC0" on 2026-11-27 (UTC), and so does the archive's own License_Standard.txt ("CC0 1.0 Universal (CC0 1.0)").
+# The archive is the owner's own download through the kit's itch.io page (`url`), placed by hand and never committed (ADR 0049 D-11):
+# "Downtown City MegaKit[Standard].zip", 234 753 092 bytes, SHA-256 5b1a945576d54cdbb4ccc9c3d52711e6d530da74c74c586407ecc28b165335da, pinned in inputs.lock.json.
+[[asset]]
+path = "apps/web/public/realistic/downtown_kit.glb"
+source = "itch.io (the owner’s download, #3334), quaternius-downtown-city-megakit by Quaternius; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-11-27"
+sha256 = "f55c5d8030ddd5594bf5270242c32d5bde7ef45104917d0eee174d8bbe0b8f71"
+creator = "Quaternius"
+url = "https://quaternius.itch.io/downtown-city-megakit"
+modified = "39 facade pieces from 29 of the kit's models (each named in inputs.lock.json; their names are too long to break on a narrow Credits screen), each read from its glTF: the faces nobody outside a building sees dropped (the kit's MI_InteriorWall, MI_FakeInterior, MI_InteriorFloor and MI_InteriorRoof), the roof piece stood upright, a door frame's opening closed with the kit's own door leaf or a pane of glass, its texture coordinates replaced by a projection straight onto the wall's plane into its cell of the pieces' atlas, a second set added that carries each face's colour class (wall, trim, accent or fixed), faces of no area dissolved and every face shaded flat, and its materials, pictures and vertex colours dropped; 8 of the pieces are another's mesh in a second cell of the atlas (the brick pieces walled in the kit's concrete) and have no mesh of their own; four are not the kit's: an awning, a sign band and a ladder made by this repository's script of a few boxes and quads, and a slab it lays under the kit's own railing; one mesh a piece named by its id, geometry and texture coordinates only, the picture in the atlas"
+input = "https://quaternius.com/packs/downtowncitymegakit.html"
+inputsha256 = "505cd49d795d386a3803342cca96cd8848ec708e6d60937cf180a67446f4ad9c"
+script = "apps/web/tools/realistic/blender/process_downtown_kit.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/downtown_kit_atlas_2048.ktx2"
+source = "itch.io (the owner’s download, #3334), quaternius-downtown-city-megakit by Quaternius; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-11-27"
+sha256 = "63f4f82757a73de685b5ac654c9f2a33bcf0d5f9bbe01618dcfb01c866d7fa18"
+creator = "Quaternius"
+url = "https://quaternius.itch.io/downtown-city-megakit"
+modified = "the facade pieces' one atlas, made in the same run as the pieces: each piece's colour baked by Cycles on one thread, as an emission, looking straight at the piece, into the piece's own cell of one 2048 px square at 96 px a metre with a margin of 8 px: its brick, metal and asphalt the kit's own colour pictures through the kit's own texture coordinates; its trim, its painted shop fronts and the walls of its render and stone pieces (the kit's trim and concrete pictures) baked as a neutral grey that keeps the picture's grain, for the renderer to colour a building at a time; its dark trim the trim's picture darkened; its glass one of the kit's own interior pictures laid across the piece's glass, dimmed under a flat sky colour; the awning, sign band, ladder and landing this repository's script makes in flat greys; the kit's wear masks (its vertex colours) and its normal and roughness pictures not used; then encoded as KTX2 (Basis Universal ETC1S, sRGB, with its full mipmap chain) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "https://quaternius.com/packs/downtowncitymegakit.html"
+inputsha256 = "505cd49d795d386a3803342cca96cd8848ec708e6d60937cf180a67446f4ad9c"
+script = "apps/web/tools/realistic/blender/process_downtown_kit.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
 [[asset]]
