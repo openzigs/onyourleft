@@ -43,6 +43,7 @@ import {
   type SignatureVerifier,
 } from '@onyourleft/domain';
 
+import { isNativeShell, type CapacitorGlobal } from '../support/capacitor';
 import type { InstanceAccount } from './sign-in';
 
 /** What a rider is told about the instance's keys. Draft wording (D-14 Q6). */
@@ -147,8 +148,9 @@ export function cardFromPin(account: InstanceAccount | undefined): string | unde
 
 /**
  * Where this copy of the app was loaded from (#1192, ADR 0047 D-11): whether
- * it runs inside the Android shell, and the page's own address. `main.tsx`
- * reads it once, from `location.href` and `support/capacitor.ts`.
+ * it runs inside a native shell, and the page's own address. `main.tsx`
+ * reads it once, from `location.href` and `support/capacitor.ts`, through
+ * {@link loadedFromShell}.
  */
 export interface LoadedFrom {
   readonly native: boolean;
@@ -156,13 +158,29 @@ export interface LoadedFrom {
 }
 
 /**
- * D-11's web-build notice, wherever a phase-1 feature would be. ⚠️ **Draft
- * wording for the owner to approve in #1192's pull request** (D-14 Q6).
+ * {@link LoadedFrom} from the Capacitor global and the page's address — #1755.
+ *
+ * ⚠️ **`native` is ANY native shell, the iOS app included**, never only
+ * Android's: the owner ruled on 2026-11-26 (#1755) that D-11's "only in the
+ * Android app" reads "only in the native apps", and ADR 0047's amendment of
+ * that date records it. The iOS app's page is `capacitor://localhost/`, which
+ * {@link sealedBuildOffered} refuses as an address, so an Android-only answer
+ * here would take every sealed feature out of the iOS app.
+ */
+export function loadedFromShell(capacitor: CapacitorGlobal | undefined, href: string): LoadedFrom {
+  return { native: isNativeShell(capacitor), href };
+}
+
+/**
+ * D-11's web-build notice, wherever a phase-1 feature would be (D-14 Q6).
+ * The owner approved this wording on 2026-11-26 (#1755): it names the On Your
+ * Left app, never one platform's, because the iOS app offers the sealed
+ * features too.
  */
 export const WEB_BUILD_TEXT =
   'Encrypted features are not offered in a copy of the app loaded from a website, because ' +
-  'whoever serves a website’s code could change it to take the encryption out. Use the Android ' +
-  'app, or a copy of the app saved on this device.';
+  'whoever serves a website’s code could change it to take the encryption out. Use the On Your ' +
+  'Left app, or a copy of the app saved on this device.';
 
 /** A loopback host, as the URL parser spells one. */
 function isLoopbackHost(hostname: string): boolean {
@@ -174,7 +192,8 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 /**
- * D-11: sealed features are offered only in the Android app, and in a web
+ * D-11: sealed features are offered only in the native apps (Android and,
+ * since the owner's ruling of 2026-11-26 on #1755, iOS), and in a web
  * build loaded from a loopback address or from a file the rider installed. A
  * build loaded over `https:` from any other host — the instance's own origin
  * included — offers none of them, because the edge that served its code could
