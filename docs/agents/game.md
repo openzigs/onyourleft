@@ -708,16 +708,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         each mesh's own model. ⚠️ **A shape is
                         no longer a mesh, and a reviewer who remembers "a
                         variant is a draw call" is reading the old file**: a
-                        mesh's one geometry holds several shapes, each vertex
-                        marked with its own, and the vertex shader folds away
-                        the ones an instance is not (`three-renderer.ts`
-                        §`STYLISED_INSTANCE_GLSL`, the realistic fence's fold,
-                        #1274). So the mesh count, `MAXIMUM_SCENERY_VARIANTS`
-                        and every draw-call ceiling are what they were, and
-                        the cost is triangles: an instance submits every shape
-                        its mesh holds, at most `FOLDED_TRIANGLES_A_MESH` more
-                        by kind — 2 819 for a building, so a house is drawn at
-                        the cost of three. ⚠️ **No shape is built in code**
+                        mesh that holds several shapes is a three
+                        `BatchedMesh` (`three-renderer.ts` §`ScatterBelt`),
+                        drawn in ONE call through `WEBGL_multi_draw`, each
+                        instance as the one shape it names. So the mesh count,
+                        `MAXIMUM_SCENERY_VARIANTS` and every draw-call ceiling
+                        are what they were, and an item submits its own
+                        shape's triangles and no other's
+                        (`STYLISED_SHAPE_TRIANGLES`: 2 006 at most for a
+                        building). ⚠️ **Only where the driver has
+                        `WEBGL_multi_draw`**: without it three draws a
+                        `BatchedMesh` one call an instance, so the view builds
+                        a belt that draws each mesh's own model alone, as
+                        before #3287. ⚠️ **A multi-draw is not one of the
+                        context's four draw entry points**: every counter in
+                        `browser/` counts it through
+                        `browser/realistic/draws.ts` §`watchMultiDraws`, and
+                        `game-harness.ts` §`countingTextures` leaves a
+                        batch's instance tables out of #366's count of
+                        pictures. ⚠️ **No shape is built in code**
                         (they were, until the owner placed the archives on
                         2026-11-26). ⚠️ **The two City Kits declare one atlas
                         name for two images**: `sceneryAtlasOf` answers a

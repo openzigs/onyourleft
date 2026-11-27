@@ -69,6 +69,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { readGlb } from '../src/game/model-bytes-testing';
 import { MIXED_TOWN_EDGE_RUNG } from '../src/game/footprint-fixtures-testing';
 import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
@@ -586,22 +587,26 @@ interface StylisedFoldMeasurement {
     readonly darker: readonly number[];
     readonly ratio: number;
   };
+  readonly batchedTint: StylisedFoldMeasurement['tint'];
   readonly triangles: number;
   readonly calls: number;
+  readonly drawnAs: readonly { readonly shape: string; readonly model: string }[];
 }
 
-/**
- * The triangles #3287's folded files add to the frame of one item a slot a
- * kind. Each of the six items of a kind submits what its mesh holds beside
- * its model (`stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` bounds that by
- * kind), and nine meshes hold any: three of a kind's six items a mesh for a
- * kind of two, two for a building's three. So the frame adds exactly
- * 3 × (112 + 72) + 3 × (140 + 54) + 3 × (165 + 73) + 2 × (2 819 + 2 534 +
- * 2 240) = **17 034**, and this is that sum, not a margin over it. ⚠️ All but
- * 1 500 of it is the six buildings: a house is drawn at the cost of three.
- */
-const FOLDED_FRAME_TRIANGLES =
-  3 * (112 + 72) + 3 * (140 + 54) + 3 * (165 + 73) + 2 * (2_819 + 2_534 + 2_240);
+/** A committed stylised model's triangles, read off its bytes — #3287. */
+function stylisedModelTriangles(name: string): number {
+  const { json } = readGlb(
+    fileURLToPath(new URL(`../src/game/models/${name}.glb`, import.meta.url)),
+  );
+  let triangles = 0;
+  for (const mesh of json.meshes ?? []) {
+    for (const primitive of mesh.primitives) {
+      const accessor = primitive.indices ?? primitive.attributes['POSITION'];
+      triangles += (accessor === undefined ? 0 : (json.accessors?.[accessor]?.count ?? 0)) / 3;
+    }
+  }
+  return triangles;
+}
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -3156,24 +3161,69 @@ test.describe('the stylised world’s shapes by setting — #3287', () => {
     expect(drawn).toBeLessThan(Math.pow(ratio, 1 / 2.2) + 0.06);
   });
 
-  test('adds no draw call, and exactly the triangles its shapes are', async ({
+  test('tints a conifer its mesh draws beside other shapes, through the batch’s colours', async ({
+    harnessRun,
+  }, testInfo) => {
+    // A conifer's mesh holds three shapes, so it is a `BatchedMesh`, whose
+    // instances are tinted through its colour table and not the attribute a
+    // shrub's are. Both trees here are `tree_pineTallA`: one shape, two tints.
+    const result = await harness(harnessRun);
+    const { lighter, darker, ratio } = result.stylisedFolds.batchedTint;
+    const colour = (pixel: readonly number[]): string =>
+      pixel
+        .slice(0, 3)
+        .map((channel) => channel.toFixed(0))
+        .join('/');
+    const measured =
+      `the lighter conifer ${colour(lighter)}, the darker ${colour(darker)}; ` +
+      `the tints leave ${(ratio * 100).toFixed(0)} % of the green, linear`;
+    testInfo.annotations.push({ type: 'a seeded tint on a batched kind', description: measured });
+    console.log(`#3287 a seeded tint on a batched kind — ${measured}`);
+
+    expect(lighter[1]).toBeGreaterThan(0);
+    expect(ratio).toBeLessThan(0.9);
+    const drawn = (darker[1] ?? 0) / (lighter[1] ?? 1);
+    expect(drawn).toBeLessThan(0.985);
+    expect(drawn).toBeGreaterThan(Math.pow(ratio, 1 / 2.2) - 0.06);
+    expect(drawn).toBeLessThan(Math.pow(ratio, 1 / 2.2) + 0.06);
+  });
+
+  test('adds no draw call, and submits each item’s own shape and no other', async ({
     harnessRun,
   }, testInfo) => {
     const result = await harness(harnessRun);
-    const { triangles, calls, control } = result.stylisedFolds;
+    const { triangles, calls, control, drawnAs } = result.stylisedFolds;
+    // What each item is drawn as, off the committed bytes: with the files
+    // beside the models, and with the models alone.
+    const own = drawnAs.reduce((sum, each) => sum + stylisedModelTriangles(each.shape), 0);
+    const alone = drawnAs.reduce((sum, each) => sum + stylisedModelTriangles(each.model), 0);
     const measured =
       `the frame of one item a slot a kind: ${String(control.triangles)} triangles of scenery in ` +
       `${String(control.calls)} draw calls with the models alone, ${String(triangles)} in ` +
-      `${String(calls)} with #3287's shapes folded in`;
-    testInfo.annotations.push({ type: 'what the folded shapes cost', description: measured });
-    console.log(`#3287 what the folded shapes cost — ${measured}`);
+      `${String(calls)} with #3287's shapes beside them; its ${String(drawnAs.length)} modelled ` +
+      `items are ${String(own)} triangles as the shapes they are, ${String(alone)} as the models`;
+    testInfo.annotations.push({ type: 'what the shapes cost', description: measured });
+    console.log(`#3287 what the shapes cost — ${measured}`);
 
     // Not one draw call: the belt's whole width, as it was (#367).
     expect(control.calls).toBe(SCATTER_MESH_CEILING);
     expect(calls).toBe(control.calls);
-    // Triangles are what it costs: each instance's folded shapes, and no more.
+    // The frame holds every kind of shape: a file beside a model, and both
+    // settings' buildings among them.
+    const drawn = new Set(drawnAs.map((each) => each.shape));
+    expect(drawnAs.some((each) => each.shape !== each.model)).toBe(true);
+    for (const kit of [
+      ['building-type-l', 'building-type-p', 'building-type-q'],
+      ['building-e', 'building-g', 'building-h'],
+    ]) {
+      expect(kit.some((building) => drawn.has(building))).toBe(true);
+    }
+    // ⚠️ **Each item submits the ONE shape it is.** The difference from the
+    // models alone is exactly the difference between the files, item by
+    // item — where the fold this replaced submitted every shape a mesh held,
+    // three houses for a house.
     expect(control.triangles).toBeGreaterThan(0);
-    expect(triangles - control.triangles).toBe(FOLDED_FRAME_TRIANGLES);
+    expect(triangles - control.triangles).toBe(own - alone);
   });
 });
 

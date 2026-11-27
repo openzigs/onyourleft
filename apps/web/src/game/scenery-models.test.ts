@@ -76,7 +76,7 @@ function everyModel(): readonly { kind: SceneryKind; name: string; url: string }
 }
 
 /** The three City Kit (Commercial) buildings, by name: the files that kit's archive gave. */
-const COMMERCIAL_KIT = ['building-a', 'building-d', 'building-e'];
+const COMMERCIAL_KIT = ['building-e', 'building-g', 'building-h'];
 
 /** One model's glTF JSON chunk, parsed out of the committed container. */
 function glTfOf(name: string): ReturnType<typeof readGlb>['json'] {
@@ -221,8 +221,8 @@ describe('what a model is allowed to fetch — #240 NFR-5, #366', () => {
       rock: [['stone_largeB.glb', 'stone_largeD.glb'], ['stone_largeF.glb']],
       building: [
         ['building-type-l.glb', 'building-e.glb'],
-        ['building-type-p.glb', 'building-a.glb'],
-        ['building-type-q.glb', 'building-d.glb'],
+        ['building-type-p.glb', 'building-h.glb'],
+        ['building-type-q.glb', 'building-g.glb'],
       ],
     });
     for (const [kind, meshes] of Object.entries(STYLISED_FOLD_MODELS)) {

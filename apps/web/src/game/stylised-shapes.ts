@@ -32,14 +32,12 @@
  *
  * A shape was a mesh and a mesh a draw call (`scenery-models.ts`
  * §`MAXIMUM_SCENERY_VARIANTS`), and no ceiling is raised here. Each mesh a
- * kind already has is instead drawn with SEVERAL shapes in its one geometry:
- * every vertex says which shape it belongs to, every instance says which
- * shape it is ({@link stylisedFoldOf}), and the vertex shader folds the
- * others to a point (`three-renderer.ts` §`STYLISED_INSTANCE_GLSL`) — the
- * realistic fence's fold, #1274. The mesh count, and so every draw-call
- * figure, is what it was. ⚠️ **What it costs is vertices**: an instance
- * submits every shape its mesh holds, so a building is drawn at the cost of
- * three. {@link FOLDED_TRIANGLES_A_MESH} bounds that, by kind.
+ * kind already has instead holds SEVERAL shapes, and is drawn in its one
+ * call as a `BatchedMesh` (`three-renderer.ts` §`ScatterBelt`): every
+ * instance names the one shape it is ({@link stylisedFoldOf}) and submits
+ * that shape's triangles alone. The mesh count, and so every draw-call
+ * figure, is what it was. {@link STYLISED_SHAPE_TRIANGLES} holds the
+ * heaviest shape a kind may be.
  *
  * Pure: no rendering library and no file — `settlements.ts` reads
  * {@link buildingSettingOf}, in a worker and under Node, where a model's URL
@@ -77,32 +75,29 @@ const SETTING_FOLD: Readonly<Record<BuildingSetting, number>> = {
 };
 
 /**
- * The most triangles the files folded into ONE mesh may come to together, by
- * kind — #3287. Every instance of a mesh submits every shape the mesh holds,
- * so this is the most a fold adds to any one item, beyond its own model:
+ * The most triangles any ONE shape of a kind may be — #3287: the heaviest
+ * file the kind is drawn as, its meshes' own models and the files beside
+ * them (`scenery-models.ts`). An item submits the one shape it is, so this is
+ * the most an item of the kind costs.
  *
- * | kind | the meshes' sums | ceiling |
+ * | kind | heaviest file | triangles |
  * |---|---|--:|
- * | building | 2 819, 2 534, 2 240 | 2 819 |
- * | broadleaf | 112, 72 | 112 |
- * | conifer | 140, 54 | 140 |
- * | rock | 165, 73 | 165 |
+ * | building | `building-g` | 2 006 |
+ * | broadleaf | `tree_oak` | 196 |
+ * | conifer | `tree_pineRoundD` | 170 |
+ * | rock | `stone_largeB` | 85 |
  *
- * ⚠️ **Each is the heaviest mesh's sum as committed, so it is a ratchet**: a
- * heavier file, or one more, is a red test and a number moved in review. A
- * building's is twenty-eight times what the shapes built from numbers cost
- * (100), which is the price of the kits' own models and was the owner's
- * ruling of 2026-11-26; the tablet's frame time is the check it is owed.
+ * ⚠️ **Each is the heaviest file as committed, so it is a ratchet**: a
+ * heavier file is a red test and a number moved in review.
  *
  * @test-facing held by `stylised-shapes.test.ts`, off the committed bytes;
- * `game.browser.spec.ts` §`FOLDED_FRAME_TRIANGLES` is the same sums on a
- * frame a driver drew
+ * `game.browser.spec.ts` §"#3287" counts what a frame a driver drew submits
  */
-export const FOLDED_TRIANGLES_A_MESH: Partial<Record<SceneryKind, number>> = {
-  'tree-broadleaf': 112,
-  'tree-conifer': 140,
-  rock: 165,
-  building: 2_819,
+export const STYLISED_SHAPE_TRIANGLES: Partial<Record<SceneryKind, number>> = {
+  'tree-broadleaf': 196,
+  'tree-conifer': 170,
+  rock: 85,
+  building: 2_006,
 };
 
 /** The seed a place's shape and tint are hashed from: their own, so neither follows anything `scatter.ts` drew there. */

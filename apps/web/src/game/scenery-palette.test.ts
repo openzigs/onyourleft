@@ -137,7 +137,7 @@ describe('the atlas the buildings are painted from', () => {
     // CONTROL for the routing: the same bytes read against the wrong kit's
     // atlas are another set of colours, so a reproduced digest below says
     // which atlas a building was read against.
-    for (const name of ['building-a', 'building-d', 'building-e']) {
+    for (const name of ['building-e', 'building-g', 'building-h']) {
       const file = readGlb(`${MODELS}${name}.glb`);
 
       expect(atlasOf(name) === commercialAtlas, name).toBe(true);

@@ -172,6 +172,7 @@ import {
   Group,
   HalfFloatType,
   InstancedBufferAttribute,
+  BatchedMesh,
   InstancedMesh,
   LatheGeometry,
   LinearFilter,
@@ -1964,46 +1965,29 @@ function fittedToKind(merged: BufferGeometry, kind: SceneryKind): BufferGeometry
 }
 
 /**
- * The vertex attribute that says which of its mesh's shapes a vertex belongs
- * to — #3287: 0 the model, 1 and up the shapes folded in beside it
- * (`scenery-models.ts` §`STYLISED_FOLD_MODELS`). Only a geometry that holds more
- * than one shape carries it: a driver reads nought where there is none, which
- * is the one shape such a mesh is. @see STYLISED_INSTANCE_GLSL
- */
-export const STYLISED_SHAPE_ATTRIBUTE = 'oylShape';
-
-/**
- * The instance attribute a stylised mesh's instances carry — #3287, four
- * numbers: in `xyz` what the item's tint takes OFF each channel
- * (`stylised-shapes.ts` §`writeStylisedTint`, as `1 − tint`), and in `w` one
- * more than which of its mesh's shapes it is (§`stylisedFoldOf`).
+ * The instance attribute a tinted stylised mesh's instances carry — #3287,
+ * three numbers: what the item's tint takes OFF each channel
+ * (`stylised-shapes.ts` §`writeStylisedTint`, as `1 − tint`).
  *
  * ⚠️ **Written that way round so that a mesh with no such attribute is drawn
- * as it always was.** A driver reads `(0, 0, 0, 1)` for an attribute a
- * geometry does not carry: nothing taken off, and the first shape. So a post,
- * a barn and a wall — one shape and no tint — carry no buffer for it at all,
- * and the whole belt still wears one material and compiles one program.
+ * as it always was.** A driver reads `(0, 0, 0)` for an attribute a geometry
+ * does not carry: nothing taken off. So a post, a barn and a wall carry no
+ * buffer for it at all, and the whole belt still wears one material.
+ *
+ * ⚠️ **It no longer says which shape an instance is.** Until 2026-11-27 its
+ * fourth number did, and the vertex shader folded away the shapes an instance
+ * was not — which made every instance submit every shape its mesh held, three
+ * houses' triangles for one. A mesh of several shapes is a
+ * {@link BatchedMesh} now ({@link ScatterBelt}), which submits the one.
  */
 export const STYLISED_INSTANCE_ATTRIBUTE = 'oylInstance';
 
 /**
- * The two functions {@link withStylisedInstances} declares in the vertex
- * program — #3287.
- *
- * - `oylShapeIs` is 1 for a vertex of the shape its instance is, and 0 for a
- *   vertex of any other: `transformed` is multiplied by it, so a shape an
- *   instance is not is folded to the instance's origin, every corner of its
- *   triangles to one point, which draws nothing. The realistic fence's fold
- *   (`CHAIN_LINK_FOLD_GLSL`, #1274), for as many shapes as a mesh holds.
- * - `oylTinted` is a vertex's own colour, less what the instance's tint takes
- *   off each channel.
- *
- * Exported for `stylised-folds.test.ts`, which runs it.
+ * The function {@link withStylisedInstances} declares in the vertex program —
+ * #3287: a vertex's own colour, less what the instance's tint takes off each
+ * channel. Exported for `stylised-folds.test.ts`, which runs it.
  */
-export const STYLISED_INSTANCE_GLSL = `float oylShapeIs(float shape, float oneMore) {
-  return 1.0 - step(0.5, abs(shape - (oneMore - 1.0)));
-}
-vec3 oylTinted(vec3 colour, vec3 off) {
+export const STYLISED_INSTANCE_GLSL = `vec3 oylTinted(vec3 colour, vec3 off) {
   return colour * (vec3(1.0) - off);
 }`;
 
@@ -2021,34 +2005,28 @@ export function readsStylisedInstances(material: Material): boolean {
 }
 
 /**
- * Teaches a stylised scenery material its instances' shape and tint — #3287,
- * {@link STYLISED_INSTANCE_GLSL}, applied where three has the vertex's colour
- * and where it has begun its position. Throws, as every splice here does, if
+ * Teaches a stylised scenery material its instances' tint — #3287,
+ * {@link STYLISED_INSTANCE_GLSL}, applied where three has the vertex's
+ * colour. Throws, as every splice here does, if
  * three's program no longer holds an include it is spliced at.
  */
 function withStylisedInstances<M extends Material>(material: M): M {
   STYLISED_INSTANCES_TAUGHT.add(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
-  const spliced = "#3287's shapes and tints";
+  const spliced = "#3287's tints";
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
-        replacedOrThrown(
-          shader.vertexShader,
-          '#include <common>',
-          `#include <common>\nattribute float ${STYLISED_SHAPE_ATTRIBUTE};\nattribute vec4 ${STYLISED_INSTANCE_ATTRIBUTE};\n${STYLISED_INSTANCE_GLSL}`,
-          'vertex',
-          spliced,
-        ),
-        '#include <color_vertex>',
-        `#include <color_vertex>\nvColor.rgb = oylTinted(vColor.rgb, ${STYLISED_INSTANCE_ATTRIBUTE}.xyz);`,
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute vec3 ${STYLISED_INSTANCE_ATTRIBUTE};\n${STYLISED_INSTANCE_GLSL}`,
         'vertex',
         spliced,
       ),
-      '#include <begin_vertex>',
-      `#include <begin_vertex>\ntransformed *= oylShapeIs(${STYLISED_SHAPE_ATTRIBUTE}, ${STYLISED_INSTANCE_ATTRIBUTE}.w);`,
+      '#include <color_vertex>',
+      `#include <color_vertex>\nvColor.rgb = oylTinted(vColor.rgb, ${STYLISED_INSTANCE_ATTRIBUTE});`,
       'vertex',
       spliced,
     );
@@ -2059,66 +2037,11 @@ function withStylisedInstances<M extends Material>(material: M): M {
 
 /**
  * The stylised belt's pair — #3287: {@link vertexColouredMaterials}, taught
- * each instance's shape and tint. One pair for the whole belt still, so one
- * program a shading.
+ * each instance's tint. One pair for the whole belt still.
  */
 function stylisedSceneryMaterials(): ShadedMaterials {
   const pair = vertexColouredMaterials();
   return { lit: withStylisedInstances(pair.lit), flat: withStylisedInstances(pair.flat) };
-}
-
-/** How many shapes a stylised mesh's one geometry holds — #3287: one, with no marks. */
-function shapesHeldBy(geometry: BufferGeometry): number {
-  const held = geometry.getAttribute(STYLISED_SHAPE_ATTRIBUTE) as BufferAttribute | undefined;
-  if (held === undefined) return 1;
-  let last = 0;
-  for (let at = 0; at < held.count; at += 1) last = Math.max(last, held.getX(at));
-  return Math.round(last) + 1;
-}
-
-/**
- * One mesh's shapes as ONE geometry — #3287: `model`, and each of `folds`
- * after it, every vertex marked with its shape in
- * {@link STYLISED_SHAPE_ATTRIBUTE}. One geometry is one instanced mesh and one
- * draw call, however many shapes it holds; {@link STYLISED_INSTANCE_GLSL} draws
- * the one an instance is. Every part is a shape as
- * {@link prepareSceneryGeometry} leaves one: fitted to its kind, with a
- * position, a normal and a colour and nothing else. `model` and `folds` are
- * released; with no `folds` the model is returned as it came, and so it is
- * if the parts cannot be merged — a rider loses variety, never an item.
- * Exported for `stylised-folds.test.ts`, which folds shapes of its own
- * through it.
- */
-export function foldedSceneryGeometry(
-  model: BufferGeometry,
-  folds: readonly BufferGeometry[],
-): BufferGeometry {
-  if (folds.length === 0) return model;
-  const parts = [model, ...folds];
-  // `mergeGeometries` needs every part to agree about being indexed, and one
-  // kit's files need not agree with another's. Levelled down, as
-  // `prepareSceneryGeometry` levels a file's own parts: an index where every
-  // part has one, since a file's shared corners are vertices a phone does not
-  // shade twice, and none otherwise.
-  const indexed = parts.every((part) => part.index !== null);
-  const ready = indexed
-    ? parts
-    : parts.map((part) => (part.index === null ? part : part.toNonIndexed()));
-  const joined = mergeGeometries(ready);
-  if (joined === null) {
-    for (const part of new Set([...folds, ...ready])) if (part !== model) part.dispose();
-    return model;
-  }
-  const marks = new Float32Array(joined.getAttribute('position').count);
-  let at = 0;
-  ready.forEach((part, fold) => {
-    const vertices = part.getAttribute('position').count;
-    marks.fill(fold, at, at + vertices);
-    at += vertices;
-  });
-  joined.setAttribute(STYLISED_SHAPE_ATTRIBUTE, new BufferAttribute(marks, 1));
-  for (const part of new Set([...parts, ...ready])) part.dispose();
-  return joined;
 }
 
 /**
@@ -2129,7 +2052,7 @@ let stylisedFoldsOn = true;
 
 /**
  * Loads the models, from the next {@link loadSceneryModels} on, with #3287's
- * shapes folded in beside them, or with the models alone — the browser gate's
+ * shapes beside them, or with the models alone — the browser gate's
  * control: the same frame drawn as it was before, in the same browser, for
  * what the shapes cost and for the building a setting must NOT draw.
  *
@@ -2269,6 +2192,15 @@ function readImagePixels(image: unknown): AtlasImage | undefined {
  */
 let sceneryGeometries: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = new Map();
 
+/**
+ * The files drawn BESIDE each of {@link sceneryGeometries}' models — #3287,
+ * `scenery-models.ts` §`STYLISED_FOLD_MODELS`: by kind, then by mesh in the
+ * same order, each fitted as its mesh's own model is. Empty for a mesh that
+ * has none, or any of whose files could not be read. Module state for
+ * `sceneryGeometries`' reason, and written by the same load.
+ */
+let sceneryFolds: ReadonlyMap<SceneryKind, readonly (readonly BufferGeometry[])[]> = new Map();
+
 /** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
 async function readModelScene(url: string): Promise<Object3D> {
   // #3287: a model is answered with the atlas of the kit it came from. Both
@@ -2304,6 +2236,7 @@ export async function loadSceneryModels(
   readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): Promise<void> {
   const loaded = new Map<SceneryKind, readonly BufferGeometry[]>();
+  const folded = new Map<SceneryKind, readonly (readonly BufferGeometry[])[]>();
   await Promise.all(
     SCENERY_KINDS.map(async (kind) => {
       const models: readonly SceneryModel[] = SCENERY_MODELS[kind] ?? [];
@@ -2330,7 +2263,8 @@ export async function loadSceneryModels(
           releaseLoadedScene(scene);
         }
       };
-      // #3287: the files drawn beside a mesh's model, in its draw call.
+      // #3287: the files drawn beside a mesh's model, in its draw call
+      // ({@link ScatterBelt} §`batched`).
       // ⚠️ **All of a mesh's or none**: a building's fold is its setting's by
       // INDEX, so a list with a hole in it would draw a suburban lot as the
       // commercial building. A mesh any of whose folds cannot be read keeps
@@ -2361,7 +2295,7 @@ export async function loadSceneryModels(
           // Started together; `foldsOf` settles every read and never rejects.
           const folding = foldsOf(mesh);
           try {
-            return foldedSceneryGeometry(await read(model), await folding);
+            return { own: await read(model), folds: await folding };
           } catch {
             for (const geometry of await folding) geometry.dispose();
             // Keep the primitive for this variant. @see the note above.
@@ -2374,10 +2308,17 @@ export async function loadSceneryModels(
       // every other place — `ScatterBelt` takes a variant modulo this list's
       // length, and a `[geometry, undefined]` would make every other item
       // vanish. Losing variety is the documented trade; losing items is not.
-      const kept = shapes.filter((shape): shape is BufferGeometry => shape !== undefined);
+      const kept = shapes.filter((shape) => shape !== undefined);
       if (kept.length > 0) {
         // A kind with no model loaded keeps its primitive alone.
-        loaded.set(kind, kept);
+        loaded.set(
+          kind,
+          kept.map((shape) => shape.own),
+        );
+        folded.set(
+          kind,
+          kept.map((shape) => shape.folds),
+        );
       }
     }),
   );
@@ -2386,7 +2327,11 @@ export async function loadSceneryModels(
       geometry.dispose();
     }
   }
+  for (const meshes of sceneryFolds.values()) {
+    for (const geometry of meshes.flat()) geometry.dispose();
+  }
   sceneryGeometries = loaded;
+  sceneryFolds = folded;
   // #545: the near-plane cull's shapes, built now rather than on a frame.
   warmNearFieldShapes('stylised');
 }
@@ -3089,12 +3034,40 @@ export class ScatterBelt {
    */
   readonly #stylised: boolean;
   /**
-   * #3287: the stylised meshes whose instances carry
-   * {@link STYLISED_INSTANCE_ATTRIBUTE} — a mesh that holds more than one
-   * shape, or whose kind is tinted — and how many shapes each holds. Every
-   * other mesh is drawn from the attribute's default, and carries no buffer.
+   * #3287: the stylised instanced meshes whose instances carry
+   * {@link STYLISED_INSTANCE_ATTRIBUTE} — those of a tinted kind. Every other
+   * mesh is drawn from the attribute's default, and carries no buffer.
    */
-  readonly #held = new Map<InstancedMesh, number>();
+  readonly #held = new Set<InstancedMesh>();
+  /**
+   * #3287: the meshes that hold SEVERAL shapes, by the key an instanced mesh
+   * of the same kind and variant would have — a mesh's own model and the
+   * files folded in beside it (`scenery-models.ts` §`STYLISED_FOLD_MODELS`).
+   *
+   * ⚠️ **A `BatchedMesh`, because an instanced draw is ONE shape.** It draws
+   * every instance in one call through `WEBGL_multi_draw`, each as the ONE
+   * geometry it names, so an instance submits its own shape's triangles and
+   * no other's. (Until 2026-11-27 the shapes were merged into an instanced
+   * mesh's geometry and the vertex shader folded away the ones an instance
+   * was not, which submitted all of them: three houses' triangles a house.)
+   *
+   * ⚠️ **Only where the caller says the driver has `WEBGL_multi_draw`**
+   * (`batched`). Without it three draws a `BatchedMesh` one call an INSTANCE,
+   * which is the draw-call budget spent many times over; so a belt built
+   * without it draws each mesh's own model alone, instanced, as before
+   * #3287 — a rider loses variety, never an item, and never a frame.
+   *
+   * What it costs beside the instanced mesh it stands in for: two data
+   * textures a mesh (its matrices, and which instance each draw is) and a
+   * third for a tinted kind's colours, uploaded when a frame's items change.
+   */
+  readonly #batches = new Map<string, BatchedMesh>();
+  /** How many shapes each of {@link #batches}' meshes holds. */
+  readonly #batchShapes = new Map<BatchedMesh, number>();
+  /** How many instances of each {@link #batches} mesh the last update drew. */
+  readonly #batched = new Map<BatchedMesh, number>();
+  readonly #tintScratch = new Float32Array(3);
+  readonly #tintColour = new Color();
 
   /**
    * @param models the shapes to draw, by kind, in variant order. Defaults to
@@ -3134,9 +3107,18 @@ export class ScatterBelt {
        * pair, which the belt then owns and releases. @see ScatterFold
        */
       readonly fold?: ScatterFold;
+      /**
+       * #3287: whether the driver has `WEBGL_multi_draw`, so a mesh of
+       * several shapes may be a `BatchedMesh`. @see #batches
+       */
+      readonly batched?: boolean;
     } = {},
   ) {
     this.#stylised = options.materials === undefined && options.physical !== true;
+    const folds =
+      this.#stylised && options.batched === true && models === sceneryGeometries
+        ? sceneryFolds
+        : undefined;
     this.#materials =
       options.materials ??
       (options.physical === true ? physicalMaterials() : stylisedSceneryMaterials());
@@ -3157,6 +3139,11 @@ export class ScatterBelt {
       );
       for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
         const model = shapes[variant];
+        const beside = model === undefined ? [] : (folds?.get(kind)?.[variant] ?? []);
+        if (model !== undefined && beside.length > 0) {
+          this.#batches.set(beltKey(kind, variant), this.#batchOf([model, ...beside]));
+          continue;
+        }
         const mesh = new InstancedMesh(
           // ⚠️ **A copy of the model, not the model.** {@link dispose} releases
           // every geometry the belt is wearing, and the loaded ones are shared
@@ -3190,12 +3177,9 @@ export class ScatterBelt {
         }
         // #3287: a stylised mesh of several shapes, or of a tinted kind,
         // carries which shape each instance is and its tint.
-        if (this.#stylised) {
-          const held = shapesHeldBy(mesh.geometry);
-          if (held > 1 || stylisedTinted(kind)) {
-            this.#held.set(mesh, held);
-            foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 4);
-          }
+        if (this.#stylised && stylisedTinted(kind)) {
+          this.#held.add(mesh);
+          foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 3);
         }
         // three's constructor fills every slot with the identity matrix and
         // sets `count` to the capacity. A belt that drew before its first frame
@@ -3230,7 +3214,62 @@ export class ScatterBelt {
   get drawnItems(): number {
     let drawn = 0;
     for (const mesh of this.#meshes.values()) drawn += mesh.count;
+    for (const count of this.#batched.values()) drawn += count;
     return drawn;
+  }
+
+  /**
+   * One mesh of several shapes — #3287: `parts` copied into one
+   * `BatchedMesh`, in order, so a shape's geometry id is its place in the
+   * list. Nothing of `parts` is kept or released: the loaded geometries are
+   * shared by every belt a tab builds.
+   */
+  #batchOf(parts: readonly BufferGeometry[]): BatchedMesh {
+    // A batch's geometries must agree about being indexed, and one kit's
+    // files need not agree with another's. Levelled down, as
+    // `prepareSceneryGeometry` levels a file's own parts.
+    const indexed = parts.every((part) => part.index !== null);
+    const ready = indexed
+      ? parts
+      : parts.map((part) => (part.index === null ? part : part.toNonIndexed()));
+    let vertices = 0;
+    let indices = 0;
+    for (const part of ready) {
+      vertices += part.getAttribute('position').count;
+      indices += part.index?.count ?? 0;
+    }
+    const batch = new BatchedMesh(
+      SCATTER_INSTANCE_CAPACITY,
+      vertices,
+      indices,
+      this.#materials.lit,
+    );
+    // The belt has already decided what is in view (`inView`); three's own
+    // pass over every instance, a frame, buys nothing.
+    batch.perObjectFrustumCulled = false;
+    batch.sortObjects = false;
+    batch.frustumCulled = false;
+    for (const part of ready) batch.addGeometry(part);
+    for (const part of ready) if (!parts.includes(part)) part.dispose();
+    batch.visible = false;
+    this.#batchShapes.set(batch, parts.length);
+    this.#batched.set(batch, 0);
+    return batch;
+  }
+
+  /** The meshes of several shapes one kind is drawn across — #3287. @see #batches */
+  batchesOf(kind: SceneryKind): readonly BatchedMesh[] {
+    const found: BatchedMesh[] = [];
+    for (let variant = 0; variant < (this.#shapes.get(kind) ?? 0); variant += 1) {
+      const batch = this.#batches.get(beltKey(kind, variant));
+      if (batch !== undefined) found.push(batch);
+    }
+    return found;
+  }
+
+  /** How many instances of `batch` the last {@link update} drew — #3287. */
+  batchedCount(batch: BatchedMesh): number {
+    return this.#batched.get(batch) ?? 0;
   }
 
   /** Every mesh one kind is drawn across. @see ScatterBelt.meshes */
@@ -3286,6 +3325,7 @@ export class ScatterBelt {
           ? this.#fold.materials[shading]
           : this.#materials[shading];
     }
+    for (const batch of this.#batches.values()) batch.material = this.#materials[shading];
   }
 
   /**
@@ -3350,6 +3390,7 @@ export class ScatterBelt {
     for (const mesh of this.#meshes.values()) {
       scene.add(mesh);
     }
+    for (const batch of this.#batches.values()) scene.add(batch);
   }
 
   /**
@@ -3363,6 +3404,7 @@ export class ScatterBelt {
       for (const mesh of this.#meshes.values()) {
         mesh.visible = false;
       }
+      for (const batch of this.#batches.values()) batch.visible = false;
     }
   }
 
@@ -3406,10 +3448,13 @@ export class ScatterBelt {
     for (const key of this.#meshes.keys()) {
       this.#counts.set(key, 0);
     }
+    for (const key of this.#batches.keys()) {
+      this.#counts.set(key, 0);
+    }
     let admitted = 0;
     for (const item of items) {
       const key = this.#keyFor(item);
-      const mesh = this.#meshes.get(key);
+      const mesh = this.#meshes.get(key) ?? this.#batches.get(key);
       if ((mesh === undefined && !this.#skip.has(item.kind)) || !inView(item, pose)) {
         continue;
       }
@@ -3429,21 +3474,61 @@ export class ScatterBelt {
       if (this.#fold !== undefined && this.#folded.has(mesh)) {
         foldChannel(mesh, this.#fold.attribute);
       }
-      if (this.#held.has(mesh)) foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 4);
+      if (this.#held.has(mesh)) foldChannel(mesh, STYLISED_INSTANCE_ATTRIBUTE, 3);
       // Rewound here rather than tracked in a second map: the next loop uses
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
     }
+    for (const [key, batch] of this.#batches) {
+      // Hidden first and shown again as each is written: that is what tells
+      // three its list of draws is stale, which a new shape alone does not.
+      const before = this.#batched.get(batch) ?? 0;
+      for (let at = 0; at < before; at += 1) batch.setVisibleAt(at, false);
+      const needed = this.#counts.get(key) ?? 0;
+      if (needed > batch.maxInstanceCount) {
+        batch.setInstanceCount(Math.max(needed, batch.maxInstanceCount * 2));
+      }
+      while (batch.instanceCount < needed) batch.setVisibleAt(batch.addInstance(0), false);
+      this.#batched.set(batch, 0);
+    }
     admitted = 0;
     for (const item of items) {
-      const mesh = this.#meshes.get(this.#keyFor(item));
-      if ((mesh === undefined && !this.#skip.has(item.kind)) || !inView(item, pose)) {
+      const key = this.#keyFor(item);
+      const mesh = this.#meshes.get(key);
+      const batch = mesh === undefined ? this.#batches.get(key) : undefined;
+      if (
+        (mesh === undefined && batch === undefined && !this.#skip.has(item.kind)) ||
+        !inView(item, pose)
+      ) {
         continue;
       }
       if (admitted >= this.#budget) {
         break;
       }
       admitted += 1;
+      if (batch !== undefined) {
+        const at = this.#batched.get(batch) ?? 0;
+        this.#position.set(item.x, item.y, item.z);
+        this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
+        this.#scale.setScalar(item.scale);
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        batch.setGeometryIdAt(at, stylisedFoldOf(item, this.#batchShapes.get(batch) ?? 1));
+        batch.setMatrixAt(at, this.#matrix);
+        if (stylisedTinted(item.kind)) {
+          writeStylisedTint(item.kind, item.x, item.z, this.#tintScratch, 0);
+          batch.setColorAt(
+            at,
+            this.#tintColour.setRGB(
+              this.#tintScratch[0] as number,
+              this.#tintScratch[1] as number,
+              this.#tintScratch[2] as number,
+            ),
+          );
+        }
+        batch.setVisibleAt(at, true);
+        this.#batched.set(batch, at + 1);
+        continue;
+      }
       if (mesh === undefined) {
         continue;
       }
@@ -3472,20 +3557,17 @@ export class ScatterBelt {
           this.#fold.shapeOf(item),
         );
       }
-      // #3287: its tint, as what it takes off each channel, and which of its
-      // mesh's shapes this one is — a building's by its setting, a tree's or
-      // a rock's by where it stands. @see STYLISED_INSTANCE_ATTRIBUTE
-      const held = this.#held.get(mesh);
-      if (held !== undefined) {
+      // #3287: its tint, as what it takes off each channel.
+      // @see STYLISED_INSTANCE_ATTRIBUTE
+      if (this.#held.has(mesh)) {
         const channels = (
           mesh.geometry.getAttribute(STYLISED_INSTANCE_ATTRIBUTE) as InstancedBufferAttribute
         ).array as Float32Array;
-        const at = mesh.count * 4;
+        const at = mesh.count * 3;
         writeStylisedTint(item.kind, item.x, item.z, channels, at);
         channels[at] = 1 - (channels[at] as number);
         channels[at + 1] = 1 - (channels[at + 1] as number);
         channels[at + 2] = 1 - (channels[at + 2] as number);
-        channels[at + 3] = 1 + stylisedFoldOf(item, held);
       }
       mesh.count += 1;
     }
@@ -3514,10 +3596,12 @@ export class ScatterBelt {
       // projected, sorted or bound at all.
       mesh.visible = mesh.count > 0;
     }
+    for (const [batch, drawn] of this.#batched) batch.visible = drawn > 0;
   }
 
   /** Releases every GPU resource the belt owns. */
   dispose(): void {
+    for (const batch of this.#batches.values()) batch.dispose();
     for (const mesh of this.#meshes.values()) {
       mesh.geometry.dispose();
       mesh.dispose();
@@ -12119,7 +12203,8 @@ function furnitureSurfaceGeometry(
  * one geometry, so the frame draws the same triangles in the same places in
  * two calls. Instancing cannot do that — an instanced draw is ONE shape — and
  * three's `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's
- * page's counter does not see (`browser/realistic/draws.ts`).
+ * page's counter did not see then (`browser/realistic/draws.ts`; since #3287
+ * it does, and the stylised scenery is one).
  *
  * ⚠️ **Rebuilt only when the pieces in reach change**, as
  * {@link PavementBelt} is when its streets do: `streets.ts` hands every frame
@@ -13047,7 +13132,8 @@ function parkedCarPaint(piece: DeliveryObstaclePiece): number {
  * draw no pixel. That is what lets a wheelie bin, a hand trolley and a cone
  * share one instanced call: an instanced draw is ONE geometry, and three's
  * `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's page's
- * counter does not see (`browser/realistic/draws.ts`).
+ * counter did not see then (`browser/realistic/draws.ts`; since #3287 it
+ * does, and the stylised scenery is one).
  *
  * The cost is the other kinds' vertices run through the vertex shader and
  * dropped before any pixel: no pass, no fragment, no transparency.
@@ -27280,9 +27366,15 @@ function nearFieldShapesOf(
   if (geometries === undefined || geometries.length === 0) return undefined;
   const cached = nearFieldTriangles.get(geometries);
   if (cached !== undefined) return cached;
-  const built = geometries.map((geometry) => {
-    const out = new Float32Array(triangleNumbers(geometry));
-    writeTriangles(geometry, 1, out, 0);
+  // #3287: a mesh's item is drawn as its model or as a file folded in beside
+  // it, so the cull is given every one of them — the union, which is the
+  // conservative answer for whichever an item is.
+  const folds = sceneryFolds.get(kind) ?? [];
+  const built = geometries.map((geometry, mesh) => {
+    const parts = [geometry, ...(folds[mesh] ?? [])];
+    const out = new Float32Array(parts.reduce((sum, part) => sum + triangleNumbers(part), 0));
+    let at = 0;
+    for (const part of parts) at = writeTriangles(part, 1, out, at);
     return out;
   });
   nearFieldTriangles.set(geometries, built);
@@ -28200,7 +28292,7 @@ class ThreeGameView implements GameView {
    * from `SceneFrame.scatter` being unread, and `game.browser.spec.ts` reads
    * the drawing buffer back beside the road for exactly that reason.
    */
-  readonly #scatter = new ScatterBelt();
+  readonly #scatter: ScatterBelt;
   /**
    * The stylised world's start and finish gantries, unlettered — #966. The
    * realistic world draws its own, lettered ({@link RealisticDrawing}).
@@ -28297,6 +28389,11 @@ class ThreeGameView implements GameView {
     if (renderer !== undefined) renderer.debug.checkShaderErrors = import.meta.env.DEV;
     this.#renderer = renderer;
     this.hasContext = renderer !== undefined;
+    // #3287: a mesh of several shapes is a `BatchedMesh` only where the
+    // driver draws one in a single call. @see ScatterBelt
+    this.#scatter = new ScatterBelt(undefined, {
+      batched: renderer?.extensions.has('WEBGL_multi_draw') === true,
+    });
 
     this.#scene.background = this.#sky;
     this.#scene.fog = this.#fog;

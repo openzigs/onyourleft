@@ -274,6 +274,6 @@ export const SCENERY_PALETTE: Readonly<Record<string, ModelPalette>> = {
   'building-type-p': { colours: 35, brightestChannel: 0.9734452903984125, digest: 'f4b869f3' },
   'building-type-q': { colours: 30, brightestChannel: 0.9734452903984125, digest: '59a48b6f' },
   'building-e': { colours: 40, brightestChannel: 0.9646862478944651, digest: '0727bbf2' },
-  'building-a': { colours: 40, brightestChannel: 1, digest: '218676e2' },
-  'building-d': { colours: 50, brightestChannel: 1, digest: '97ca863a' },
+  'building-h': { colours: 46, brightestChannel: 0.9646862478944651, digest: '5e83886f' },
+  'building-g': { colours: 53, brightestChannel: 1, digest: '527a5978' },
 };

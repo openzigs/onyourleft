@@ -109,7 +109,7 @@ describe('#3287 a building is drawn by its setting', () => {
     const folds = STYLISED_FOLD_MODELS.building ?? [];
     // Suburban are City Kit (Suburban)'s files and commercial City Kit (Commercial)'s.
     expect([...suburban].sort()).toEqual(['building-type-l', 'building-type-p', 'building-type-q']);
-    expect([...commercial].sort()).toEqual(['building-a', 'building-d', 'building-e']);
+    expect([...commercial].sort()).toEqual(['building-e', 'building-g', 'building-h']);
     expect(suburban).toEqual(new Set(folds.map((mesh) => mesh[0]?.name)));
     expect(commercial).toEqual(new Set(folds.map((mesh) => mesh[1]?.name)));
     expect(suburban.size).toBe(3);

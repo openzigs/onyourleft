@@ -86,7 +86,7 @@ import {
   STEERING_AXIS,
   UPPER_BODY_PIVOT,
 } from './bicycle';
-import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS, STYLISED_FOLD_MODELS } from './scenery-models';
+import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
 import {
   REALISTIC_REMOTE_RIDERS,
@@ -2584,15 +2584,11 @@ describe('the shapes the models bring — #341', () => {
     return loadSceneryModels(loaderFrom(donor, 'tree-conifer')).then(() => {
       const belt = new ScatterBelt();
 
-      // Every kind with a model in the table now draws the loaded shape — and,
-      // since #3287, the files `scenery-models.ts` folds into its first mesh
-      // beside it, each read here as the same donor shape
-      // (`stylised-folds.test.ts` reads those back one by one).
+      // Every kind with a model in the table now draws the loaded shape. (The
+      // files #3287 draws beside it are a batched belt's:
+      // `stylised-folds.test.ts`.)
       for (const kind of Object.keys(SCENERY_MODELS) as SceneryKind[]) {
-        const folded = (STYLISED_FOLD_MODELS[kind]?.[0] ?? []).length;
-        expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(
-          modelVertices * (1 + folded),
-        );
+        expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
       }
       // …and `post`, which ADR 0022 D-3 leaves alone, still draws its cylinder.
       expect(meshFor(belt, 'post')?.geometry.getAttribute('position').count).toBe(

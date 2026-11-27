@@ -13,7 +13,7 @@ import { readGlb } from './model-bytes-testing';
 import { type BuildingSetting, type SceneryKind } from './scatter';
 import { SCENERY_MODELS, STYLISED_FOLD_MODELS, stylisedShapeNameOf } from './scenery-models';
 import {
-  FOLDED_TRIANGLES_A_MESH,
+  STYLISED_SHAPE_TRIANGLES,
   STYLISED_TINT_FLOOR,
   buildingSettingOf,
   stylisedFoldOf,
@@ -35,14 +35,10 @@ function modelTriangles(name: string): number {
   return triangles;
 }
 
-/** What the files folded into each of a kind's meshes come to together, off their bytes. */
-function foldedTriangles(): Record<string, number[]> {
-  return Object.fromEntries(
-    Object.entries(STYLISED_FOLD_MODELS).map(([kind, meshes]) => [
-      kind,
-      meshes.map((folds) => folds.reduce((sum, model) => sum + modelTriangles(model.name), 0)),
-    ]),
-  );
+/** Every file a kind is drawn as — its meshes' own models and the files beside them — with its triangles. */
+function shapesOf(kind: SceneryKind): Record<string, number> {
+  const files = [...(SCENERY_MODELS[kind] ?? []), ...(STYLISED_FOLD_MODELS[kind] ?? []).flat()];
+  return Object.fromEntries(files.map((model) => [model.name, modelTriangles(model.name)]));
 }
 
 describe('#3287 the setting a class is', () => {
@@ -60,7 +56,7 @@ describe('#3287 the setting a class is', () => {
   });
 });
 
-describe('#3287 what the files folded into a mesh cost', () => {
+describe('#3287 what the shapes a kind is drawn as cost', () => {
   it('adds three broadleaves, three conifers, three stones and six buildings', () => {
     expect((STYLISED_FOLD_MODELS['tree-broadleaf'] ?? []).flat()).toHaveLength(3);
     expect((STYLISED_FOLD_MODELS['tree-conifer'] ?? []).flat()).toHaveLength(3);
@@ -81,38 +77,54 @@ describe('#3287 what the files folded into a mesh cost', () => {
     for (const name of names) expect(models.has(name), name).toBe(false);
   });
 
-  it('states what each mesh’s folds add to every one of its items, off the bytes', () => {
-    // An instance submits every shape its mesh holds, so the cost of a fold is
-    // the sum, not the heaviest. Written out, so a heavier file or one more
-    // is a number that moves in review.
-    expect(foldedTriangles()).toEqual({
-      'tree-broadleaf': [50 + 62, 72],
-      'tree-conifer': [54 + 86, 54],
-      rock: [85 + 80, 73],
-      building: [1_310 + 1_509, 1_282 + 1_252, 1_140 + 1_100],
+  it('states what an item of each shape submits, off the bytes', () => {
+    // An item submits the one shape it is. Written out, so a heavier file is
+    // a number that moves in review.
+    expect(shapesOf('building')).toEqual({
+      'building-type-h': 770,
+      'building-type-i': 800,
+      'building-type-k': 1_024,
+      'building-type-l': 1_310,
+      'building-type-p': 1_282,
+      'building-type-q': 1_140,
+      'building-e': 1_509,
+      'building-h': 1_512,
+      'building-g': 2_006,
+    });
+    expect(shapesOf('tree-broadleaf')).toEqual({
+      tree_default: 114,
+      tree_oak: 196,
+      tree_fat: 50,
+      tree_simple: 62,
+      tree_tall: 72,
+    });
+    expect(shapesOf('tree-conifer')).toEqual({
+      tree_pineTallA: 78,
+      tree_pineRoundD: 170,
+      tree_pineSmallC: 54,
+      tree_pineSmallB: 86,
+      tree_pineSmallD: 54,
+    });
+    expect(shapesOf('rock')).toEqual({
+      stone_largeA: 80,
+      stone_largeC: 72,
+      stone_largeB: 85,
+      stone_largeD: 80,
+      stone_largeF: 73,
     });
   });
 
-  it('holds each kind to the ceiling of its heaviest mesh, and no looser', () => {
-    const sums = foldedTriangles();
-    expect(Object.keys(FOLDED_TRIANGLES_A_MESH).sort()).toEqual(Object.keys(sums).sort());
-    for (const [kind, each] of Object.entries(sums)) {
-      const ceiling = FOLDED_TRIANGLES_A_MESH[kind as SceneryKind];
-      for (const sum of each) expect(sum, kind).toBeLessThanOrEqual(ceiling as number);
-      // A ratchet: the ceiling is the heaviest mesh as committed, with no slack.
+  it('holds each kind to its heaviest file, and no looser', () => {
+    expect(Object.keys(STYLISED_SHAPE_TRIANGLES).sort()).toEqual(
+      Object.keys(STYLISED_FOLD_MODELS).sort(),
+    );
+    for (const [kind, ceiling] of Object.entries(STYLISED_SHAPE_TRIANGLES)) {
+      const each = Object.values(shapesOf(kind as SceneryKind));
+      for (const triangles of each) expect(triangles, kind).toBeLessThanOrEqual(ceiling);
+      // A ratchet: the ceiling is the heaviest file as committed, with no slack.
       expect(ceiling, kind).toBe(Math.max(...each));
     }
-    expect(FOLDED_TRIANGLES_A_MESH.building).toBe(2_819);
-  });
-
-  it('pairs the heaviest house with the lightest model, so no mesh carries two heavy ones', () => {
-    // A building item costs its mesh's model and both folds: 3 589, 3 334 and
-    // 3 264 triangles, where the three models alone are 770, 800 and 1 024.
-    const own = (SCENERY_MODELS.building ?? []).map((model) => modelTriangles(model.name));
-    const folded = foldedTriangles()['building'] ?? [];
-    expect(own.map((triangles, mesh) => triangles + (folded[mesh] ?? 0))).toEqual([
-      3_589, 3_334, 3_264,
-    ]);
+    expect(STYLISED_SHAPE_TRIANGLES.building).toBe(2_006);
   });
 });
 
@@ -184,8 +196,8 @@ describe('#3287 which of its mesh’s shapes an item is', () => {
     expect(stylisedShapeNameOf(item(1, 'suburban'))).toBe('building-type-p');
     expect(stylisedShapeNameOf(item(2, 'suburban'))).toBe('building-type-q');
     expect(stylisedShapeNameOf(item(0, 'commercial'))).toBe('building-e');
-    expect(stylisedShapeNameOf(item(1, 'commercial'))).toBe('building-a');
-    expect(stylisedShapeNameOf(item(2, 'commercial'))).toBe('building-d');
+    expect(stylisedShapeNameOf(item(1, 'commercial'))).toBe('building-h');
+    expect(stylisedShapeNameOf(item(2, 'commercial'))).toBe('building-g');
     // At a rung of one shape a kind, every house is the first mesh's.
     expect(stylisedShapeNameOf(item(2, 'commercial'), 1)).toBe('building-e');
     // A tree's is its mesh's model or one of the files beside it, by where it stands.

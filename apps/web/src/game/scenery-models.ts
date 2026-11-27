@@ -48,12 +48,13 @@
  *
  * ⚠️ **Since #3287 a shape is no longer a mesh, and the budget is unmoved.**
  * Each mesh {@link SCENERY_MODELS} gives a kind is drawn with more shapes than
- * its model: {@link STYLISED_FOLD_MODELS} folds a City Kit (Suburban) house
- * and a City Kit (Commercial) building in beside each building, and Nature
- * Kit trees and stones beside each of those, into the mesh's ONE geometry, and
- * the vertex shader draws the one an instance is. So a kind has more shapes
- * and exactly the meshes, and the draw calls, it had; what a fold costs is
- * triangles, and `stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` bounds them.
+ * its model: {@link STYLISED_FOLD_MODELS} puts a City Kit (Suburban) house
+ * and a City Kit (Commercial) building beside each building, and Nature Kit
+ * trees and stones beside each of those, in the mesh's ONE draw call
+ * (`three-renderer.ts` §`ScatterBelt`, a `BatchedMesh`). So a kind has more
+ * shapes and exactly the meshes, and the draw calls, it had, and an item
+ * submits the triangles of the one shape it is; `stylised-shapes.ts`
+ * §`STYLISED_SHAPE_TRIANGLES` holds the heaviest a kind may be.
  * `SCENERY_MODELS` is still the mesh count.
  *
  * ## Provenance
@@ -114,9 +115,9 @@ import buildingKUrl from './models/building-type-k.glb?url';
 import buildingLUrl from './models/building-type-l.glb?url';
 import buildingPUrl from './models/building-type-p.glb?url';
 import buildingQUrl from './models/building-type-q.glb?url';
-import commercialAUrl from './models/building-a.glb?url';
-import commercialDUrl from './models/building-d.glb?url';
 import commercialEUrl from './models/building-e.glb?url';
+import commercialGUrl from './models/building-g.glb?url';
+import commercialHUrl from './models/building-h.glb?url';
 import bushUrl from './models/plant_bush.glb?url';
 import bushTriangleUrl from './models/plant_bushLargeTriangle.glb?url';
 import stoneAUrl from './models/stone_largeA.glb?url';
@@ -226,8 +227,8 @@ export const SCENERY_MODELS: Partial<Record<SceneryKind, readonly SceneryModel[]
  * | kind | mesh | folded in |
  * |---|---|---|
  * | building | `building-type-h` | `building-type-l`, `building-e` |
- * | building | `building-type-i` | `building-type-p`, `building-a` |
- * | building | `building-type-k` | `building-type-q`, `building-d` |
+ * | building | `building-type-i` | `building-type-p`, `building-h` |
+ * | building | `building-type-k` | `building-type-q`, `building-g` |
  * | broadleaf | `tree_default` | `tree_fat`, `tree_simple` |
  * | broadleaf | `tree_oak` | `tree_tall` |
  * | conifer | `tree_pineTallA` | `tree_pineSmallC`, `tree_pineSmallB` |
@@ -245,11 +246,14 @@ export const SCENERY_MODELS: Partial<Record<SceneryKind, readonly SceneryModel[]
  * ⚠️ **Order is load-bearing**, as `SCENERY_MODELS`' is: reordering a list
  * changes what stands where on every route.
  *
- * ⚠️ **Every file here costs every instance of its mesh its triangles**: an
- * instance submits each shape its mesh holds, and the vertex shader folds
- * away the ones it is not. The commercial buildings are that kit's three
- * lightest but one, and each mesh pairs a heavier house with a lighter
- * model; `stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` holds the sums.
+ * ⚠️ **An item costs the triangles of the one file it is drawn as**, and no
+ * other's: `stylised-shapes.ts` §`STYLISED_SHAPE_TRIANGLES` holds the
+ * heaviest a kind may be. The commercial buildings are the kit's with an
+ * awning over a shop window — `building-e` low and wide under a green one,
+ * `building-h` dark over a green one, `building-g` over an orange one.
+ *
+ * ⚠️ **Drawn only where the driver has `WEBGL_multi_draw`.** Without it a
+ * mesh draws its own model alone, as before #3287 (`ScatterBelt`).
  *
  * Every file is the upstream artefact byte for byte, as the models above are,
  * from the archives the owner placed on 2026-11-26 (`ASSETS.toml` records
@@ -286,11 +290,11 @@ export const STYLISED_FOLD_MODELS: Partial<
     ],
     [
       { name: 'building-type-p', url: buildingPUrl },
-      { name: 'building-a', url: commercialAUrl },
+      { name: 'building-h', url: commercialHUrl },
     ],
     [
       { name: 'building-type-q', url: buildingQUrl },
-      { name: 'building-d', url: commercialDUrl },
+      { name: 'building-g', url: commercialGUrl },
     ],
   ],
 };
@@ -357,9 +361,9 @@ export const COMMERCIAL_ATLAS: SceneryModel = {
 
 /** The models that are City Kit (Commercial)'s, and so are painted from {@link COMMERCIAL_ATLAS}. */
 const COMMERCIAL_KIT_URLS: ReadonlySet<string> = new Set([
-  commercialAUrl,
-  commercialDUrl,
   commercialEUrl,
+  commercialGUrl,
+  commercialHUrl,
 ]);
 
 /**

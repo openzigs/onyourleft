@@ -367,7 +367,13 @@ import {
 } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import type { NearTreeFade } from '../src/game/near-tree-fade';
-import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
+import {
+  COUNTED_DRAWS,
+  indicesInMultiDraw,
+  trianglesInDraw,
+  trianglesInMultiDraw,
+  watchMultiDraws,
+} from './realistic/draws';
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
   scatterSeed,
@@ -378,6 +384,7 @@ import {
   type ScatterItem,
   type SceneryKind,
 } from '../src/game/scatter';
+import { SCENERY_MODELS, stylisedShapeNameOf } from '../src/game/scenery-models';
 import { writeStylisedTint } from '../src/game/stylised-shapes';
 import { atStartLine } from '../src/game/simulation';
 import {
@@ -2212,9 +2219,14 @@ function countingDrawCalls(body: (calls: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  // #3287: a `BatchedMesh` is drawn by a multi-draw, which is one call.
+  const stop = watchMultiDraws(() => {
+    calls += 1;
+  });
   try {
     body(() => calls);
   } finally {
+    stop();
     for (const name of names) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
@@ -2249,9 +2261,13 @@ function countingNonEmptyDrawCalls(body: (calls: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    if (indicesInMultiDraw(name, args) > 0) calls += 1;
+  });
   try {
     body(() => calls);
   } finally {
+    stop();
     for (const [name, original] of originals) {
       (gl as unknown as Record<string, unknown>)[name] = original;
     }
@@ -2304,9 +2320,13 @@ function countingIndices(body: (indices: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    indices += indicesInMultiDraw(name, args);
+  });
   try {
     body(() => indices);
   } finally {
+    stop();
     for (const name of Object.keys(submitted)) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
@@ -2336,12 +2356,17 @@ function countingTriangles(body: (triangles: () => number, calls: () => number) 
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    triangles += trianglesInMultiDraw(name, args);
+    calls += 1;
+  });
   try {
     body(
       () => triangles,
       () => calls,
     );
   } finally {
+    stop();
     for (const [name, original] of originals) gl[name] = original;
   }
 }
@@ -2437,9 +2462,28 @@ interface StylisedFoldMeasurement {
     readonly darker: Pixel;
     readonly ratio: number;
   };
-  /** What the frame of one item a slot a kind submits for its scenery. */
+  /**
+   * The same of two conifers — a kind whose mesh holds several shapes, so
+   * they are drawn by a `BatchedMesh` and tinted through its colours. Both
+   * are the mesh's own model, `tree_pineTallA`, so one shape in two tints.
+   */
+  readonly batchedTint: {
+    readonly lighter: Pixel;
+    readonly darker: Pixel;
+    readonly ratio: number;
+  };
+  /**
+   * What the frame of one item a slot a kind submits for its scenery, its
+   * buildings stood on a rural, a suburban and a commercial lot in turn.
+   */
   readonly triangles: number;
   readonly calls: number;
+  /**
+   * That frame's items of a kind with a model: the file each is drawn as,
+   * and its mesh's own model, which is what it is drawn as with the models
+   * alone. The spec reads each file's triangles off its bytes.
+   */
+  readonly drawnAs: readonly { readonly shape: string; readonly model: string }[];
 }
 
 /** What {@link foldProbe} reports when it did not run. */
@@ -2450,8 +2494,10 @@ const NO_STYLISED_FOLDS: StylisedFoldMeasurement = {
     commercial: { pixels: 0, green: 0 },
   },
   tint: { lighter: [0, 0, 0, 0], darker: [0, 0, 0, 0], ratio: 1 },
+  batchedTint: { lighter: [0, 0, 0, 0], darker: [0, 0, 0, 0], ratio: 1 },
   triangles: 0,
   calls: 0,
+  drawnAs: [],
 };
 
 /**
@@ -2530,48 +2576,81 @@ function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasuremen
     commercial: lot('commercial'),
   };
 
-  // The two shrubs: of a few dozen places a pace apart, the lightest and the darkest.
+  // Two of a kind: of a few dozen places a pace apart, the lightest and the
+  // darkest — for a conifer, among the places where it is its mesh's own model.
   const tintAt = new Float32Array(3);
   const greenOf = (item: ScatterItem): number => {
     writeStylisedTint(item.kind, item.x, item.z, tintAt, 0);
     return tintAt[1] ?? 1;
   };
-  let lightest = placedAhead(pose, 'shrub', 0, 14, 0);
-  let darkest = lightest;
-  for (let step = 0; step < 48; step += 1) {
-    const here = placedAhead(
-      pose,
-      'shrub',
-      0,
-      13.5 + (step % 8) / 8,
-      (Math.floor(step / 8) - 3) / 6,
-    );
-    if (greenOf(here) > greenOf(lightest)) lightest = here;
-    if (greenOf(here) < greenOf(darkest)) darkest = here;
-  }
-  view.render(alone({ ...lightest, scale: 1.4 }));
-  const lighter = changed(whole()).mean;
-  view.render(alone({ ...darkest, scale: 1.4 }));
-  const darker = changed(whole()).mean;
-  const ratio = greenOf(darkest) / greenOf(lightest);
+  const tintPair = (
+    kind: 'shrub' | 'tree-conifer',
+  ): { lighter: Pixel; darker: Pixel; ratio: number } => {
+    let lightest: ScatterItem | undefined;
+    let darkest: ScatterItem | undefined;
+    for (let step = 0; step < 96; step += 1) {
+      const here = placedAhead(
+        pose,
+        kind,
+        0,
+        13.5 + (step % 16) / 16,
+        (Math.floor(step / 16) - 3) / 6,
+      );
+      if (kind === 'tree-conifer' && stylisedShapeNameOf(here) !== 'tree_pineTallA') continue;
+      if (lightest === undefined || greenOf(here) > greenOf(lightest)) lightest = here;
+      if (darkest === undefined || greenOf(here) < greenOf(darkest)) darkest = here;
+    }
+    if (lightest === undefined || darkest === undefined) {
+      throw new Error(`no place to stand a ${kind}`);
+    }
+    view.render(alone({ ...lightest, scale: 1.4 }));
+    const lighter = changed(whole()).mean;
+    view.render(alone({ ...darkest, scale: 1.4 }));
+    const darker = changed(whole()).mean;
+    return { lighter, darker, ratio: greenOf(darkest) / greenOf(lightest) };
+  };
+  const tint = tintPair('shrub');
+  const batchedTint = tintPair('tree-conifer');
 
   let triangles = 0;
   let calls = 0;
-  const bare: SceneFrame = { ...every, scatter: [] };
+  // Every mesh the belt owns, and every shape of a building's: its houses
+  // stand on a rural, a suburban and a commercial lot in turn.
+  const lots = [undefined, 'suburban', 'commercial'] as const;
+  let houses = 0;
+  const settled: SceneFrame = {
+    ...every,
+    scatter: every.scatter.map((item): ScatterItem => {
+      if (item.kind !== 'building') return item;
+      // Stepped on by one a round, so no mesh's houses are all of one setting.
+      const setting = lots[(houses + Math.floor(houses / lots.length)) % lots.length];
+      houses += 1;
+      return setting === undefined ? item : { ...item, setting };
+    }),
+  };
+  const bare: SceneFrame = { ...settled, scatter: [] };
   // Drawn once first: three compiles a program and allocates an instance
   // buffer the first time it draws a mesh. @see sceneryCallsAcrossRungs
-  view.render(every);
+  view.render(settled);
   view.render(bare);
   countingTriangles((submitted, drawn) => {
     view.render(bare);
     const bareTriangles = submitted();
     const bareCalls = drawn();
-    view.render(every);
+    view.render(settled);
     triangles = submitted() - 2 * bareTriangles;
     calls = drawn() - 2 * bareCalls;
   });
   view.destroy();
-  return { settings, tint: { lighter, darker, ratio }, triangles, calls };
+  const drawnAs = settled.scatter.flatMap((item) => {
+    const shape = stylisedShapeNameOf(item);
+    const own = SCENERY_MODELS[item.kind];
+    if (shape === undefined || own === undefined) return [];
+    const wanted = Number.isInteger(item.variant) ? item.variant : 0;
+    const model = own[((wanted % own.length) + own.length) % own.length]?.name;
+    return model === undefined ? [] : [{ shape, model }];
+  });
+  return { settings, tint, batchedTint, triangles, calls, drawnAs };
 }
 
 /**
@@ -2582,22 +2661,53 @@ function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasuremen
  * *"no texture reaches the GPU"* unreadable. Patched on the prototype for the
  * reason every counter here is — three obtains its own context and the harness
  * never sees it.
+ *
+ * ⚠️ **Less the instance tables of a `BatchedMesh` — #3287.** A stylised mesh
+ * of several shapes keeps its instances' matrices, which instance each draw
+ * is and, for a tinted kind, their colours in small data textures
+ * ({@link INSTANCE_TABLE_FORMATS}): numbers, as an instance buffer is, and
+ * not a picture. They are told apart by the format they are stored in, which
+ * no image a model or a logo brings is stored in, and `instanceTables` says
+ * how many there were. What #366 claims is about pictures, and still is.
  */
-function countingTextures(body: (textures: () => number) => void): void {
+function countingTextures(
+  body: (textures: () => number, instanceTables: () => number) => void,
+): void {
   const gl = WebGL2RenderingContext.prototype;
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+  /* eslint-disable @typescript-eslint/unbound-method */
   const real = gl.createTexture;
+  const realStorage = gl.texStorage2D;
+  /* eslint-enable @typescript-eslint/unbound-method */
   let created = 0;
+  let tables = 0;
   gl.createTexture = function patchedCreateTexture(this: WebGL2RenderingContext) {
     created += 1;
     return real.call(this);
   };
+  gl.texStorage2D = function countedStorage(
+    this: WebGL2RenderingContext,
+    ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
+  ) {
+    if (INSTANCE_TABLE_FORMATS.has(args[2])) tables += 1;
+    realStorage.apply(this, args);
+  };
   try {
-    body(() => created);
+    body(
+      () => created - tables,
+      () => tables,
+    );
   } finally {
     gl.createTexture = real;
+    gl.texStorage2D = realStorage;
   }
 }
+
+/**
+ * The formats three stores a `BatchedMesh`'s instance tables in — #3287:
+ * `RGBA32F` (its matrices, and its colours) and `R32UI` (which instance each
+ * draw is). @see countingTextures
+ */
+const INSTANCE_TABLE_FORMATS: ReadonlySet<number> = new Set([0x8814, 0x8236]);
 
 /** Which channel leads in each pixel of a region, counted. @see treeRedPixels */
 function channelLead(
@@ -11608,7 +11718,10 @@ function stylisedTextureProbe(): StylisedTextureMeasurement {
       this: WebGL2RenderingContext,
       ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
     ) {
-      if (watching) uploads.push(`${String(args[3])}x${String(args[4])}`);
+      // #3287: not a `BatchedMesh`'s instance tables. @see countingTextures
+      if (watching && !INSTANCE_TABLE_FORMATS.has(args[2])) {
+        uploads.push(`${String(args[3])}x${String(args[4])}`);
+      }
       realStorage.apply(this, args);
     };
     gl.texImage2D = function patchedImage(this: WebGL2RenderingContext, ...args: unknown[]) {

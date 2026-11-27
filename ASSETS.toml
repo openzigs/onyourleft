@@ -328,7 +328,7 @@ read = "2026-11-26"
 sha256 = "5f03bf2e65a3a795afc18f7e56a5da891908d59d937e660be8478b66905d2cee"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
 path = "apps/web/src/game/models/building-type-p.glb"
@@ -338,7 +338,7 @@ read = "2026-11-26"
 sha256 = "561b2eff15bd2bfe2799a8a049cafc70a1c7bfb6e35f3b2a4d95c8f4f376458c"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
 path = "apps/web/src/game/models/building-type-q.glb"
@@ -348,27 +348,27 @@ read = "2026-11-26"
 sha256 = "9b56037cab0de804e308766cc5e69b95b3576ffb444084c9016a0748cbcaca04"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
-path = "apps/web/src/game/models/building-a.glb"
+path = "apps/web/src/game/models/building-h.glb"
 source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
 licence = "CC0-1.0"
 read = "2026-11-26"
-sha256 = "5cf220f90ee3f21e7abe38055ca409a48aa8ef1d5ffab6e2deb99e5a5e1ed5e0"
+sha256 = "6881613ce218bb33a0f56137d4d33b00d307c47e518fbb21ccba1083efbea896"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-commercial"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
-path = "apps/web/src/game/models/building-d.glb"
+path = "apps/web/src/game/models/building-g.glb"
 source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
 licence = "CC0-1.0"
 read = "2026-11-26"
-sha256 = "40605608e9aca0c98e294acff4af0f74afa417a51d589be490ca98f33ce4c2f5"
+sha256 = "9a28fa2fdfac07492ee95589882213cfd6eb32d6752cb3b2f5404604c676d27a"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-commercial"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
 path = "apps/web/src/game/models/building-e.glb"
@@ -378,7 +378,7 @@ read = "2026-11-26"
 sha256 = "edbe5b49858a3c83e72d3cf496129c06082ef3a3d6005769f8883138e275b456"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-commercial"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts); a building is turned half a turn at load, so that its front faces the road"
 
 [[asset]]
 path = "apps/web/src/game/models/colormap-city-kit-commercial.png"
@@ -398,7 +398,7 @@ read = "2026-11-26"
 sha256 = "84b262c5dda3a91ac6c95f9d8b23a0ebbb1951d678c0e1375d3e32623cc43ee2"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_simple.glb"
@@ -408,7 +408,7 @@ read = "2026-11-26"
 sha256 = "93891ea740447634930de19c31a7c1c9f4add94122e6db03aca9f75aea32f9d6"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_tall.glb"
@@ -418,7 +418,7 @@ read = "2026-11-26"
 sha256 = "3515a8826044d91e84e011186c86878f62024a487a079b4e32c9ac2e71994411"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_pineSmallC.glb"
@@ -428,7 +428,7 @@ read = "2026-11-26"
 sha256 = "c334c78379b2968b0c198a92b4e429e433c89e1685792b5c6ed730216c8512e3"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_pineSmallB.glb"
@@ -438,7 +438,7 @@ read = "2026-11-26"
 sha256 = "59392aa6604adb9dccd4fb76df5ed12ae8ac7d7391eb7e04bc84fffe9f9b36c8"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_pineSmallD.glb"
@@ -448,7 +448,7 @@ read = "2026-11-26"
 sha256 = "5128c47e7dc954b539245968d05fa518c9afa677d740fb11db0813aafadf17ef"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/stone_largeB.glb"
@@ -458,7 +458,7 @@ read = "2026-11-26"
 sha256 = "2b6b96b701b42d96efaa92ad4aba0cc8d23417f1bc07f0e996ee1a5acd52b4b8"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/stone_largeD.glb"
@@ -468,7 +468,7 @@ read = "2026-11-26"
 sha256 = "db945df5cc1fb3113777dc208bac3f46d3fb970aaf39f2c517612f99fbf3532b"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/stone_largeF.glb"
@@ -478,7 +478,7 @@ read = "2026-11-26"
 sha256 = "6fd7761da24e492b9e763cfc8ebb5f3c2bb33aa68fb0f320a8769ab71fcc6c9e"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn it is folded into the mesh of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn it shares the draw call of the model it stands beside (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS, #3287), each instance is scaled between 0.7 and 1.4, each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
