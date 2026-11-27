@@ -12,13 +12,26 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0101 is [ADR 0101](../adr/0101-the-ai-group-ride.md)**, taken by
+  [#3297](https://github.com/openzigs/onyourleft/issues/3297) on 2026-11-26 for the AI group ride
+  (epic [#3296](https://github.com/openzigs/onyourleft/issues/3296)): a solo ride in a paceline of
+  synthetic riders that coaches the rotation and never drops the rider. **Proposed.** It records
+  the owner's four rulings of 2026-11-26 as decided (a true ride average, a HUD line and a sound
+  per cue kind, no-drop with no lower limit, and the patent-risk acceptance extended to group-ride
+  bots and a waiting group with trainer safety held), and puts twenty further questions to the
+  owner, each with a proposed answer **the owner has not given**. It supersedes nothing, so no ADR
+  gained a pointer. It took 0101 because **0100 is claimed** by the open pull request
+  [#3261](https://github.com/openzigs/onyourleft/pull/3261), which adds an ADR numbered 0100 for
+  #3245's street names on a saved-route ride; the 0099 paragraph below said 0100 was free, and
+  that was stale. 0098 is still claimed by the open pull request #2966. The next free number is
+  **0102**.
   ⚠️ **0057 is [ADR 0057](../adr/0057-store-fees-the-publisher-pays-are-outside-adr-0036-d-7.md)**,
   taken by [#1748](https://github.com/openzigs/onyourleft/issues/1748) on 2026-11-26. It says that
   store fees the publisher pays are outside ADR 0036 D-7. It was **Proposed**, and the owner
   **accepted** it as written the same day on #3330, its D-3 list and the `CLAUDE.md` §1 qualifier. It took the number reserved for
   it on #15 on 2026-10-27, which every entry below kept as claimed. **0058 stays claimed** by
   [#1752](https://github.com/openzigs/onyourleft/issues/1752). ADR 0036 gained one dated
-  `## Amendments` pointer. The next free number is still the one the 0099 entry below states.
+  `## Amendments` pointer. The next free number is still the one the 0101 entry above states.
   ⚠️ **0099 is [ADR 0099](../adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)**,
   taken by [#3250](https://github.com/openzigs/onyourleft/issues/3250) on 2026-11-26 for the model
   sources #3251 to #3253 may use, the two licences, the credit and the budget a new model holds.
