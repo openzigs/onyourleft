@@ -172,13 +172,15 @@ export function loadedFromShell(capacitor: CapacitorGlobal | undefined, href: st
 }
 
 /**
- * D-11's web-build notice, wherever a phase-1 feature would be. ⚠️ **Draft
- * wording for the owner to approve in #1192's pull request** (D-14 Q6).
+ * D-11's web-build notice, wherever a phase-1 feature would be (D-14 Q6).
+ * The owner approved this wording on 2026-11-26 (#1755): it names the On Your
+ * Left app, never one platform's, because the iOS app offers the sealed
+ * features too.
  */
 export const WEB_BUILD_TEXT =
   'Encrypted features are not offered in a copy of the app loaded from a website, because ' +
-  'whoever serves a website’s code could change it to take the encryption out. Use the Android ' +
-  'app, or a copy of the app saved on this device.';
+  'whoever serves a website’s code could change it to take the encryption out. Use the On Your ' +
+  'Left app, or a copy of the app saved on this device.';
 
 /** A loopback host, as the URL parser spells one. */
 function isLoopbackHost(hostname: string): boolean {
