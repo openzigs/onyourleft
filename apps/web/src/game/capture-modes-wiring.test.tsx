@@ -51,17 +51,46 @@ const OWN: RidableRoute = {
 const STEP_MS = 250;
 
 let asked: string[] = [];
+/** What the port was asked to keep as a best lap, as `[route, lap]` — #2319. */
+let keptLaps: [string, number][] = [];
 /** The routes the port lists: the capture tool's own, unless a test rides a loop. */
 let own: RidableRoute = OWN;
 /** The built-in circuits the port lists: the shipped ones, unless a test rides a shorter one. */
 let circuits: () => Promise<readonly RidableRoute[]> = () => loadBuiltInCircuits();
 
+/**
+ * Every read the port has started in the running case. The circuits and the
+ * levels are `import.meta.glob` loaders, and in Vitest each `import()` is a
+ * round trip to the main process that a loaded CI runner under coverage may
+ * not answer inside forty event-loop turns: the first case then found no
+ * *Ride Morning Round* (#3206, the shape `testing/mount.tsx` §`readsSettled`
+ * names for #1939). {@link arrived} waits for the reads themselves instead.
+ */
+let reads: Promise<unknown>[] = [];
+
+function read<T>(started: Promise<T>): Promise<T> {
+  reads.push(started);
+  return started;
+}
+
+/**
+ * Let every read the port has started resolve, however long that takes, then
+ * let React render what each resolved to. A read that starts another (the
+ * listing, then the level it names) is waited for on the next call.
+ */
+async function arrived(): Promise<void> {
+  await act(async () => {
+    await Promise.allSettled(reads);
+  });
+  await settle();
+}
+
 function gamePort(): GamePort {
   return {
-    listRoutes: () => Promise.resolve([own]),
-    listCircuits: () => circuits(),
-    listDeliveryLevels: () => Promise.resolve(SHIPPED_LEVELS.list()),
-    loadDeliveryLevel: (id) => SHIPPED_LEVELS.load(id),
+    listRoutes: () => read(Promise.resolve([own])),
+    listCircuits: () => read(circuits()),
+    listDeliveryLevels: () => read(Promise.resolve(SHIPPED_LEVELS.list())),
+    loadDeliveryLevel: (id) => read(SHIPPED_LEVELS.load(id)),
     // The rider's own data: a capture must ask for none of it.
     loadGhost: (routeId) => {
       asked.push(`loadGhost:${routeId}`);
@@ -72,6 +101,10 @@ function gamePort(): GamePort {
       return Promise.resolve({ kind: 'unavailable' });
     },
     readSensors: () => NO_SENSORS,
+    recordBestLap: (route, lap) => {
+      keptLaps.push([route, lap]);
+      return Promise.resolve();
+    },
   };
 }
 
@@ -158,6 +191,8 @@ const NO_LEVELS = JSON.stringify({ finished: [] });
 beforeEach(() => {
   running = new AbortController();
   asked = [];
+  keptLaps = [];
+  reads = [];
   own = OWN;
   circuits = () => loadBuiltInCircuits();
   localStorage.clear();
@@ -226,7 +261,7 @@ async function captureFor(
   const ride = `Ride ${captureRideName(scene)}`;
   for (let tries = 0; tries < 40; tries += 1) {
     if (rideButton(ride) !== undefined) break;
-    await settle();
+    await arrived();
     stillRunning(signal);
   }
   expect(rideButton(ride), ride).toBeDefined();
@@ -241,7 +276,7 @@ async function captureFor(
       on.clock.frame();
       await Promise.resolve();
     });
-    await settle();
+    await arrived();
     stillRunning(signal);
   }
   expect(published()?.drawn).toBe(1);
@@ -333,6 +368,31 @@ describe('a lap race scene — #3153', () => {
     // Its first pick-up is a quarter of the way round, minutes in: no item yet, so none used.
     expect(events.filter((event) => event.kind === 'cue')).toEqual([]);
     expect(asked).toEqual([]);
+  });
+});
+
+describe('a lap race scene on a saved loop keeps no best lap — #2319', () => {
+  const SAVED = 'saved-loop-lap-race';
+
+  afterEach(() => {
+    delete (CAPTURE_SCENES as Record<string, unknown>)[SAVED];
+  });
+
+  it('states its laps in memory only: the port is asked to keep none', async () => {
+    // The scene's race on the capture tool's own route, here a 377 m loop the
+    // port lists as a rider's saved one, started 20 m short of its line.
+    const lapRace = CAPTURE_SCENES['lap-race'];
+    (CAPTURE_SCENES as Record<string, unknown>)[SAVED] = {
+      ...lapRace,
+      route: undefined,
+      startMetres: 357,
+    };
+    own = { ...OWN, profile: circuitRoute(60, () => 0) };
+    const events = await capture(SAVED, 120);
+    // The control: the capture did cross the line as a lap, so a kept lap
+    // would have been offered.
+    expect(events.some((event) => event.kind === 'lap')).toBe(true);
+    expect(keptLaps).toEqual([]);
   });
 });
 
@@ -458,7 +518,7 @@ describe('every other ride draws its own seed — #3153', () => {
       />,
     );
     for (let tries = 0; tries < 40 && rideButton(name) === undefined; tries += 1) {
-      await settle();
+      await arrived();
       stillRunning(signal);
     }
     on.clock.hold();

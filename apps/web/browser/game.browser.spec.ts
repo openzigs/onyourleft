@@ -191,6 +191,8 @@ interface GameHarnessResult {
   readonly frameMsNoise: number;
   readonly litDrawCalls: number;
   readonly flatDrawCalls: number;
+  readonly litShadedMaterials: readonly string[];
+  readonly flatShadedMaterials: readonly string[];
   readonly sceneryIndicesModelled: Readonly<Record<string, number>>;
   readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
   readonly sceneryInstances: Readonly<Record<string, number>>;
@@ -479,6 +481,11 @@ function expectWordmarkRead(logos: LogoMeasurement): void {
   );
   // One draw call for every board in a frame.
   expect(logos.calls).toBe(1);
+  // #976: …measured on a frame that holds two, the start's and the finish's
+  // of a 300 m point-to-point route — until then only jsdom's instance count
+  // said the second board cost no call.
+  expect(logos.bothGatesBoards).toBe(2);
+  expect(logos.bothGatesCalls).toBe(1);
 }
 
 /**
@@ -891,6 +898,12 @@ const REALISTIC_LOAD_BUDGET_MS = 275_000;
  * six shapes.** #1289's review took one of each out again, for the draw
  * calls, so a load reads eight fewer files than those runs did; neither
  * budget was raised, and re-measuring both on the 7763 is #1293's.
+ *
+ * ⚠️ **#1293 took that phase out again**, with the scanned broadleaves it
+ * loaded (the owner's ruling of 2026-11-26): this load is the world and the
+ * unmerged control, as it was before #1283. **Not re-measured here, and the
+ * budget is not lowered on arithmetic**: what the load takes without the
+ * phase is for #1293's item 3 to read off nightly runs on `main`.
  */
 const TREES_LOAD_BUDGET_MS = 160_000;
 
@@ -2361,6 +2374,21 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // and nowhere else.
     expect(result.litDrawCalls).toBeGreaterThan(0);
     expect(result.litDrawCalls).toBe(result.flatDrawCalls);
+  });
+
+  test('mounts every belt’s unlit twin at the floor rung, the gate and its board too — #976', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
+
+    // Each belt's own swap is tested in jsdom (`three-renderer.test.ts`);
+    // what calls them all is the view's `#applyShading`, which jsdom cannot
+    // build with a context. So, on the whole frame at the start line: lit,
+    // drawn meshes wear lit materials (the control — the read can see one)…
+    expect(result.litShadedMaterials.length).toBeGreaterThan(0);
+    // …and flat, not one does. A belt left out of `#applyShading` keeps its
+    // lit material here: #970's review found the gate's and the board's out.
+    expect(result.flatShadedMaterials).toEqual([]);
   });
 
   test('carries a real sun on the frame, derived from the route', async ({ harnessRun }) => {
@@ -5726,45 +5754,15 @@ test.describe('the trees’ levels of detail in the realistic world — #617', {
     // triangles and 878 at its middle level — and the saving on this frame is
     // 14 234 (129 952 against 115 718, 2026-10-12), where it was 18 078 with
     // the scanned firs. Still over the floor below, which did not move.
-    // #617's own figure is still held on the scans, off the committed files,
-    // by `realistic-budget.test.ts` §"falls by at least 60 000" — and was
-    // measured here on 2026-10-12, on this very frame with the scanned
-    // broadleaves loaded, as 72 017 (253 249 against 181 232), before that
-    // half of the control was dropped for what it cost the load.
+    // #617's own figure was measured here on 2026-10-12, on this very frame
+    // with the scanned broadleaves loaded, as 72 017 (253 249 against
+    // 181 232). ⚠️ Since #1293 those scans are deleted and nothing holds the
+    // 60 000 any more: `realistic-budget.test.ts` §"falls with the trees’
+    // middle level" holds each set that still ships to its own figure, off
+    // the committed files.
     expect(measured.trianglesHardSwap - measured.trianglesSubmitted).toBeGreaterThanOrEqual(
       TRIANGLES_FALL_AT_LEAST,
     );
-  });
-
-  test('draws the wooded view in fewer triangles with the generated trees than with the scans, inside the same calls — #1283', async ({
-    harnessRun,
-  }) => {
-    const measured = await trees(harnessRun);
-    console.log(
-      `#1283, #1294: the wooded view, same route position and camera: ` +
-        `${String(measured.trianglesSubmitted)} triangles in ${String(measured.drawCallsSubmitted)} draw calls ` +
-        `with the generated trees, ${String(measured.scanned.triangles)} in ` +
-        `${String(measured.scanned.calls)} with the scans — ` +
-        `${String(measured.scanned.triangles - measured.trianglesSubmitted)} fewer triangles, ` +
-        `${String(measured.drawCallsSubmitted - measured.scanned.calls)} more calls`,
-    );
-    // Non-vacuity: both are real frames of the realistic world, and different ones.
-    expect(measured.scanned.triangles).toBeGreaterThan(50_000);
-    expect(measured.scanned.calls).toBeGreaterThan(0);
-    expect(measured.scanned.triangles).not.toBe(measured.trianglesSubmitted);
-    // Fewer triangles, by more than one generated tree's worth.
-    expect(measured.scanned.triangles - measured.trianglesSubmitted).toBeGreaterThan(
-      GENERATED_WOODED_TRIANGLES_SAVED,
-    );
-    // More shapes are more calls — a call a level a variant — and both sets
-    // stay inside the one ceiling, which did not move: 29 with the four
-    // generated shapes and 27 with the two scans, 2026-10-12 (32 with the six
-    // shapes #1283 first made). #1294's two generated firs stand where the two
-    // scanned firs stood, so they add none: still 29, and 115 718 triangles
-    // where the frame was 169 482 with the scanned firs.
-    expect(measured.drawCallsSubmitted).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
-    expect(measured.scanned.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
-    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });
 
   test('draws the wooded view in at most 35 calls, into the same picture — #639', async ({
@@ -5973,20 +5971,15 @@ const MERGED_CALLS_SAVED_AT_LEAST = 4;
  * and the floor was not moved to make room.
  *
  * ⚠️ **It was 60 000 until #1283** — #617's own figure, measured on the
- * scans, which `realistic-budget.test.ts` still holds the scans' worst case
- * to. A generated broadleaf is 6 692 triangles at full detail where a scan is
- * 28 000, so the hard swap costs far less than it did.
+ * scans. A generated broadleaf is 6 692 triangles at full detail where a scan
+ * was 28 000, so the hard swap costs far less than it did. ⚠️ **Revisited by
+ * #1293 and not moved**: the scanned broadleaves are deleted, so the 60 000
+ * is held nowhere now — `realistic-budget.test.ts` §"falls with the trees’
+ * middle level" holds each set that still ships to its own worst case — and
+ * this floor was already the generated trees' own, measured on the frame a
+ * ride draws.
  */
 const TRIANGLES_FALL_AT_LEAST = 9_000;
-
-/**
- * The least the generated broadleaves must take off the wooded view against
- * the scans, at the same route position with the same camera — #1283:
- * **6 692**, one generated tree's worth, so that "fewer" is not a rounding
- * error. Measured on 2026-10-12: see `realistic-budget.ts` §"The generated
- * trees, measured".
- */
-const GENERATED_WOODED_TRIANGLES_SAVED = 6_692;
 
 /**
  * The most the picture may change in one frame of a hand-over, as a share of

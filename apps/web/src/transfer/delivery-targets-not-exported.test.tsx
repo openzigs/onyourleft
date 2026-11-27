@@ -391,8 +391,28 @@ interface Ridden {
   readonly houses: ReturnType<typeof housesField>;
 }
 
+/**
+ * The case that is running: aborted once it ends, so a ride whose case timed
+ * out stops instead of pumping on, in the background, into the next case's
+ * frames (#3167). Checked after every frame of a ride.
+ */
+let running = new AbortController();
+/** The rides the running case started, until each has stopped: `afterEach` waits for them. */
+let inFlight: Promise<unknown>[] = [];
+
+/** Stop here if the case this ride belongs to has ended. */
+function stillRunning(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('the case this ride belongs to has ended');
+}
+
 /** The ride, recorded and saved: #1816's `recordedRide`, with the round's throws pressed. */
-async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
+function rideAndSave(course: Course = TOWN): Promise<Ridden> {
+  const run = rideFor(running.signal, course);
+  inFlight.push(run.catch(() => undefined));
+  return run;
+}
+
+async function rideFor(signal: AbortSignal, course: Course): Promise<Ridden> {
   const round = theRound(course);
   const script = throwScript(round, course);
   const harness = createStoreHarness();
@@ -473,6 +493,7 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
   const frameMs = course.frameMs ?? FRAME_MS;
   for (let index = 0; index < (FRAMES * FRAME_MS) / frameMs; index += 1) {
     await pump(frameMs);
+    stillRunning(signal);
     // The bench keeps whole seconds; five of the game's frames are one (#1688: or one of 1 s).
     if ((index + 1) % (1_000 / frameMs) === 0) {
       await act(async () => {
@@ -499,14 +520,42 @@ async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
   return { harness, targets: [...round.targets, ...round.noDeliveryTargets], drawn, houses };
 }
 
+/**
+ * A shared ride's frames: half a second, the same 66 s in 132 frames, not 330
+ * (#3167, #1688's ruling: cheaper, never a longer timeout). The simulation's
+ * steps are fixed at 0.05 s whatever the frame, and the throws are scripted on
+ * a shadow pumped the same way. A whole second a frame lands no parcel: the
+ * throw is pressed a frame too early or too late for every house.
+ */
+const SHARED_FRAME_MS = 500;
+
+/**
+ * `ride`, kept for the next case to read unless it failed: a ride whose case
+ * timed out is ridden again by the next case that asks, rather than every case
+ * after it failing at 0 ms on the first one's rejection (#3167).
+ */
+function shared(ride: Promise<Ridden>, forget: () => void): Promise<Ridden> {
+  return ride.catch((error: unknown) => {
+    forget();
+    throw error;
+  });
+}
+
 let ridden: Promise<Ridden> | undefined;
 /** The one ride every case reads, ridden by the first that asks. */
-const theRide = (): Promise<Ridden> => (ridden ??= rideAndSave());
+const theRide = (): Promise<Ridden> =>
+  (ridden ??= shared(rideAndSave({ ...TOWN, frameMs: SHARED_FRAME_MS }), () => {
+    ridden = undefined;
+  }));
 let riddenOnLevel: Promise<Ridden> | undefined;
 /** #2362: the one level ride its cases read, ridden by the first that asks. */
-const theLevelRide = (): Promise<Ridden> => (riddenOnLevel ??= rideAndSave(ON_LEVEL));
+const theLevelRide = (): Promise<Ridden> =>
+  (riddenOnLevel ??= shared(rideAndSave({ ...ON_LEVEL, frameMs: SHARED_FRAME_MS }), () => {
+    riddenOnLevel = undefined;
+  }));
 
 beforeEach(() => {
+  running = new AbortController();
   pending = [];
   nowMs = START_MS;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -516,7 +565,10 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  running.abort();
+  await Promise.all(inFlight);
+  inFlight = [];
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
@@ -979,6 +1031,13 @@ const FORMATS = ['fit', 'gpx', 'tcx'] as const satisfies readonly ActivityFileFo
  * 687 ms without coverage and 1 462 ms with `--coverage`, and the level's
  * ride (`theLevelRide`) 590 ms and 1 353 ms; every other case reads a ride
  * already made and takes 50 ms or less with `--coverage`. The removal changes nothing they run.
+ *
+ * #3167: the nightly's coverage half on CI took the first ride to 5.0 s, and
+ * the cases after it failed at 0 ms on its rejection. Both rides are now in
+ * frames of {@link SHARED_FRAME_MS}. On this Mac at a load average of 18 to
+ * 25, with `--coverage`, the first case 2.56 s → 1.05–1.50 s and the level's
+ * 2.58 s → 0.90–1.20 s. A ride whose case timed out stops and is ridden again
+ * by the next case.
  */
 
 describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {

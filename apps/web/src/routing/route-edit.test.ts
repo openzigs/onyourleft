@@ -21,6 +21,7 @@ import {
   routeProfile,
   RouteError,
   RoutingError,
+  seconds,
   unixSeconds,
   type GeographicPosition,
   type RouteProfile,
@@ -568,6 +569,14 @@ describe('saving an edit', () => {
     expect(outcome.record.name).toBe(stored.name);
     expect(outcome.record.profile).toBe(edited.profile);
     expect(outcome.record.updatedAt).toBe(NOW);
+  });
+
+  it('over the original: drops the best lap, a lap of the old line — #2319', () => {
+    const stored = { ...savedRoute(), bestLap: seconds(287) };
+    const outcome = replaceRouteLine(stored, detour(lineOf(stored), 50, 120), SAVED_AT, NOW);
+    if (outcome.status !== 'saved') throw new Error(outcome.refusal.message);
+    expect(outcome.record.bestLap).toBeUndefined();
+    expect(outcome.record.name).toBe(stored.name);
   });
 
   it('over the original: refused when it was changed somewhere else', () => {

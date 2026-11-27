@@ -11,7 +11,8 @@
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
  * `start-year`, since #1794 `landmark-churches`, since #1795 `landmark-civic`,
- * since #2973 `nearby-streets` and since #2975 `map-pois`.
+ * since #2973 `nearby-streets`, since #2975 `map-pois` and since #3334
+ * `facade-kit`.
  * Its own module so that a test reads the plans the page draws, and a lever
  * parsed but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -48,6 +49,7 @@ import {
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   shopApronsWithLevers,
+  facadeKitWithLevers,
   splitRoofsWithLevers,
   startYearWithLevers,
   steeplesWithLevers,
@@ -123,6 +125,7 @@ export function plannedTown(
       landmarkChurches: landmarkChurchesWithLevers(leversOff),
       landmarkCivic: landmarkCivicWithLevers(leversOff),
       shopAprons: shopApronsWithLevers(leversOff),
+      facadeKit: facadeKitWithLevers(leversOff),
       mappedPois: mappedPoisWithLevers(leversOff),
       // #2973: and no footprint on a mapped street drawn off the route, unless that lever is off.
       nearbyStreets: nearbyStreetsWithLevers(leversOff),

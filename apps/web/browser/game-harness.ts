@@ -253,7 +253,6 @@ import {
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
-  setRealisticTrees,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -345,7 +344,6 @@ import {
 import { urbanClassMap } from '../src/game/urban-class';
 import {
   REALISTIC_SURFACES,
-  REALISTIC_TREES_DEFAULT,
   realisticUrl,
   realisticWorldNotice,
 } from '../src/game/realistic-assets';
@@ -935,6 +933,16 @@ declare global {
       readonly litDrawCalls: number;
       readonly flatDrawCalls: number;
       /**
+       * #976: the lit materials a drawn mesh wears on the whole harness
+       * frame — at the start line, so with the gate, its wordmark board,
+       * scenery, riders and terrain — once at each shading, by three's own
+       * type. What says `ThreeGameView`'s own `#applyShading` reaches every
+       * belt: each belt's swap is tested in jsdom, and the view that calls
+       * them cannot be built there. @see LIT_MATERIAL_TYPES
+       */
+      readonly litShadedMaterials: readonly string[];
+      readonly flatShadedMaterials: readonly string[];
+      /**
        * How many vertex indices the **scenery** submitted for one frame of each
        * kind, with #341's models loaded — the whole point of the change, read
        * off the driver rather than off a geometry the harness built itself.
@@ -955,7 +963,7 @@ declare global {
       /**
        * WebGL textures created across a whole sweep — #366's fourth criterion.
        *
-       * ⚠️ **Since #966 ONE is the assertion — the start gate's wordmark, the
+       * ⚠️ **Since #966 ONE is the assertion — the gates' wordmark, the
        * stylised world's one allowed texture — and {@link stylisedTextures}
        * says which texture it was.** Until then zero was. The
        * buildings' colour comes out of a 512 × 512 atlas that is fetched,
@@ -7095,7 +7103,7 @@ function colourProbes(probe: SceneFrame): {
     // this program has an image anywhere. What #366's fourth criterion is
     // about is whether the **scenery** adds one, so the baseline is taken
     // after the first frame and what is published is the difference.
-    // ⚠️ **And with no gate and no billboard in it — #966**: the start gate's
+    // ⚠️ **And with no gate and no billboard in it — #966**: the gates'
     // wordmark is the one texture the stylised world may upload, and it is
     // uploaded the first time a frame draws a board, so the baseline frame
     // must not, or the count below could not see it.
@@ -8157,6 +8165,19 @@ const SCENERY_REGION = {
   fromRow: 0.4,
   toRow: 0.85,
 } as const;
+
+/**
+ * three's materials that a light shades — #976: what no drawn mesh may wear at
+ * the `'flat'` rung, where `QualitySettings.shading` mounts every belt's
+ * unlit twin. A `ShaderMaterial` is its own author's and is not counted.
+ */
+const LIT_MATERIAL_TYPES: ReadonlySet<string> = new Set([
+  'MeshLambertMaterial',
+  'MeshPhongMaterial',
+  'MeshStandardMaterial',
+  'MeshPhysicalMaterial',
+  'MeshToonMaterial',
+]);
 
 /** Reads a rectangle of the drawing buffer, four bytes a pixel. */
 function readRegion(
@@ -9479,24 +9500,6 @@ export interface TreeLevelMeasurement {
    * heaviest of R2's probes. @see foliageProbe
    */
   readonly foliage: FoliageMeasurement;
-  /**
-   * #1283: the same wooded frame from a world loaded with the SCANNED
-   * trees — since #1294 the firs' scans as well as the broadleaves'
-   * (`three-renderer.ts` §`setRealisticTrees`) — the trees every
-   * measurement above was first taken on — at the same route position, with
-   * the same camera: its triangles and draw calls as the product's levels draw
-   * it. Everything above is the GENERATED trees', which is what a ride draws.
-   *
-   * ⚠️ **One frame, on one view, and not the hard swap as well.** The first
-   * version counted the scans' hard swap too, to keep #617's 60 000 in the
-   * browser; the two views took 25.5 s of a 128 s load on the slower runner
-   * (run 38259197999), 80 % of the load's budget. #617's figure is still held
-   * off the committed files by `realistic-budget.test.ts`, on the scans.
-   */
-  readonly scanned: {
-    readonly triangles: number;
-    readonly calls: number;
-  };
   /** #545: a tree near the camera, faded and the controls. @see nearFadeProbe */
   readonly nearFade: NearFadeMeasurement;
 }
@@ -10940,6 +10943,13 @@ export interface LogoMeasurement {
   /** Draw calls the boards add to the gate's frame. */
   readonly calls: number;
   /**
+   * #976: a frame holding the start's AND the finish's boards — a 300 m
+   * point-to-point route at its start, both gates in reach — the boards the
+   * view drew in it and the draw calls they add: two boards, one call.
+   */
+  readonly bothGatesBoards: number;
+  readonly bothGatesCalls: number;
+  /**
    * Which way up the wordmark reads — #966's review: how well a grid read
    * over each board's face correlates with the committed picture, upright,
    * mirrored and upside down. Drawn right, the upright picture must agree
@@ -11152,6 +11162,8 @@ const NO_LOGO: LogoMeasurement = {
   billboardMean: [],
   finishMean: [],
   calls: 0,
+  bothGatesBoards: 0,
+  bothGatesCalls: 0,
   gateOrientation: NO_ORIENTATION,
   billboardOrientation: NO_ORIENTATION,
   finishOrientation: NO_ORIENTATION,
@@ -11273,15 +11285,26 @@ function logoProbe(
     gateAim,
     'upside-down',
   );
+  // #976: and a frame with two gate boards in it, the start's and the finish's.
+  const short = northRoute(300, () => 0);
+  const bothGatesFrame = bare(riding(short, 0));
+  view.render(bothGatesFrame);
+  const bothGatesBoards = logoBoardsOf(view);
   let calls = 0;
+  let bothGatesCalls = 0;
   countingDrawCalls((counted) => {
-    const before = counted();
-    view.render(gateFrame);
-    const on = counted() - before;
-    logosShownOf(view, false);
-    const again = counted();
-    view.render(gateFrame);
-    calls = on - (counted() - again);
+    const drawnOnAndOff = (frame: SceneFrame): number => {
+      logosShownOf(view, true);
+      const before = counted();
+      view.render(frame);
+      const on = counted() - before;
+      logosShownOf(view, false);
+      const again = counted();
+      view.render(frame);
+      return on - (counted() - again);
+    };
+    calls = drawnOnAndOff(gateFrame);
+    bothGatesCalls = drawnOnAndOff(bothGatesFrame);
   });
   let gateLetteringOff: number;
   let billboardLetteringOff: number;
@@ -11309,6 +11332,8 @@ function logoProbe(
     billboardMean: means[1] ?? [],
     finishMean: means[2] ?? [],
     calls,
+    bothGatesBoards,
+    bothGatesCalls,
     gateOrientation,
     billboardOrientation,
     finishOrientation,
@@ -11342,7 +11367,7 @@ function stylisedLogoProbe(): LogoMeasurement {
 
 /**
  * The stylised world's one texture — #966: what a view uploads when it first
- * draws the start gate's wordmark, counted from a frame drawn without it, and
+ * draws a gate's wordmark, counted from a frame drawn without it, and
  * the size of every 2D image handed to the GPU meanwhile — with the control: a
  * second view, the boards off, the same frames, which must upload nothing.
  */
@@ -11588,7 +11613,6 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
-  scanned: { triangles: 0, calls: 0 },
   nearFade: NO_NEAR_FADE,
 };
 
@@ -12803,7 +12827,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
 
-  // #966: the wordmark on the start gate and a billboard, read.
+  // #966: the wordmark on a loop's gate and a billboard, and since #978 on a
+  // finish gate, read.
   const logos = logoProbe(view, gl, canvas, riding);
   phaseEnds('realistic: wordmark — #966');
 
@@ -13894,37 +13919,14 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     setRealisticMaterialsMerged(true);
   }
   phaseEnds('trees: unmerged control');
-  // #1283, #1294: the scans the generated trees replaced, on the same frame.
-  // LAST, because it replaces the loaded world and nothing after it reads one;
-  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644),
-  // and on ONE view: a view is the dearest thing on this load.
-  setRealisticTrees('scanned');
-  let scanned: TreeLevelMeasurement['scanned'];
-  try {
-    const outcome = await loadRealisticWorld();
-    if (!outcome.loaded) {
-      throw new Error(`#1283: the scanned trees' world did not load: ${outcome.detail}`);
-    }
-    const canvas = document.createElement('canvas');
-    const view = threeGameRenderer.create(canvas, top);
-    try {
-      const gl = canvas.getContext('webgl2');
-      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
-      view.resize(160, 90);
-      const levelled = woodedFrameOf(view, gl, wooded);
-      scanned = { triangles: levelled.triangles, calls: levelled.calls };
-    } finally {
-      view.destroy();
-    }
-  } finally {
-    setRealisticTrees(REALISTIC_TREES_DEFAULT);
-  }
-  phaseEnds('trees: scanned — #1283');
+  // ⚠️ #1293: a third load stood here until the scanned broadleaves were
+  // deleted (`trees: scanned — #1283`: the world loaded again with every
+  // tree a scan, and the wooded frame counted on it, 12.8 s to 14.3 s of this
+  // load). There is no such set to load now, so the phase is gone with it.
   const pixels = unmerged.pixels ?? new Uint8Array(0);
   return {
     measured: true,
     ...probed,
-    scanned,
     drawCallsUnmerged: unmerged.calls,
     trianglesUnmerged: unmerged.triangles,
     unmergedPixelsChanged:
@@ -13999,6 +14001,8 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     frameMsNoise: 0,
     litDrawCalls: 0,
     flatDrawCalls: 0,
+    litShadedMaterials: [],
+    flatShadedMaterials: [],
     sceneryIndicesModelled: {},
     sceneryIndicesPlain: {},
     sceneryInstances: {},
@@ -14455,6 +14459,8 @@ async function run(): Promise<void> {
   let frameMsNoise = 0;
   let litDrawCalls = 0;
   let flatDrawCalls = 0;
+  let litShadedMaterials: readonly string[] = [];
+  let flatShadedMaterials: readonly string[] = [];
   let sceneryIndicesModelled: Record<string, number> = {};
   let sceneryIndicesPlain: Record<string, number> = {};
   const sceneryInstances: Record<string, number> = {};
@@ -14823,6 +14829,13 @@ async function run(): Promise<void> {
               flatDrawCalls = drawn;
             }
           }
+          // #976: and what every drawn mesh of the whole frame wears.
+          view.render(frame);
+          const shaded = sceneMaterialsOf(view)
+            .filter((each) => each.visible && LIT_MATERIAL_TYPES.has(each.type))
+            .map((each) => each.type);
+          if (record === 'lit') litShadedMaterials = shaded;
+          else flatShadedMaterials = shaded;
         }
 
         // ----------------------------------------- the pedalling — #349
@@ -15147,6 +15160,8 @@ async function run(): Promise<void> {
     frameMsNoise,
     litDrawCalls,
     flatDrawCalls,
+    litShadedMaterials,
+    flatShadedMaterials,
     sceneryIndicesModelled,
     sceneryIndicesPlain,
     sceneryInstances,

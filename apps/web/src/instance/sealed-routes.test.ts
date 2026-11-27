@@ -28,8 +28,10 @@ import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
+import type { CapacitorGlobal } from '../support/capacitor';
 import {
   INSTANCE_KEY_TEXT,
+  loadedFromShell,
   sealedBuildOffered,
   sealedRouteGate,
   WEB_BUILD_TEXT,
@@ -272,6 +274,9 @@ describe('every caller of a sealed-only route seals it (#1192, ADR 0047 D-7)', (
 describe('the web-build gate (#1192, ADR 0047 D-11)', () => {
   it.each([
     ['the Android shell', { native: true, href: 'https://localhost/' }, true],
+    // #1755: the iOS app's page is `capacitor://localhost/`, refused as an
+    // address; it is offered because it is native (the owner, 2026-11-26).
+    ['the iOS app', { native: true, href: 'capacitor://localhost/' }, true],
     [
       'a copy opened from a file',
       { native: false, href: 'file:///Users/rider/app/index.html' },
@@ -289,6 +294,24 @@ describe('the web-build gate (#1192, ADR 0047 D-11)', () => {
     ['nothing readable', { native: false, href: 'not a url' }, false],
   ] as const)('%s: offered %s', (_name, from, offered) => {
     expect(sealedBuildOffered(from as LoadedFrom)).toBe(offered);
+  });
+
+  // #1755: read from the Capacitor global the way `main.tsx` reads it, so a
+  // "native" that meant Android alone would take sealed features from iOS.
+  it.each<[string, CapacitorGlobal | undefined, boolean]>([
+    ['the iOS app', { isNativePlatform: () => true, getPlatform: () => 'ios' }, true],
+    ['the Android shell', { isNativePlatform: () => true, getPlatform: () => 'android' }, true],
+    [
+      'the web build of Capacitor',
+      { isNativePlatform: () => false, getPlatform: () => 'web' },
+      false,
+    ],
+    ['a browser', undefined, false],
+  ])('%s at capacitor://localhost/', (_name, capacitor, offered) => {
+    expect(sealedBuildOffered(loadedFromShell(capacitor, 'capacitor://localhost/'))).toBe(offered);
+    expect(
+      sealedRouteGate(undefined, loadedFromShell(capacitor, 'capacitor://localhost/')).kind,
+    ).toBe(offered ? 'needs-card' : 'web-build');
   });
 
   it('says the web-build sentence ahead of anything about a card', () => {

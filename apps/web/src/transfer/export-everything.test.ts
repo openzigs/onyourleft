@@ -212,6 +212,14 @@ describe('exporting everything', () => {
     expect(manifest['activities']).toHaveLength(1);
   });
 
+  it('carries a loop’s best lap with its route — #2319', async () => {
+    const { route } = await seedLibrary(1);
+    await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(287.5)));
+    const { files } = await runExport();
+    const routes = manifestOf(files)['routes'] as { id: string; bestLap?: number }[];
+    expect(routes.map((each) => [each.id, each.bestLap])).toEqual([[route.id, 287.5]]);
+  });
+
   it('never writes the private key, in any file', async () => {
     // #61's second criterion, applied to a path that did not exist when it was
     // written. The fixture key is extractable precisely so its bytes are known

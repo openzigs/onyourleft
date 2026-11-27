@@ -161,6 +161,8 @@ import {
 } from './room-ride';
 import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
+import { routeStreetNameLabels } from './route-street-names';
+import type { StreetNameLabel } from './street-names';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { CaptureRecording } from './capture-recording';
@@ -364,6 +366,7 @@ import {
   stepLapRaceRide,
   type LapRaceRide,
 } from './lap-race/ride-race';
+import { raceLapToKeep } from './lap-race/best-lap';
 import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
 import {
@@ -429,6 +432,15 @@ import {
 // #940: the chooser's own module now; re-exported so every caller keeps one import.
 export type { RidableRoute } from './StageChooser';
 
+/**
+ * How many directed pacer rides this page has begun — #2727: each hands the
+ * ride controller its own count (`PacerRideFacts.gameRide`), which is how a
+ * second directed ride in one recording begins a log of its own. The page's
+ * and not a view's: a view left and opened again in one recording would
+ * otherwise count from nought again and hand the number the last ride had.
+ */
+let directedGameRides = 0;
+
 /** What asking for another rider's ghost came to — #331. */
 export type RiderGhostLoad =
   | { readonly kind: 'ghost'; readonly rider: string; readonly track: GhostTrack }
@@ -464,6 +476,17 @@ export interface GamePort {
    * `check:wiring`; `circuits/circuits-wiring.test.tsx` is what goes red.
    */
   listCircuits?(): Promise<readonly RidableRoute[]>;
+  /**
+   * Keep a lap of one of the rider's loops, ridden in a solo lap race, as its
+   * best lap if it is the fastest — #2319 (`@onyourleft/store`
+   * §`ActivityStore.recordBestLap`), read back as
+   * {@link RidableRoute.bestLapSeconds}. `route` is a saved route's id, never
+   * a circuit's or a level's; `lap` is the lap's moving time in seconds.
+   * Absent, nothing is kept. ⚠️ An optional member, so a `main.tsx` that
+   * stopped supplying it is GREEN in `check:wiring`;
+   * `lap-race/best-lap-wiring.test.ts` is what goes red.
+   */
+  recordBestLap?(route: string, lap: number): Promise<void>;
   /**
    * The app's built-in Delivery levels, as the Delivery picker lists them —
    * #2362, ADR 0065 D-8.1: each one's id, name, length and houses, from
@@ -1357,6 +1380,15 @@ interface PreviewAsked {
   readonly rider: SimulatedRider;
   readonly routeId: string;
   readonly position: RidingPosition;
+  /**
+   * The corridor the picker had ready for the route at the press — the
+   * tablet check on PR #3261. The preview's screen is a new one, which reads
+   * the corridor again, and it starts as soon as its routes are read: long
+   * before that read ends, so with nothing handed over a preview rode with no
+   * map data at all (no mapped buildings, no street names). As an ordinary
+   * press does (ADR 0054 D-2.4), it rides what was ready when it was pressed.
+   */
+  readonly corridor?: CorridorState | undefined;
 }
 
 /**
@@ -1875,6 +1907,16 @@ function GameScreen({
   const lapProgressSecondRef = useRef<number | undefined>(undefined);
   /** The course this ride is on, for `teardown`, which closes over nothing of the ride. */
   const courseRef = useRef<RouteProfile | undefined>(undefined);
+  /**
+   * Where a solo lap race's lap of this ride is kept if it is the loop's best
+   * — #2319: the rider's saved loop, and the port's {@link GamePort.recordBestLap}.
+   * `undefined` on a built-in circuit or level, the open world, a simulated
+   * rider's ride, a route that is no loop, and with no port to keep it.
+   */
+  const bestLapRef = useRef<
+    | { readonly route: string; readonly keep: (route: string, lap: number) => Promise<void> }
+    | undefined
+  >(undefined);
   /**
    * The finished lap's sentence, still owed to the HUD's one region, and the
    * ride time after which it is no longer worth saying — #1312. Offered on
@@ -2542,6 +2584,12 @@ function GameScreen({
   const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
   /** #1550, #1583: the lots' town, built from the same plans as {@link mappedBuildingsRef}, at the press. */
   const mappedTownRef = useRef<MappedTown | undefined>(undefined);
+  /**
+   * #3245: where a saved route ride paints the name of the street it is on,
+   * placed once at the press from {@link worldCorridorRef}'s named streets.
+   * `undefined` with no corridor, or none of the route's streets named.
+   */
+  const routeStreetNamesRef = useRef<readonly StreetNameLabel[] | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -3211,7 +3259,9 @@ function GameScreen({
       ) {
         // #2712's review: what the log replays with beside it, the same
         // values this simulation was built with, so a replay is this ride's.
+        directedGameRides += 1;
         const replayedWith = {
+          gameRide: directedGameRides,
           pacerWPerKg: pacer.intensityWattsPerKilogram,
           routeId: route.id,
           position: sitting,
@@ -3261,6 +3311,20 @@ function GameScreen({
       // #2982: and an open-world ride is no course: it has no line, no lap and
       // no part lap, so the recording under it has none.
       courseRef.current = onOpenWorld ? undefined : profile;
+      // #2319: a race lap of this ride is kept on the rider's own loop only.
+      const keptBy = props.port;
+      bestLapRef.current =
+        keptBy?.recordBestLap === undefined ||
+        onOpenWorld ||
+        onCircuit ||
+        onLevel ||
+        simulated !== undefined ||
+        !profile.loop
+          ? undefined
+          : {
+              route: route.id,
+              keep: (id, lap) => keptBy.recordBestLap?.(id, lap) ?? Promise.resolve(),
+            };
       lapsDoneRef.current = 0;
       lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
@@ -3401,7 +3465,12 @@ function GameScreen({
       // from what was ready for this route — and never changed during it
       // (ADR 0054 D-2.4). Leaving `choosing` below abandons a read still
       // running; one that ends anyway changes nothing this ride draws.
-      const ready = corridorStateRef.current;
+      // A preview rides the corridor its picker had ready (@see PreviewAsked.corridor)
+      // where its own screen's read has not ended.
+      const ready =
+        corridorStateRef.current?.kind === 'ready'
+          ? corridorStateRef.current
+          : (preview?.corridor ?? corridorStateRef.current);
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
@@ -3426,6 +3495,18 @@ function GameScreen({
         worldCorridorRef.current === undefined || landClassRef.current === undefined
           ? NO_URBAN_CLASS
           : urbanClassMap(worldCorridorRef.current, landClassRef.current, route.profile);
+      // #3245: and the names of the streets a saved route is on, placed ONCE,
+      // here, from the same corridor. None where the world is not drawn from
+      // it, and none on a built-in circuit or level, whose line is ours.
+      const routeLabels =
+        worldCorridorRef.current === undefined || onCircuit || onLevel
+          ? []
+          : routeStreetNameLabels(
+              worldCorridorRef.current.streets,
+              route.profile,
+              corridorOrigin(route.profile),
+            );
+      routeStreetNamesRef.current = routeLabels.length === 0 ? undefined : routeLabels;
       if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
         mappedBuildingsRef.current = undefined;
         mappedTownRef.current = undefined;
@@ -3437,6 +3518,9 @@ function GameScreen({
           corridorOrigin(route.profile),
           FOOTPRINT_MAX_VERTICES,
           urban,
+          // #3334: wraps of the downtown kit's pieces are planned only for a ride that asked
+          // for the realistic world, the one world that draws them.
+          { facadeKit: realistic },
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
         // #1637: carrying the urban class, which the lots and the streets read.
@@ -3627,6 +3711,7 @@ function GameScreen({
       captureSensors,
       inventedSensors,
       level,
+      preview,
     ],
   );
 
@@ -4407,6 +4492,22 @@ function GameScreen({
         if (laps !== undefined) {
           setRideLaps(laps);
         }
+        // #2319: a solo lap race's whole lap of the rider's own loop, offered
+        // to the store, which keeps it if it is the fastest. A lap time and
+        // nothing else (ADR 0060 D-12.2). Never a simulated rider's, a capture
+        // included: `bestLapRef` is unset for one, where the ride begins.
+        const best = bestLapRef.current;
+        const raceLap =
+          best === undefined ||
+          crossed.kind !== 'lap' ||
+          lapRaceRef.current === undefined ||
+          laps === undefined
+            ? undefined
+            : raceLapToKeep(laps, course.totalDistance);
+        if (best !== undefined && raceLap !== undefined) {
+          // A lap not kept costs the rider a best time, never the ride.
+          void best.keep(best.route, raceLap).catch(() => undefined);
+        }
         const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
         if (summary !== undefined) {
           setLapNotice({
@@ -4884,6 +4985,11 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #3245: a saved route's street names, on every frame of a ride that
+          // names one (#3107: so the belt is made ready on its first frame).
+          ...(routeStreetNamesRef.current === undefined
+            ? {}
+            : { streetNames: routeStreetNamesRef.current }),
           // #2902: an open-world ride's mapped buildings, planned round the
           // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
           // and ranked by the ways on from the next junction too.
@@ -5556,7 +5662,14 @@ function GameScreen({
                   // control, and the preview's new screen would leave a
                   // control granted to this one with nothing to release it.
                   if (startingRef.current) return;
-                  onPreview({ rider, routeId: route.id, position: sitting });
+                  // The tablet check on PR #3261: and what the picker had
+                  // read, which the press holds to this route's own.
+                  onPreview({
+                    rider,
+                    routeId: route.id,
+                    position: sitting,
+                    corridor: corridorStateRef.current,
+                  });
                 }
           }
           // #1221: whether this ride will be saved, said under Ride. The

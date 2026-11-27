@@ -70,6 +70,7 @@ import {
   REALISTIC_RIDER_FEMALE,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_DELIVERY_CAR_ATLAS,
+  REALISTIC_DOWNTOWN_KIT,
   REALISTIC_DELIVERY_CAR_BODIES,
   REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
@@ -136,9 +137,11 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // Kenney from the start. ⚠️ Since #2847 the cars are GGBotNet's PSX Style
     // Cars, whose page is on its author's itch.io host, and that IS a new
     // source: ADR 0085 D-1 admits it, superseding ADR 0049 D-10 in part.
+    // ⚠️ Since #3334 one Quaternius kit is read, on its own kit page: ADR 0099
+    // D-1 admits a kit whose own page states CC0, and that page is the host.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io|quaternius\.com)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -563,11 +566,13 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.
         // The people's atlas likewise, at their GLB's own coordinates, and
-        // since #2847 the cars' atlas, at the cars' GLB's.
+        // since #2847 the cars' atlas, at the cars' GLB's; since #3334 the
+        // downtown kit's, at its pieces' GLB's.
         const glTF =
           output.file === REALISTIC_RIDER ||
           output.file === REALISTIC_PEOPLE.model ||
-          output.file === REALISTIC_DELIVERY_CAR;
+          output.file === REALISTIC_DELIVERY_CAR ||
+          output.file === REALISTIC_DOWNTOWN_KIT.model;
         for (const also of recipe.alsoWrites ?? []) {
           // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
           if (also.ktx2 === undefined) {
@@ -735,13 +740,13 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
     // and the rider, whose eyes' cost is; and #2540's car, and since #2847
     // the three cars that replaced it; and the people (PR #2844), whose skirt
     // and hands a run must have found; #2839: and the female rider, held to
-    // the rider's own figures.
+    // the rider's own figures; #3334: and the downtown kit, whose pieces and
+    // their triangles a run must have made.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
+        REALISTIC_DOWNTOWN_KIT.model,
         REALISTIC_PEOPLE.model,
-        'island_tree_02-middle.glb',
-        'island_tree_02.glb',
         REALISTIC_RIDER,
         REALISTIC_RIDER_FEMALE,
         REALISTIC_RIDER_PACK.lod,
@@ -755,23 +760,35 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
       for (const field of Object.keys(EXPECTED_REPORTS[file] ?? {})) {
         expect(script, `${file}: ${field}`).toContain(`"${field}": `);
       }
-      if (file.startsWith('island_tree_02')) {
-        expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
-      }
     }
+    // #1293: `island_tree_02`'s two files were the first entries (#696's
+    // repeated triangle), and went with the scan. No deleted file is required
+    // of a run that can no longer make it.
+    expect(files.filter((file) => /^(island_tree_02|tree_small_02)/.test(file))).toEqual([]);
   });
 
-  it('passes a report with #696’s count, and names a run that dropped none, or the wrong one', () => {
-    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 1, x: 2 })).toEqual([]);
-    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 0 })).toEqual([
-      'island_tree_02.glb: its report says repeatedTrianglesDropped 0, not 1',
+  it('passes a report with the counts required, and names a run that said another, or nothing', () => {
+    // ⚠️ Until #1293 this was read on `island_tree_02.glb` and #696's
+    // repeated triangle; that scan is deleted, so it is read on the pack's
+    // rider, whose report is held the same way.
+    const file = REALISTIC_RIDER_PACK.lod;
+    const required = EXPECTED_REPORTS[file] ?? {};
+    expect(Object.keys(required)).toContain('triangles');
+    expect(reportFaults(file, { ...required, x: 2 })).toEqual([]);
+    expect(reportFaults(file, { ...required, triangles: 0 })).toEqual([
+      `${file}: its report says triangles 0, not ${String(required['triangles'])}`,
     ]);
-    expect(reportFaults('island_tree_02-middle.glb', {})).toEqual([
-      'island_tree_02-middle.glb: its report says repeatedTrianglesDropped nothing, not 1',
+    const silent = Object.fromEntries(
+      Object.entries(required).filter(([field]) => field !== 'triangles'),
+    );
+    expect(reportFaults(file, silent)).toEqual([
+      `${file}: its report says triangles nothing, not ${String(required['triangles'])}`,
     ]);
-    expect(reportFaults('island_tree_02.glb', undefined)).toHaveLength(1);
-    // A file nothing is required of passes whatever its report says.
-    expect(reportFaults('tree_small_02.glb', undefined)).toEqual([]);
+    expect(reportFaults(file, undefined)).toHaveLength(Object.keys(required).length);
+    // A file nothing is required of passes whatever its report says — and a
+    // deleted scan's is such a file now.
+    expect(reportFaults('fir_sapling_medium_a.glb', undefined)).toEqual([]);
+    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 0 })).toEqual([]);
   });
 });
 

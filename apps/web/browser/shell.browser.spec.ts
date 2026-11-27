@@ -3814,8 +3814,11 @@ test.describe('#944 — the indicator moves, and only when motion is wanted', ()
       'no background-color transition on a pill',
     ).toBeGreaterThanOrEqual(1);
     expect(motion.iconScale.length, 'no transform transition on an icon').toBeGreaterThanOrEqual(1);
+    // #976: compared in milliseconds to a thousandth, not exactly, so the check
+    // survives the motion token being written in seconds: then both sides are
+    // floating-point arithmetic on a fraction, not one number read twice.
     for (const each of [...motion.pillFill, ...motion.iconScale]) {
-      expect(each.durationMs).toBe(motion.shortMs);
+      expect(each.durationMs).toBeCloseTo(motion.shortMs, 3);
     }
   });
 
@@ -3969,6 +3972,32 @@ test.describe('#944 — under forced colours the current destination keeps a sha
     }
     // The padding took the border back: the pill is the height it was.
     expect(current[0]?.height).toBeCloseTo(plain.find((each) => each.current)?.height ?? 0, 1);
+  });
+
+  test('the current icon grows by 1.15 under forced colours, inside the padding, where it is 1.2 otherwise — #976', async ({
+    page,
+  }) => {
+    // #977's review: 1.2 grows a 24 px icon 2.4 px each way, which under the
+    // forced-colours border reaches 0.4 px into it; 1.15 grows it 1.8 px,
+    // inside the 2 px of padding. Read as the engine resolves the transform,
+    // once the icon's own transition has run.
+    const iconScale = (): Promise<number> =>
+      page.evaluate(() => {
+        const icon = document.querySelector(
+          'nav[aria-label="Primary"] a[aria-current] .oyl-nav-icon',
+        );
+        if (icon === null) throw new Error('the current destination has no icon');
+        return new DOMMatrixReadOnly(getComputedStyle(icon).transform).a;
+      });
+    await openShell(page);
+    // The control: with no forced palette, the larger-icon cue's own 1.2.
+    await expect.poll(iconScale).toBeCloseTo(1.2, 3);
+    await page.emulateMedia({ forcedColors: 'active' });
+    expect(
+      await page.evaluate(() => matchMedia('(forced-colors: active)').matches),
+      'the engine is not in forced colours, so this measured nothing',
+    ).toBe(true);
+    await expect.poll(iconScale).toBeCloseTo(1.15, 3);
   });
 });
 

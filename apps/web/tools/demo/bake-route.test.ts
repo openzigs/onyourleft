@@ -22,6 +22,9 @@ import {
   BUILDING_FIELDS_DECODED,
   BUILDING_PART_FIELDS_DECODED,
   buildingFieldsTile,
+  EARTH,
+  encodeTile,
+  line,
   POISON,
 } from '@onyourleft/map-features/testing';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -210,6 +213,42 @@ describe('demo:bake draws what a ride would get — #1651', () => {
   });
 });
 
+describe('demo:bake names no street — #3245, ADR 0100 (proposed)', () => {
+  it('reads no street’s name, so the published bundle names none though its tiles do', async () => {
+    const named = (): Uint8Array =>
+      encodeTile([
+        EARTH,
+        {
+          name: 'roads',
+          features: [
+            {
+              type: 2,
+              tags: { kind: 'minor_road', name: 'Testbake Road' },
+              geometry: line([
+                [
+                  [100, 600],
+                  [4000, 600],
+                ],
+              ]),
+            },
+          ],
+        },
+      ]);
+    const tiles = corridorFixtureTiles().map((tile) => ({ ...tile, bytes: named() }));
+    const baked = await bakeRoute({
+      routeId: 'named',
+      gpx: fixtureGpx(),
+      archive: corridorArchiveFrom(countingSource(await buildArchive({ tiles }))),
+      archiveUrl: 'file:named-streets.pmtiles',
+    });
+    const { bundle, features } = await readRouteBundle(baked.bytes);
+    expect(bundle.features.streets.length).toBeGreaterThan(0);
+    expect(bundle.features.streets.some((street) => 'n' in street)).toBe(false);
+    expect(features.streets.some((street) => street.name !== undefined)).toBe(false);
+    expect(JSON.stringify(bundle)).not.toContain('Testbake');
+  });
+});
+
 describe('demo:bake carries the building fields — #1789, ADR 0056’s entry of 2026-11-01', () => {
   it('publishes every field in the packed bundle, as the store packs it, and the demo reads them back', async () => {
     // The browser gate's route, over an archive whose every tile is #1789's
@@ -223,7 +262,7 @@ describe('demo:bake carries the building fields — #1789, ADR 0056’s entry of
     });
     const { bundle, features } = await readRouteBundle(baked.bytes);
     expect(bundle.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(bundle.features.v).toBe(8);
+    expect(bundle.features.v).toBe(9);
 
     // In the packed bundle, as the file publishes them: short names, an enum
     // as the decoder's constant, a number as a number, and no `b` at all for

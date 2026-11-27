@@ -68,12 +68,16 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import type { Billboard } from './billboards';
+import { windingRoute } from './route-fixtures-testing';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
 import { SCATTER_KINDS, SCATTER_VARIANT_SLOTS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 
 const LATITUDE_DEGREES = 51.5;
+const BILLBOARD_SWEEP_METRES = 12_000;
+const BILLBOARD_SWEEP_STEP_METRES = 150;
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
 /**
@@ -171,6 +175,22 @@ function serialisePlan(item: ScatterItem): string {
   ].join(' ');
 }
 
+/**
+ * One billboard as a string — #976, at {@link serialise}'s precision: where
+ * it stands in plan, which way it faces, the side of the road and the
+ * odometer it was sited at. Not its height, for {@link serialisePlan}'s
+ * reason: the ground under it is the terrain's, not the billboards'.
+ */
+function serialiseBillboard(board: Billboard): string {
+  return [
+    board.x.toFixed(3),
+    board.z.toFixed(3),
+    board.rotation.toFixed(3),
+    String(board.side),
+    board.along.toFixed(3),
+  ].join(' ');
+}
+
 /** FNV-1a, 32-bit, as eight hex digits. Short enough to read in a diff. */
 function digest(lines: readonly string[]): string {
   let hash = 0x811c9dc5;
@@ -204,6 +224,29 @@ function sweep(wooded = false): readonly ScatterItem[] {
     items.push(...frame.scatter);
   }
   return items;
+}
+
+/**
+ * Every billboard of every frame of a sweep along a 12 km winding road, a
+ * frame every 150 m — #976, through the real `sceneFrame`, so what the
+ * renderer is handed after `clearOfBillboards` and the nearest-first cut.
+ * A road of its own: the fixture above carries one billboard in its 3 km,
+ * measured, too few for a digest to say much.
+ */
+function billboardSweep(): readonly Billboard[] {
+  const profile = windingRoute(BILLBOARD_SWEEP_METRES);
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const boards: Billboard[] = [];
+  for (let at = 0; at < BILLBOARD_SWEEP_METRES; at += BILLBOARD_SWEEP_STEP_METRES) {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(at) } },
+    });
+    boards.push(...frame.billboards);
+  }
+  return boards;
 }
 
 describe('the arrangement a route produces — #341', () => {
@@ -365,6 +408,22 @@ describe('the arrangement a route produces — #341', () => {
     expect(natural.length).toBe(6960);
     expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1020);
     expect(wooded.length - natural.length).toBe(1901);
+  });
+
+  it('stands its billboards where it stood them — #976', () => {
+    // `billboards.test.ts` holds what a billboard must be — outside a bend,
+    // clear of the road and of what is built — and nothing there says WHERE
+    // one stands, so a change to the chance, the jitter, the lateral, the yaw
+    // or the bend rule would move every billboard with every gate green. This
+    // pins them, taken on `main` before #976 changed anything: 12 sightings
+    // of 4 boards over 80 frames of a 12 km winding road, and the first and
+    // last written out, so a red run says what moved.
+    const lines = billboardSweep().map(serialiseBillboard);
+    expect(lines).toHaveLength(12);
+    expect(new Set(lines).size).toBe(4);
+    expect(lines[0]).toBe('65.920 2283.473 -1.189 -1 3471.271');
+    expect(lines.at(-1)).toBe('26.951 6455.283 -0.995 -1 9768.294');
+    expect(digest(lines)).toBe('d00bf54c');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {

@@ -13,7 +13,7 @@
  * value still in memory cannot serve it.
  */
 
-import { metres } from '@onyourleft/domain';
+import { metres, seconds, type Seconds } from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -315,6 +315,126 @@ describe('what a route outlives', () => {
     expect(
       await harness.read(async (store) => store.getRoute(ATHLETE_B, survivor.id)),
     ).toBeDefined();
+  });
+});
+
+describe('the best lap of a loop — #2319', () => {
+  it('keeps the faster lap, read back on a fresh connection through the reads a rider uses', async () => {
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    expect(route.bestLap).toBeUndefined();
+    expect(
+      await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(312))),
+    ).toBe(true);
+    // A slower lap is no best, and leaves the kept one as it was.
+    expect(
+      await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(340))),
+    ).toBe(false);
+    // Nor is one no faster.
+    expect(
+      await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(312))),
+    ).toBe(false);
+    expect(
+      (await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id)))?.bestLap,
+    ).toBe(312);
+    expect(
+      await harness.write(async (store) =>
+        store.recordBestLap(ATHLETE_A, route.id, seconds(298.5)),
+      ),
+    ).toBe(true);
+    const listed = await harness.read(async (store) => store.listRoutes(ATHLETE_A));
+    expect(listed.map((each) => each.bestLap)).toEqual([298.5]);
+  });
+
+  it('moves no updatedAt: a lap is no edit of the route', async () => {
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(300)));
+    const read = await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id));
+    expect(read?.updatedAt).toBe(route.updatedAt);
+    expect(read?.name).toBe(route.name);
+    expect(read?.profile.totalDistance).toBe(route.profile.totalDistance);
+  });
+
+  it('writes nothing on another athlete’s route, and answers as for no route', async () => {
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    expect(
+      await harness.write(async (store) => store.recordBestLap(ATHLETE_B, route.id, seconds(100))),
+    ).toBe(false);
+    expect(
+      await harness.write(async (store) =>
+        store.recordBestLap(ATHLETE_B, routeId('never-existed'), seconds(100)),
+      ),
+    ).toBe(false);
+    expect(
+      (await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id)))?.bestLap,
+    ).toBeUndefined();
+  });
+
+  it('refuses a lap on a route that is not a loop, and a lap of no time', async () => {
+    await seedAthletes(harness);
+    const out = await seedRoute(harness, ATHLETE_A, { loop: false });
+    await expect(
+      harness.write(async (store) => store.recordBestLap(ATHLETE_A, out.id, seconds(300))),
+    ).rejects.toThrow(StoreValidationError);
+    const loop = await seedRoute(harness, ATHLETE_A);
+    for (const lap of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(
+        harness.write(async (store) => store.recordBestLap(ATHLETE_A, loop.id, lap as Seconds)),
+      ).rejects.toThrow(StoreValidationError);
+    }
+    expect(
+      (await harness.read(async (store) => store.getRoute(ATHLETE_A, loop.id)))?.bestLap,
+    ).toBeUndefined();
+  });
+
+  it('is kept by a rename, which writes the route whole', async () => {
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    await harness.write(async (store) => store.recordBestLap(ATHLETE_A, route.id, seconds(300)));
+    const read = await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id));
+    if (read === undefined) throw new Error('no route');
+    await harness.write(async (store) => store.putRoute({ ...read, name: 'Renamed' }));
+    const renamed = await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id));
+    expect(renamed?.name).toBe('Renamed');
+    expect(renamed?.bestLap).toBe(300);
+  });
+
+  it('is erased with the route, and with the rider', async () => {
+    await seedAthletes(harness);
+    const deleted = await seedRoute(harness, ATHLETE_A);
+    const erased = await seedRoute(harness, ATHLETE_A);
+    const theirs = await seedRoute(harness, ATHLETE_B);
+    for (const [owner, route] of [
+      [ATHLETE_A, deleted],
+      [ATHLETE_A, erased],
+      [ATHLETE_B, theirs],
+    ] as const) {
+      await harness.write(async (store) => store.recordBestLap(owner, route.id, seconds(300)));
+    }
+    await harness.write(async (store) => store.deleteRoute(ATHLETE_A, deleted.id));
+    const rows = await harness.read(async (store) => store.listRoutes(ATHLETE_A));
+    expect(rows.map((each) => each.id)).toEqual([erased.id]);
+    await harness.write(async (store) => store.deleteAthlete(ATHLETE_A));
+    expect(await harness.read(async (store) => store.listRoutes(ATHLETE_A))).toEqual([]);
+    // Scoped: the other rider keeps theirs.
+    expect(
+      (await harness.read(async (store) => store.getRoute(ATHLETE_B, theirs.id)))?.bestLap,
+    ).toBe(300);
+  });
+
+  it('round trips through the persisted shape, and refuses a lap of no time on disk', () => {
+    const route = { ...routeFor(ATHLETE_A), bestLap: seconds(287.25) };
+    expect(fromPersistedRoute(toPersistedRoute(route)).bestLap).toBe(287.25);
+    const none = routeFor(ATHLETE_A);
+    expect('bestLap' in toPersistedRoute(none)).toBe(false);
+    expect('bestLap' in fromPersistedRoute(toPersistedRoute(none))).toBe(false);
+    for (const bad of [0, -3, Number.NaN, '300']) {
+      expect(() =>
+        fromPersistedRoute({ ...toPersistedRoute(none), bestLap: bad as number }),
+      ).toThrow(StoreDecodeError);
+    }
   });
 });
 

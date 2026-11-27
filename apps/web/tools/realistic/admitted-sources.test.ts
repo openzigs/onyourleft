@@ -48,6 +48,20 @@ const ADR_0085 = readFileSync(
   'utf8',
 );
 
+/**
+ * #3250: ADR 0099, which adds two more rows after ADR 0085's, on the owner's
+ * approval of 2026-11-26.
+ */
+const ADR_0099 = readFileSync(
+  join(
+    REPOSITORY,
+    'docs',
+    'adr',
+    '0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md',
+  ),
+  'utf8',
+);
+
 /** A cell as the code writes it: no emphasis, no code marks, one kind of apostrophe. */
 function plain(cell: string): string {
   return cell
@@ -62,10 +76,17 @@ function rowsAfter(marker: string): readonly (readonly string[])[] {
   return tableRows(section.slice(section.indexOf(marker)));
 }
 
-/** D-10's In table and then ADR 0085 D-1's row, the whole In list since #2847. */
+/** `### D-1 — ` of an ADR that adds rows to D-10's In table: its first table. */
+function rowsOfD1(adr: string): readonly (readonly string[])[] {
+  return tableRows(adr.slice(adr.indexOf('### D-1 — '), adr.indexOf('### D-2 — ')));
+}
+
+/**
+ * D-10's In table, then ADR 0085 D-1's row (#2847), then ADR 0099 D-1's two
+ * (#3250): the whole In list.
+ */
 function admittedRows(): readonly (readonly string[])[] {
-  const added = ADR_0085.slice(ADR_0085.indexOf('### D-1 — '), ADR_0085.indexOf('### D-2 — '));
-  return [...rowsAfter('**In**'), ...tableRows(added)];
+  return [...rowsAfter('**In**'), ...rowsOfD1(ADR_0085), ...rowsOfD1(ADR_0099)];
 }
 
 /** The body rows of the first Markdown table in `text`. */
@@ -201,6 +222,16 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
       ],
       // #2847, ADR 0085 D-1: the author's own itch.io pages, the pack's among them.
       'GGBotNet’s PSX Style Cars': ['https://ggbot.itch.io/'],
+      // #3250, ADR 0099 D-1: Quaternius's kit pages, where each kit's licence
+      // line is; and an individual CC0 model, which has no address until one
+      // is adopted.
+      // #3334: and the author's own itch.io pages, where the Downtown City
+      // MegaKit's archive is offered and the owner downloaded it.
+      'Quaternius, a kit whose own page states CC0': [
+        'https://quaternius.com/packs/',
+        'https://quaternius.itch.io/',
+      ],
+      'An individual model under CC0-1.0': [],
     });
   });
 
@@ -237,14 +268,19 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
     // had already admitted, since #1585 D-4's individual CC-BY-4.0 models,
     // and since #2847 GGBotNet's PSX Style Cars (ADR 0085), whose cars
     // replaced #2540's Kenney sedan — and nothing ADR 0049 admits is adopted
-    // by #1275.
+    // by #1275. Six since #3334, which adopts one Quaternius kit, the
+    // Downtown City MegaKit (ADR 0099 D-1).
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
       'An individual model under CC-BY-4.0',
       'GGBotNet’s PSX Style Cars',
       'MakeHuman’s own files',
       'Poly Haven',
+      'Quaternius, a kit whose own page states CC0',
       'ambientCG',
     ]);
+    expect(owners.get('quaternius-downtown-city-megakit')).toEqual(
+      new Set(['Quaternius, a kit whose own page states CC0']),
+    );
     expect(owners.get('ggbot-psx-style-cars')).toEqual(new Set(['GGBotNet’s PSX Style Cars']));
     expect(owners.get('rva_duplex_02a')).toEqual(new Set(['An individual model under CC-BY-4.0']));
     expect(owners.get('Rock026')).toEqual(new Set(['ambientCG']));
@@ -416,6 +452,49 @@ describe('ADR 0026 points at the list that replaced its own — ADR 0013', () =>
   });
 });
 
+describe('ADR 0099’s two rows — #3250', () => {
+  it('is accepted, and ADR 0049 points at it from a dated amendment below unedited tables', () => {
+    expect(ADR_0099).toMatch(/^- \*\*Status\*\*: \*\*Accepted, 2026-11-26\*\*/m);
+    const amendments = ADR.slice(ADR.indexOf('\n## Amendments\n'));
+    const entry = amendments.split('\n- **').find((text) => text.startsWith('2026-11-26**'));
+    expect(entry).toContain(
+      '0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md',
+    );
+    expect(entry).toContain('D-10');
+    // D-10's own table does not name either row: the body is never edited.
+    const body = ADR.slice(0, ADR.indexOf('\n## Amendments\n'));
+    expect(body).not.toContain('Quaternius');
+    expect(body).not.toContain('An individual model under CC0-1.0');
+  });
+
+  it('admits a Quaternius kit page, and nothing else on that host', () => {
+    expect(admission('https://quaternius.com/packs/downtowncitymegakit.html')).toMatchObject({
+      admitted: true,
+      source: { name: 'Quaternius, a kit whose own page states CC0', licence: 'CC0-1.0' },
+    });
+    // Its QAL licence page and its front page are not a kit's own page.
+    expect(admission('https://quaternius.com/license.html')).toMatchObject({ admitted: false });
+    expect(admission('https://quaternius.com/')).toMatchObject({ admitted: false });
+    expect(admission('https://quaternius.com.example/packs/x.html')).toMatchObject({
+      admitted: false,
+    });
+  });
+
+  it('gives the individual CC0 row no address, and leaves Sketchfab’s to the CC-BY-4.0 row', () => {
+    const row = ADMITTED_SOURCES.find(
+      (source) => source.name === 'An individual model under CC0-1.0',
+    );
+    expect(row).toMatchObject({ licence: 'CC0-1.0', kind: 'files', prefixes: [] });
+    expect(
+      admission('https://api.sketchfab.com/v3/models/70436f6bde1b43c8a8fe2e630f0fa4d0'),
+    ).toMatchObject({ admitted: true, source: { name: 'An individual model under CC-BY-4.0' } });
+  });
+
+  it('still refuses Poly Pizza, which ADR 0099 D-6 keeps out as a source', () => {
+    expect(admission('https://poly.pizza/m/huCpr8nhu0')).toMatchObject({ admitted: false });
+  });
+});
+
 describe('what a generated tree may wear — ADR 0049 D-1 and its amendment of 2026-10-12, #1294', () => {
   const amendments = ADR.slice(ADR.indexOf('\n## Amendments\n'));
   const entry = amendments.split('\n- **').find((text) => text.startsWith('2026-10-12**')) ?? '';
@@ -432,11 +511,16 @@ describe('what a generated tree may wear — ADR 0049 D-1 and its amendment of 2
     );
     expect(body).toContain('repository are **not** taken.');
     // And the ruling added no source: D-10's In table names what it named,
-    // and since #2847 ADR 0085 adds its one row after it.
+    // since #2847 ADR 0085 adds its one row after it, and since #3250 ADR 0099
+    // adds its two after that.
     expect(admittedRows().map(([name]) => name)).toEqual(
       ADMITTED_SOURCES.map((source) => plain(source.name)),
     );
-    expect(ADMITTED_SOURCES.at(-1)?.decidedBy).toBe('ADR 0085 D-1');
+    expect(ADMITTED_SOURCES.slice(-3).map((source) => source.decidedBy)).toEqual([
+      'ADR 0085 D-1',
+      'ADR 0099 D-1',
+      'ADR 0099 D-1',
+    ]);
   });
 
   it('lets a generated tree wear ambientCG’s and Poly Haven’s, the two the ADR now names', () => {

@@ -1599,6 +1599,32 @@ mkdir -p "${fixture_root}/apps/mobile"
 printf 'binary\n' > "${fixture_root}/apps/mobile/service-account.p12"
 assert_violation "a committed .p12 is rejected" REL001 "service-account.p12"
 
+# iOS signing material (#1761). A provisioning profile and the distribution
+# certificate are both binary DER with no banner, so only the name half can see
+# them; #1778 keeps both in repository secrets.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios/App"
+printf 'binary\n' > "${fixture_root}/apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision"
+assert_violation "a committed .mobileprovision is rejected" REL001 \
+  "apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios"
+printf 'binary\n' > "${fixture_root}/apps/mobile/ios/distribution.cer"
+assert_violation "a committed .cer is rejected" REL001 "apps/mobile/ios/distribution.cer"
+
+# An App Store Connect key is a `.p8`, which the name half deliberately does not
+# list: it is a PKCS#8 PEM, and its banner names no algorithm, so it is the
+# content half's `[A-Z ]*` matching nothing that catches it. The banner is
+# assembled at run time from two pieces, so this file gains no PRIVATE KEY block
+# of its own for the content half's self-exemption to have to cover.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios"
+printf -- '-----BEGIN %s-----\nAAAA\n-----END %s-----\n' 'PRIVATE KEY' 'PRIVATE KEY' \
+  > "${fixture_root}/apps/mobile/ios/AuthKey_TESTKEY000.p8"
+assert_violation "a committed App Store Connect .p8 key is caught by its content" REL001 \
+  "apps/mobile/ios/AuthKey_TESTKEY000.p8: contains a PRIVATE KEY block"
+
 # The case a name rule cannot catch: a private key pasted into a file whose name
 # says nothing. This is why REL001 has a content half as well as a name half.
 new_fixture
@@ -1657,6 +1683,34 @@ printf 'binary\n' > "${fixture_root}/coverage/tmp/release.jks"
 printf -- '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n' \
   > "${fixture_root}/coverage/tmp/report.json"
 assert_clean "key material inside generated coverage output is pruned"
+
+# --- .gitignore keeps the same names out of `git add` (#1761) ----------------
+#
+# REL001 reports a key that is already in the tree; the ignore rule is what stops
+# `git add -A` staging one in the first place. It is read back through git
+# itself, against this repository's real `.gitignore`, because git is the
+# consumer: a pattern that looks right and that git reads differently is the
+# defect. `--no-index` so a path is judged by the ignore rules alone. The names
+# are REL001's name half, one per alternative.
+repo_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
+for ignored in \
+  apps/mobile/android/app/release.jks \
+  apps/mobile/android/upload.keystore \
+  apps/mobile/android/service-account.p12 \
+  apps/mobile/android/signing.pfx \
+  apps/mobile/android/signing.key \
+  apps/mobile/android/keystore.properties \
+  apps/mobile/android/release-key.jks.base64 \
+  apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision \
+  apps/mobile/ios/distribution.cer; do
+  if git -C "${repo_root}" check-ignore -q --no-index -- "${ignored}"; then
+    pass=$((pass + 1))
+    printf 'ok   %s\n' ".gitignore ignores ${ignored}"
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n     git check-ignore does not ignore it\n' ".gitignore ignores ${ignored}"
+  fi
+done
 
 # --- REL002: the Android build targets a current API level (#95) -------------
 #
@@ -2198,8 +2252,11 @@ assert_violation "a binary with no extension at all is still found" ASSET001 \
 # unusable and would have been caught in review rather than by a gate.
 new_fixture
 write_good_app web
+# ⚠️ This file was `model.gltf` until #3250, when a text-format model became
+# ASSET009's. The complement is still needed, so it is a text file of no kind
+# any asset rule names.
 mkdir -p "${fixture_root}/apps/web/public"
-printf '{ "scene": 0 }\n' > "${fixture_root}/apps/web/public/model.gltf"
+printf '{ "scene": 0 }\n' > "${fixture_root}/apps/web/public/scene-notes.json"
 assert_clean "a text file the manifest does not name is not an asset"
 
 # --- ASSET002: the manifest names a file that is not there --------------------
@@ -2759,6 +2816,143 @@ new_fixture
 write_good_app web
 write_svg docs/diagram.svg
 assert_clean "an .svg under docs/ is not reported"
+
+# --- ASSET009: a 3D model, text or not, under one of two licences (#3250) ----
+#
+# ADR 0099 D-5. A `.gltf` is text, so ASSET001 never saw one; a model under MIT
+# passed ASSET004; and a `source` of bare prose passed ASSET005. Every red case
+# has its green complement, for the reason given above ASSET001.
+
+# A minimal glTF 2.0 document in its TEXT form: no NUL byte anywhere.
+write_text_model() {
+  mkdir -p "$(dirname "${fixture_root}/$1")"
+  printf '{ "asset": { "version": "2.0" }, "scenes": [ { "nodes": [] } ] }\n' \
+    > "${fixture_root}/$1"
+}
+
+# append_model_entry <path> <licence> <sha256> <source>
+append_model_entry() {
+  printf '\n[[asset]]\npath = "%s"\nsource = "%s"\nlicence = "%s"\nread = "2026-11-26"\nsha256 = "%s"\n' \
+    "$1" "$4" "$2" "$3" >> "${fixture_root}/ASSETS.toml"
+}
+
+new_fixture
+write_good_app web
+write_text_model apps/web/public/models/house.gltf
+assert_violation "an unnamed text-format .gltf under apps/ is rejected" ASSET009 \
+  "apps/web/public/models/house.gltf: a 3D model that ASSETS.toml does not name"
+
+new_fixture
+write_good_app web
+write_text_model apps/web/public/models/house.gltf
+append_asset_entry apps/web/public/models/house.gltf CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/house.gltf)"
+assert_clean "a named CC0 .gltf with a link to its source passes"
+
+# Whatever the case, and whichever of the formats: an `.OBJ` is what some
+# exporters write.
+new_fixture
+write_good_app web
+write_text_model apps/web/public/models/Track.OBJ
+assert_violation "an unnamed .OBJ is rejected, whatever the case" ASSET009 \
+  "apps/web/public/models/Track.OBJ: a 3D model that ASSETS.toml does not name"
+
+# A BINARY model nobody named stays ASSET001's: one file, one finding.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+assert_violation_and_silence "an unnamed binary .glb is still ASSET001's, not ASSET009's" \
+  ASSET001 "apps/web/public/models/rider.glb: a committed binary" ASSET009
+
+# The licence. MIT is on ASSET004's permissive list, so until #3250 this row
+# was clean: a model under a licence no ADR admits for a model.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb MIT \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation_and_silence "a model under MIT is rejected by ASSET009, though ASSET004 admits MIT" \
+  ASSET009 "apps/web/public/models/rider.glb: licence MIT is not one a 3D model may be committed under" ASSET004
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_clean "a model under CC0-1.0 passes"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC-BY-4.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+printf 'creator = "Someone Else"\nurl = "https://example.invalid/rider"\nmodified = "no"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_clean "a model under CC-BY-4.0 with its attribution keys passes"
+
+# A licence ASSET004 refuses is reported once, by ASSET004.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC-BY-NC-4.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation_and_silence "a non-commercial model is ASSET004's finding alone" \
+  ASSET004 "apps/web/public/models/rider.glb: licence CC-BY-NC-4.0 is not permitted" ASSET009
+
+# Under packages/ the list is not applied: ASSET004 admits a permissive licence
+# alone there, and a fixture this repository makes itself is Apache-2.0.
+new_fixture
+write_good_package domain
+write_binary_asset packages/domain/fixtures/rider.glb
+append_asset_entry packages/domain/fixtures/rider.glb Apache-2.0 \
+  "$(fixture_digest packages/domain/fixtures/rider.glb)"
+assert_clean "a model fixture under packages/ keeps the licence boundary's Apache-2.0"
+
+# The same MIT licence on a file that is not a model is none of this rule's
+# business: the list is about models.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/icons/splash.png
+append_asset_entry apps/web/public/icons/splash.png MIT \
+  "$(fixture_digest apps/web/public/icons/splash.png)"
+assert_clean "a binary that is not a model keeps ASSET004's wider list"
+
+# The source. Prose with no address cannot be opened and read again.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_model_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)" "a pack somebody downloaded once"
+assert_violation "a model whose entry carries no link to its source is rejected" ASSET009 \
+  "apps/web/public/models/rider.glb: a 3D model's entry carries no https link"
+
+# The link may be in `url` rather than in `source`.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_model_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)" "a pack somebody downloaded once"
+printf 'url = "https://example.invalid/pack"\n' >> "${fixture_root}/ASSETS.toml"
+assert_clean "a model whose link is in its url key passes"
+
+# Not a model, no link: ASSET005 asks only that a source is recorded.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/icons/splash.png
+append_model_entry apps/web/public/icons/splash.png CC0-1.0 \
+  "$(fixture_digest apps/web/public/icons/splash.png)" "drawn in this repository"
+assert_clean "a binary that is not a model owes no link"
+
+# Outside apps/ and packages/ nothing ships, as for ASSET008.
+new_fixture
+write_good_app web
+write_text_model docs/figures/house.gltf
+assert_clean "a text-format model under docs/ is not reported"
+
+new_fixture
+write_good_app web
+write_text_model apps/web/node_modules/some-models/house.gltf
+assert_clean "a model under node_modules is not walked"
 
 # --- ASSET005: the manifest itself ------------------------------------------
 #

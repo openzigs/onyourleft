@@ -379,12 +379,14 @@ export function steadyClimb(): RouteProfile {
 /**
  * A closed circuit of a given radius — a route that bends everywhere and
  * wraps — with a gentle rise and fall so that a height is never trivially
- * zero.
+ * zero. `loop: false` is the same closed circuit NOT ticked as a loop (#976):
+ * a point-to-point route whose finish is its start.
  */
 export function circuitRoute(
   radius: number,
   elevation?: (along: number) => number,
   hand: 'right' | 'left' = 'left',
+  loop = true,
 ): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
@@ -409,7 +411,7 @@ export function circuitRoute(
     });
   }
   points.push(points[0] as RoutePoint);
-  return routeProfile(points, { loop: true });
+  return routeProfile(points, { loop });
 }
 
 /**
