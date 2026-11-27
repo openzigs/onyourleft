@@ -18,13 +18,8 @@ import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { GlslProgram } from './glsl-program-testing';
 import type { CameraPose } from './port';
 import { SCENERY_KINDS, type ScatterItem, type SceneryKind } from './scatter';
-import { SCENERY_MODELS } from './scenery-models';
-import {
-  STYLISED_FOLDS,
-  stylisedFoldOf,
-  writeStylisedTint,
-  type GeneratedShape,
-} from './stylised-shapes';
+import { SCENERY_MODELS, STYLISED_FOLD_MODELS, type SceneryModel } from './scenery-models';
+import { stylisedFoldOf, writeStylisedTint } from './stylised-shapes';
 import {
   STYLISED_INSTANCE_ATTRIBUTE,
   STYLISED_INSTANCE_GLSL,
@@ -32,10 +27,9 @@ import {
   ScatterBelt,
   foldedSceneryGeometry,
   readsStylisedInstances,
-  generatedSceneryGeometry,
   loadSceneryModels,
   prepareSceneryGeometry,
-  sceneryFitMetres,
+  setStylisedFolds,
 } from './three-renderer';
 
 const POSE: CameraPose = {
@@ -123,12 +117,54 @@ async function loadEveryModelAs(donor: SceneryKind): Promise<void> {
   belt.dispose();
 }
 
-/** A shape of two triangles, for a fold of the test's own. */
-const SLIVER: GeneratedShape = {
-  name: 'sliver',
-  positions: Float32Array.of(0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1),
-  colours: new Float32Array(18).fill(0.5),
-};
+/** Every file folded into a mesh, with its kind, its mesh and which fold it is (1 and up). */
+const FOLDED: readonly {
+  readonly kind: SceneryKind;
+  readonly mesh: number;
+  readonly fold: number;
+  readonly model: SceneryModel;
+}[] = (
+  Object.entries(STYLISED_FOLD_MODELS) as [SceneryKind, readonly (readonly SceneryModel[])[]][]
+).flatMap(([kind, meshes]) =>
+  meshes.flatMap((folds, mesh) => folds.map((model, at) => ({ kind, mesh, fold: at + 1, model }))),
+);
+
+/**
+ * A scene whose shape has a front: `donor`'s primitive with its highest
+ * corners pushed toward +z, so which way a loaded shape faces can be read
+ * back off it. @see leanOf
+ */
+function leaningSceneOf(donor: SceneryKind): Parameters<typeof prepareSceneryGeometry>[0] {
+  const belt = new ScatterBelt();
+  const mesh = meshFor(belt, donor);
+  const geometry = mesh.geometry.clone();
+  const position = geometry.getAttribute('position');
+  let top = Number.NEGATIVE_INFINITY;
+  for (let at = 0; at < position.count; at += 1) top = Math.max(top, position.getY(at));
+  for (let at = 0; at < position.count; at += 1) {
+    if (position.getY(at) > top - 1e-6) position.setZ(at, position.getZ(at) + 5);
+  }
+  const scene = sceneOf(geometry, mesh.matrixWorld);
+  belt.dispose();
+  return scene;
+}
+
+/** Which way each of a geometry's shapes leans: the z of its highest corner, by mark. */
+function leanOf(geometry: Geometry): number[] {
+  const position = geometry.getAttribute('position');
+  const marks = geometry.getAttribute(STYLISED_SHAPE_ATTRIBUTE) as
+    ReturnType<Geometry['getAttribute']> | undefined;
+  const highest: number[] = [];
+  const lean: number[] = [];
+  for (let at = 0; at < position.count; at += 1) {
+    const mark = marks === undefined ? 0 : marks.getX(at);
+    if (position.getY(at) > (highest[mark] ?? Number.NEGATIVE_INFINITY)) {
+      highest[mark] = position.getY(at);
+      lean[mark] = position.getZ(at);
+    }
+  }
+  return lean;
+}
 
 /** The meshes a belt holds when every model in the table loads: 24, the browser gate's ceiling. */
 const MESHES_WITH_EVERY_MODEL = SCENERY_KINDS.reduce(
@@ -138,7 +174,9 @@ const MESHES_WITH_EVERY_MODEL = SCENERY_KINDS.reduce(
 );
 
 afterEach(async () => {
-  // `loadSceneryModels` writes module state. @see three-renderer.test.ts
+  // `loadSceneryModels` writes module state, and so does the control's switch.
+  // @see three-renderer.test.ts
+  setStylisedFolds(true);
   await loadSceneryModels(() => Promise.reject(new Error('no models in this test')));
 });
 
@@ -147,48 +185,141 @@ describe('#3287 several shapes in one geometry', () => {
     for (const donor of ['tree-broadleaf', 'rock'] as const) {
       // A sphere is indexed and an octahedron is not: both ways a file may come.
       const model = modelOf('building', donor);
+      const first = modelOf('building', donor);
+      const second = modelOf('building', donor);
       const own = verticesOf(model);
       const ownTriangles = trianglesOf(model);
       const indexed = model.index !== null;
-      const folded = foldedSceneryGeometry(model, [SLIVER, SLIVER], 'building');
+      const folded = foldedSceneryGeometry(model, [first, second]);
 
-      expect(marksOf(folded)).toEqual([own, 6, 6]);
-      expect(trianglesOf(folded)).toBe(ownTriangles + 4);
-      // A model's index is kept: its shared corners are not shaded twice.
+      expect(marksOf(folded)).toEqual([own, own, own]);
+      expect(trianglesOf(folded)).toBe(ownTriangles * 3);
+      // An index every part has is kept: shared corners are not shaded twice.
       expect(folded.index !== null).toBe(indexed);
-      expect(folded.getAttribute('color').count).toBe(own + 12);
-      expect(folded.getAttribute('normal').count).toBe(own + 12);
+      expect(folded.getAttribute('color').count).toBe(own * 3);
+      expect(folded.getAttribute('normal').count).toBe(own * 3);
       folded.dispose();
     }
   });
 
+  it('folds a file with an index beside one without, and loses no triangle', () => {
+    // One kit's files need not agree with another's about being indexed.
+    const indexed = modelOf('building', 'tree-broadleaf');
+    const plain = modelOf('building', 'rock');
+    expect(indexed.index).not.toBeNull();
+    expect(plain.index).toBeNull();
+    const triangles = trianglesOf(indexed) + trianglesOf(plain);
+    const plainVertices = verticesOf(plain);
+    const folded = foldedSceneryGeometry(indexed, [plain]);
+
+    expect(folded.index).toBeNull();
+    expect(trianglesOf(folded)).toBe(triangles);
+    expect(marksOf(folded)).toEqual([verticesOf(folded) - plainVertices, plainVertices]);
+    folded.dispose();
+  });
+
   it('CONTROL: with nothing to fold, the model is returned as it came', () => {
     const model = modelOf('rock', 'shrub');
-    expect(foldedSceneryGeometry(model, [], 'rock')).toBe(model);
+    expect(foldedSceneryGeometry(model, [])).toBe(model);
     expect(model.getAttribute(STYLISED_SHAPE_ATTRIBUTE)).toBeUndefined();
     model.dispose();
   });
+});
 
-  it('fits a shape from numbers into the room a model of its kind takes', () => {
-    for (const [kind, meshes] of Object.entries(STYLISED_FOLDS) as [
-      SceneryKind,
-      readonly (readonly GeneratedShape[])[],
-    ][]) {
-      for (const shape of meshes.flat()) {
-        const geometry = generatedSceneryGeometry(shape, kind);
-        geometry.computeBoundingBox();
-        const box = geometry.boundingBox;
-        if (box === null) throw new Error('no box');
-        const extents = [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
-        expect(Math.max(...extents), shape.name).toBeCloseTo(sceneryFitMetres(kind), 4);
-        // On the ground, and centred on its place.
-        expect(box.min.y, shape.name).toBeCloseTo(0, 5);
-        expect(box.min.x + box.max.x, shape.name).toBeCloseTo(0, 4);
-        expect(box.min.z + box.max.z, shape.name).toBeCloseTo(0, 4);
-        expect(trianglesOf(geometry)).toBe(shape.positions.length / 9);
-        geometry.dispose();
-      }
+describe('#3287 the files a load folds in', () => {
+  it('reads every model and every folded file once, through the loader a ride uses', async () => {
+    const asked: string[] = [];
+    const donor = new ScatterBelt();
+    const mesh = meshFor(donor, 'rock');
+    await loadSceneryModels((url) => {
+      asked.push(url);
+      return Promise.resolve(sceneOf(mesh.geometry.clone(), mesh.matrixWorld));
+    });
+    donor.dispose();
+
+    const models = Object.values(SCENERY_MODELS).flat();
+    expect(FOLDED).toHaveLength(15);
+    expect([...asked].sort()).toEqual(
+      [...models, ...FOLDED.map((each) => each.model)].map((model) => model.url).sort(),
+    );
+  });
+
+  it('turns a folded building to the road, and nothing else', async () => {
+    // A City Kit building's front is its −z, and a lot's house is stood with
+    // its +z to the road: a folded building is turned half a turn, about its
+    // own middle. The mesh's own model stands as it always has.
+    await loadSceneryModels(() => Promise.resolve(leaningSceneOf('rock')));
+    const belt = new ScatterBelt();
+
+    for (const mesh of [0, 1, 2]) {
+      const [own, suburban, commercial] = leanOf(meshFor(belt, 'building', mesh).geometry);
+      expect(own, `building ${String(mesh)}`).toBeGreaterThan(0.5);
+      expect(suburban, `building ${String(mesh)}`).toBeCloseTo(-(own as number), 4);
+      expect(commercial, `building ${String(mesh)}`).toBeCloseTo(-(own as number), 4);
     }
+    // CONTROL: a tree and a stone have no front, and are folded in as they come.
+    for (const kind of ['tree-broadleaf', 'tree-conifer', 'rock'] as const) {
+      const lean = leanOf(meshFor(belt, kind, 0).geometry);
+      expect(lean).toHaveLength(3);
+      for (const each of lean) expect(each, kind).toBeCloseTo(lean[0] as number, 4);
+      expect(lean[0], kind).toBeGreaterThan(0);
+    }
+    belt.dispose();
+  });
+
+  it('keeps a mesh’s model alone when one of its folds cannot be read', async () => {
+    // A building's fold is its setting's by INDEX: a list with a hole in it
+    // would draw a suburban lot as the commercial building. All or none.
+    const missing = STYLISED_FOLD_MODELS.building?.[0]?.[1]?.url;
+    expect(missing).toBeDefined();
+    const donor = new ScatterBelt();
+    const mesh = meshFor(donor, 'rock');
+    const own = verticesOf(mesh.geometry);
+    await loadSceneryModels((url) =>
+      url === missing
+        ? Promise.reject(new Error('404'))
+        : Promise.resolve(sceneOf(mesh.geometry.clone(), mesh.matrixWorld)),
+    );
+    donor.dispose();
+    const belt = new ScatterBelt();
+
+    expect(marksOf(meshFor(belt, 'building', 0).geometry)).toEqual([own]);
+    expect(
+      meshFor(belt, 'building', 0).geometry.getAttribute(STYLISED_SHAPE_ATTRIBUTE),
+    ).toBeUndefined();
+    // The other two meshes, and every other kind, lose nothing.
+    expect(marksOf(meshFor(belt, 'building', 1).geometry)).toEqual([own, own, own]);
+    expect(marksOf(meshFor(belt, 'building', 2).geometry)).toEqual([own, own, own]);
+    expect(marksOf(meshFor(belt, 'rock', 0).geometry)).toEqual([own, own, own]);
+    // And a commercial lot on that mesh is drawn, as the one shape it has.
+    belt.update([item({ kind: 'building', setting: 'commercial', variant: 0 })], POSE);
+    expect(meshFor(belt, 'building', 0).count).toBe(1);
+    expect(
+      meshFor(belt, 'building', 0).geometry.getAttribute(STYLISED_INSTANCE_ATTRIBUTE),
+    ).toBeUndefined();
+    belt.dispose();
+  });
+
+  it('CONTROL: with the folds switched off, reads the models alone', async () => {
+    setStylisedFolds(false);
+    const asked: string[] = [];
+    const donor = new ScatterBelt();
+    const mesh = meshFor(donor, 'rock');
+    await loadSceneryModels((url) => {
+      asked.push(url);
+      return Promise.resolve(sceneOf(mesh.geometry.clone(), mesh.matrixWorld));
+    });
+    donor.dispose();
+    const belt = new ScatterBelt();
+
+    expect(asked).toHaveLength(Object.values(SCENERY_MODELS).flat().length);
+    for (const each of FOLDED) {
+      expect(asked).not.toContain(each.model.url);
+      expect(
+        meshFor(belt, each.kind, each.mesh).geometry.getAttribute(STYLISED_SHAPE_ATTRIBUTE),
+      ).toBeUndefined();
+    }
+    belt.dispose();
   });
 });
 
@@ -214,17 +345,22 @@ describe('#3287 the belt a view builds', () => {
     await loadEveryModelAs('tree-conifer');
     const belt = new ScatterBelt();
 
-    for (const [kind, meshes] of Object.entries(STYLISED_FOLDS) as [
+    for (const [kind, meshes] of Object.entries(STYLISED_FOLD_MODELS) as [
       SceneryKind,
-      readonly (readonly GeneratedShape[])[],
+      readonly (readonly SceneryModel[])[],
     ][]) {
       meshes.forEach((folds, mesh) => {
+        // Every file was read as the donor's shape: the model, then one a fold.
         expect(marksOf(meshFor(belt, kind, mesh).geometry), `${kind} ${String(mesh)}`).toEqual([
           model,
-          ...folds.map((shape) => shape.positions.length / 3),
+          ...folds.map(() => model),
         ]);
       });
     }
+    // A building's mesh holds three shapes; a tree's first three and its second two.
+    expect(marksOf(meshFor(belt, 'building', 2).geometry)).toHaveLength(3);
+    expect(marksOf(meshFor(belt, 'tree-broadleaf', 0).geometry)).toHaveLength(3);
+    expect(marksOf(meshFor(belt, 'tree-broadleaf', 1).geometry)).toHaveLength(2);
     // A kind with nothing folded in is its model alone, and carries no marks.
     for (const kind of ['shrub', 'post', 'barn'] as const) {
       expect(
@@ -276,7 +412,7 @@ describe('#3287 the belt a view builds', () => {
     const tints = new Set<string>();
     trees.forEach((tree, at) => {
       const { shape, tint } = instanceOf(mesh, at);
-      expect(shape).toBe(stylisedFoldOf(tree, 2));
+      expect(shape).toBe(stylisedFoldOf(tree, 3));
       drawn.add(shape);
       writeStylisedTint(tree.kind, tree.x, tree.z, expected, 0);
       tint.forEach((channel, each) => {
@@ -285,8 +421,8 @@ describe('#3287 the belt a view builds', () => {
       });
       tints.add(tint.map((channel) => channel.toFixed(5)).join());
     });
-    // Both shapes of the mesh stand in the row, and no two trees are one colour.
-    expect(drawn).toEqual(new Set([0, 1]));
+    // All three shapes of the mesh stand in the row, and no two trees are one colour.
+    expect(drawn).toEqual(new Set([0, 1, 2]));
     expect(tints.size).toBe(40);
     belt.dispose();
   });
@@ -352,7 +488,7 @@ describe('#3287 the belt a view builds', () => {
     expect(carried.count).toBeGreaterThanOrEqual(mesh.count);
     // The last instance drawn was written, past where the first buffer ended.
     const last = instanceOf(mesh, mesh.count - 1);
-    expect(last.shape === 0 || last.shape === 1).toBe(true);
+    expect([0, 1, 2]).toContain(last.shape);
     expect(Math.max(...last.tint)).toBeLessThanOrEqual(1);
     expect(Math.min(...last.tint)).toBeGreaterThan(0.5);
     belt.dispose();

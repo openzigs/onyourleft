@@ -724,17 +724,13 @@ import {
 import {
   MAXIMUM_SCENERY_VARIANTS,
   SCENERY_MODELS,
+  STYLISED_FOLD_MODELS,
+  sceneryAtlasOf,
   sceneryResourceUrl,
   type SceneryModel,
 } from './scenery-models';
 import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from './scenery-palette';
-import {
-  STYLISED_FOLDS,
-  stylisedFoldOf,
-  stylisedTinted,
-  writeStylisedTint,
-  type GeneratedShape,
-} from './stylised-shapes';
+import { stylisedFoldOf, stylisedTinted, writeStylisedTint } from './stylised-shapes';
 import type {
   CameraPose,
   DeliveryCarMotion,
@@ -1937,9 +1933,8 @@ export function prepareSceneryGeometry(
 /**
  * A shape made to fit its kind, in place: scaled so its largest extent is
  * {@link sceneryFitMetres}, centred on x and z, its base at y = 0.
- * {@link prepareSceneryGeometry}'s last step, and since #3287 a generated
- * shape's too ({@link generatedSceneryGeometry}), so a shape from numbers
- * takes the room a model of its kind takes by the same arithmetic.
+ * {@link prepareSceneryGeometry}'s last step, so a file folded into a mesh
+ * (#3287) takes the room its mesh's own model takes, by the same arithmetic.
  */
 function fittedToKind(merged: BufferGeometry, kind: SceneryKind): BufferGeometry {
   // One helper rather than the same guard written three times: `boundingBox`
@@ -1971,7 +1966,7 @@ function fittedToKind(merged: BufferGeometry, kind: SceneryKind): BufferGeometry
 /**
  * The vertex attribute that says which of its mesh's shapes a vertex belongs
  * to — #3287: 0 the model, 1 and up the shapes folded in beside it
- * (`stylised-shapes.ts` §`STYLISED_FOLDS`). Only a geometry that holds more
+ * (`scenery-models.ts` §`STYLISED_FOLD_MODELS`). Only a geometry that holds more
  * than one shape carries it: a driver reads nought where there is none, which
  * is the one shape such a mesh is. @see STYLISED_INSTANCE_GLSL
  */
@@ -2082,58 +2077,47 @@ function shapesHeldBy(geometry: BufferGeometry): number {
 }
 
 /**
- * A shape built from numbers as a geometry of its kind — #3287: its triangles
- * and their colours as `stylised-shapes.ts` gives them, flat normals, and
- * fitted as a model is ({@link fittedToKind}). Exported for
- * `stylised-folds.test.ts`, which reads each shape's extent through it.
- */
-export function generatedSceneryGeometry(shape: GeneratedShape, kind: SceneryKind): BufferGeometry {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(Float32Array.from(shape.positions), 3));
-  geometry.setAttribute('color', new BufferAttribute(Float32Array.from(shape.colours), 3));
-  geometry.computeVertexNormals();
-  return fittedToKind(geometry, kind);
-}
-
-/**
  * One mesh's shapes as ONE geometry — #3287: `model`, and each of `folds`
  * after it, every vertex marked with its shape in
  * {@link STYLISED_SHAPE_ATTRIBUTE}. One geometry is one instanced mesh and one
  * draw call, however many shapes it holds; {@link STYLISED_INSTANCE_GLSL} draws
- * the one an instance is. `model` is released; with no `folds` it is returned
- * as it came. Exported for `stylised-folds.test.ts`, which folds a shape of
- * its own through it.
+ * the one an instance is. Every part is a shape as
+ * {@link prepareSceneryGeometry} leaves one: fitted to its kind, with a
+ * position, a normal and a colour and nothing else. `model` and `folds` are
+ * released; with no `folds` the model is returned as it came, and so it is
+ * if the parts cannot be merged — a rider loses variety, never an item.
+ * Exported for `stylised-folds.test.ts`, which folds shapes of its own
+ * through it.
  */
 export function foldedSceneryGeometry(
   model: BufferGeometry,
-  folds: readonly GeneratedShape[],
-  kind: SceneryKind,
+  folds: readonly BufferGeometry[],
 ): BufferGeometry {
   if (folds.length === 0) return model;
-  const parts = [model, ...folds.map((shape) => generatedSceneryGeometry(shape, kind))];
-  // `mergeGeometries` needs every part to agree about being indexed. A model's
-  // index is kept, since a file's shared corners are vertices a phone does
-  // not shade twice; a generated shape shares none, so its index is a count.
-  if (model.index !== null) {
-    for (const part of parts.slice(1)) {
-      const vertices = part.getAttribute('position').count;
-      part.setIndex(Array.from({ length: vertices }, (_, at) => at));
-    }
-  }
-  const joined = mergeGeometries(parts);
+  const parts = [model, ...folds];
+  // `mergeGeometries` needs every part to agree about being indexed, and one
+  // kit's files need not agree with another's. Levelled down, as
+  // `prepareSceneryGeometry` levels a file's own parts: an index where every
+  // part has one, since a file's shared corners are vertices a phone does not
+  // shade twice, and none otherwise.
+  const indexed = parts.every((part) => part.index !== null);
+  const ready = indexed
+    ? parts
+    : parts.map((part) => (part.index === null ? part : part.toNonIndexed()));
+  const joined = mergeGeometries(ready);
   if (joined === null) {
-    for (const part of parts.slice(1)) part.dispose();
-    throw new Error(`${kind}: a model and its folded shapes could not be merged into one geometry`);
+    for (const part of new Set([...folds, ...ready])) if (part !== model) part.dispose();
+    return model;
   }
   const marks = new Float32Array(joined.getAttribute('position').count);
   let at = 0;
-  parts.forEach((part, fold) => {
+  ready.forEach((part, fold) => {
     const vertices = part.getAttribute('position').count;
     marks.fill(fold, at, at + vertices);
     at += vertices;
   });
   joined.setAttribute(STYLISED_SHAPE_ATTRIBUTE, new BufferAttribute(marks, 1));
-  for (const part of parts) part.dispose();
+  for (const part of new Set([...parts, ...ready])) part.dispose();
   return joined;
 }
 
@@ -2154,27 +2138,6 @@ let stylisedFoldsOn = true;
  */
 export function setStylisedFolds(on: boolean): void {
   stylisedFoldsOn = on;
-}
-
-/**
- * A kind's loaded models, each with the shapes `stylised-shapes.ts` folds
- * into its mesh — #3287. ⚠️ **A fold that cannot be made keeps the model**:
- * the trade {@link loadSceneryModels} states for a file that cannot be read —
- * a rider loses variety, never an item.
- */
-function withStylisedFolds(
-  kind: SceneryKind,
-  models: readonly BufferGeometry[],
-): readonly BufferGeometry[] {
-  const folds = STYLISED_FOLDS[kind];
-  if (folds === undefined || !stylisedFoldsOn) return models;
-  return models.map((model, mesh) => {
-    try {
-      return foldedSceneryGeometry(model, folds[mesh] ?? [], kind);
-    } catch {
-      return model;
-    }
-  });
 }
 
 /**
@@ -2308,12 +2271,15 @@ let sceneryGeometries: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = new
 
 /** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
 async function readModelScene(url: string): Promise<Object3D> {
+  // #3287: a model is answered with the atlas of the kit it came from. Both
+  // City Kits declare theirs under one name, and they are not one image.
+  const atlas = sceneryAtlasOf(url);
   // ⚠️ The manager is what makes `sceneryResourceUrl` binding rather than
   // advisory: `GLTFLoader` resolves every external URI a file declares through
   // it, so this is the one place a model could reach the network and the one
   // place that is refused. `scenery-models.ts` says what it answers with.
   const manager = new LoadingManager();
-  manager.setURLModifier(sceneryResourceUrl);
+  manager.setURLModifier((asked) => sceneryResourceUrl(asked, atlas));
   return (await new GLTFLoader(manager).loadAsync(url)).scene;
 }
 
@@ -2348,24 +2314,56 @@ export async function loadSceneryModels(
       // guard, and #367's own framing is that the budget must be somewhere the
       // ladder can see.
       const wanted = models.slice(0, MAXIMUM_SCENERY_VARIANTS);
+      const read = async (model: SceneryModel): Promise<BufferGeometry> => {
+        const scene = await load(model.url);
+        try {
+          return prepareSceneryGeometry(scene, kind, readImage);
+        } finally {
+          // ⚠️ **What makes "no texture reaches the GPU" structural rather
+          // than a claim about timing.** The loader built a
+          // `MeshStandardMaterial` and, for a building, a `Texture` holding
+          // the atlas; three allocates nothing on the device until the
+          // first draw, so neither has cost anything yet — and neither
+          // exists by the time anything could. ADR 0022 D-7 is about the
+          // material specifically, and this is where it stops being
+          // reachable at all.
+          releaseLoadedScene(scene);
+        }
+      };
+      // #3287: the files drawn beside a mesh's model, in its draw call.
+      // ⚠️ **All of a mesh's or none**: a building's fold is its setting's by
+      // INDEX, so a list with a hole in it would draw a suburban lot as the
+      // commercial building. A mesh any of whose folds cannot be read keeps
+      // its model alone — the trade stated above: a rider loses variety,
+      // never an item.
+      //
+      // ⚠️ **A folded building is turned half a turn.** A City Kit building's
+      // front — its door and its garden, a shop's window — is on its −z, and
+      // a lot's house is stood with its +z to the road (`settlements.ts`
+      // §`lotsAt`): unturned, a shop shows the road a blank wall. Fitted
+      // first, so it turns about its own middle. The three models a mesh has
+      // always had are left as they stand, backs to the road: turning them
+      // is a change to every ride with no setting, and not #3287's.
+      const turned = async (model: SceneryModel): Promise<BufferGeometry> => {
+        const geometry = await read(model);
+        return kind === 'building' ? geometry.rotateY(Math.PI) : geometry;
+      };
+      const foldsOf = async (mesh: number): Promise<readonly BufferGeometry[]> => {
+        const folded = stylisedFoldsOn ? (STYLISED_FOLD_MODELS[kind]?.[mesh] ?? []) : [];
+        const settled = await Promise.allSettled(folded.map(turned));
+        const made = settled.flatMap((each) => (each.status === 'fulfilled' ? [each.value] : []));
+        if (made.length === folded.length) return made;
+        for (const geometry of made) geometry.dispose();
+        return [];
+      };
       const shapes = await Promise.all(
-        wanted.map(async (model) => {
+        wanted.map(async (model, mesh) => {
+          // Started together; `foldsOf` settles every read and never rejects.
+          const folding = foldsOf(mesh);
           try {
-            const scene = await load(model.url);
-            try {
-              return prepareSceneryGeometry(scene, kind, readImage);
-            } finally {
-              // ⚠️ **What makes "no texture reaches the GPU" structural rather
-              // than a claim about timing.** The loader built a
-              // `MeshStandardMaterial` and, for a building, a `Texture` holding
-              // the atlas; three allocates nothing on the device until the
-              // first draw, so neither has cost anything yet — and neither
-              // exists by the time anything could. ADR 0022 D-7 is about the
-              // material specifically, and this is where it stops being
-              // reachable at all.
-              releaseLoadedScene(scene);
-            }
+            return foldedSceneryGeometry(await read(model), await folding);
           } catch {
+            for (const geometry of await folding) geometry.dispose();
             // Keep the primitive for this variant. @see the note above.
             return undefined;
           }
@@ -2378,9 +2376,8 @@ export async function loadSceneryModels(
       // vanish. Losing variety is the documented trade; losing items is not.
       const kept = shapes.filter((shape): shape is BufferGeometry => shape !== undefined);
       if (kept.length > 0) {
-        // #3287: each mesh's model, and the shapes drawn beside it in the same
-        // draw call. A kind with no model loaded keeps its primitive alone.
-        loaded.set(kind, withStylisedFolds(kind, kept));
+        // A kind with no model loaded keeps its primitive alone.
+        loaded.set(kind, kept);
       }
     }),
   );

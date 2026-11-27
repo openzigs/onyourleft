@@ -257,4 +257,23 @@ export const SCENERY_PALETTE: Readonly<Record<string, ModelPalette>> = {
   'building-type-h': { colours: 27, brightestChannel: 0.9734452903984125, digest: 'b4a5d47d' },
   'building-type-i': { colours: 39, brightestChannel: 0.9734452903984125, digest: 'c7503177' },
   'building-type-k': { colours: 32, brightestChannel: 0.9734452903984125, digest: 'c2974f54' },
+  // #3287: the files folded in beside those (`scenery-models.ts`
+  // §`STYLISED_FOLD_MODELS`), read on 2026-11-26 from the committed bytes. A
+  // stone here carries a second, white material; the three City Kit
+  // (Commercial) buildings are read against that kit's own atlas.
+  tree_fat: { colours: 2, brightestChannel: 0.8862745, digest: '9edcadf0' },
+  tree_simple: { colours: 2, brightestChannel: 0.8862745, digest: '9edcadf0' },
+  tree_tall: { colours: 2, brightestChannel: 0.8862745, digest: '9edcadf0' },
+  tree_pineSmallC: { colours: 2, brightestChannel: 0.8, digest: '1422b45c' },
+  tree_pineSmallB: { colours: 2, brightestChannel: 0.8, digest: '1422b45c' },
+  tree_pineSmallD: { colours: 2, brightestChannel: 0.8, digest: '1422b45c' },
+  stone_largeB: { colours: 2, brightestChannel: 1, digest: '724d86d3' },
+  stone_largeD: { colours: 2, brightestChannel: 1, digest: '724d86d3' },
+  stone_largeF: { colours: 2, brightestChannel: 1, digest: '724d86d3' },
+  'building-type-l': { colours: 32, brightestChannel: 0.9734452903984125, digest: '0410a9cb' },
+  'building-type-p': { colours: 35, brightestChannel: 0.9734452903984125, digest: 'f4b869f3' },
+  'building-type-q': { colours: 30, brightestChannel: 0.9734452903984125, digest: '59a48b6f' },
+  'building-e': { colours: 40, brightestChannel: 0.9646862478944651, digest: '0727bbf2' },
+  'building-a': { colours: 40, brightestChannel: 1, digest: '218676e2' },
+  'building-d': { colours: 50, brightestChannel: 1, digest: '97ca863a' },
 };

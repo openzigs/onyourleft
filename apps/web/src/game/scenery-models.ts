@@ -47,13 +47,14 @@
  * somebody felt like adding.
  *
  * ⚠️ **Since #3287 a shape is no longer a mesh, and the budget is unmoved.**
- * Each mesh this table gives a kind is drawn with more shapes than its model:
- * `stylised-shapes.ts` §`STYLISED_FOLDS` folds a suburban house and a
- * commercial front in beside each building, and a tree or a rock beside each
- * of those, into the mesh's ONE geometry, and the vertex shader draws the one
- * an instance is. So a kind has more shapes and exactly the meshes, and the
- * draw calls, it had; what a fold costs is triangles, and that file bounds
- * them. This table is still the list of FILES, and still the mesh count.
+ * Each mesh {@link SCENERY_MODELS} gives a kind is drawn with more shapes than
+ * its model: {@link STYLISED_FOLD_MODELS} folds a City Kit (Suburban) house
+ * and a City Kit (Commercial) building in beside each building, and Nature
+ * Kit trees and stones beside each of those, into the mesh's ONE geometry, and
+ * the vertex shader draws the one an instance is. So a kind has more shapes
+ * and exactly the meshes, and the draw calls, it had; what a fold costs is
+ * triangles, and `stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` bounds them.
+ * `SCENERY_MODELS` is still the mesh count.
  *
  * ## Provenance
  *
@@ -88,7 +89,8 @@
  * and `prepareSceneryGeometry` together enforce.
  */
 
-import type { SceneryKind } from './scatter';
+import type { ScatterItem, SceneryKind } from './scatter';
+import { stylisedFoldOf } from './stylised-shapes';
 
 /**
  * The file each kind's shape is read from.
@@ -105,17 +107,33 @@ import type { SceneryKind } from './scatter';
  * exactly that reason.
  */
 import atlasUrl from './models/colormap.png?url';
+import commercialAtlasUrl from './models/colormap-city-kit-commercial.png?url';
 import buildingHUrl from './models/building-type-h.glb?url';
 import buildingIUrl from './models/building-type-i.glb?url';
 import buildingKUrl from './models/building-type-k.glb?url';
+import buildingLUrl from './models/building-type-l.glb?url';
+import buildingPUrl from './models/building-type-p.glb?url';
+import buildingQUrl from './models/building-type-q.glb?url';
+import commercialAUrl from './models/building-a.glb?url';
+import commercialDUrl from './models/building-d.glb?url';
+import commercialEUrl from './models/building-e.glb?url';
 import bushUrl from './models/plant_bush.glb?url';
 import bushTriangleUrl from './models/plant_bushLargeTriangle.glb?url';
 import stoneAUrl from './models/stone_largeA.glb?url';
+import stoneBUrl from './models/stone_largeB.glb?url';
 import stoneCUrl from './models/stone_largeC.glb?url';
+import stoneDUrl from './models/stone_largeD.glb?url';
+import stoneFUrl from './models/stone_largeF.glb?url';
 import oakUrl from './models/tree_oak.glb?url';
 import pineRoundUrl from './models/tree_pineRoundD.glb?url';
+import pineSmallBUrl from './models/tree_pineSmallB.glb?url';
+import pineSmallCUrl from './models/tree_pineSmallC.glb?url';
+import pineSmallDUrl from './models/tree_pineSmallD.glb?url';
 import pineTallUrl from './models/tree_pineTallA.glb?url';
 import treeDefaultUrl from './models/tree_default.glb?url';
+import treeFatUrl from './models/tree_fat.glb?url';
+import treeSimpleUrl from './models/tree_simple.glb?url';
+import treeTallUrl from './models/tree_tall.glb?url';
 
 /** One shape a kind may be drawn as. */
 export interface SceneryModel {
@@ -201,6 +219,107 @@ export const SCENERY_MODELS: Partial<Record<SceneryKind, readonly SceneryModel[]
 };
 
 /**
+ * The files folded into each kind's meshes BESIDE the model each already has
+ * — #3287: by kind, then by mesh ({@link SCENERY_MODELS}' order), then by
+ * fold, the mesh's own model being fold 0.
+ *
+ * | kind | mesh | folded in |
+ * |---|---|---|
+ * | building | `building-type-h` | `building-type-l`, `building-e` |
+ * | building | `building-type-i` | `building-type-p`, `building-a` |
+ * | building | `building-type-k` | `building-type-q`, `building-d` |
+ * | broadleaf | `tree_default` | `tree_fat`, `tree_simple` |
+ * | broadleaf | `tree_oak` | `tree_tall` |
+ * | conifer | `tree_pineTallA` | `tree_pineSmallC`, `tree_pineSmallB` |
+ * | conifer | `tree_pineRoundD` | `tree_pineSmallD` |
+ * | rock | `stone_largeA` | `stone_largeB`, `stone_largeD` |
+ * | rock | `stone_largeC` | `stone_largeF` |
+ *
+ * ⚠️ **A building's two are its settings, in this order**: fold 1 a City Kit
+ * (Suburban) house — the kit's three modern ones, a dark single pitch (`l`),
+ * a flat roof on columns (`p`) and a flat roof with a carport (`q`) — and
+ * fold 2 a City Kit (Commercial) building. `stylised-shapes.ts`
+ * §`stylisedFoldOf` reads a lot's setting as that index. A natural kind's are
+ * picked by where the item stands.
+ *
+ * ⚠️ **Order is load-bearing**, as `SCENERY_MODELS`' is: reordering a list
+ * changes what stands where on every route.
+ *
+ * ⚠️ **Every file here costs every instance of its mesh its triangles**: an
+ * instance submits each shape its mesh holds, and the vertex shader folds
+ * away the ones it is not. The commercial buildings are that kit's three
+ * lightest but one, and each mesh pairs a heavier house with a lighter
+ * model; `stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` holds the sums.
+ *
+ * Every file is the upstream artefact byte for byte, as the models above are,
+ * from the archives the owner placed on 2026-11-26 (`ASSETS.toml` records
+ * each archive's SHA-256, ADR 0049 D-11).
+ */
+export const STYLISED_FOLD_MODELS: Partial<
+  Record<SceneryKind, readonly (readonly SceneryModel[])[]>
+> = {
+  'tree-broadleaf': [
+    [
+      { name: 'tree_fat', url: treeFatUrl },
+      { name: 'tree_simple', url: treeSimpleUrl },
+    ],
+    [{ name: 'tree_tall', url: treeTallUrl }],
+  ],
+  'tree-conifer': [
+    [
+      { name: 'tree_pineSmallC', url: pineSmallCUrl },
+      { name: 'tree_pineSmallB', url: pineSmallBUrl },
+    ],
+    [{ name: 'tree_pineSmallD', url: pineSmallDUrl }],
+  ],
+  rock: [
+    [
+      { name: 'stone_largeB', url: stoneBUrl },
+      { name: 'stone_largeD', url: stoneDUrl },
+    ],
+    [{ name: 'stone_largeF', url: stoneFUrl }],
+  ],
+  building: [
+    [
+      { name: 'building-type-l', url: buildingLUrl },
+      { name: 'building-e', url: commercialEUrl },
+    ],
+    [
+      { name: 'building-type-p', url: buildingPUrl },
+      { name: 'building-a', url: commercialAUrl },
+    ],
+    [
+      { name: 'building-type-q', url: buildingQUrl },
+      { name: 'building-d', url: commercialDUrl },
+    ],
+  ],
+};
+
+/**
+ * The name of the file an item is drawn as, with `meshes` shapes a kind at
+ * this rung (`quality.ts` §`sceneryVariants`) — #3287: its mesh's own model,
+ * or a file folded in beside it. `undefined` for a kind drawn from no table —
+ * a post, a barn, a wall.
+ *
+ * @test-facing the scenery plan read as shapes, for
+ * `stylised-settings.test.ts`; the renderer draws by mesh and fold and needs
+ * no name
+ */
+export function stylisedShapeNameOf(
+  item: Pick<ScatterItem, 'kind' | 'x' | 'z' | 'setting' | 'variant'>,
+  meshes: number = MAXIMUM_SCENERY_VARIANTS,
+): string | undefined {
+  const models = SCENERY_MODELS[item.kind] ?? [];
+  const shapes = Math.min(models.length, meshes);
+  if (!(shapes > 0)) return undefined;
+  const wanted = Number.isInteger(item.variant) ? item.variant : 0;
+  const mesh = ((wanted % shapes) + shapes) % shapes;
+  const folded = STYLISED_FOLD_MODELS[item.kind]?.[mesh] ?? [];
+  const fold = stylisedFoldOf(item, 1 + folded.length);
+  return fold === 0 ? models[mesh]?.name : folded[fold - 1]?.name;
+}
+
+/**
  * The colour atlas the City Kit paints every building from — #366.
  *
  * ⚠️ **Committed, and that is a change from #341.** The buildings' colour is
@@ -218,6 +337,39 @@ export const SCENERY_MODELS: Partial<Record<SceneryKind, readonly SceneryModel[]
  * style"* is untouched.
  */
 export const SCENERY_ATLAS: SceneryModel = { name: 'colormap', url: atlasUrl };
+
+/**
+ * The atlas the City Kit (Commercial) paints ITS buildings from — #3287.
+ *
+ * ⚠️ **A different image under the same declared name.** Every building of
+ * both kits declares `Textures/colormap.png`, and the two files are not the
+ * same bytes: a commercial building painted from the suburban atlas comes out
+ * in another kit's colours. So the file is committed beside the first under a
+ * name of its own (its bytes are the archive's), and
+ * {@link sceneryResourceUrl} answers a model with the atlas of the kit it
+ * came from ({@link COMMERCIAL_KIT_URLS}). Sampled at load and thrown away,
+ * as the first is: it never reaches the GPU.
+ */
+export const COMMERCIAL_ATLAS: SceneryModel = {
+  name: 'colormap-city-kit-commercial',
+  url: commercialAtlasUrl,
+};
+
+/** The models that are City Kit (Commercial)'s, and so are painted from {@link COMMERCIAL_ATLAS}. */
+const COMMERCIAL_KIT_URLS: ReadonlySet<string> = new Set([
+  commercialAUrl,
+  commercialDUrl,
+  commercialEUrl,
+]);
+
+/**
+ * The atlas a model's kit paints it from — #3287: {@link COMMERCIAL_ATLAS}
+ * for a City Kit (Commercial) building, by its URL, {@link SCENERY_ATLAS} for
+ * every other model, as it was.
+ */
+export function sceneryAtlasOf(modelUrl: string): SceneryModel {
+  return COMMERCIAL_KIT_URLS.has(modelUrl) ? COMMERCIAL_ATLAS : SCENERY_ATLAS;
+}
 
 /**
  * The name the models' own glTF declares the atlas under.
@@ -242,7 +394,11 @@ const NOTHING_IMAGE =
 /** Every URL this repository is willing to let a model reach. */
 const OWN_URLS = new Set<string>([
   ...Object.values(SCENERY_MODELS).flatMap((models) => models.map((model) => model.url)),
+  ...Object.values(STYLISED_FOLD_MODELS).flatMap((meshes) =>
+    meshes.flatMap((folds) => folds.map((model) => model.url)),
+  ),
   SCENERY_ATLAS.url,
+  COMMERCIAL_ATLAS.url,
 ]);
 
 /**
@@ -262,9 +418,12 @@ const OWN_URLS = new Set<string>([
  * So the loader is handed this as its URL modifier, and **every answer it gives
  * is a URL of ours**:
  *
- * - one of {@link SCENERY_MODELS}' own values, matched by identity;
- * - {@link SCENERY_ATLAS}' own value, for a resource whose last path segment is
- *   the name the pack declares its atlas under;
+ * - one of {@link SCENERY_MODELS}' or {@link STYLISED_FOLD_MODELS}' own
+ *   values, or an atlas's, matched by identity;
+ * - `atlas`' own value, for a resource whose last path segment is the name
+ *   the packs declare their atlas under — {@link SCENERY_ATLAS} unless the
+ *   caller is loading a model of another kit ({@link sceneryAtlasOf}, #3287),
+ *   and never anything but one of the two committed atlases;
  * - {@link NOTHING_IMAGE} for everything else — 68 bytes of transparent PNG
  *   that is already in the bundle.
  *
@@ -283,11 +442,15 @@ const OWN_URLS = new Set<string>([
  * same mistake in a new place, and a path prefix cannot be written at all
  * because Vite chooses where these land.
  */
-export function sceneryResourceUrl(url: string): string {
+export function sceneryResourceUrl(url: string, atlas: SceneryModel = SCENERY_ATLAS): string {
   if (OWN_URLS.has(url)) {
     return url;
   }
-  return lastSegment(url) === ATLAS_DECLARED_FILE ? SCENERY_ATLAS.url : NOTHING_IMAGE;
+  if (lastSegment(url) !== ATLAS_DECLARED_FILE) {
+    return NOTHING_IMAGE;
+  }
+  // ⚠️ By identity, so the range stays "a URL of ours" whatever is passed in.
+  return atlas.url === COMMERCIAL_ATLAS.url ? COMMERCIAL_ATLAS.url : SCENERY_ATLAS.url;
 }
 
 /** The part after the last `/`, with any query or fragment taken off. */

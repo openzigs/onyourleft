@@ -591,15 +591,17 @@ interface StylisedFoldMeasurement {
 }
 
 /**
- * The most triangles #3287's folded shapes may add to the frame of one item a
- * slot a kind. Each of the six items of a kind submits what its mesh holds
- * beside its model, at most 100 triangles a mesh (`stylised-shapes.ts`
- * §`FOLDED_TRIANGLES_A_MESH`), and nine meshes hold any: three of a kind's
- * six items a mesh for a kind of two, two for a building's three. So the
- * frame adds exactly 3 × (72 + 52) + 3 × (46 + 30) + 3 × (20 + 20) +
- * 2 × (70 + 82 + 86) = **1 196**, and this is that sum, not a margin over it.
+ * The triangles #3287's folded files add to the frame of one item a slot a
+ * kind. Each of the six items of a kind submits what its mesh holds beside
+ * its model (`stylised-shapes.ts` §`FOLDED_TRIANGLES_A_MESH` bounds that by
+ * kind), and nine meshes hold any: three of a kind's six items a mesh for a
+ * kind of two, two for a building's three. So the frame adds exactly
+ * 3 × (112 + 72) + 3 × (140 + 54) + 3 × (165 + 73) + 2 × (2 819 + 2 534 +
+ * 2 240) = **17 034**, and this is that sum, not a margin over it. ⚠️ All but
+ * 1 500 of it is the six buildings: a house is drawn at the cost of three.
  */
-const FOLDED_FRAME_TRIANGLES = 3 * (72 + 52) + 3 * (46 + 30) + 3 * (20 + 20) + 2 * (70 + 82 + 86);
+const FOLDED_FRAME_TRIANGLES =
+  3 * (112 + 72) + 3 * (140 + 54) + 3 * (165 + 73) + 2 * (2_819 + 2_534 + 2_240);
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -2723,7 +2725,7 @@ test.describe('the scenery is models, not solids — #341', () => {
     expect(sceneryCalls).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
   });
 
-  test('fetches the committed models and its one atlas, and nothing else', async ({
+  test('fetches the committed models and their two atlases, and nothing else', async ({
     harnessRun,
   }) => {
     // ⚠️ **#240's NFR-5 — *"makes no network request"* — was true until #341
@@ -2758,11 +2760,16 @@ test.describe('the scenery is models, not solids — #341', () => {
     const atlases = new Set(requested.filter((url) => url.includes('colormap')));
 
     // Eleven since #367 — two shapes for each of the four natural kinds and
-    // three buildings. {@link SCATTER_MESH_CEILING} is the same arithmetic from
-    // the renderer's end.
-    expect(models.size).toBe(11);
-    // One atlas, shared by all three buildings, served from this origin.
-    expect(atlases.size).toBe(1);
+    // three buildings; {@link SCATTER_MESH_CEILING} is the same arithmetic from
+    // the renderer's end. And since #3287 the fifteen files folded in beside
+    // them (`scenery-models.ts` §`STYLISED_FOLD_MODELS`): six buildings, and
+    // three each of broadleaf, conifer and stone. Twenty-six requests at
+    // load, for the same eleven meshes.
+    expect(models.size).toBe(11 + 15);
+    // Two atlases since #3287, one a City Kit: the suburban kit's, shared by
+    // six buildings, and the commercial kit's, shared by three. Both are
+    // served from this origin.
+    expect(atlases.size).toBe(2);
     for (const atlas of atlases) {
       expect(atlas.startsWith(HARNESS_ORIGIN)).toBe(true);
     }
@@ -3101,18 +3108,22 @@ test.describe('the stylised world’s shapes by setting — #3287', () => {
     testInfo.annotations.push({ type: 'a building by its setting', description: measured });
     console.log(`#3287 a building by its setting — ${measured}`);
 
-    // Rural is the Kenney building, whose roof is green (#366).
+    // Rural is the building the mesh always had, whose roof is green (#366).
     expect(settings.rural.green).toBeGreaterThan(200);
     // Each of the others is drawn, and is a different silhouette.
     for (const setting of ['suburban', 'commercial'] as const) {
       expect(settings[setting].pixels, setting).toBeGreaterThan(2_000);
       expect(settings[setting].pixels, setting).not.toBe(settings.rural.pixels);
-      // ⚠️ **And the roof is not in it.** No generated shape has a green thing
-      // on it, so green here is the Kenney building drawn through the shape —
-      // a fold that did not fold.
-      expect(settings[setting].green, setting).toBeLessThan(settings.rural.green / 20);
     }
     expect(settings.suburban.pixels).not.toBe(settings.commercial.pixels);
+    // ⚠️ **And the rural roof is not in the commercial one.** That mesh's
+    // commercial building (`building-e`) is white with one small awning,
+    // where the rural house is under a green roof — so green there is the
+    // rural house drawn through it: a fold that did not fold. (The suburban
+    // house, `building-type-l`, has a green roof of its own, and is told
+    // apart by its silhouette alone.) A fold that folds nothing draws all
+    // three shapes on every lot, and all three counts above are then one.
+    expect(settings.commercial.green).toBeLessThan(settings.rural.green / 4);
     // The control: with the models alone, a lot of any setting is the Kenney building.
     expect(control.settings.rural).toEqual(settings.rural);
     expect(control.settings.suburban).toEqual(settings.rural);

@@ -261,7 +261,7 @@ export interface ScatterItem {
    * §`lotsAt`, a `building` only, and only where it is not `rural`: absent is
    * rural, which is every building of a ride with no urban class. The
    * stylised world draws a suburban lot as a modern house and a commercial
-   * one as a shop front or an office (`stylised-shapes.ts`
+   * one as a shop or a low block of flats over one (`stylised-shapes.ts`
    * §`stylisedFoldOf`); the realistic world does not read it. Like the
    * variant it changes what stands somewhere, never where.
    */

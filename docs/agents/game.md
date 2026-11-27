@@ -697,13 +697,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         glTF and PNG reader the gate reproduces that table with
                         — the same argument `identity-verifier.test.ts` makes
     src/game/stylised-shapes.ts
-                        the stylised world's shapes by setting, and the ones
-                        built from numbers (#3287) — `buildingSettingOf`, the
-                        urban class read as rural, suburban or commercial;
-                        `STYLISED_FOLDS`, the houses, shop fronts, trees and
-                        rocks drawn BESIDE each mesh's Kenney model;
-                        `stylisedFoldOf`, which of them an item is; and
-                        `writeStylisedTint`, its seeded tint. ⚠️ **A shape is
+                        the stylised world's shapes by setting (#3287) —
+                        `buildingSettingOf`, the urban class read as rural,
+                        suburban or commercial; `stylisedFoldOf`, which of its
+                        mesh's shapes an item is; and `writeStylisedTint`, its
+                        seeded tint. The shapes are Kenney files:
+                        `scenery-models.ts` §`STYLISED_FOLD_MODELS` names the
+                        City Kit (Suburban) houses, City Kit (Commercial)
+                        buildings and Nature Kit trees and stones drawn BESIDE
+                        each mesh's own model. ⚠️ **A shape is
                         no longer a mesh, and a reviewer who remembers "a
                         variant is a draw call" is reading the old file**: a
                         mesh's one geometry holds several shapes, each vertex
@@ -713,11 +715,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         #1274). So the mesh count, `MAXIMUM_SCENERY_VARIANTS`
                         and every draw-call ceiling are what they were, and
                         the cost is triangles: an instance submits every shape
-                        its mesh holds, at most `FOLDED_TRIANGLES_A_MESH` more.
-                        ⚠️ The new shapes are arithmetic and not Kenney files:
-                        the file's header says why, and a Kenney file can
-                        replace any of them — a shape is a geometry to the
-                        renderer, whichever made it. The setting is written on
+                        its mesh holds, at most `FOLDED_TRIANGLES_A_MESH` more
+                        by kind — 2 819 for a building, so a house is drawn at
+                        the cost of three. ⚠️ **No shape is built in code**
+                        (they were, until the owner placed the archives on
+                        2026-11-26). ⚠️ **The two City Kits declare one atlas
+                        name for two images**: `sceneryAtlasOf` answers a
+                        commercial building with its own kit's, and a folded
+                        building is turned half a turn to face the road
+                        (`loadSceneryModels`). The setting is written on
                         a mapped town's lot by `settlements.ts` §`lotsAt`
                         (`ScatterItem.setting`); a ride with no urban class has
                         none, and draws the three Kenney buildings as before

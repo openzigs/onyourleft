@@ -1,41 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * #3287: `stylised-shapes.ts` — the setting a class is, the shapes built from
- * numbers, which shape an item is drawn as, and its tint. Everything here is
- * arithmetic; that the renderer draws what these say is
- * `stylised-folds.test.ts`' and the browser gate's.
+ * #3287: `stylised-shapes.ts` — the setting a class is, what the files folded
+ * into a mesh cost, which shape an item is drawn as, and its tint. Everything
+ * here is arithmetic and committed bytes; that the renderer draws what these
+ * say is `stylised-folds.test.ts`' and the browser gate's.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { readGlb } from './model-bytes-testing';
-import { SCENERY_KINDS, type BuildingSetting, type SceneryKind } from './scatter';
-import { SCENERY_MODELS } from './scenery-models';
-import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
+import { type BuildingSetting, type SceneryKind } from './scatter';
+import { SCENERY_MODELS, STYLISED_FOLD_MODELS, stylisedShapeNameOf } from './scenery-models';
 import {
   FOLDED_TRIANGLES_A_MESH,
-  GENERATED_TRIANGLE_CEILINGS,
-  STYLISED_FOLDS,
   STYLISED_TINT_FLOOR,
   buildingSettingOf,
   stylisedFoldOf,
-  stylisedShapeNameOf,
   writeStylisedTint,
-  type GeneratedShape,
 } from './stylised-shapes';
 import type { UrbanClass } from './urban-class';
-
-/** Every generated shape, with the kind it is drawn as. */
-const GENERATED: readonly (readonly [SceneryKind, GeneratedShape])[] = (
-  Object.entries(STYLISED_FOLDS) as [SceneryKind, readonly (readonly GeneratedShape[])[]][]
-).flatMap(([kind, meshes]) =>
-  meshes.flatMap((folds) => folds.map((shape) => [kind, shape] as const)),
-);
-
-function trianglesOf(shape: GeneratedShape): number {
-  return shape.positions.length / 9;
-}
 
 /** A committed model's triangles, read off its bytes. */
 function modelTriangles(name: string): number {
@@ -51,18 +35,14 @@ function modelTriangles(name: string): number {
   return triangles;
 }
 
-/** Six times a shape's signed volume: positive when its faces look outward. */
-function signedVolume(shape: GeneratedShape): number {
-  const p = shape.positions;
-  let volume = 0;
-  for (let at = 0; at < p.length; at += 9) {
-    const [ax, ay, az, bx, by, bz, cx, cy, cz] = p.subarray(at, at + 9) as unknown as number[];
-    volume +=
-      (ax as number) * ((by as number) * (cz as number) - (bz as number) * (cy as number)) -
-      (ay as number) * ((bx as number) * (cz as number) - (bz as number) * (cx as number)) +
-      (az as number) * ((bx as number) * (cy as number) - (by as number) * (cx as number));
-  }
-  return volume;
+/** What the files folded into each of a kind's meshes come to together, off their bytes. */
+function foldedTriangles(): Record<string, number[]> {
+  return Object.fromEntries(
+    Object.entries(STYLISED_FOLD_MODELS).map(([kind, meshes]) => [
+      kind,
+      meshes.map((folds) => folds.reduce((sum, model) => sum + modelTriangles(model.name), 0)),
+    ]),
+  );
 }
 
 describe('#3287 the setting a class is', () => {
@@ -80,29 +60,20 @@ describe('#3287 the setting a class is', () => {
   });
 });
 
-describe('#3287 the shapes built from numbers', () => {
-  it('folds shapes only into meshes a kind already has', () => {
-    for (const [kind, meshes] of Object.entries(STYLISED_FOLDS) as [
-      SceneryKind,
-      readonly (readonly GeneratedShape[])[],
-    ][]) {
-      expect(SCENERY_KINDS).toContain(kind);
-      // One list a mesh: a kind gains no mesh, so no draw call.
-      expect(meshes.length, kind).toBe(SCENERY_MODELS[kind]?.length);
-    }
-    // A building's mesh holds a suburban house and a commercial front.
-    for (const folds of STYLISED_FOLDS.building ?? []) expect(folds).toHaveLength(2);
+describe('#3287 what the files folded into a mesh cost', () => {
+  it('adds three broadleaves, three conifers, three stones and six buildings', () => {
+    expect((STYLISED_FOLD_MODELS['tree-broadleaf'] ?? []).flat()).toHaveLength(3);
+    expect((STYLISED_FOLD_MODELS['tree-conifer'] ?? []).flat()).toHaveLength(3);
+    expect((STYLISED_FOLD_MODELS.rock ?? []).flat()).toHaveLength(3);
+    expect((STYLISED_FOLD_MODELS.building ?? []).flat()).toHaveLength(6);
+    // A building's mesh holds a suburban house and a commercial building: one a setting.
+    for (const folds of STYLISED_FOLD_MODELS.building ?? []) expect(folds).toHaveLength(2);
   });
 
-  it('adds two broadleaves, two conifers and two rocks', () => {
-    expect((STYLISED_FOLDS['tree-broadleaf'] ?? []).flat()).toHaveLength(2);
-    expect((STYLISED_FOLDS['tree-conifer'] ?? []).flat()).toHaveLength(2);
-    expect((STYLISED_FOLDS.rock ?? []).flat()).toHaveLength(2);
-    expect((STYLISED_FOLDS.building ?? []).flat()).toHaveLength(6);
-  });
-
-  it('names every shape once, and never as a committed model is named', () => {
-    const names = GENERATED.map(([, shape]) => shape.name);
+  it('names every folded file once, and never as a mesh’s own model is named', () => {
+    const names = Object.values(STYLISED_FOLD_MODELS)
+      .flat(2)
+      .map((model) => model.name);
     expect(new Set(names).size).toBe(names.length);
     const models = new Set(
       Object.values(SCENERY_MODELS).flatMap((list) => list.map((model) => model.name)),
@@ -110,109 +81,38 @@ describe('#3287 the shapes built from numbers', () => {
     for (const name of names) expect(models.has(name), name).toBe(false);
   });
 
-  it('holds each shape to the heaviest committed model of its kind', () => {
-    for (const [kind, shape] of GENERATED) {
-      const ceiling = GENERATED_TRIANGLE_CEILINGS[kind];
-      expect(ceiling, kind).toBeDefined();
-      expect(trianglesOf(shape), shape.name).toBeGreaterThan(0);
-      expect(trianglesOf(shape), shape.name).toBeLessThanOrEqual(ceiling as number);
-    }
-  });
-
-  it('adds at most a hundred triangles to any one item', () => {
+  it('states what each mesh’s folds add to every one of its items, off the bytes', () => {
     // An instance submits every shape its mesh holds, so the cost of a fold is
-    // the sum, not the heaviest: each mesh's shapes together, bounded.
-    expect(FOLDED_TRIANGLES_A_MESH).toBe(100);
-    const sums: Record<string, number[]> = {};
-    for (const [kind, meshes] of Object.entries(STYLISED_FOLDS)) {
-      const each = meshes.map((folds) => folds.reduce((sum, shape) => sum + trianglesOf(shape), 0));
-      for (const sum of each) expect(sum, kind).toBeLessThanOrEqual(FOLDED_TRIANGLES_A_MESH);
-      sums[kind] = each;
-    }
-    // Written out, so a shape that grows is a number that moves in review.
-    expect(sums).toEqual({
-      'tree-broadleaf': [72, 52],
-      'tree-conifer': [46, 30],
-      rock: [20, 20],
-      building: [70, 82, 86],
+    // the sum, not the heaviest. Written out, so a heavier file or one more
+    // is a number that moves in review.
+    expect(foldedTriangles()).toEqual({
+      'tree-broadleaf': [50 + 62, 72],
+      'tree-conifer': [54 + 86, 54],
+      rock: [85 + 80, 73],
+      building: [1_310 + 1_509, 1_282 + 1_252, 1_140 + 1_100],
     });
   });
 
-  it('takes each ceiling from the committed files, read back off their bytes', () => {
-    // #3287's fourth criterion: a building at most 1 024, a tree at most 196.
-    expect(GENERATED_TRIANGLE_CEILINGS.building).toBe(1_024);
-    expect(GENERATED_TRIANGLE_CEILINGS['tree-broadleaf']).toBe(196);
-    for (const [kind, ceiling] of Object.entries(GENERATED_TRIANGLE_CEILINGS)) {
-      const heaviest = Math.max(
-        ...(SCENERY_MODELS[kind as SceneryKind] ?? []).map((model) => modelTriangles(model.name)),
-      );
-      expect(ceiling, kind).toBe(heaviest);
+  it('holds each kind to the ceiling of its heaviest mesh, and no looser', () => {
+    const sums = foldedTriangles();
+    expect(Object.keys(FOLDED_TRIANGLES_A_MESH).sort()).toEqual(Object.keys(sums).sort());
+    for (const [kind, each] of Object.entries(sums)) {
+      const ceiling = FOLDED_TRIANGLES_A_MESH[kind as SceneryKind];
+      for (const sum of each) expect(sum, kind).toBeLessThanOrEqual(ceiling as number);
+      // A ratchet: the ceiling is the heaviest mesh as committed, with no slack.
+      expect(ceiling, kind).toBe(Math.max(...each));
     }
+    expect(FOLDED_TRIANGLES_A_MESH.building).toBe(2_819);
   });
 
-  it('builds whole triangles of finite corners, none with no area', () => {
-    for (const [, shape] of GENERATED) {
-      expect(shape.positions.length % 9, shape.name).toBe(0);
-      expect(shape.colours.length, shape.name).toBe(shape.positions.length);
-      const p = shape.positions;
-      for (let at = 0; at < p.length; at += 9) {
-        const ux = (p[at + 3] as number) - (p[at] as number);
-        const uy = (p[at + 4] as number) - (p[at + 1] as number);
-        const uz = (p[at + 5] as number) - (p[at + 2] as number);
-        const vx = (p[at + 6] as number) - (p[at] as number);
-        const vy = (p[at + 7] as number) - (p[at + 1] as number);
-        const vz = (p[at + 8] as number) - (p[at + 2] as number);
-        const area = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
-        expect(Number.isFinite(area), shape.name).toBe(true);
-        expect(area, `${shape.name} triangle ${String(at / 9)}`).toBeGreaterThan(1e-4);
-      }
-    }
-  });
-
-  it('winds its faces outward', () => {
-    // A face wound inward is culled, and the shape drawn inside out. The
-    // signed volume of a solid whose faces look outward is positive.
-    for (const [, shape] of GENERATED) expect(signedVolume(shape), shape.name).toBeGreaterThan(0);
-  });
-
-  it('stands on the ground, its front toward +z for a building', () => {
-    for (const [kind, shape] of GENERATED) {
-      let lowest = Number.POSITIVE_INFINITY;
-      let front = Number.NEGATIVE_INFINITY;
-      let back = Number.POSITIVE_INFINITY;
-      for (let at = 0; at < shape.positions.length; at += 3) {
-        lowest = Math.min(lowest, shape.positions[at + 1] as number);
-        front = Math.max(front, shape.positions[at + 2] as number);
-        back = Math.min(back, shape.positions[at + 2] as number);
-      }
-      expect(lowest, shape.name).toBeCloseTo(0, 6);
-      // A building's door is on its +z wall, which is its furthest from the middle.
-      if (kind === 'building') expect(front, shape.name).toBeGreaterThanOrEqual(-back);
-    }
-  });
-
-  it('paints nothing brighter than the sun leaves unclipped', () => {
-    for (const [, shape] of GENERATED) {
-      for (const channel of shape.colours) {
-        expect(channel, shape.name).toBeGreaterThanOrEqual(0);
-        expect(channel, shape.name).toBeLessThanOrEqual(MAXIMUM_LIT_CHANNEL + 1e-6);
-      }
-    }
-  });
-
-  it('builds the same shape every time', () => {
-    // No clock and no random number: a shape is the same on every device.
-    for (const [, shape] of GENERATED) {
-      expect(shape.positions.every((value) => Number.isFinite(value))).toBe(true);
-    }
-    const tree = STYLISED_FOLDS['tree-broadleaf']?.[0]?.[0];
-    expect(Array.from(tree?.positions.subarray(0, 3) ?? [])).toMatchInlineSnapshot(`
-      [
-        0.17000000178813934,
-        0,
-        0,
-      ]
-    `);
+  it('pairs the heaviest house with the lightest model, so no mesh carries two heavy ones', () => {
+    // A building item costs its mesh's model and both folds: 3 589, 3 334 and
+    // 3 264 triangles, where the three models alone are 770, 800 and 1 024.
+    const own = (SCENERY_MODELS.building ?? []).map((model) => modelTriangles(model.name));
+    const folded = foldedTriangles()['building'] ?? [];
+    expect(own.map((triangles, mesh) => triangles + (folded[mesh] ?? 0))).toEqual([
+      3_589, 3_334, 3_264,
+    ]);
   });
 });
 
@@ -254,6 +154,21 @@ describe('#3287 which of its mesh’s shapes an item is', () => {
     expect(second / count).toBeLessThan(0.55);
   });
 
+  it('spreads a mesh of three shapes over all three, a third each', () => {
+    const drawn = [0, 0, 0];
+    const count = 6_000;
+    for (let step = 0; step < count; step += 1) {
+      const tree = { kind: 'tree-broadleaf', x: (step % 53) * 3.9 - 80, z: step * 6.7 } as const;
+      const fold = stylisedFoldOf(tree, 3);
+      drawn[fold] = (drawn[fold] ?? 0) + 1;
+    }
+    expect(drawn).toHaveLength(3);
+    for (const share of drawn) {
+      expect(share / count).toBeGreaterThan(0.3);
+      expect(share / count).toBeLessThan(0.37);
+    }
+  });
+
   it('ignores a setting on anything but a building', () => {
     const at = { x: 40, z: 900 } as const;
     expect(stylisedFoldOf({ kind: 'rock', ...at, setting: 'commercial' }, 2)).toBe(
@@ -262,17 +177,25 @@ describe('#3287 which of its mesh’s shapes an item is', () => {
   });
 
   it('names the shape an item is drawn as', () => {
-    const models = SCENERY_MODELS.building ?? [];
     const item = (variant: number, setting?: BuildingSetting) => ({ ...house(setting), variant });
-    expect(stylisedShapeNameOf(item(0), models)).toBe('building-type-h');
-    expect(stylisedShapeNameOf(item(4), models)).toBe('building-type-i');
-    expect(stylisedShapeNameOf(item(0, 'suburban'), models)).toBe('house_flat_roof');
-    expect(stylisedShapeNameOf(item(1, 'suburban'), models)).toBe('house_single_pitch');
-    expect(stylisedShapeNameOf(item(2, 'commercial'), models)).toBe('office_low');
+    expect(stylisedShapeNameOf(item(0))).toBe('building-type-h');
+    expect(stylisedShapeNameOf(item(4))).toBe('building-type-i');
+    expect(stylisedShapeNameOf(item(0, 'suburban'))).toBe('building-type-l');
+    expect(stylisedShapeNameOf(item(1, 'suburban'))).toBe('building-type-p');
+    expect(stylisedShapeNameOf(item(2, 'suburban'))).toBe('building-type-q');
+    expect(stylisedShapeNameOf(item(0, 'commercial'))).toBe('building-e');
+    expect(stylisedShapeNameOf(item(1, 'commercial'))).toBe('building-a');
+    expect(stylisedShapeNameOf(item(2, 'commercial'))).toBe('building-d');
     // At a rung of one shape a kind, every house is the first mesh's.
-    expect(stylisedShapeNameOf(item(2, 'commercial'), models, 1)).toBe('shop_front');
+    expect(stylisedShapeNameOf(item(2, 'commercial'), 1)).toBe('building-e');
+    // A tree's is its mesh's model or one of the files beside it, by where it stands.
+    const named = new Set<string | undefined>();
+    for (let step = 0; step < 60; step += 1) {
+      named.add(stylisedShapeNameOf({ kind: 'tree-broadleaf', x: 5, z: step * 8, variant: 0 }));
+    }
+    expect(named).toEqual(new Set(['tree_default', 'tree_fat', 'tree_simple']));
     // A kind drawn from no table has no name.
-    expect(stylisedShapeNameOf({ kind: 'post', x: 0, z: 0, variant: 0 }, [])).toBeUndefined();
+    expect(stylisedShapeNameOf({ kind: 'post', x: 0, z: 0, variant: 0 })).toBeUndefined();
   });
 });
 

@@ -36,9 +36,12 @@ import { describe, expect, it } from 'vitest';
 import { readGlb } from './model-bytes-testing';
 import { SCENERY_KINDS, type SceneryKind } from './scatter';
 import {
+  COMMERCIAL_ATLAS,
   MAXIMUM_SCENERY_VARIANTS,
   SCENERY_ATLAS,
   SCENERY_MODELS,
+  STYLISED_FOLD_MODELS,
+  sceneryAtlasOf,
   sceneryResourceUrl,
 } from './scenery-models';
 import { SCENERY_PALETTE } from './scenery-palette';
@@ -57,12 +60,23 @@ function fileOf(url: string | undefined): string {
   return (url ?? '').split('/').pop()?.split('?')[0] ?? '';
 }
 
-/** Every model in the table, flattened, with the kind it belongs to. */
+/**
+ * Every model in the tables, flattened, with the kind it belongs to: each
+ * mesh's own, and — #3287 — each file folded in beside one.
+ */
 function everyModel(): readonly { kind: SceneryKind; name: string; url: string }[] {
-  return Object.entries(SCENERY_MODELS).flatMap(([kind, models]) =>
-    models.map((model) => ({ kind: kind as SceneryKind, ...model })),
-  );
+  return [
+    ...Object.entries(SCENERY_MODELS).flatMap(([kind, models]) =>
+      models.map((model) => ({ kind: kind as SceneryKind, ...model })),
+    ),
+    ...Object.entries(STYLISED_FOLD_MODELS).flatMap(([kind, meshes]) =>
+      meshes.flat().map((model) => ({ kind: kind as SceneryKind, ...model })),
+    ),
+  ];
 }
+
+/** The three City Kit (Commercial) buildings, by name: the files that kit's archive gave. */
+const COMMERCIAL_KIT = ['building-a', 'building-d', 'building-e'];
 
 /** One model's glTF JSON chunk, parsed out of the committed container. */
 function glTfOf(name: string): ReturnType<typeof readGlb>['json'] {
@@ -191,6 +205,59 @@ describe('the committed bytes are glTF 2.0 with geometry in them', () => {
 });
 
 describe('what a model is allowed to fetch — #240 NFR-5, #366', () => {
+  it('folds files only into meshes a kind already has, and these files — #3287', () => {
+    const named = Object.fromEntries(
+      Object.entries(STYLISED_FOLD_MODELS).map(([kind, meshes]) => [
+        kind,
+        meshes.map((folds) => folds.map((model) => fileOf(model.url))),
+      ]),
+    );
+
+    // A building's are a City Kit (Suburban) house, then a City Kit
+    // (Commercial) building: `stylisedFoldOf` reads a setting as that index.
+    expect(named).toEqual({
+      'tree-broadleaf': [['tree_fat.glb', 'tree_simple.glb'], ['tree_tall.glb']],
+      'tree-conifer': [['tree_pineSmallC.glb', 'tree_pineSmallB.glb'], ['tree_pineSmallD.glb']],
+      rock: [['stone_largeB.glb', 'stone_largeD.glb'], ['stone_largeF.glb']],
+      building: [
+        ['building-type-l.glb', 'building-e.glb'],
+        ['building-type-p.glb', 'building-a.glb'],
+        ['building-type-q.glb', 'building-d.glb'],
+      ],
+    });
+    for (const [kind, meshes] of Object.entries(STYLISED_FOLD_MODELS)) {
+      // One list a mesh: a kind gains no mesh, so no draw call.
+      expect(meshes.length, kind).toBe(SCENERY_MODELS[kind as SceneryKind]?.length);
+    }
+  });
+
+  it('answers each building with the atlas of the kit it came from — #3287', () => {
+    // Both kits declare `Textures/colormap.png`, and they are two images.
+    expect(COMMERCIAL_ATLAS.url).not.toBe(SCENERY_ATLAS.url);
+    expect(fileOf(COMMERCIAL_ATLAS.url)).toBe(`${COMMERCIAL_ATLAS.name}.png`);
+    const buildings = everyModel().filter((model) => model.kind === 'building');
+    expect(buildings).toHaveLength(9);
+    for (const model of buildings) {
+      const commercial = COMMERCIAL_KIT.includes(model.name);
+      const atlas = sceneryAtlasOf(model.url);
+
+      expect(atlas, model.name).toBe(commercial ? COMMERCIAL_ATLAS : SCENERY_ATLAS);
+      expect(sceneryResourceUrl('assets/Textures/colormap.png', atlas), model.name).toBe(
+        commercial ? COMMERCIAL_ATLAS.url : SCENERY_ATLAS.url,
+      );
+    }
+    expect(buildings.filter((model) => COMMERCIAL_KIT.includes(model.name))).toHaveLength(3);
+    // An atlas is a URL of ours, and fetches as itself.
+    expect(sceneryResourceUrl(COMMERCIAL_ATLAS.url)).toBe(COMMERCIAL_ATLAS.url);
+    // And an atlas that is not one of the two is answered with the first.
+    expect(
+      sceneryResourceUrl('Textures/colormap.png', {
+        name: 'colormap',
+        url: 'https://example.invalid/colormap.png',
+      }),
+    ).toBe(SCENERY_ATLAS.url);
+  });
+
   it('lets each model fetch its own bytes', () => {
     for (const model of everyModel()) {
       expect(sceneryResourceUrl(model.url)).toBe(model.url);
@@ -202,7 +269,7 @@ describe('what a model is allowed to fetch — #240 NFR-5, #366', () => {
     // asks for nothing is green for the wrong reason, for ever. Every City Kit
     // building declares its pack's shared colour atlas as an external URI, and
     // that is what the next assertions are about.
-    for (const model of SCENERY_MODELS.building ?? []) {
+    for (const model of everyModel().filter((each) => each.kind === 'building')) {
       const declared = (glTfOf(fileOf(model.url)).images ?? []).map((image) => image.uri);
 
       expect(declared).toEqual(['Textures/colormap.png']);
@@ -249,7 +316,11 @@ describe('what a model is allowed to fetch — #240 NFR-5, #366', () => {
     // read.** Whatever a glTF asks for, what comes back is a model of ours, the
     // atlas of ours, or 68 bytes — so a file declaring a host cannot reach it,
     // and no new condition has to be written to keep that true.
-    const ours = new Set<string>([...everyModel().map((model) => model.url), SCENERY_ATLAS.url]);
+    const ours = new Set<string>([
+      ...everyModel().map((model) => model.url),
+      SCENERY_ATLAS.url,
+      COMMERCIAL_ATLAS.url,
+    ]);
     const hostile = [
       'https://example.invalid/anything',
       'http://127.0.0.1:9/probe',
@@ -262,10 +333,12 @@ describe('what a model is allowed to fetch — #240 NFR-5, #366', () => {
     ];
 
     for (const asked of hostile) {
-      const answered = sceneryResourceUrl(asked);
+      for (const atlas of [SCENERY_ATLAS, COMMERCIAL_ATLAS, { name: 'x', url: asked }]) {
+        const answered = sceneryResourceUrl(asked, atlas);
 
-      expect(ours.has(answered) || answered.startsWith('data:image/png;base64,')).toBe(true);
-      expect(answered).not.toBe(asked);
+        expect(ours.has(answered) || answered.startsWith('data:image/png;base64,')).toBe(true);
+        expect(answered).not.toBe(asked);
+      }
     }
   });
 });

@@ -21,10 +21,9 @@ import { SETTINGS_STRETCHES, settingsFixture } from './footprint-fixtures-testin
 import { landClassMask } from './land-class';
 import { scatterSeed, type ScatterItem } from './scatter';
 import { sceneFrame } from './scene';
-import { SCENERY_MODELS } from './scenery-models';
+import { SCENERY_MODELS, STYLISED_FOLD_MODELS, stylisedShapeNameOf } from './scenery-models';
 import { structuresAt, type MappedTown } from './settlements';
 import { atStartLine } from './simulation';
-import { STYLISED_FOLDS, stylisedShapeNameOf } from './stylised-shapes';
 import { urbanClassMap } from './urban-class';
 
 const ALL = { maxItems: 1_000_000, riderMetres: 0 } as const;
@@ -70,7 +69,7 @@ function withoutSetting(item: ScatterItem): ScatterItem {
 }
 
 function shapesOf(houses: readonly ScatterItem[]): Set<string> {
-  return new Set(houses.map((house) => stylisedShapeNameOf(house, BUILDINGS) ?? 'none'));
+  return new Set(houses.map((house) => stylisedShapeNameOf(house) ?? 'none'));
 }
 
 describe('#3287 a building is drawn by its setting', () => {
@@ -107,7 +106,10 @@ describe('#3287 a building is drawn by its setting', () => {
     // Rural: the three committed Kenney buildings, and nothing else.
     expect(rural).toEqual(new Set(BUILDINGS.map((model) => model.name)));
     // Suburban: each mesh's first fold; commercial: its second. All three of each.
-    const folds = STYLISED_FOLDS.building ?? [];
+    const folds = STYLISED_FOLD_MODELS.building ?? [];
+    // Suburban are City Kit (Suburban)'s files and commercial City Kit (Commercial)'s.
+    expect([...suburban].sort()).toEqual(['building-type-l', 'building-type-p', 'building-type-q']);
+    expect([...commercial].sort()).toEqual(['building-a', 'building-d', 'building-e']);
     expect(suburban).toEqual(new Set(folds.map((mesh) => mesh[0]?.name)));
     expect(commercial).toEqual(new Set(folds.map((mesh) => mesh[1]?.name)));
     expect(suburban.size).toBe(3);

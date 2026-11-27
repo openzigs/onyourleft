@@ -2419,7 +2419,7 @@ function placedAhead(
 interface SettingPixels {
   /** Pixels the building changed. */
   readonly pixels: number;
-  /** Of those, the ones whose green leads — a Kenney roof, and no generated shape's. */
+  /** Of those, the ones whose green leads — a roof of City Kit (Suburban), a plant or an awning. */
   readonly green: number;
 }
 
@@ -2460,10 +2460,11 @@ const NO_STYLISED_FOLDS: StylisedFoldMeasurement = {
  * shapes cost.
  *
  * - **The settings.** One building, of the first mesh, 14 m ahead, drawn
- *   alone as a rural, a suburban and a commercial lot. The Kenney building
- *   that mesh holds has a green roof and no generated shape has a green
- *   thing on it — so a fold that did not fold, which would draw all three
- *   shapes through each other, leaves the roof's green in every one.
+ *   alone as a rural, a suburban and a commercial lot. Three silhouettes,
+ *   so three counts — and the rural house has a green roof where the
+ *   commercial building is white, so a fold that did not fold, which would
+ *   draw all three shapes through each other, leaves that roof's green in
+ *   the commercial lot and makes all three counts one.
  * - **The tint.** A shrub is one colour and has one shape a mesh, so two
  *   drawn alone a pace apart differ by their tints and nothing else. The two
  *   places are the pair, of a few dozen, whose tints are furthest apart.
