@@ -31,7 +31,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { createRememberedSensors } from './remembered-sensors';
-import { createShellRideController, type ShellRecordingService } from './shell-ride-controller';
+import {
+  androidRecordingService,
+  createShellRideController,
+  type ShellRecordingService,
+} from './shell-ride-controller';
 
 let harness: StoreHarness;
 
@@ -108,7 +112,7 @@ function shellWith(plugin: RecordingServicePlugin): {
   };
 }
 
-function controllerOver(mobile: ShellRecordingService) {
+function controllerOver(mobile: ShellRecordingService | undefined) {
   const { transport, bench } = createSimulator({ devices: [] });
   let sessions = 0;
   return createShellRideController(mobile, {
@@ -191,6 +195,47 @@ describe('#524 — the shell’s ride controller reaches RecordingServicePlugin'
       'start',
       'stop',
     ]);
+    controller.dispose();
+  });
+});
+
+describe('#1755 — the iOS app’s ride controller asks for no RecordingService', () => {
+  const ios = { isNativePlatform: () => true, getPlatform: () => 'ios' };
+  const android = { isNativePlatform: () => true, getPlatform: () => 'android' };
+
+  it('constructs no RecordingService plugin, and records a ride with no keep-alive', async () => {
+    const plugin = scriptedPlugin();
+    const shell = shellWith(plugin);
+    const controller = controllerOver(androidRecordingService(ios, shell.mobile));
+    await controller.start();
+    await settle();
+    // Read back through the ride: it is recording, and no keep-alive was
+    // refused, because there was none to ask — the browser's no-op.
+    expect(controller.getSnapshot().phase).toBe('recording');
+    expect(controller.getSnapshot().keepAliveFailed).toBe(false);
+    controller.armStop();
+    await controller.confirmStop();
+    controller.dispose();
+    await settle();
+    expect(controller.getSnapshot().phase).toBe('stopped');
+    expect(shell.constructed()).toBe(0);
+    expect(plugin.calls).toEqual([]);
+  });
+
+  it('gives a native shell that names no known platform none either', () => {
+    const shell = shellWith(scriptedPlugin());
+    expect(androidRecordingService({ isNativePlatform: () => true }, shell.mobile)).toBeUndefined();
+    expect(androidRecordingService(undefined, shell.mobile)).toBeUndefined();
+  });
+
+  it('still starts the service in the Android shell', async () => {
+    const plugin = scriptedPlugin();
+    const shell = shellWith(plugin);
+    const controller = controllerOver(androidRecordingService(android, shell.mobile));
+    await controller.start();
+    await settle();
+    expect(plugin.calls.filter((call) => call === 'start')).toEqual(['start']);
+    expect(shell.constructed()).toBe(1);
     controller.dispose();
   });
 });
