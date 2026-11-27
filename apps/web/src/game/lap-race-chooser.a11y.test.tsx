@@ -289,10 +289,11 @@ describe('#1907 — the lap race in the chooser', () => {
     )?.nextElementSibling;
     expect(explained?.tagName).toBe('P');
     expect(explained?.textContent).toBe(
-      'The figure beside a bot in the race moves around that: a bot holds it on the flat, eases ' +
-        'downhill and goes harder on climbs and in the final sprint, and one that goes too hard ' +
-        'for too long fades back to it until it recovers. Each bot paces the race its own way, ' +
-        'and its name says how.',
+      'The figure beside a bot in the race moves around that. Riding on its own, a bot holds it ' +
+        'on the flat, eases downhill and goes harder on climbs. On a wheel it sits in and rides ' +
+        'easier; it goes harder to close a gap to the racer ahead, and in the final sprint. One ' +
+        'that goes too hard for too long fades back to it until it recovers. Each bot paces the ' +
+        'race its own way, and its name says how.',
     );
     for (const tier of BOT_TIERS) expect(tierRadio(BOT_TIER_TEXT[tier])).toBeDefined();
     expect(tierRadio(BOT_TIER_TEXT[DEFAULT_LAP_RACE_CHOICE.tier])?.checked).toBe(true);

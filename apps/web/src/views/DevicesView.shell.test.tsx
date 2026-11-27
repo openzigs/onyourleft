@@ -49,7 +49,7 @@ import { createShellRideController } from '../ride/shell-ride-controller';
 
 import { NOT_FOUND } from '../ride/pairing-words';
 import type { SignalStrengthPort } from '../ride/signal-port';
-import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
+import { BLUETOOTH_WHY, BLUETOOTH_WHY_IOS, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
 
@@ -947,5 +947,101 @@ describe('#1436 — Bluetooth is asked for in context, and a denial has a way ou
     expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
       'Open app settings',
     );
+  });
+});
+
+/**
+ * #3239 — inside the iOS app, nothing on the Devices screen names Android.
+ * The chain is #1436's and #322's: the real transport over the scripted
+ * plugin, the real `capacitorShellSupport` and the real hook, read as the
+ * rendered page, with a Capacitor global that says it is the iOS app.
+ */
+describe('#3239 — the iOS app’s Devices screen says nothing of Android', () => {
+  const IOS = { isNativePlatform: () => true, getPlatform: () => 'ios' };
+
+  function overPlugin(stack: ScriptedStack = {}): ShellSupportPort {
+    const plugin = scriptedPort(stack);
+    const transport = createCapacitorTransport({ plugin, profiles: [], now: () => unixSeconds(0) });
+    return capacitorShellSupport({
+      availability: async () => transport.availability(),
+      notice: permissionNotice,
+      mayShowDeviceList,
+    });
+  }
+
+  const asking: BluetoothAskPort = { askedBefore: () => false, noteAsked: () => undefined };
+  const askedBefore: BluetoothAskPort = { askedBefore: () => true, noteAsked: () => undefined };
+
+  beforeEach(() => {
+    vi.stubGlobal('Capacitor', IOS);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('says why before the iPhone or iPad asks', async () => {
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={overPlugin()} bluetoothAsk={asking} />,
+    );
+    await settle();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(BLUETOOTH_WHY_IOS);
+    expect(text).toContain('Before your iPhone or iPad asks');
+    expect(text).not.toContain(BLUETOOTH_WHY);
+    expect(text).not.toMatch(/Android/);
+  });
+
+  it('sends a rider whose radio is off to Control Center or Settings, in iOS’s words', async () => {
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={overPlugin({ enabled: false })}
+        bluetoothAsk={askedBefore}
+      />,
+    );
+    await settle();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(
+      'Switch Bluetooth on — in Control Center, or in Settings under Bluetooth. Then check again.',
+    );
+    expect(text).not.toMatch(/Android/);
+  });
+
+  it('after a denial names the permission as iOS’s Settings does', async () => {
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={overPlugin({ initializeRejectsWith: new Error('Permission denied.') })}
+        bluetoothAsk={askedBefore}
+      />,
+    );
+    await settle();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain(
+      'Open Settings on this iPhone or iPad, find On Your Left in the app list, and allow Bluetooth. Then check again.',
+    );
+    expect(text).not.toContain('Nearby devices');
+    // ⚠️ Not "no Android at all": the notice's explanation is `apps/mobile`'s
+    // `permissionNotice`, which #3239 does not list, and which still says it.
+  });
+
+  it('says the device has not answered, in iOS’s words, when the plugin never replies', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={overPlugin({ initializeNeverAnswers: true })}
+        bluetoothAsk={askedBefore}
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHELL_ANSWER_TIMEOUT * 1000);
+    });
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('This device has not answered about Bluetooth');
+    expect(text).toContain('swipe it up and out of the app switcher');
+    expect(text).not.toMatch(/Android/);
   });
 });

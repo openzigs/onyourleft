@@ -234,6 +234,9 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         'https://quaternius.com/packs/modulartrain.html',
         'https://quaternius.com/packs/simplebuildings.html',
         'https://quaternius.com/packs/ultimatetexturedbuildings.html',
+        // #3334: and the author's own itch.io pages, where the Downtown City
+        // MegaKit's archive is offered and the owner downloaded it.
+        'https://quaternius.itch.io/',
       ],
       'An individual model under CC0-1.0': [],
     });
@@ -272,14 +275,19 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
     // had already admitted, since #1585 D-4's individual CC-BY-4.0 models,
     // and since #2847 GGBotNet's PSX Style Cars (ADR 0085), whose cars
     // replaced #2540's Kenney sedan — and nothing ADR 0049 admits is adopted
-    // by #1275.
+    // by #1275. Six since #3334, which adopts one Quaternius kit, the
+    // Downtown City MegaKit (ADR 0099 D-1).
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
       'An individual model under CC-BY-4.0',
       'GGBotNet’s PSX Style Cars',
       'MakeHuman’s own files',
       'Poly Haven',
+      'Quaternius, a kit whose own page states CC0',
       'ambientCG',
     ]);
+    expect(owners.get('quaternius-downtown-city-megakit')).toEqual(
+      new Set(['Quaternius, a kit whose own page states CC0']),
+    );
     expect(owners.get('ggbot-psx-style-cars')).toEqual(new Set(['GGBotNet’s PSX Style Cars']));
     expect(owners.get('rva_duplex_02a')).toEqual(new Set(['An individual model under CC-BY-4.0']));
     expect(owners.get('Rock026')).toEqual(new Set(['ambientCG']));

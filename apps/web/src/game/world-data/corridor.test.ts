@@ -563,8 +563,9 @@ describe('packing', () => {
       false,
     ]);
     // 5 since #2659 added the water lines, 6 since #2660 added the railway lines,
-    // 7 since #2975 added the POI class, 8 since #2688 a pitch's sport.
-    expect(packed.v).toBe(8);
+    // 7 since #2975 added the POI class, 8 since #2688 a pitch's sport, 9
+    // since #3245 a street's name.
+    expect(packed.v).toBe(9);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {

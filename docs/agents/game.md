@@ -2227,6 +2227,78 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         in the glass's otherwise unread `uv`
                         (`buildings.ts` §`glassPaneCoordinates`);
                         `-lot-realism` builds both out
+    src/game/facade-kit.ts
+                        a mapped footprint wrapped in modular facade pieces
+                        (#3334, the owner's direction of 2026-11-26): 39
+                        pieces from Quaternius's CC0 Downtown City MegaKit
+                        (ADR 0099 D-1), in ONE GLB and one 2048 px atlas
+                        (`realistic-assets.ts` §`REALISTIC_DOWNTOWN_KIT`,
+                        `tools/realistic/blender/process_downtown_kit.py`).
+                        `kitKindOf`: beside a `town` or `city-centre` stretch
+                        and never on farmland, a commercial footprint is a
+                        `retail` strip (one storey), a `shop` (two or three)
+                        or an `office` (four or more), and a terrace's house
+                        of two to four storeys a `townhouse`; every other
+                        footprint, and every one beside a `village`, `rural`
+                        or unclassed stretch, keeps what it draws today.
+                        `kitStyleOf` chooses each building's own look, seeded
+                        from its footprint: its skin from its extrusion's
+                        wall (the kit's brick; `render`, the brick pieces
+                        walled in the kit's concrete; `stone`, its cream
+                        trim; `metal`), its window, cornice, shop front,
+                        door, an awning or a sign band, pilasters, and a
+                        fire escape on some brick fronts. `kitPaletteOf`
+                        colours it from the plan's OWN paints: every vertex
+                        carries a class (wall, trim, accent, fixed) and the
+                        atlas is baked neutral where the building colours it.
+                        `wrapFootprint` walks the footprint's OWN outline: 2 m
+                        bays, each piece stretched to its bay and its storey,
+                        a shop front and the door on the edge facing the
+                        street, windows above, plain party walls, a plinth, a
+                        cornice as tall as the parapet, a flat roof.
+                        ⚠️ A wrap holds `REALISTIC_KIT_WRAP_TRIANGLES`, 3 000
+                        (the house models' price a building; it was the
+                        structure class's 640, and most bays were flat
+                        cards): every bay starts as a two-triangle CARD, then
+                        a door, cornice and window are chosen that put the
+                        WHOLE street front in RELIEF, the kit's own geometry,
+                        and the rest is spent a row at a time. ⚠️ A wrap is
+                        some thirty times its extrusion (2 785 against 78 on
+                        the terrace fixture), so `selectMappedBuildings`
+                        draws only the nearest `MAPPED_KIT_NEAR_MAX` (6) as
+                        wraps, a side of the street in turn (by which way
+                        each door faces), nearest the point 14 m up the road
+                        from the RIDER (`nearWraps`; never the road's
+                        ranking), asked again every `MAPPED_KIT_STRIDE_METRES`
+                        (10 m) and the belt refilled when the answer changes,
+                        so wraps keep beside the rider through a 100 m chunk
+                        (⚠️ a refill up to every 10 m on a street of wraps);
+                        `MAPPED_KIT_TRIANGLES` (18 000),
+                        out of the pooled 23 040 which is NOT raised, and one
+                        wrap fewer wherever a wrap would cost the frame a
+                        building or a procedural structure. What they take
+                        is the field boundaries' (31 structures left become
+                        5; `mapped-kit-belt.test.ts` holds each figure).
+                        Drawn at the near level only, as a model is
+                        (`FootprintPlan.kit`; its extrusion is its far level
+                        and the same height); never where a house model fits
+                        (the brick shop stays), on a part, or under a pitched
+                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        as a mapped shop is. One more draw call for
+                        every wrap in view, counted INSIDE
+                        `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
+                        the belt writes the wraps after the models in the
+                        models' own buffer and `kitMesh` draws that range in
+                        the house models' program with the kit's atlas bound
+                        (`three-renderer.ts` §`writeKitWrap`). Its bytes are
+                        `realistic-budget.ts` §`REALISTIC_DOWNTOWN_KIT_SURFACES`.
+                        The look pair is `town=terrace` against
+                        `levers=-facade-kit` (houses to 1 200 m, shops and
+                        offices beyond), or `town=city-street`, whose street
+                        front is #1637's lots (NOT `town=city`: its front is
+                        procedural house lots, which no wrap reaches).
+                        ⚠️ No tablet has drawn it: the frame check and the
+                        owner's look are owed
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

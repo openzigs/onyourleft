@@ -22,6 +22,7 @@ import {
   BICYCLE_TYPES,
   decodePolyline6,
   NO_PATH_TEXT,
+  NO_ROAD_NEAR_TEXT,
   NOT_LOADED_TEXT,
   OUTSIDE_GRAPH_TEXT,
   refusal,
@@ -503,6 +504,7 @@ describe('what a refused leg becomes (#2734)', () => {
       NOT_LOADED_TEXT,
       TILES_OFF_TEXT,
       NO_PATH_TEXT,
+      NO_ROAD_NEAR_TEXT,
       ...['RESOURCE_LIMIT', 'OUTSIDE_COVERAGE', 'TIMEOUT', 'NO_ROUTE', 'NETWORK', 'x'].map(
         (code) => refusal(sdkError(code), 0).message,
       ),
@@ -531,6 +533,74 @@ describe('what a refused leg becomes (#2734)', () => {
       failure: { message: OUTSIDE_GRAPH_TEXT, retryable: true },
     });
     expect(settled.legs[0]?.shape).toHaveLength(2);
+  });
+});
+
+describe('a waypoint the graph has no road near (#3179)', () => {
+  /**
+   * As Valhalla answers it: the waypoint with no road near it is moved to the
+   * nearest road the graph holds, here 0.1° (about 11 km) south of where it
+   * was, and the line runs to there.
+   */
+  function snapsFar(which: 'from' | 'to'): (request: BrowserRouteRequest) => BrowserRouteResult {
+    return (request) => {
+      const [from, to] = request.locations;
+      const moved = (point: { lat: number; lon: number }) => ({
+        lat: point.lat - 0.1,
+        lon: point.lon,
+      });
+      return roadBetween({
+        ...request,
+        locations: which === 'from' ? [moved(from), to] : [from, moved(to)],
+      });
+    };
+  }
+
+  it.each(['from', 'to'] as const)(
+    'draws a leg straight when the engine moved its %s waypoint to a road far away, and says why without a coordinate',
+    async (which) => {
+      const engine = fakeEngine();
+      const answer = snapsFar(which);
+      engine.answer = (request) => Promise.resolve(answer(request));
+      const provider = valhallaBrowserProvider({
+        graph: GRAPH,
+        mapTilesOn: () => true,
+        createRouter: engine.createRouter,
+      });
+      let draft = emptyDraft();
+      draft = addWaypoint(draft, at(0.25, 0.05), 'snapped').draft;
+      const added = addWaypoint(draft, at(0.26, 0.06), 'snapped');
+      const settled = await resolveDraft(added.draft, added.stale, provider, RIDING_DEFAULTS);
+      // The engine answered; the planner does not take its line as a road to the pins.
+      expect(engine.requests).toHaveLength(1);
+      expect(settled.legs[0]).toMatchObject({
+        mode: 'freehand',
+        state: 'routed',
+        failure: { message: NO_ROAD_NEAR_TEXT, retryable: true },
+      });
+      expect(settled.legs[0]?.shape).toStrictEqual([at(0.25, 0.05), at(0.26, 0.06)]);
+    },
+  );
+
+  it('still follows roads when the engine moved a waypoint a short way onto a road', async () => {
+    const engine = fakeEngine();
+    // About 110 m: a pin dropped beside a road.
+    engine.answer = (request) => {
+      const [from, to] = request.locations;
+      return Promise.resolve(
+        roadBetween({ ...request, locations: [{ lat: from.lat + 0.001, lon: from.lon }, to] }),
+      );
+    };
+    const provider = valhallaBrowserProvider({
+      graph: GRAPH,
+      mapTilesOn: () => true,
+      createRouter: engine.createRouter,
+    });
+    const legs = await provider.route({
+      waypoints: [{ position: at(0.05, 0.05) }, { position: at(0.06, 0.06) }],
+      preferences: RIDING_DEFAULTS,
+    });
+    expect(legs[0]?.shape).toHaveLength(3);
   });
 });
 
