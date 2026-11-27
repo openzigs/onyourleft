@@ -70,6 +70,7 @@ import {
   REALISTIC_RIDER_FEMALE,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_DELIVERY_CAR_ATLAS,
+  REALISTIC_DOWNTOWN_KIT,
   REALISTIC_DELIVERY_CAR_BODIES,
   REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
@@ -136,9 +137,11 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // Kenney from the start. ⚠️ Since #2847 the cars are GGBotNet's PSX Style
     // Cars, whose page is on its author's itch.io host, and that IS a new
     // source: ADR 0085 D-1 admits it, superseding ADR 0049 D-10 in part.
+    // ⚠️ Since #3334 one Quaternius kit is read, on its own kit page: ADR 0099
+    // D-1 admits a kit whose own page states CC0, and that page is the host.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io|quaternius\.com)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -563,11 +566,13 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.
         // The people's atlas likewise, at their GLB's own coordinates, and
-        // since #2847 the cars' atlas, at the cars' GLB's.
+        // since #2847 the cars' atlas, at the cars' GLB's; since #3334 the
+        // downtown kit's, at its pieces' GLB's.
         const glTF =
           output.file === REALISTIC_RIDER ||
           output.file === REALISTIC_PEOPLE.model ||
-          output.file === REALISTIC_DELIVERY_CAR;
+          output.file === REALISTIC_DELIVERY_CAR ||
+          output.file === REALISTIC_DOWNTOWN_KIT.model;
         for (const also of recipe.alsoWrites ?? []) {
           // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
           if (also.ktx2 === undefined) {
@@ -735,10 +740,12 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
     // and the rider, whose eyes' cost is; and #2540's car, and since #2847
     // the three cars that replaced it; and the people (PR #2844), whose skirt
     // and hands a run must have found; #2839: and the female rider, held to
-    // the rider's own figures.
+    // the rider's own figures; #3334: and the downtown kit, whose pieces and
+    // their triangles a run must have made.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
+        REALISTIC_DOWNTOWN_KIT.model,
         REALISTIC_PEOPLE.model,
         REALISTIC_RIDER,
         REALISTIC_RIDER_FEMALE,

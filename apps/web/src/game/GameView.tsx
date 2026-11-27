@@ -3518,6 +3518,9 @@ function GameScreen({
           corridorOrigin(route.profile),
           FOOTPRINT_MAX_VERTICES,
           urban,
+          // #3334: wraps of the downtown kit's pieces are planned only for a ride that asked
+          // for the realistic world, the one world that draws them.
+          { facadeKit: realistic },
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
         // #1637: carrying the urban class, which the lots and the streets read.

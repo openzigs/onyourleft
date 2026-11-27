@@ -24,6 +24,9 @@
  * - Since #1585 a near plan with a house model that fits it
  *   (`FootprintPlan.model`, `house-models.ts`) is drawn as that model, in one
  *   more call counted inside {@link MAPPED_BUILDING_DRAW_CALLS}.
+ * - Since #3334 a near plan wrapped in the downtown kit's facade pieces
+ *   (`FootprintPlan.kit`, `facade-kit.ts`) is drawn as its wrap, in one more
+ *   call of its own, counted inside {@link MAPPED_BUILDING_DRAW_CALLS} too.
  * - {@link clearOfMappedBuildings}: no tree, shrub or rock inside a mapped
  *   footprint or within #1534's margin of it. That is #1534's rule, extended
  *   from a settlement's ground to a mapped one. Since #2428 none within its
@@ -45,6 +48,7 @@
  */
 
 import type { FootprintPlan, FootprintRole } from './footprint-buildings';
+import type { KitWrap } from './facade-kit';
 import {
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
@@ -54,6 +58,8 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_KIT_FOCUS_AHEAD_METRES,
+  MAPPED_KIT_NEAR_MAX,
   MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_REACH_METRES,
@@ -317,6 +323,21 @@ export class MappedSelection {
   /** How many are drawn as models, and their triangles — #1585. */
   modelCount = 0;
   modelTriangles = 0;
+  /**
+   * 1 where the drawn building at that place is drawn as its wrap of facade
+   * pieces — #3334: near, wrapped, and the kit loaded. Never where
+   * {@link modelled} is.
+   */
+  readonly kitted: Uint8Array;
+  /**
+   * 1 where the wrap at that place is drawn with its plan's paved apron
+   * (#2848), in its extrusion's wall surface — #3334. Read only where
+   * {@link kitted} is 1.
+   */
+  readonly paved: Uint8Array;
+  /** How many are drawn as wraps, and their triangles (the wraps' alone, no apron's) — #3334. */
+  kitCount = 0;
+  kitTriangles = 0;
   /** How many are drawn whole, and how many at the far level. */
   near = 0;
   farCount = 0;
@@ -342,6 +363,8 @@ export class MappedSelection {
     this.plans = new Int32Array(capacity);
     this.far = new Uint8Array(capacity);
     this.modelled = new Uint8Array(capacity);
+    this.kitted = new Uint8Array(capacity);
+    this.paved = new Uint8Array(capacity);
   }
 
   reset(): void {
@@ -355,6 +378,8 @@ export class MappedSelection {
     this.surfaceTriangles.fill(0);
     this.modelCount = 0;
     this.modelTriangles = 0;
+    this.kitCount = 0;
+    this.kitTriangles = 0;
   }
 }
 
@@ -475,6 +500,24 @@ function landmarksAhead(
  * world, a test, a realistic world whose models did not load — every plan is
  * its extrusion, as before #1585. A far plan is always its extrusion.
  *
+ * **Facade-kit wraps** — #3334. With `kit` (the downtown kit loaded), a near
+ * plan that is wrapped (`FootprintPlan.kit`) is drawn as its wrap, at the
+ * wrap's triangles — up to `realistic-budget.ts`
+ * §`REALISTIC_KIT_WRAP_TRIANGLES`, 3 000 — in ONE more group of its own,
+ * counted inside `surfaceSlots` exactly as the models' group is. With no slot
+ * left for it the plan is drawn as its extrusion. A wrap costs some thirty
+ * times its extrusion's triangles, out of `triangleBudget` as a model's are,
+ * so only the first `MAPPED_KIT_NEAR_MAX` wrapped plans of the walk are
+ * wraps — `MAPPED_KIT_TRIANGLES` between them at the most — and every
+ * wrapped plan past them is its extrusion, and still drawn.
+ * ⚠️ **And never at a building's cost**: where the wraps would leave the
+ * frame fewer buildings, fewer procedural structures ranked in, or more plans
+ * passed over for want of a surface, than the same refill draws with no wrap, the walk is run again with one wrap fewer
+ * until it does not — at most eight walks a refill, and a refill is a chunk's,
+ * not a frame's. What the wraps do take is what `refillMappedBuildings` would
+ * have left the field boundaries (walls, hedges, fences).
+ * Without `kit` every wrapped plan is its extrusion, as before #3334.
+ *
  * **A city centre's far boxes** — #1638, off by default. Where `buildings`
  * carries a {@link MappedBuildings.cityFarMax}, the walk goes on past
  * {@link MAPPED_BUILDING_MAX}, up to that cap and `into`'s capacity, taking
@@ -496,6 +539,268 @@ export function selectMappedBuildings(
   rivals: RivalStructures = NO_RIVALS,
   models?: readonly number[],
   ahead?: Float32Array,
+  kit = false,
+): void {
+  // No closure and no object here: since #3334 the belt runs this between chunks too, to ask
+  // whether the wraps would change, on a frame that may write nothing.
+  const most = kit ? MAPPED_KIT_NEAR_MAX : 0;
+  walkMappedBuildings(
+    buildings,
+    x,
+    z,
+    triangleBudget,
+    into,
+    surfaceSlots,
+    rivals,
+    models,
+    ahead,
+    most,
+  );
+  if (!kit) return;
+  // #3334: never fewer buildings, nor fewer structures ranked in, nor more passed over, than
+  // the same refill draws with no wrap at all. Where the wraps took triangles or a surface slot
+  // a farther building or a structure was drawn in, one wrap fewer, until none is. ⚠️ Not
+  // skipped where the first walk took no wrap: a wrap tried and not fitting stops that walk
+  // short, and the bare walk is what it must not be shorter than.
+  const firstCount = into.count;
+  const firstRivals = into.rivals;
+  const firstPassed = into.passed;
+  let wraps = into.kitCount;
+  walkMappedBuildings(
+    buildings,
+    x,
+    z,
+    triangleBudget,
+    into,
+    surfaceSlots,
+    rivals,
+    models,
+    ahead,
+    0,
+  );
+  const bareCount = into.count;
+  const bareRivals = into.rivals;
+  const barePassed = into.passed;
+  if (wraps === 0) return;
+  if (firstCount >= bareCount && firstRivals >= bareRivals && firstPassed <= barePassed) {
+    walkMappedBuildings(
+      buildings,
+      x,
+      z,
+      triangleBudget,
+      into,
+      surfaceSlots,
+      rivals,
+      models,
+      ahead,
+      wraps,
+    );
+    return;
+  }
+  while (wraps > 0) {
+    wraps -= 1;
+    walkMappedBuildings(
+      buildings,
+      x,
+      z,
+      triangleBudget,
+      into,
+      surfaceSlots,
+      rivals,
+      models,
+      ahead,
+      wraps,
+    );
+    if (into.count >= bareCount && into.rivals >= bareRivals && into.passed <= barePassed) return;
+  }
+}
+
+const NO_WRAPS: readonly number[] = [];
+
+/**
+ * The plans a refill at `(x, z)` may draw as wraps of the downtown kit's
+ * facade pieces — #3334: the at most `wraps` near wrapped plans nearest the
+ * point {@link MAPPED_KIT_FOCUS_AHEAD_METRES} up the road from the rider
+ * (the rider, with no road `ahead`), taken from the street's two sides in
+ * turn. A side is which way a building's door faces: with the nearest's, or
+ * against it (the maintainer's ruling on PR #3343: nearest first alone put
+ * all six on the rider's side).
+ *
+ * ⚠️ **From the rider, not by the road's ranking** — PR #3343's review. Every
+ * other choice of a refill ranks a building by its distance from the 200 m of
+ * road ahead, which is much the same for every building beside it; ranked so,
+ * the six wraps were wherever the index put them, and held for a whole
+ * {@link MAPPED_CHUNK_METRES}. The belt runs the selection again every
+ * `MAPPED_KIT_STRIDE_METRES` and refills when the wraps it would draw are
+ * other plans (`three-renderer.ts` §`MappedBuildingBelt.wrapsWouldChange`).
+ *
+ * Ahead of the rider, because the camera looks up the road: a wrap behind the
+ * rider is three thousand triangles nobody sees.
+ */
+export function nearWraps(
+  buildings: MappedBuildings,
+  x: number,
+  z: number,
+  ahead: Float32Array | undefined,
+  wraps: number = MAPPED_KIT_NEAR_MAX,
+  /** Written and returned; a new list where none is given. Allocates nothing with one. */
+  into: number[] = [],
+): readonly number[] {
+  RIDER[0] = x;
+  RIDER[1] = z;
+  return wrapsNearRider(buildings, ahead, wraps, into);
+}
+
+/**
+ * {@link nearWraps} for the rider of a view — what the belt asks on a frame
+ * that is not a refill: the rider's place is read off `at` here, so no number
+ * crosses a call as an argument (which, below the engine's top tier, is a
+ * boxed number allocated on every call).
+ */
+export function nearWrapsAt(
+  buildings: MappedBuildings,
+  at: { readonly x: number; readonly z: number },
+  ahead: Float32Array | undefined,
+  into: number[],
+): readonly number[] {
+  RIDER[0] = at.x;
+  RIDER[1] = at.z;
+  return wrapsNearRider(buildings, ahead, MAPPED_KIT_NEAR_MAX, into);
+}
+
+/** {@link nearWraps}, the rider's place in {@link RIDER}. */
+function wrapsNearRider(
+  buildings: MappedBuildings,
+  ahead: Float32Array | undefined,
+  wraps: number,
+  into: number[],
+): readonly number[] {
+  // ⚠️ The focus and the nearest's distance are kept in a typed array, not in locals that an
+  // `if` or a loop reassigns: until the engine's top tier has the function, each such local
+  // is a boxed number allocated on every call (48 bytes a call, measured).
+  FOCUS[0] = RIDER[0] as number;
+  FOCUS[1] = RIDER[1] as number;
+  if (ahead !== undefined && ahead.length >= 4) {
+    const dx = (ahead[2] as number) - (ahead[0] as number);
+    const dz = (ahead[3] as number) - (ahead[1] as number);
+    // ⚠️ No `Math.hypot` in this function: the engine's allocates on every call, and this
+    // runs on frames that are not refills (`mapped-kit-belt.test.ts` measured 68 bytes a plan).
+    const span = Math.sqrt(dx * dx + dz * dz);
+    if (span > 0) {
+      FOCUS[0] = (RIDER[0] as number) + (dx / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+      FOCUS[1] = (RIDER[1] as number) + (dz / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+    }
+  }
+  const { plans } = buildings;
+  // ⚠️ `into` is never emptied and filled again: that frees and reallocates its store. It is
+  // written in place and cut to length once.
+  const most = Math.min(wraps, MAPPED_KIT_NEAR_MAX);
+  if (most <= 0) {
+    if (into.length !== 0) into.length = 0;
+    return into;
+  }
+  // The nearest of all: its door's facing is the first side.
+  let nearest = -1;
+  FOCUS[2] = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index] as FootprintPlan;
+    if (plan.kit === undefined) continue;
+    // Near is the rider's, as the walk's near level is.
+    const riderX = plan.centroid.x - (RIDER[0] as number);
+    const riderZ = plan.centroid.z - (RIDER[1] as number);
+    if (riderX * riderX + riderZ * riderZ > NEAR_SQUARED) continue;
+    const offX = plan.centroid.x - FOCUS[0];
+    const offZ = plan.centroid.z - FOCUS[1];
+    // Squared: only compared.
+    const apart = offX * offX + offZ * offZ;
+    // Ties broken by index, so the same ride draws the same town every time.
+    if (apart < FOCUS[2]) {
+      nearest = index;
+      FOCUS[2] = apart;
+    }
+  }
+  if (nearest < 0) {
+    if (into.length !== 0) into.length = 0;
+    return into;
+  }
+  const facing = ((plans[nearest] as FootprintPlan).kit as KitWrap).facing;
+  // Each side's `most` nearest, kept in order in scratch: `SIDE_PLANS[side * most + rank]`.
+  let counts0 = 0;
+  let counts1 = 0;
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index] as FootprintPlan;
+    const kit = plan.kit;
+    if (kit === undefined) continue;
+    const riderX = plan.centroid.x - (RIDER[0] as number);
+    const riderZ = plan.centroid.z - (RIDER[1] as number);
+    if (riderX * riderX + riderZ * riderZ > NEAR_SQUARED) continue;
+    const offX = plan.centroid.x - FOCUS[0];
+    const offZ = plan.centroid.z - FOCUS[1];
+    // Squared: only compared.
+    const apart = offX * offX + offZ * offZ;
+    const side = kit.facing[0] * facing[0] + kit.facing[1] * facing[1] >= 0 ? 0 : 1;
+    const base = side * MAPPED_KIT_NEAR_MAX;
+    const count = side === 0 ? counts0 : counts1;
+    // Where it stands among its side's nearest: after every one as near or nearer.
+    let rank = count;
+    while (rank > 0 && (SIDE_APART[base + rank - 1] as number) > apart) rank -= 1;
+    if (rank >= most) continue;
+    const kept = Math.min(count + 1, most);
+    for (let at = kept - 1; at > rank; at -= 1) {
+      SIDE_PLANS[base + at] = SIDE_PLANS[base + at - 1] as number;
+      SIDE_APART[base + at] = SIDE_APART[base + at - 1] as number;
+    }
+    SIDE_PLANS[base + rank] = index;
+    SIDE_APART[base + rank] = apart;
+    if (side === 0) counts0 = kept;
+    else counts1 = kept;
+  }
+  // A side in turn, the nearest's first.
+  let chosen = 0;
+  for (let turn = 0; chosen < most && turn < most; turn += 1) {
+    if (turn < counts0 && chosen < most) {
+      into[chosen] = SIDE_PLANS[turn] as number;
+      chosen += 1;
+    }
+    if (turn < counts1 && chosen < most) {
+      into[chosen] = SIDE_PLANS[MAPPED_KIT_NEAR_MAX + turn] as number;
+      chosen += 1;
+    }
+  }
+  if (into.length !== chosen) into.length = chosen;
+  return into;
+}
+
+/** {@link nearWraps}' rider, `x, z`. */
+const RIDER = new Float64Array(2);
+
+/** {@link nearWraps}' focus, `x, z`, and the nearest plan's squared distance from it. */
+const FOCUS = new Float64Array(3);
+
+/** {@link MAPPED_BUILDING_NEAR_METRES}, squared. */
+const NEAR_SQUARED = MAPPED_BUILDING_NEAR_METRES * MAPPED_BUILDING_NEAR_METRES;
+
+/** {@link nearWraps}' scratch: each side's nearest plans and how far each is, so a call allocates nothing. */
+const SIDE_PLANS = new Int32Array(2 * MAPPED_KIT_NEAR_MAX);
+const SIDE_APART = new Float64Array(2 * MAPPED_KIT_NEAR_MAX);
+/** The walk's own list of {@link nearWraps}, reused. */
+const WALK_WRAPS: number[] = [];
+
+/**
+ * {@link selectMappedBuildings}' one walk, drawing at most `wraps` plans as
+ * their wraps of facade pieces — #3334; 0 where the kit is not loaded.
+ */
+function walkMappedBuildings(
+  buildings: MappedBuildings,
+  x: number,
+  z: number,
+  triangleBudget: number,
+  into: MappedSelection,
+  surfaceSlots: number,
+  rivals: RivalStructures,
+  models: readonly number[] | undefined,
+  ahead: Float32Array | undefined,
+  wraps: number,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -526,6 +831,8 @@ export function selectMappedBuildings(
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const landmarks = landmarksAhead(plans, order, inReach);
+  // #3334: which plans may be wraps: the nearest to the rider, never the road's ranking.
+  const kitted = wraps > 0 ? nearWraps(buildings, x, z, ahead, wraps, WALK_WRAPS) : NO_WRAPS;
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   // #1638: past MAPPED_BUILDING_MAX only where a city centre's far-level cap is on.
   const most = Math.min(mappedBuildingCap(buildings), into.plans.length);
@@ -554,14 +861,29 @@ export function selectMappedBuildings(
     // #1585: near, with a model that fits, and the models loaded. With no
     // slot left for the models' group the plan is drawn as its extrusion,
     // whose surfaces may already be open, rather than passed over.
+    /** The wraps' one group, counted inside the slots once it is open — #3334. */
+    const kitGroup = into.kitCount > 0 ? 1 : 0;
     const modelTriangles =
       far ||
       plan.model === undefined ||
       models === undefined ||
-      (into.modelCount === 0 && into.surfaces.length + 1 > slots)
+      (into.modelCount === 0 && into.surfaces.length + kitGroup + 1 > slots)
         ? undefined
         : models[plan.model.model];
-    const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
+    // #3334: near, wrapped, and the kit loaded; with no slot left for the
+    // wraps' group the plan is drawn as its extrusion, as a model's is.
+    const kitTriangles =
+      far ||
+      plan.kit === undefined ||
+      modelTriangles !== undefined ||
+      // The nearest few only, a side of the street in turn: `wraps` of them, so never more
+      // than `MAPPED_KIT_TRIANGLES`.
+      !kitted.includes(index) ||
+      (into.kitCount === 0 && into.surfaces.length + (into.modelCount > 0 ? 1 : 0) + 1 > slots)
+        ? undefined
+        : plan.kit.triangles;
+    const triangles =
+      modelTriangles ?? kitTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
       // A landmark taken ahead that does not fit leaves the nearest to their own walk.
       if (at < landmarks) continue;
@@ -574,11 +896,41 @@ export function selectMappedBuildings(
       into.plans[into.count] = index;
       into.far[into.count] = 0;
       into.modelled[into.count] = 1;
+      into.kitted[into.count] = 0;
       into.count += 1;
       into.near += 1;
       into.modelCount += 1;
       into.modelTriangles += modelTriangles;
       into.triangles += modelTriangles;
+      continue;
+    }
+    if (kitTriangles !== undefined) {
+      // Its paved apron (#2848) is ground, and no piece of the kit: drawn with the wrap, in
+      // its extrusion's own surface, where that surface's slot is open or can be and the
+      // frame has its few triangles. PR #3343's look check: without it a wrapped shop stood
+      // on grass where its extrusion stood on its pavement.
+      const apron = roleTriangles(plan, 'apron');
+      const paving = surfaceOfRole(plan, 'apron');
+      const paved =
+        apron > 0 &&
+        into.triangles + rivalTriangles + kitTriangles + apron <= triangleBudget &&
+        (slotOf(into, paving) >= 0 || into.surfaces.length + 1 + modelGroup + 1 <= slots);
+      if (paved) {
+        if (slotOf(into, paving) < 0) into.surfaces.push(paving);
+        const slot = slotOf(into, paving);
+        into.surfaceTriangles[slot] = (into.surfaceTriangles[slot] ?? 0) + apron;
+        into.triangles += apron;
+      }
+      into.paved[into.count] = paved ? 1 : 0;
+      into.plans[into.count] = index;
+      into.far[into.count] = 0;
+      into.modelled[into.count] = 0;
+      into.kitted[into.count] = 1;
+      into.count += 1;
+      into.near += 1;
+      into.kitCount += 1;
+      into.kitTriangles += kitTriangles;
+      into.triangles += kitTriangles;
       continue;
     }
     const wall = slotOf(into, plan.surfaces.wall);
@@ -592,7 +944,7 @@ export function selectMappedBuildings(
       (slotOf(into, spire) < 0 && spire !== plan.surfaces.wall && spire !== plan.surfaces.roof
         ? 1
         : 0);
-    if (into.surfaces.length + opened + modelGroup > slots) {
+    if (into.surfaces.length + opened + modelGroup + kitGroup > slots) {
       into.passed += 1;
       continue;
     }
@@ -606,6 +958,7 @@ export function selectMappedBuildings(
     into.plans[into.count] = index;
     into.far[into.count] = far ? 1 : 0;
     into.modelled[into.count] = 0;
+    into.kitted[into.count] = 0;
     into.count += 1;
     if (far) into.farCount += 1;
     else into.near += 1;
