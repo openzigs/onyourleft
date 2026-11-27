@@ -1493,6 +1493,40 @@ export const REALISTIC_HOUSE_MODEL_SURFACES = {
 } as const;
 
 /**
+ * What the downtown kit's facade pieces may add — #3334's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **1 MiB** of texture memory as the tablet is handed it, and **256 KiB** of
+ * build. The one atlas is 1024² ETC1S, half a byte a texel and a third again
+ * for its mipmaps, 0.67 MiB estimated; the GLB of twelve pieces and the atlas
+ * are 153 952 bytes (73 900 and 80 052). `facade-kit.test.ts` reads both off
+ * the committed files.
+ *
+ * ADR 0099 D-4: what each piece costs. In triangles, in relief, as
+ * `facade-kit.ts` §`KIT_PIECES` records and that test holds to the GLB: the
+ * plain brick wall 2, the brick window 172, the stone shop front 142, the
+ * stone pier 44, the metal shop front 148, the metal pier 30, the metal door
+ * 241, the metal window 308, the plain metal wall 12, the brick cornice 6,
+ * the metal cornice 26 and the roof 2 — 1 133 between them, and 2 each as a
+ * card. In bytes they share the two files above: about 65 a triangle of the
+ * GLB, and a cell of the atlas each.
+ *
+ * ⚠️ **One draw call, and no triangle a frame did not already have**: the
+ * wraps are one mesh in one material, counted inside
+ * {@link MAPPED_BUILDING_DRAW_CALLS} as the house models' is, and a wrapped
+ * building holds {@link REALISTIC_TRIANGLES}' `structure`, 640 — the ceiling
+ * of the extrusion it replaces (ADR 0099 D-4.1), where a house model pools
+ * {@link MAPPED_BUILDING_TRIANGLES}. So no ceiling here is raised for the
+ * kit, and a street of wraps draws as many buildings as it did.
+ *
+ * @test-facing held by `facade-kit.test.ts`, which reads the committed kit
+ * back off disk against it; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_DOWNTOWN_KIT_SURFACES = {
+  textureBytes: 1 * MEBIBYTE,
+  buildBytes: 256 * 1024,
+} as const;
+
+/**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
  * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
  * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
@@ -1583,6 +1617,14 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * everything else since, the set with its transcoder is **49 051 685**,
  * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
  * three — which is what keeps the cost to one GLB rather than 1.5 MB.
+ *
+ * ## The downtown kit's facade pieces, inside the same 47 MiB — #3334
+ *
+ * Measured on the committed files: the kit's GLB and its atlas
+ * ({@link REALISTIC_DOWNTOWN_KIT_SURFACES}) add **153 952**, so the set with
+ * its transcoder is **49 205 637**, 77 435 under 47 MiB. Nothing was raised
+ * for them. The APK carries the same bytes more, and a browser's first
+ * download does not move.
  *
  * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
  * and this one has not been ruled on**: the issue asks for the body and its

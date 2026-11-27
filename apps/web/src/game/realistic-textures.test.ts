@@ -63,7 +63,13 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { footwaysFixture, mixedTownFixture } from './footprint-fixtures-testing';
+import { KIT_ATLAS_PIXELS, KIT_PIECES, kitCardOf } from './facade-kit';
+import { committedKitPieces } from './facade-kit-testing';
+import {
+  footwaysFixture,
+  mixedTownFixture,
+  terraceStreetFixture,
+} from './footprint-fixtures-testing';
 import { footwayTriangles } from './footway-surfaces';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
@@ -4764,6 +4770,102 @@ describe('the village-square tree, in the realistic world: no depth pre-pass —
         (mesh.onAfterRender as () => void)();
         expect(mesh.children.length, mode).toBe(0);
       }
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the downtown kit, loaded by the product’s own loader — #3334', () => {
+  it('draws a town’s wrapped footprints from the committed GLB and atlas, in the drawing a view builds', async () => {
+    // The whole road a rider's frame takes: the committed GLB through
+    // `GLTFLoader` and the atlas through `KTX2Loader`, into the loaded world;
+    // a street planned as a ride plans it; and `RealisticDrawing.updateMapped`
+    // itself, read back off the belt's own mesh, which is what the GPU is handed.
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const street = terraceStreetFixture();
+      const land = landClassMask(street.corridor);
+      const { plans } = footprintPlans(
+        street.corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        { classAt: () => 'town' },
+      );
+      const start = atStartLine(street.profile);
+      const frame = sceneFrame({
+        profile: street.profile,
+        origin: street.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_150) } },
+        worldCorridor: street.corridor,
+        landClass: land,
+        mappedBuildings: mappedBuildingsOf(plans),
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      // The wraps are drawn: in their own call, in the kit's own picture.
+      expect(mapped.stats.kitted).toBeGreaterThan(0);
+      expect(mapped.kitMesh.visible).toBe(true);
+      const range = mapped.kitMesh.geometry.drawRange;
+      expect(range.count).toBe(mapped.stats.kitTriangles * 3);
+      const picture = (
+        mapped.kitMesh.material as unknown as {
+          readonly map: { readonly image: { readonly width: number; readonly height: number } };
+        }
+      ).map;
+      expect(picture.image.width).toBe(KIT_ATLAS_PIXELS);
+      expect(picture.image.height).toBe(KIT_ATLAS_PIXELS);
+      expect(picture).not.toBe((mapped.modelMesh.material as unknown as { map: unknown }).map);
+      // The first wrapped building drawn: every vertex the belt wrote for it is where
+      // `writeKitWrap` puts the loader's reading of the pieces, and that reading is the
+      // file's, triangle for triangle, as the bytes read without the loader say.
+      const committed = committedKitPieces();
+      const position = mapped.kitMesh.geometry.getAttribute('position');
+      let checked = 0;
+      for (let place = 0; ; place += 1) {
+        const drawn = mapped.drawnAt(place);
+        if (drawn === undefined) break;
+        const wrap = plans[drawn.plan]?.kit;
+        if (drawn.modelAt < 0 || wrap === undefined) continue;
+        const vertices = wrap.triangles * 3;
+        const into = {
+          position: new Float32Array(vertices * 3),
+          normal: new Float32Array(vertices * 3),
+          uv: new Float32Array(vertices * 2),
+          colour: new Float32Array(vertices * 3),
+          tint: new Float32Array(vertices),
+        };
+        const end = renderer.writeKitWrap(
+          {
+            pieces: committed,
+            cards: KIT_PIECES.map((_, index) => kitCardOf(index)),
+            atlas: picture as never,
+          },
+          wrap,
+          [1, 1, 1],
+          0,
+          into,
+          0,
+        );
+        expect(end).toBe(vertices);
+        for (let vertex = 0; vertex < vertices; vertex += 1) {
+          const at = drawn.modelAt + vertex;
+          expect(position.getX(at)).toBeCloseTo(into.position[vertex * 3] as number, 3);
+          expect(position.getY(at)).toBeCloseTo(into.position[vertex * 3 + 1] as number, 3);
+          expect(position.getZ(at)).toBeCloseTo(into.position[vertex * 3 + 2] as number, 3);
+        }
+        checked += 1;
+      }
+      expect(checked).toBe(mapped.stats.kitted);
     } finally {
       drawing.dispose();
     }

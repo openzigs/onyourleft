@@ -28,6 +28,7 @@ import {
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   shopApronsWithLevers,
+  facadeKitWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -668,6 +669,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(configQuery(parseConfig('?town=churches&levers=-landmark-churches'))).toBe(
       `?levers=${encodeURIComponent('-landmark-churches')}&town=churches`,
+    );
+  });
+
+  it('wraps a town’s shops, offices and terraces in the downtown kit, as the product does, unless #3334’s lever takes it out', () => {
+    expect(LEVERS).toContain('facade-kit');
+    expect(facadeKitWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(facadeKitWithLevers(LEVERS.filter((lever) => lever !== 'facade-kit'))).toBe(true);
+    expect(facadeKitWithLevers(parseConfig('?levers=-facade-kit').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=terrace&levers=-facade-kit'))).toBe(
+      `?levers=${encodeURIComponent('-facade-kit')}&town=terrace`,
     );
   });
 

@@ -24,6 +24,9 @@
  * - Since #1585 a near plan with a house model that fits it
  *   (`FootprintPlan.model`, `house-models.ts`) is drawn as that model, in one
  *   more call counted inside {@link MAPPED_BUILDING_DRAW_CALLS}.
+ * - Since #3334 a near plan wrapped in the downtown kit's facade pieces
+ *   (`FootprintPlan.kit`, `facade-kit.ts`) is drawn as its wrap, in one more
+ *   call of its own, counted inside {@link MAPPED_BUILDING_DRAW_CALLS} too.
  * - {@link clearOfMappedBuildings}: no tree, shrub or rock inside a mapped
  *   footprint or within #1534's margin of it. That is #1534's rule, extended
  *   from a settlement's ground to a mapped one. Since #2428 none within its
@@ -317,6 +320,15 @@ export class MappedSelection {
   /** How many are drawn as models, and their triangles — #1585. */
   modelCount = 0;
   modelTriangles = 0;
+  /**
+   * 1 where the drawn building at that place is drawn as its wrap of facade
+   * pieces — #3334: near, wrapped, and the kit loaded. Never where
+   * {@link modelled} is.
+   */
+  readonly kitted: Uint8Array;
+  /** How many are drawn as wraps, and their triangles — #3334. */
+  kitCount = 0;
+  kitTriangles = 0;
   /** How many are drawn whole, and how many at the far level. */
   near = 0;
   farCount = 0;
@@ -342,6 +354,7 @@ export class MappedSelection {
     this.plans = new Int32Array(capacity);
     this.far = new Uint8Array(capacity);
     this.modelled = new Uint8Array(capacity);
+    this.kitted = new Uint8Array(capacity);
   }
 
   reset(): void {
@@ -355,6 +368,8 @@ export class MappedSelection {
     this.surfaceTriangles.fill(0);
     this.modelCount = 0;
     this.modelTriangles = 0;
+    this.kitCount = 0;
+    this.kitTriangles = 0;
   }
 }
 
@@ -475,6 +490,13 @@ function landmarksAhead(
  * world, a test, a realistic world whose models did not load — every plan is
  * its extrusion, as before #1585. A far plan is always its extrusion.
  *
+ * **Facade-kit wraps** — #3334. With `kit` (the downtown kit loaded), a near
+ * plan that is wrapped (`FootprintPlan.kit`) is drawn as its wrap, at the
+ * wrap's triangles — never more than an extrusion's ceiling — in ONE more
+ * group of its own, counted inside `surfaceSlots` exactly as the models'
+ * group is. With no slot left for it the plan is drawn as its extrusion.
+ * Without `kit` every wrapped plan is its extrusion, as before #3334.
+ *
  * **A city centre's far boxes** — #1638, off by default. Where `buildings`
  * carries a {@link MappedBuildings.cityFarMax}, the walk goes on past
  * {@link MAPPED_BUILDING_MAX}, up to that cap and `into`'s capacity, taking
@@ -496,6 +518,7 @@ export function selectMappedBuildings(
   rivals: RivalStructures = NO_RIVALS,
   models?: readonly number[],
   ahead?: Float32Array,
+  kit = false,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -554,14 +577,27 @@ export function selectMappedBuildings(
     // #1585: near, with a model that fits, and the models loaded. With no
     // slot left for the models' group the plan is drawn as its extrusion,
     // whose surfaces may already be open, rather than passed over.
+    /** The wraps' one group, counted inside the slots once it is open — #3334. */
+    const kitGroup = into.kitCount > 0 ? 1 : 0;
     const modelTriangles =
       far ||
       plan.model === undefined ||
       models === undefined ||
-      (into.modelCount === 0 && into.surfaces.length + 1 > slots)
+      (into.modelCount === 0 && into.surfaces.length + kitGroup + 1 > slots)
         ? undefined
         : models[plan.model.model];
-    const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
+    // #3334: near, wrapped, and the kit loaded; with no slot left for the
+    // wraps' group the plan is drawn as its extrusion, as a model's is.
+    const kitTriangles =
+      far ||
+      !kit ||
+      plan.kit === undefined ||
+      modelTriangles !== undefined ||
+      (into.kitCount === 0 && into.surfaces.length + (into.modelCount > 0 ? 1 : 0) + 1 > slots)
+        ? undefined
+        : plan.kit.triangles;
+    const triangles =
+      modelTriangles ?? kitTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
       // A landmark taken ahead that does not fit leaves the nearest to their own walk.
       if (at < landmarks) continue;
@@ -574,11 +610,24 @@ export function selectMappedBuildings(
       into.plans[into.count] = index;
       into.far[into.count] = 0;
       into.modelled[into.count] = 1;
+      into.kitted[into.count] = 0;
       into.count += 1;
       into.near += 1;
       into.modelCount += 1;
       into.modelTriangles += modelTriangles;
       into.triangles += modelTriangles;
+      continue;
+    }
+    if (kitTriangles !== undefined) {
+      into.plans[into.count] = index;
+      into.far[into.count] = 0;
+      into.modelled[into.count] = 0;
+      into.kitted[into.count] = 1;
+      into.count += 1;
+      into.near += 1;
+      into.kitCount += 1;
+      into.kitTriangles += kitTriangles;
+      into.triangles += kitTriangles;
       continue;
     }
     const wall = slotOf(into, plan.surfaces.wall);
@@ -592,7 +641,7 @@ export function selectMappedBuildings(
       (slotOf(into, spire) < 0 && spire !== plan.surfaces.wall && spire !== plan.surfaces.roof
         ? 1
         : 0);
-    if (into.surfaces.length + opened + modelGroup > slots) {
+    if (into.surfaces.length + opened + modelGroup + kitGroup > slots) {
       into.passed += 1;
       continue;
     }
@@ -606,6 +655,7 @@ export function selectMappedBuildings(
     into.plans[into.count] = index;
     into.far[into.count] = far ? 1 : 0;
     into.modelled[into.count] = 0;
+    into.kitted[into.count] = 0;
     into.count += 1;
     if (far) into.farCount += 1;
     else into.near += 1;

@@ -315,6 +315,16 @@ import { settlingBasisWorker } from './basis-worker';
 import { FRONT_PORCH } from './porch';
 import { HOUSE_MODELS, placedPoint, placeOnPlot, type HousePlacement } from './house-models';
 import {
+  KIT_PIECES,
+  KIT_RUN_FLOATS,
+  kitCardOf,
+  kitPaintOf,
+  kitPieceIndex,
+  kitPlacedPoint,
+  kitProjectedUv,
+  type KitWrap,
+} from './facade-kit';
+import {
   EAVES_OVERHANG_METRES,
   BAY_METRES,
   CLAD_BLOCK,
@@ -524,6 +534,7 @@ import {
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
+  REALISTIC_DOWNTOWN_KIT,
   houseModelFile,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
@@ -7436,6 +7447,48 @@ export interface RealisticHouses {
   readonly atlas: Texture;
   /** Each model's triangles, as `mapped-buildings.ts` §`selectMappedBuildings` reads them. */
   readonly triangles: readonly number[];
+  /**
+   * The downtown kit's facade pieces and their atlas — #3334; absent where
+   * the kit's GLB is not the one `facade-kit.ts` describes, and every wrapped
+   * plan is then its extrusion.
+   */
+  readonly kit?: RealisticKit;
+}
+
+/**
+ * The facade pieces a mapped footprint is wrapped in, by their place in
+ * `facade-kit.ts` §`KIT_PIECES`, and their atlas — #3334.
+ */
+export interface RealisticKit {
+  /** Each piece in relief: its own geometry, out of the kit's GLB. */
+  readonly pieces: readonly HouseGeometry[];
+  /** Each piece's card: its rectangle on the wall's plane (`facade-kit.ts` §`kitCardOf`). */
+  readonly cards: readonly HouseGeometry[];
+  readonly atlas: Texture;
+}
+
+/**
+ * The downtown kit's pieces as the belt copies them — #3334: each of
+ * `facade-kit.ts` §`KIT_PIECES` found in `scene` by its id, with the card
+ * made for it; or `undefined` where a piece is missing or is not the
+ * triangles `facade-kit.ts` says, which a wrap's count was planned from.
+ */
+export function kitGeometriesOf(
+  scene: Object3D,
+): Pick<RealisticKit, 'pieces' | 'cards'> | undefined {
+  // By `traverse`, as `houseGeometryOf` reads a scene: the first node of each name.
+  const named = new Map<string, Object3D>();
+  scene.traverse((node) => {
+    if (!named.has(node.name)) named.set(node.name, node);
+  });
+  const pieces: HouseGeometry[] = [];
+  for (const piece of KIT_PIECES) {
+    const node = named.get(piece.id);
+    const geometry = node === undefined ? undefined : houseGeometryOf(node);
+    if (geometry?.triangles !== piece.triangles) return undefined;
+    pieces.push(geometry);
+  }
+  return { pieces, cards: KIT_PIECES.map((_, index) => kitCardOf(index)) };
 }
 
 /**
@@ -7954,6 +8007,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       model(() => loaders.model(realisticUrl(houseModelFile(id)))),
     );
     const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
+    // #3334: the downtown kit's facade pieces and their atlas, likewise.
+    const kitScene = model(() => loaders.model(realisticUrl(REALISTIC_DOWNTOWN_KIT.model)));
+    const kitAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_DOWNTOWN_KIT.atlas)));
     // #1274: the roadside models, loaded and settled with everything else.
     // Or none, on the owner's page with that lever off. @see setRealisticRoadside
     const roadsideScenes = (realisticRoadside ? STREET_MODEL_NAMES : []).map((name) => ({
@@ -8043,6 +8099,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...bicycleMaps.map((each) => each.texture),
       ...houseScenes,
       houseAtlas,
+      kitScene,
+      kitAtlas,
       ...roadsideScenes.map((each) => each.scene),
       ...litterScenes.map((each) => each.scene),
       chainLinkScene,
@@ -8192,6 +8250,13 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     atlasTexture.minFilter = LinearMipmapLinearFilter;
     atlasTexture.wrapS = ClampToEdgeWrapping;
     atlasTexture.wrapT = ClampToEdgeWrapping;
+    // #3334: the kit's pieces, copied once; its atlas, never repeated.
+    const kitGeometries = kitGeometriesOf(await kitScene);
+    const kitTexture = await kitAtlas;
+    kitTexture.colorSpace = SRGBColorSpace;
+    kitTexture.minFilter = LinearMipmapLinearFilter;
+    kitTexture.wrapS = ClampToEdgeWrapping;
+    kitTexture.wrapT = ClampToEdgeWrapping;
     const houses: RealisticHouses | undefined = houseGeometries.every(
       (each): each is HouseGeometry => each !== undefined,
     )
@@ -8199,6 +8264,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
           models: houseGeometries,
           atlas: atlasTexture,
           triangles: houseGeometries.map((each) => each.triangles),
+          ...(kitGeometries === undefined ? {} : { kit: { ...kitGeometries, atlas: kitTexture } }),
         }
       : undefined;
     // #1274: the roadside models' triangles, copied once, or none of them.
@@ -22234,6 +22300,13 @@ export interface MappedBuildingStats {
   readonly modelled: number;
   readonly modelTriangles: number;
   /**
+   * How many are drawn as wraps of the downtown kit's facade pieces, and
+   * their triangles — #3334: one more draw call between them, inside
+   * `MAPPED_BUILDING_DRAW_CALLS`.
+   */
+  readonly kitted: number;
+  readonly kitTriangles: number;
+  /**
    * In reach and inside the budget, but passed over because its surfaces would
    * have opened a seventh — `mapped-buildings.ts` §`selectMappedBuildings`.
    */
@@ -24697,6 +24770,13 @@ export interface DrawnMappedBuilding {
 export interface MappedBuildingMaterials {
   readonly surfaces: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
   readonly models: MeshStandardMaterial;
+  /**
+   * The downtown kit's — #3334: {@link houseModelMaterial} with the kit's
+   * atlas for its map, so it is the house models' program with another
+   * picture bound, and {@link mappedBuildingWarmUp}'s `models` mesh compiles
+   * it too.
+   */
+  readonly kit: MeshStandardMaterial;
 }
 
 /**
@@ -24726,6 +24806,7 @@ export function mappedBuildingMaterials(
       FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
     ),
     models: houseModelMaterial(houses?.atlas),
+    kit: houseModelMaterial(houses?.kit?.atlas),
   };
 }
 
@@ -24733,6 +24814,7 @@ export function mappedBuildingMaterials(
 export function disposeMappedBuildingMaterials(materials: MappedBuildingMaterials): void {
   for (const material of materials.surfaces.values()) material.dispose();
   materials.models.dispose();
+  materials.kit.dispose();
 }
 
 /**
@@ -24819,6 +24901,15 @@ export class MappedBuildingBelt {
    * draw call whatever their count — refilled with the surfaces.
    */
   readonly modelMesh: Mesh;
+  /**
+   * #3334: the wraps of the downtown kit's facade pieces, one mesh in the
+   * kit's one material — one draw call whatever their count. Its geometry
+   * holds the house models' own attributes, the wraps written after the
+   * models in the one buffer and each mesh drawing its own range of it: the
+   * budget is shared, so a third buffer of the whole capacity would hold
+   * nothing the second cannot.
+   */
+  readonly kitMesh: Mesh;
   readonly #houses: RealisticHouses | undefined;
   readonly #modelPosition: BufferAttribute;
   readonly #modelNormal: BufferAttribute;
@@ -24858,6 +24949,8 @@ export class MappedBuildingBelt {
     passed: 0,
     modelled: 0,
     modelTriangles: 0,
+    kitted: 0,
+    kitTriangles: 0,
   };
   /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
   #chunk: number | undefined;
@@ -24939,11 +25032,28 @@ export class MappedBuildingBelt {
     this.modelMesh = new Mesh(models, drawnIn.models);
     this.modelMesh.frustumCulled = false;
     this.modelMesh.visible = false;
+    // #3334: the wraps' mesh, over the same attributes.
+    const wraps = new BufferGeometry();
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+      wraps.setAttribute(name, models.getAttribute(name));
+    }
+    wraps.setDrawRange(0, 0);
+    this.kitMesh = new Mesh(wraps, drawnIn.kit);
+    this.kitMesh.frustumCulled = false;
+    this.kitMesh.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.mesh);
     scene.add(this.modelMesh);
+    scene.add(this.kitMesh);
+  }
+
+  /** Takes the belt's meshes out of whatever scene they are in. */
+  removeFromParent(): void {
+    this.mesh.removeFromParent();
+    this.modelMesh.removeFromParent();
+    this.kitMesh.removeFromParent();
   }
 
   /** The set of buildings the belt draws from. @see rebind */
@@ -25064,8 +25174,11 @@ export class MappedBuildingBelt {
   }
 
   #applyVisible(): void {
-    this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
+    this.mesh.visible =
+      this.drawing &&
+      this.#stats.triangles - this.#stats.modelTriangles - this.#stats.kitTriangles > 0;
     this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
+    this.kitMesh.visible = this.drawing && this.#stats.kitted > 0;
   }
 
   /**
@@ -25096,6 +25209,7 @@ export class MappedBuildingBelt {
       rivals,
       this.#houses?.triangles,
       ahead,
+      this.#houses?.kit !== undefined,
     );
     const surfaces = selection.surfaces;
     let end = 0;
@@ -25118,6 +25232,13 @@ export class MappedBuildingBelt {
         this.#spireAt[at] = -1;
         modelEnd = this.#appendModel(plan, plan.model, modelEnd);
         this.#modelEnd[at] = modelEnd;
+        continue;
+      }
+      // #3334: a wrapped plan's triangles are written after every model's, below.
+      if (selection.kitted[at] === 1 && plan.kit !== undefined) {
+        this.#wallAt[at] = -1;
+        this.#roofAt[at] = -1;
+        this.#spireAt[at] = -1;
         continue;
       }
       this.#modelAt[at] = -1;
@@ -25161,8 +25282,19 @@ export class MappedBuildingBelt {
         attribute.needsUpdate = true;
       }
     }
+    // #3334: the wraps, after the models in the models' buffer, in the kit's own range.
+    const kitStart = modelEnd;
+    for (let at = 0; at < selection.count; at += 1) {
+      if (selection.kitted[at] !== 1) continue;
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      if (plan.kit === undefined) continue;
+      this.#modelAt[at] = modelEnd;
+      modelEnd = this.#appendKit(plan, plan.kit, modelEnd);
+      this.#modelEnd[at] = modelEnd;
+    }
     const models = this.modelMesh.geometry;
-    models.setDrawRange(0, modelEnd);
+    models.setDrawRange(0, kitStart);
+    this.kitMesh.geometry.setDrawRange(kitStart, modelEnd - kitStart);
     for (const attribute of [
       this.#modelPosition,
       this.#modelNormal,
@@ -25182,10 +25314,15 @@ export class MappedBuildingBelt {
       near: selection.near,
       far: selection.farCount,
       triangles: selection.triangles,
-      drawCalls: geometry.groups.length + (selection.modelCount > 0 ? 1 : 0),
+      drawCalls:
+        geometry.groups.length +
+        (selection.modelCount > 0 ? 1 : 0) +
+        (selection.kitCount > 0 ? 1 : 0),
       passed: selection.passed,
       modelled: selection.modelCount,
       modelTriangles: selection.modelTriangles,
+      kitted: selection.kitCount,
+      kitTriangles: selection.kitTriangles,
     };
     this.#applyVisible();
     return this.#stats;
@@ -25249,6 +25386,31 @@ export class MappedBuildingBelt {
       model,
       placement,
       modelPaint(mappedRolePaint(plan, 'wall')),
+      plan.tint,
+      {
+        position: this.#modelPosition.array as Float32Array,
+        normal: this.#modelNormal.array as Float32Array,
+        uv: this.#modelUv.array as Float32Array,
+        colour: this.#modelColour.array as Float32Array,
+        tint: this.#modelTint.array as Float32Array,
+      },
+      at,
+    );
+  }
+
+  /**
+   * Writes a plan's wrap of facade pieces from vertex `at` of the models'
+   * buffer — #3334 ({@link writeKitWrap}), in the shade its wall paint
+   * chooses (`facade-kit.ts` §`kitPaintOf`) and #621's seeded tint. Returns
+   * the vertex after it.
+   */
+  #appendKit(plan: FootprintPlan, wrap: KitWrap, at: number): number {
+    const kit = this.#houses?.kit;
+    if (kit === undefined) return at;
+    return writeKitWrap(
+      kit,
+      wrap,
+      kitPaintOf(plan.paint.wall),
       plan.tint,
       {
         position: this.#modelPosition.array as Float32Array,
@@ -25414,6 +25576,9 @@ export class MappedBuildingBelt {
       (this.#modelPosition.array as Float32Array).fill(0, from * 3, to * 3);
     } else if (plan.model !== undefined) {
       this.#appendModel(plan, plan.model, from);
+    } else if (plan.kit !== undefined) {
+      // #3334: a wrap is in the models' buffer too.
+      this.#appendKit(plan, plan.kit, from);
     }
     if (to > from) this.#modelPosition.addUpdateRange(from * 3, (to - from) * 3);
     this.#modelPosition.needsUpdate = true;
@@ -25438,10 +25603,12 @@ export class MappedBuildingBelt {
   dispose(): void {
     this.mesh.geometry.dispose();
     this.modelMesh.geometry.dispose();
+    this.kitMesh.geometry.dispose();
     // #3107: its own materials only. Shared ones are their maker's to dispose of.
     if (this.#ownsMaterials) {
       for (const material of this.#materials.values()) material.dispose();
       (this.modelMesh.material as Material).dispose();
+      (this.kitMesh.material as Material).dispose();
     }
   }
 }
@@ -25851,6 +26018,98 @@ function writeHouseModel(
     into.tint[to] = tint;
   }
   return at + vertices;
+}
+
+/**
+ * Writes a footprint's wrap of the downtown kit's facade pieces from vertex
+ * `at` — #3334: every bay of every run, the piece in relief or its card,
+ * each vertex placed by `facade-kit.ts` §`kitPlacedPoint`, its normal turned
+ * with the wall and taken through the stretch's inverse; then the flat roof,
+ * its texture coordinates laid across the roof piece's cell. One colour and
+ * one tint. Returns the vertex after it, `wrap.triangles` triangles on.
+ */
+export function writeKitWrap(
+  kit: RealisticKit,
+  wrap: KitWrap,
+  colour: Rgb,
+  tint: number,
+  into: HouseModelArrays,
+  at: number,
+): number {
+  const [red, green, blue] = colour;
+  const { runs } = wrap;
+  let to = at;
+  const paint = (): void => {
+    into.colour[to * 3] = red;
+    into.colour[to * 3 + 1] = green;
+    into.colour[to * 3 + 2] = blue;
+    into.tint[to] = tint;
+  };
+  for (let run = 0; run + KIT_RUN_FLOATS <= runs.length; run += KIT_RUN_FLOATS) {
+    const index = runs[run] as number;
+    const geometry = (runs[run + 1] === 1 ? kit.pieces : kit.cards)[index];
+    if (geometry === undefined) continue;
+    const ax = runs[run + 5] as number;
+    const az = runs[run + 6] as number;
+    const stretchX = runs[run + 7] as number;
+    const stretchY = runs[run + 8] as number;
+    const bays = runs[run + 9] as number;
+    const vertices = geometry.triangles * 3;
+    for (let bay = 0; bay < bays; bay += 1) {
+      for (let vertex = 0; vertex < vertices; vertex += 1) {
+        const [x, y, z] = kitPlacedPoint(
+          runs,
+          run,
+          bay,
+          geometry.position[vertex * 3] as number,
+          geometry.position[vertex * 3 + 1] as number,
+          geometry.position[vertex * 3 + 2] as number,
+        );
+        into.position[to * 3] = x;
+        into.position[to * 3 + 1] = y;
+        into.position[to * 3 + 2] = z;
+        const along = (geometry.normal[vertex * 3] as number) / stretchX;
+        const up = (geometry.normal[vertex * 3 + 1] as number) / stretchY;
+        const out = geometry.normal[vertex * 3 + 2] as number;
+        const nx = along * ax - out * az;
+        const nz = along * az + out * ax;
+        const length = Math.hypot(nx, up, nz) || 1;
+        into.normal[to * 3] = nx / length;
+        into.normal[to * 3 + 1] = up / length;
+        into.normal[to * 3 + 2] = nz / length;
+        into.uv[to * 2] = geometry.uv[vertex * 2] as number;
+        into.uv[to * 2 + 1] = geometry.uv[vertex * 2 + 1] as number;
+        paint();
+        to += 1;
+      }
+    }
+  }
+  // The roof: flat, facing up, the roof piece's cell laid across its whole extent.
+  const roofPiece = kitPieceIndex('roof');
+  const roof = KIT_PIECES[roofPiece];
+  const [minX, minZ, maxX, maxZ] = wrap.roofBounds;
+  const wide = maxX - minX || 1;
+  const deep = maxZ - minZ || 1;
+  for (let vertex = 0; vertex * 3 < wrap.roof.length; vertex += 1) {
+    const x = wrap.roof[vertex * 3] as number;
+    const z = wrap.roof[vertex * 3 + 2] as number;
+    into.position[to * 3] = x;
+    into.position[to * 3 + 1] = wrap.roof[vertex * 3 + 1] as number;
+    into.position[to * 3 + 2] = z;
+    into.normal[to * 3] = 0;
+    into.normal[to * 3 + 1] = 1;
+    into.normal[to * 3 + 2] = 0;
+    const [u, v] = kitProjectedUv(
+      roofPiece,
+      ((x - minX) / wide - 0.5) * (roof?.width ?? 1),
+      ((z - minZ) / deep) * (roof?.height ?? 1),
+    );
+    into.uv[to * 2] = u;
+    into.uv[to * 2 + 1] = v;
+    paint();
+    to += 1;
+  }
+  return to;
 }
 
 /**
@@ -26447,8 +26706,7 @@ class RealisticDrawing {
         ),
     );
     if (belt !== this.#mapped) {
-      this.#mapped?.mesh.removeFromParent();
-      this.#mapped?.modelMesh.removeFromParent();
+      this.#mapped?.removeFromParent();
       this.#mapped?.dispose();
       this.#mapped = belt;
       this.#mapped.setShown(this.#shown);
