@@ -929,6 +929,27 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
 export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_TRIANGLES.structure;
 
 /**
+ * The most triangles ONE building model may have — #3251, ADR 0099 D-4.2:
+ * **3 000**, *"no heavier than the heaviest house committed today"*, which is
+ * the brick shop at 2 946. The house models are not held to
+ * {@link REALISTIC_TRIANGLES}' 640 each: by the owner's ruling on #1585 they
+ * pool {@link MAPPED_BUILDING_TRIANGLES}, and until this constant nothing
+ * bounded one of them but that whole term, 23 040. So a model of 20 000
+ * triangles passed every gate and left the frame room for one building.
+ *
+ * It is a ceiling on a FILE, and adds nothing to the frame's sum: a frame's
+ * models are still ranked inside {@link MAPPED_BUILDING_TRIANGLES} with every
+ * other structure (`mapped-buildings.ts` §`selectMappedBuildings`). ADR 0099
+ * D-4.3 holds for it as for every ceiling here: a new model fits it, and it
+ * is not raised to make one fit without a tablet measurement recorded first.
+ *
+ * @test-facing held by `realistic-budget.test.ts` §"keeps every building
+ * model at or under one building's triangles", which reads each committed
+ * house model back off disk against it
+ */
+export const REALISTIC_BUILDING_MODEL_TRIANGLES = 3_000;
+
+/**
  * The most mapped buildings the realistic world draws at once — #1549:
  * **36**, ADR 0054 D-5.6's cap, {@link REALISTIC_STRUCTURE_ITEMS}' figure:
  * the nearest 36 footprints, and no more until #1523's fix and a measured

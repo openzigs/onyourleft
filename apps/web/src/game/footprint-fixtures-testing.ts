@@ -30,7 +30,7 @@ import {
   type FootprintPlan,
   type FootprintVerdict,
 } from './footprint-buildings';
-import { ARCHETYPE_FEATURES } from './house-archetypes';
+import { archetypeFeaturesOf } from './house-archetypes';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { FIXTURE_LATITUDE, northRoute, plannerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
@@ -3073,7 +3073,7 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
  * `archetype-porches.test.ts`.
  */
 export function eavesOverhangOf(plan: FootprintPlan): number {
-  const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
+  const eaves = archetypeFeaturesOf(plan.archetype)?.eaves ?? 'seeded';
   return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
 }
 
