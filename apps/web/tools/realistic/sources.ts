@@ -1762,7 +1762,10 @@ export const PEOPLE_ATLAS_MADE = 'people_atlas.png';
  *   colour + normal only: #457's device run put 2K surfaces at 128 MiB of the
  *   355 MiB all-on estimate against 32 MiB for 1K, and the roughness map is a
  *   third of that for a term the chase camera barely sees.
- * - `island_tree_02`, `tree_small_02` — two broadleaf species, as #457 used.
+ * - ⚠️ `island_tree_02`, `tree_small_02` — the two broadleaf scans #457 used
+ *   are NOT here since #1293: the owner ruled on 2026-11-26 that they go, the
+ *   generated broadleaves (#1283) being what every ride draws. Their recipe
+ *   and their pinned inputs are this file's and `inputs.lock.json`'s history.
  * - `fir_sapling_medium` — the conifer. #457's `fir_sapling` was a 1.3 m
  *   sapling scaled to a tree and read as bare twigs (spike 0005 §"What the
  *   pictures already say"); this pack's saplings are about 9 m.
@@ -1792,8 +1795,6 @@ export const SOURCES: readonly AssetSource[] = [
     resolution: '1k',
     maps: ['Diffuse', 'nor_gl'],
   }),
-  polyHaven('island_tree_02', { type: 'model', resolution: '1k' }),
-  polyHaven('tree_small_02', { type: 'model', resolution: '1k' }),
   polyHaven('fir_sapling_medium', { type: 'model', resolution: '1k' }),
   polyHaven('shrub_02', { type: 'model', resolution: '1k' }),
   polyHaven('boulder_01', { type: 'model', resolution: '1k' }),
@@ -2382,16 +2383,17 @@ export const RIDER_EYE_TRIANGLES = 168;
  * What `realistic:process --check` requires of a run's REPORT, as well as of
  * its bytes — #900 item 2, by output file.
  *
- * `island_tree_02`'s scan repeats one triangle, and #696 made the importer
- * drop the same copy every run (`blender/gltf_import.py`). Only about one run
- * in fifty kept the other copy before that, so comparing the files alone
- * passed about 98 % of the time with #696's fix removed. The report says how
- * many repeated triangles were dropped, and a count that is not the one the
- * committed files were made with is a run that did not reproduce them.
+ * ⚠️ **The first entries here were `island_tree_02`'s two files, and #1293
+ * deleted them with the scan.** That scan repeats one triangle, and #696 made
+ * the importer drop the same copy every run (`blender/gltf_import.py`). Only
+ * about one run in fifty kept the other copy before that, so comparing the
+ * files alone passed about 98 % of the time with #696's fix removed; the
+ * report said how many repeated triangles were dropped, and a count that was
+ * not the one the committed files were made with was a run that did not
+ * reproduce them. No tree that is still shipped repeats a triangle, so no
+ * tree is listed; the importer still drops one and still reports the count.
  */
 export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
-  'island_tree_02.glb': { repeatedTrianglesDropped: 1 },
-  'island_tree_02-middle.glb': { repeatedTrianglesDropped: 1 },
   // #2485: the pack's rider, and the texture's shape: one column a vertex of
   // the GLB, the ones the crank moves, and a row a phase. A run that cut the
   // body or found the moving vertices differently is not this one.
@@ -2530,13 +2532,11 @@ export const OUTPUTS: readonly OutputSpec[] = [
       };
     }),
   ),
-  tree('island_tree_02', 'island_tree_02', 'island_tree_02', '28000'),
-  tree('tree_small_02', 'tree_small_02', 'tree_small_02', '28000'),
+  // #1293: the two scanned broadleaves stood here, at 28000, and their middle
+  // levels below at 6000; the owner's ruling of 2026-11-26 deleted them.
   tree('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '24000'),
   tree('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '24000'),
   // #617: each tree's middle level of detail, from the same pinned input.
-  middle('island_tree_02', 'island_tree_02', 'island_tree_02', '6000'),
-  middle('tree_small_02', 'tree_small_02', 'tree_small_02', '6000'),
   middle('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '6000'),
   middle('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '6000'),
   // #1283: the generated trees, each a full level with its strips and a middle level.

@@ -1035,14 +1035,19 @@ export { formatModerationItem, parseModerationItem, type ModerationItem } from '
 
 export * from './lap-race';
 
+// --- The AI group ride (epic #3296, ADR 0101 proposed) -----------------------
+//
+// The paceline's rules: a seeded line stepped once per decision window, roles
+// and speeds out. Nothing here imports a trainer, and nothing writes to one.
+
+export * from './group-ride';
+
 // --- The group ride's plan (#3298, epic #3296) --------------------------------
 //
 // The rider's chosen average becomes the front's power along the route, solved
 // once from the course so the whole ride averages the target, with a time
 // ledger that does not chase back time spent waiting. Never a trainer target.
 
-export type { GroupRideErrorCode } from './group-ride/errors';
-export { GroupRideError } from './group-ride/errors';
 export type {
   GroupLedger,
   GroupPlan,

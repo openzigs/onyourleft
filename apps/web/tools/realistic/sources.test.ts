@@ -747,8 +747,6 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
         REALISTIC_DELIVERY_CAR,
         REALISTIC_DOWNTOWN_KIT.model,
         REALISTIC_PEOPLE.model,
-        'island_tree_02-middle.glb',
-        'island_tree_02.glb',
         REALISTIC_RIDER,
         REALISTIC_RIDER_FEMALE,
         REALISTIC_RIDER_PACK.lod,
@@ -762,23 +760,35 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
       for (const field of Object.keys(EXPECTED_REPORTS[file] ?? {})) {
         expect(script, `${file}: ${field}`).toContain(`"${field}": `);
       }
-      if (file.startsWith('island_tree_02')) {
-        expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
-      }
     }
+    // #1293: `island_tree_02`'s two files were the first entries (#696's
+    // repeated triangle), and went with the scan. No deleted file is required
+    // of a run that can no longer make it.
+    expect(files.filter((file) => /^(island_tree_02|tree_small_02)/.test(file))).toEqual([]);
   });
 
-  it('passes a report with #696’s count, and names a run that dropped none, or the wrong one', () => {
-    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 1, x: 2 })).toEqual([]);
-    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 0 })).toEqual([
-      'island_tree_02.glb: its report says repeatedTrianglesDropped 0, not 1',
+  it('passes a report with the counts required, and names a run that said another, or nothing', () => {
+    // ⚠️ Until #1293 this was read on `island_tree_02.glb` and #696's
+    // repeated triangle; that scan is deleted, so it is read on the pack's
+    // rider, whose report is held the same way.
+    const file = REALISTIC_RIDER_PACK.lod;
+    const required = EXPECTED_REPORTS[file] ?? {};
+    expect(Object.keys(required)).toContain('triangles');
+    expect(reportFaults(file, { ...required, x: 2 })).toEqual([]);
+    expect(reportFaults(file, { ...required, triangles: 0 })).toEqual([
+      `${file}: its report says triangles 0, not ${String(required['triangles'])}`,
     ]);
-    expect(reportFaults('island_tree_02-middle.glb', {})).toEqual([
-      'island_tree_02-middle.glb: its report says repeatedTrianglesDropped nothing, not 1',
+    const silent = Object.fromEntries(
+      Object.entries(required).filter(([field]) => field !== 'triangles'),
+    );
+    expect(reportFaults(file, silent)).toEqual([
+      `${file}: its report says triangles nothing, not ${String(required['triangles'])}`,
     ]);
-    expect(reportFaults('island_tree_02.glb', undefined)).toHaveLength(1);
-    // A file nothing is required of passes whatever its report says.
-    expect(reportFaults('tree_small_02.glb', undefined)).toEqual([]);
+    expect(reportFaults(file, undefined)).toHaveLength(Object.keys(required).length);
+    // A file nothing is required of passes whatever its report says — and a
+    // deleted scan's is such a file now.
+    expect(reportFaults('fir_sapling_medium_a.glb', undefined)).toEqual([]);
+    expect(reportFaults('island_tree_02.glb', { repeatedTrianglesDropped: 0 })).toEqual([]);
   });
 });
 
