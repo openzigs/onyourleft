@@ -8005,7 +8005,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
       // #1283, #1294: the trees are the generated ones, or — for the owner's
-      // page — the scans they replaced. @see setRealisticTrees
+      // page — the generated broadleaves beside the scanned firs.
+      // @see setRealisticTrees
       models: realisticVegetation(realisticTrees)[kind].map(
         ({ name, file, impostor, impostorNormals, middle }) => ({
           name,
@@ -8341,22 +8342,24 @@ export function setRealisticMaterialsMerged(on: boolean): void {
 let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
 
 /**
- * Makes the NEXT realistic load draw its trees from the scans, as every load
- * did before #1283 — or, with `'generated'`, from the generated trees, as the
- * product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`), or with
- * `'scanned-conifers'` the generated broadleaves beside the scanned firs, as
- * every load did between #1283 and #1294. Only the one set asked for is
- * fetched, decoded and held.
+ * Makes the NEXT realistic load draw its firs from the scans
+ * (`'scanned-conifers'`: the generated broadleaves beside the scanned firs, as
+ * every load did between #1283 and #1294) — or, with `'generated'`, every
+ * tree generated, as the product does (`realistic-assets.ts`
+ * §`REALISTIC_TREES_DEFAULT`). Only the one set asked for is fetched, decoded
+ * and held.
  *
  * ADR 0049 D-1 keeps a generated tree only where the tablet measurement says
- * it should, so until that row is in, the scans are one switch away: the
- * owner's page loads them with `?levers=-generated-trees` or, for the firs
- * alone, `?levers=-generated-conifers`, and the browser gate measures the
- * generated set and the scans at the same route positions with the same camera.
+ * it should, so until the fir's row is in, the scanned firs are one switch
+ * away: the owner's page loads them with `?levers=-generated-conifers`.
  *
- * @test-facing `apps/web/browser/realistic-harness.ts` and
- * `apps/web/browser/game-harness.ts` §`treeLevelRun` load the scans with it; the
- * product never calls it
+ * ⚠️ **It could load every tree's scan until #1293** (`'scanned'`, the
+ * owner's page's `-generated-trees`). The scanned broadleaves were deleted on
+ * the owner's ruling of 2026-11-26, so that set is gone from
+ * `realistic-assets.ts` §`RealisticTrees` and nothing here can ask for it.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` loads the scanned firs
+ * with it; the product never calls it
  */
 export function setRealisticTrees(trees: RealisticTrees): void {
   realisticTrees = trees;

@@ -16,6 +16,7 @@
  */
 
 import { act } from 'react';
+import { capacitorAutoplayAllowed } from '@onyourleft/mobile';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { writeAudioBus, writeMasterMuted, readMusicAndMaster } from '../game/audio-mix';
@@ -43,8 +44,10 @@ import {
   createMenuMusic,
   OWN_STREAM_CLOSE_MS,
   OWN_STREAM_QUIET_MS,
+  shellMenuMusicAutoplay,
   type MenuMusic,
   type RiderPlayer,
+  type ShellAutoplayModule,
 } from './menu-music';
 import { readMenuSoundPreference, writeMenuSoundPreference } from './menu-sound-preference';
 import { createMenuSounds, type MenuSounds } from './menu-sounds';
@@ -1841,5 +1844,55 @@ describe('in the Android app the loop starts 3 s after the launch, and 3 s after
     await music.elapse(LONG_MS);
     expect(music.made, 'it started with no press').toEqual([]);
     expect(music.fake.gains).toEqual([]);
+  });
+});
+
+/**
+ * #1755: `AutoplayPlugin.java` is Android's alone. The iOS app makes no
+ * plugin and keeps the first-press rule, read back as the loop on Home.
+ */
+describe('which shell answers the autoplay question — #1755', () => {
+  /** The mobile module as `main.tsx` loads it, with a plugin that would say yes. */
+  function mobile(): ShellAutoplayModule & { readonly made: () => number } {
+    let made = 0;
+    return {
+      capacitorAutoplayPlugin: () => {
+        made += 1;
+        return { allowed: async () => Promise.resolve({ allowed: true }) };
+      },
+      capacitorAutoplayAllowed,
+      made: () => made,
+    };
+  }
+
+  it('the iOS app makes no Autoplay plugin, and the loop waits for a press', async () => {
+    const shellModule = mobile();
+    const autoplay = shellMenuMusicAutoplay(
+      { isNativePlatform: () => true, getPlatform: () => 'ios' },
+      shellModule,
+    );
+    expect(shellModule.made()).toBe(0);
+    const music = rig(disk(), { track: TRACK, autoplay });
+    await shell(music);
+    await music.elapse(LONG_MS);
+    expect(music.made, 'it started with no press').toEqual([]);
+  });
+
+  it('a native shell naming no known platform makes none either', () => {
+    const shellModule = mobile();
+    expect(shellMenuMusicAutoplay({ isNativePlatform: () => true }, shellModule)).toBeUndefined();
+    expect(shellModule.made()).toBe(0);
+  });
+
+  it('the Android shell asks its plugin, and the loop starts with no press', async () => {
+    const shellModule = mobile();
+    const autoplay = shellMenuMusicAutoplay(
+      { isNativePlatform: () => true, getPlatform: () => 'android' },
+      shellModule,
+    );
+    const music = rig(disk(), { track: TRACK, autoplay });
+    await shell(music);
+    expect(shellModule.made()).toBe(1);
+    expect(music.made[0]?.paused).toBe(false);
   });
 });

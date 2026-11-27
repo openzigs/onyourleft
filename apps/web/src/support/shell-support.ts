@@ -42,6 +42,7 @@ import type {
   ShellSupport,
   ShellSupportPort,
 } from './shell-support-port';
+import { platformCapacitor, shellKind, type ShellKind } from './capacitor';
 import type { SettingsPage } from './system-settings-port';
 
 /**
@@ -121,6 +122,27 @@ export const UNANSWERED_SHELL_SUPPORT: ShellSupport = {
 };
 
 /**
+ * {@link UNANSWERED_SHELL_SUPPORT} in the iOS app — #3239: the same state and
+ * the same way out, said of an iPhone or iPad, whose recent apps are the app
+ * switcher. ⚠️ **Draft wording for the owner.**
+ */
+export const IOS_UNANSWERED_SHELL_SUPPORT: ShellSupport = {
+  ...UNANSWERED_SHELL_SUPPORT,
+  notice: {
+    title: 'This device has not answered about Bluetooth',
+    explanation: `Nothing has been refused. The question went to this device’s Bluetooth service and no reply came back within ${String(SHELL_ANSWER_TIMEOUT)} seconds, which is what happens when the device has been asleep.`,
+    instruction:
+      'If checking again does not help, close On Your Left completely — swipe it up and out of the app switcher — and open it again. A fresh start answers.',
+    recoverable: true,
+  },
+};
+
+/** The unanswered state for this shell — #3239. Android's in any shell but the iOS app. */
+export function unansweredShellSupport(kind: ShellKind | undefined): ShellSupport {
+  return kind === 'ios' ? IOS_UNANSWERED_SHELL_SUPPORT : UNANSWERED_SHELL_SUPPORT;
+}
+
+/**
  * What {@link capacitorShellSupport} needs from the Android shell.
  *
  * All three are `apps/mobile`'s, passed rather than imported. `availability` is
@@ -161,6 +183,19 @@ const INSTRUCTION: Record<PermissionAction['kind'], string | null> = {
 };
 
 /**
+ * {@link INSTRUCTION} in the iOS app — #3239, where Settings names the
+ * permission Bluetooth and the quick toggle is in Control Center. ⚠️ **Draft
+ * wording for the owner.**
+ */
+const IOS_INSTRUCTION: Record<PermissionAction['kind'], string | null> = {
+  'open-settings':
+    'Open Settings on this iPhone or iPad, find On Your Left in the app list, and allow Bluetooth. Then check again.',
+  'open-bluetooth-settings':
+    'Switch Bluetooth on — in Control Center, or in Settings under Bluetooth. Then check again.',
+  retry: null,
+};
+
+/**
  * One availability, as a screen's worth of already-decided text.
  *
  * ⚠️ **Deliberately not exported**, and it was exported until #284's review —
@@ -177,18 +212,23 @@ function shellSupportFrom(
   availability: TransportAvailability,
   notice: PermissionNotice | null,
   canPair: boolean,
+  kind: ShellKind | undefined,
 ): ShellSupport {
-  return { kind: availability.kind, canPair, notice: shellNotice(notice) };
+  return { kind: availability.kind, canPair, notice: shellNotice(notice, kind) };
 }
 
-function shellNotice(notice: PermissionNotice | null): ShellNotice | null {
+function shellNotice(
+  notice: PermissionNotice | null,
+  kind: ShellKind | undefined,
+): ShellNotice | null {
   if (notice === null) {
     return null;
   }
+  const instructions = kind === 'ios' ? IOS_INSTRUCTION : INSTRUCTION;
   return {
     title: notice.title,
     explanation: notice.explanation,
-    instruction: notice.action === null ? null : INSTRUCTION[notice.action.kind],
+    instruction: notice.action === null ? null : instructions[notice.action.kind],
     // ⚠️ Derived from the action rather than from the kind, deliberately.
     // `permissionNotice` already decides this and says why: an absent action
     // means *"nothing the rider does changes this, and a retry button here
@@ -218,8 +258,17 @@ const SETTINGS_PAGE: Record<PermissionAction['kind'], SettingsPage | null> = {
   retry: null,
 };
 
-/** {@link ShellSupportPort}, over the Capacitor transport. */
-export function capacitorShellSupport(source: ShellSupportSource): ShellSupportPort {
+/**
+ * {@link ShellSupportPort}, over the Capacitor transport.
+ *
+ * @param kind which shell's settings the instructions name — #3239; read from
+ * the real Capacitor global unless a caller says. Android's in any shell but
+ * the iOS app.
+ */
+export function capacitorShellSupport(
+  source: ShellSupportSource,
+  kind: ShellKind | undefined = shellKind(platformCapacitor()),
+): ShellSupportPort {
   return {
     async readShellSupport(): Promise<ShellSupport> {
       // ⚠️ Read every time rather than memoised. The two states a rider can fix
@@ -232,6 +281,7 @@ export function capacitorShellSupport(source: ShellSupportSource): ShellSupportP
         availability,
         source.notice(availability),
         source.mayShowDeviceList(availability),
+        kind,
       );
     },
   };

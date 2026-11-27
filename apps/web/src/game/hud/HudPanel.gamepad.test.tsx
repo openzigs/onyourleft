@@ -294,7 +294,7 @@ function forward(button: number, pressed: boolean): void {
 function inTheShell(): void {
   Object.defineProperty(globalThis, 'Capacitor', {
     configurable: true,
-    value: { isNativePlatform: () => true },
+    value: { isNativePlatform: () => true, getPlatform: () => 'android' },
   });
 }
 
@@ -365,6 +365,15 @@ describe('a generic pad on a Delivery ride in the Android shell — #1858', () =
     await ride();
     expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeTypeOf('function');
     endRide();
+    expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeUndefined();
+  });
+
+  it('installs nothing in the iOS app, which has no MainActivity to forward buttons (#1755)', async () => {
+    Object.defineProperty(globalThis, 'Capacitor', {
+      configurable: true,
+      value: { isNativePlatform: () => true, getPlatform: () => 'ios' },
+    });
+    await ride();
     expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeUndefined();
   });
 });

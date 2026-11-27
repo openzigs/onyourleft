@@ -253,7 +253,6 @@ import {
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
-  setRealisticTrees,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -345,7 +344,6 @@ import {
 import { urbanClassMap } from '../src/game/urban-class';
 import {
   REALISTIC_SURFACES,
-  REALISTIC_TREES_DEFAULT,
   realisticUrl,
   realisticWorldNotice,
 } from '../src/game/realistic-assets';
@@ -9502,24 +9500,6 @@ export interface TreeLevelMeasurement {
    * heaviest of R2's probes. @see foliageProbe
    */
   readonly foliage: FoliageMeasurement;
-  /**
-   * #1283: the same wooded frame from a world loaded with the SCANNED
-   * trees — since #1294 the firs' scans as well as the broadleaves'
-   * (`three-renderer.ts` §`setRealisticTrees`) — the trees every
-   * measurement above was first taken on — at the same route position, with
-   * the same camera: its triangles and draw calls as the product's levels draw
-   * it. Everything above is the GENERATED trees', which is what a ride draws.
-   *
-   * ⚠️ **One frame, on one view, and not the hard swap as well.** The first
-   * version counted the scans' hard swap too, to keep #617's 60 000 in the
-   * browser; the two views took 25.5 s of a 128 s load on the slower runner
-   * (run 38259197999), 80 % of the load's budget. #617's figure is still held
-   * off the committed files by `realistic-budget.test.ts`, on the scans.
-   */
-  readonly scanned: {
-    readonly triangles: number;
-    readonly calls: number;
-  };
   /** #545: a tree near the camera, faded and the controls. @see nearFadeProbe */
   readonly nearFade: NearFadeMeasurement;
 }
@@ -11633,7 +11613,6 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
-  scanned: { triangles: 0, calls: 0 },
   nearFade: NO_NEAR_FADE,
 };
 
@@ -13940,37 +13919,14 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     setRealisticMaterialsMerged(true);
   }
   phaseEnds('trees: unmerged control');
-  // #1283, #1294: the scans the generated trees replaced, on the same frame.
-  // LAST, because it replaces the loaded world and nothing after it reads one;
-  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644),
-  // and on ONE view: a view is the dearest thing on this load.
-  setRealisticTrees('scanned');
-  let scanned: TreeLevelMeasurement['scanned'];
-  try {
-    const outcome = await loadRealisticWorld();
-    if (!outcome.loaded) {
-      throw new Error(`#1283: the scanned trees' world did not load: ${outcome.detail}`);
-    }
-    const canvas = document.createElement('canvas');
-    const view = threeGameRenderer.create(canvas, top);
-    try {
-      const gl = canvas.getContext('webgl2');
-      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
-      view.resize(160, 90);
-      const levelled = woodedFrameOf(view, gl, wooded);
-      scanned = { triangles: levelled.triangles, calls: levelled.calls };
-    } finally {
-      view.destroy();
-    }
-  } finally {
-    setRealisticTrees(REALISTIC_TREES_DEFAULT);
-  }
-  phaseEnds('trees: scanned — #1283');
+  // ⚠️ #1293: a third load stood here until the scanned broadleaves were
+  // deleted (`trees: scanned — #1283`: the world loaded again with every
+  // tree a scan, and the wooded frame counted on it, 12.8 s to 14.3 s of this
+  // load). There is no such set to load now, so the phase is gone with it.
   const pixels = unmerged.pixels ?? new Uint8Array(0);
   return {
     measured: true,
     ...probed,
-    scanned,
     drawCallsUnmerged: unmerged.calls,
     trianglesUnmerged: unmerged.triangles,
     unmergedPixelsChanged:

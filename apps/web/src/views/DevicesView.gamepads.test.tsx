@@ -12,7 +12,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { GamepadPort, PadSnapshot } from '../game/gamepad-port';
+import { FORWARDED_BUTTON_GLOBAL, type GamepadPort, type PadSnapshot } from '../game/gamepad-port';
 import {
   GAMEPADS_HEADING,
   NOTHING_MOVED_YET,
@@ -21,7 +21,6 @@ import {
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
-
 import { DevicesView } from './DevicesView';
 
 const CAPABLE: CapabilityProbe = {
@@ -45,6 +44,8 @@ afterEach(() => {
   mounted = undefined;
   vi.useRealTimers();
   Reflect.deleteProperty(window.navigator, 'getGamepads');
+  Reflect.deleteProperty(globalThis, 'Capacitor');
+  Reflect.deleteProperty(window, FORWARDED_BUTTON_GLOBAL);
 });
 
 /** A pad as the platform lists it. */
@@ -282,5 +283,17 @@ describe('the Controllers section on the Devices screen — #2358', () => {
     frames(1);
     expect(rows()).toEqual(['Xbox Wireless Controller / Connected']);
     expect(readout()).toBe('Last moved: Right face button.');
+  });
+
+  it.each([
+    ['android', true],
+    ['ios', false],
+  ])('the %s app offers the shell button hook: %s (#1755)', async (platform, offered) => {
+    Object.defineProperty(globalThis, 'Capacitor', {
+      configurable: true,
+      value: { isNativePlatform: () => true, getPlatform: () => platform },
+    });
+    await browserScreen();
+    expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL) !== undefined).toBe(offered);
   });
 });
