@@ -25196,9 +25196,14 @@ export class MappedBuildingBelt {
       return false;
     }
     this.#wrapsAt = { x: view.x, z: view.z };
+    // ⚠️ No closure in this method: one that captured a local would have the engine
+    // allocate a context on EVERY call, refill or not (`mapped-blobs.test.ts` §"allocates
+    // nothing … on a frame that is not a refill" measured 41 bytes a frame).
     const now = nearWraps(this.buildings, view.x, view.z, view.ahead);
     const were = this.#wraps;
-    return now.length !== were.length || now.some((plan, at) => plan !== were[at]);
+    if (now.length !== were.length) return true;
+    for (let at = 0; at < now.length; at += 1) if (now[at] !== were[at]) return true;
+    return false;
   }
 
   /** The rung changed: the next frame refills, whatever its chunk. */
