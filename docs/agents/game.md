@@ -1898,10 +1898,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         roads, so a car does not come and go with them.
                         `scene.ts` asks about the road 40 m ahead of the
                         rider, and again only when that enters another 16 m
-                        cell; ≤ `PARKED_CARS_MAX` (36) nearest first, the
-                        nearest ≤ `PARKED_CARS_NEAR_MAX` (12) within 60 m
-                        with their wheels, the rest the body alone, out to
-                        150 m. Drawn by `three-renderer.ts`
+                        cell; ≤ `PARKED_CARS_MAX` (36) nearest first, out to
+                        150 m. ⚠️ **Wheels go by the RIDER's place, not the
+                        cell's** (`parkedCarsSeenFrom`, asked every frame, a
+                        distance a car): the ≤ `PARKED_CARS_NEAR_MAX` (12)
+                        nearest the rider within 60 m, the rest the body
+                        alone — by the cell, 40 m up the road, the car beside
+                        the rider stood on empty arches on a dense street. It
+                        hands back the same list until a level changes.
+                        Drawn by `three-renderer.ts`
                         §`ParkedCarBelt`: ONE merged mesh and one call of its
                         own, each car its OWN body's triangles (never the
                         Delivery roster, where every instance submits every

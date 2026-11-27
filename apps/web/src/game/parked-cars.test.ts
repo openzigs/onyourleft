@@ -45,6 +45,7 @@ import {
   parkedCarCorners,
   parkedCarPaint,
   parkedCarsAt,
+  parkedCarsSeenFrom,
   parkedCarToSegment,
   type ParkedCar,
   type ParkedCarPlot,
@@ -334,6 +335,58 @@ describe('a street of ten houses with driveways — #3278', () => {
     expect(ridesWithACarOn(plot, { plots: [plot, besideTheCar(0.4)] })).toBeGreaterThan(10);
   });
 
+  it('keeps a car off the near end of a long building whose middle is far off, whatever reach is said for it', () => {
+    const plot = house(100, 14);
+    const bay = 100 - 4.5;
+    /** A block 60 m long beside the driveway, its end wall `gap` metres off the car's side. */
+    const block = (gap: number): ParkedCarPlot => {
+      const from = bay + PARKED_CAR_BOX.halfWidth + gap;
+      return {
+        centroid: { x: 10.5, z: from + 30 },
+        footprint: Float32Array.of(9, from, 12, from, 12, from + 60, 9, from + 60),
+        garage: false,
+        driveway: new Float32Array(0),
+        apron: new Float32Array(0),
+      };
+    };
+    // Its reach as `mapped-buildings.ts` says it: its farthest corner from its middle.
+    const said = { radii: [16, Math.hypot(1.5, 30)] };
+    expect(ridesWithACarOn(plot, { plots: [plot, block(0.2)], ...said })).toBe(0);
+    // With no reach said for it, it is still a wall.
+    expect(ridesWithACarOn(plot, { plots: [plot, block(0.2)], radii: [16] })).toBe(0);
+    // THE CONTROL: the same block a hand further off.
+    expect(ridesWithACarOn(plot, { plots: [plot, block(0.4)], ...said })).toBeGreaterThan(10);
+  });
+
+  it('measures a line passing a corner of a car’s box from that corner, whichever of the four', () => {
+    // Nose along +z: the box is its half-width either way in x and its half-length in z.
+    const car = { x: 3, z: 40, heading: 0 };
+    const { halfLength, halfWidth } = PARKED_CAR_BOX;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const cornerX = car.x + sx * halfWidth;
+        const cornerZ = car.z + sz * halfLength;
+        // A line across the corner's diagonal, a metre out from it and 5 m either way.
+        const out = Math.SQRT1_2;
+        const ax = cornerX + sx * out + sx * out * 5;
+        const az = cornerZ + sz * out - sz * out * 5;
+        const bx = cornerX + sx * out - sx * out * 5;
+        const bz = cornerZ + sz * out + sz * out * 5;
+        expect(parkedCarToSegment(car, ax, az, bx, bz)).toBeCloseTo(1, 9);
+        // And one through the corner touches it.
+        expect(
+          parkedCarToSegment(
+            car,
+            cornerX + sx * 2,
+            cornerZ - sz * 2,
+            cornerX - sx * 2,
+            cornerZ + sz * 2,
+          ),
+        ).toBe(0);
+      }
+    }
+  });
+
   it('has none where another stretch of the ridden road passes the driveway', () => {
     // A hairpin's other leg 8 m out, along the road: across the driveway's
     // middle, where the first leg's own carriageway is well clear of the car.
@@ -536,6 +589,53 @@ describe('how many cars a frame carries, and at which level — #3278', () => {
       }
       expect(Math.max(...off)).toBeLessThanOrEqual(PARKED_CAR_FAR_METRES);
     }
+  });
+
+  it('gives the wheels to the cars nearest the place they are seen from, not the cell asked about', () => {
+    for (const seed of SEEDS.slice(0, 10)) {
+      const planned = parkedCarsAt(site(seed, { plots: DENSE }), 0, 245);
+      // The rider, 40 m back down the road from the place the cars were chosen about.
+      const [riderX, riderZ] = [0, 205];
+      const off = (car: ParkedCar): number => Math.hypot(car.x - riderX, car.z - riderZ);
+      const byRider = [...planned.cars].sort((a, b) => off(a) - off(b));
+      // As planned, the car beside the rider is one of those left without wheels.
+      expect(byRider[0]?.level).toBe('far');
+      const seen = parkedCarsSeenFrom(planned, riderX, riderZ);
+      // The same cars in the same order, their levels apart.
+      expect(seen.cars.map((car) => ({ ...car, level: 'far' }))).toEqual(
+        planned.cars.map((car) => ({ ...car, level: 'far' })),
+      );
+      const near = seen.cars.filter((car) => car.level === 'near');
+      expect(near).toHaveLength(PARKED_CARS_NEAR_MAX);
+      expect([...near].sort((a, b) => off(a) - off(b))).toEqual(
+        byRider.slice(0, PARKED_CARS_NEAR_MAX).map((car) => ({ ...car, level: 'near' })),
+      );
+      expect(near).toContainEqual({ ...byRider[0], level: 'near' });
+      // Asked again from the same place, or one that changes no level, it is the very same list.
+      expect(parkedCarsSeenFrom(seen, riderX, riderZ)).toBe(seen);
+      expect(parkedCarsSeenFrom(seen, riderX + 0.01, riderZ)).toBe(seen);
+      // A car that keeps its level is the very same car.
+      const kept = seen.cars.filter((car) => planned.cars.includes(car));
+      expect(kept.length).toBeGreaterThan(0);
+      expect(kept.length).toBeLessThan(seen.cars.length);
+    }
+  });
+
+  it('gives no car its wheels beyond the near band of the place they are seen from, and answers an empty list itself', () => {
+    const planned = parkedCarsAt(site(SEEDS[0] as number, { plots: DENSE }), 0, 245);
+    const seen = parkedCarsSeenFrom(planned, 0, 245 - PARKED_CAR_NEAR_METRES);
+    const near = seen.cars.filter((car) => car.level === 'near');
+    expect(near.length).toBeGreaterThan(0);
+    for (const car of near) {
+      expect(Math.hypot(car.x, car.z - (245 - PARKED_CAR_NEAR_METRES))).toBeLessThanOrEqual(
+        PARKED_CAR_NEAR_METRES,
+      );
+    }
+    // From far off, none has: every car is the body alone.
+    const from = parkedCarsSeenFrom(planned, 0, 5_000);
+    expect(from.cars).toHaveLength(planned.cars.length);
+    expect(from.cars.every((car) => car.level === 'far')).toBe(true);
+    expect(parkedCarsSeenFrom(NO_PARKED_CARS, 0, 0)).toBe(NO_PARKED_CARS);
   });
 
   it('draws a car beyond the near band without its wheels, and none beyond the far one', () => {

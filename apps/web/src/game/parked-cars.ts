@@ -98,10 +98,20 @@
  * the place asked about enters (`scene.ts` asks about the road
  * {@link PARKED_CAR_AHEAD_METRES} ahead of the rider, and keeps the last
  * answer), never per frame. It
- * names the {@link PARKED_CARS_MAX} cars nearest the cell's middle, the
- * nearest {@link PARKED_CARS_NEAR_MAX} of those within
- * {@link PARKED_CAR_NEAR_METRES} at the `near` level — the body and its four
- * wheels — and the rest at `far`, the body alone. `three-renderer.ts`
+ * names the {@link PARKED_CARS_MAX} cars nearest the cell's middle. Of
+ * those, the {@link PARKED_CARS_NEAR_MAX} nearest THE RIDER and within
+ * {@link PARKED_CAR_NEAR_METRES} of them are at the `near` level — the body
+ * and its four wheels — and the rest at `far`, the body alone
+ * ({@link parkedCarsSeenFrom}, which `scene.ts` asks every frame and which
+ * costs a distance a car: it hands back the list it was handed until a car's
+ * level changes). The rider's place and not the cell's: the cell is 40 m up
+ * the road, so on a street with more cars than the near cap the wheels went
+ * to the cars up there and the one beside the rider stood on empty arches.
+ * A plan tests a car against a footprint only where the plot's reach about
+ * its centroid ({@link ParkedCarSite.radii}) says the two can meet, and its
+ * box test makes no list: on the page's `town=streets` (624 plots) that took
+ * an ask from 7.8 ms to 0.7 ms on a desktop.
+ * `three-renderer.ts`
  * §`ParkedCarBelt` draws them in ONE call of its own, each car submitting its
  * own body's triangles and no other's, inside `realistic-budget.ts`
  * §`REALISTIC_PARKED_CAR_TRIANGLES`.
@@ -193,12 +203,15 @@ export const PARKED_CAR_NOSE_IN_SHARE = 0.65;
 /**
  * How far ahead of the rider along the road the place the cars are chosen
  * about is, in metres: **40** — so the reach is spent on what is in front of
- * the camera: from 110 m behind the rider to 190 m ahead, with their wheels
- * from 20 m behind to 100 m ahead.
+ * the camera: from 110 m behind the rider to 190 m ahead. Their wheels are
+ * another matter, and go by the rider's own place ({@link parkedCarsSeenFrom}).
  */
 export const PARKED_CAR_AHEAD_METRES = 40;
 
-/** Within this of the cell asked about a car is drawn with its wheels, in metres: **60**. */
+/**
+ * Within this of the place the cars are seen from — the rider's — a car is
+ * drawn with its wheels, in metres: **60**. @see parkedCarsSeenFrom
+ */
 export const PARKED_CAR_NEAR_METRES = 60;
 
 /**
@@ -208,7 +221,7 @@ export const PARKED_CAR_NEAR_METRES = 60;
  */
 export const PARKED_CAR_FAR_METRES = 150;
 
-/** The most cars a frame draws with their wheels: **12**. */
+/** The most cars a frame draws with their wheels, the nearest the rider first: **12**. */
 export const PARKED_CARS_NEAR_MAX = 12;
 
 /** The most cars a frame draws, at either level: **36**. */
@@ -521,12 +534,17 @@ function boxToSegment(car: Candidate, ax: number, az: number, bx: number, bz: nu
   const d0 = b0 - a0;
   const d1 = b1 - a1;
   let crosses = true;
-  for (const [p, q] of [
-    [-d0, a0 + halfLength],
-    [d0, halfLength - a0],
-    [-d1, a1 + halfWidth],
-    [d1, halfWidth - a1],
-  ] as const) {
+  // Its four sides in turn, with no list of them made: this is asked thousands of times a plan.
+  for (let side = 0; side < 4; side += 1) {
+    const p = side === 0 ? -d0 : side === 1 ? d0 : side === 2 ? -d1 : d1;
+    const q =
+      side === 0
+        ? a0 + halfLength
+        : side === 1
+          ? halfLength - a0
+          : side === 2
+            ? a1 + halfWidth
+            : halfWidth - a1;
     if (p === 0) {
       if (q < 0) crosses = false;
     } else if (p < 0) {
@@ -537,16 +555,14 @@ function boxToSegment(car: Candidate, ax: number, az: number, bx: number, bz: nu
   }
   if (crosses && from <= to) return 0;
   // Apart: the nearest of an end of the segment to the rectangle, and a corner to the segment.
-  const toRectangle = (p0: number, p1: number): number =>
-    Math.hypot(Math.max(Math.abs(p0) - halfLength, 0), Math.max(Math.abs(p1) - halfWidth, 0));
-  let nearest = Math.min(toRectangle(a0, a1), toRectangle(b0, b1));
+  let nearest = Math.min(
+    Math.hypot(Math.max(Math.abs(a0) - halfLength, 0), Math.max(Math.abs(a1) - halfWidth, 0)),
+    Math.hypot(Math.max(Math.abs(b0) - halfLength, 0), Math.max(Math.abs(b1) - halfWidth, 0)),
+  );
   const span = d0 * d0 + d1 * d1;
-  for (const [c0, c1] of [
-    [halfLength, halfWidth],
-    [halfLength, -halfWidth],
-    [-halfLength, halfWidth],
-    [-halfLength, -halfWidth],
-  ] as const) {
+  for (let corner = 0; corner < 4; corner += 1) {
+    const c0 = corner < 2 ? halfLength : -halfLength;
+    const c1 = corner % 2 === 0 ? halfWidth : -halfWidth;
     const t = span > 0 ? Math.min(1, Math.max(0, ((c0 - a0) * d0 + (c1 - a1) * d1) / span)) : 0;
     nearest = Math.min(nearest, Math.hypot(c0 - a0 - d0 * t, c1 - a1 - d1 * t));
   }
@@ -717,6 +733,8 @@ function gapToBox(
 /** What is near enough to the place asked about to stand in a car's way there. */
 interface Near {
   readonly plots: readonly ParkedCarPlot[];
+  /** Each of `plots`' reach about its centroid ({@link ParkedCarSite.radii}), in their order. */
+  readonly radii: readonly number[];
   readonly streets: readonly StreetFeature[];
   readonly paths: readonly PathFeature[];
 }
@@ -736,9 +754,14 @@ function standsClear(car: Candidate, site: ParkedCarSite, near: Near): boolean {
   }
   // Off every footprint.
   let housed = false;
-  for (const plot of near.plots) {
+  for (let at = 0; at < near.plots.length; at += 1) {
+    const plot = near.plots[at] as ParkedCarPlot;
     const off = Math.hypot(plot.centroid.x - car.x, plot.centroid.z - car.z);
     if (off <= PARKED_CAR_KERB_HOUSE_METRES) housed = true;
+    // A footprint lies within its plot's reach of its centroid: a car further
+    // off than that, its own reach and the wall's hand cannot meet it. Most
+    // plots within 150 m of a car are, and each was a walk round its outline.
+    if (off > (near.radii[at] as number) + reach + PARKED_CAR_WALL_METRES) continue;
     if (boxMeetsRing(car, plot.footprint, PARKED_CAR_WALL_METRES)) return false;
   }
   // A kerb car only on a street with a building on it: a lane through fields has none.
@@ -804,7 +827,9 @@ const PITCH_SPAN_METRES = 2.6;
  * within {@link PARKED_CAR_FAR_METRES} of the middle of the
  * {@link PARKED_CAR_CELL_METRES} cell `(x, z)` is in, the nearest
  * {@link PARKED_CARS_MAX} of them, nearest first. The same answer for every
- * place in a cell. @see the header
+ * place in a cell, each car at the level it is seen at from the cell's
+ * middle: {@link parkedCarsSeenFrom} says it again for where the rider is.
+ * @see the header
  */
 export function parkedCarsAt(site: ParkedCarSite, x: number, z: number): ParkedCarsInView {
   if (site.plots.length === 0 && site.pieces.length === 0) return NO_PARKED_CARS;
@@ -814,9 +839,14 @@ export function parkedCarsAt(site: ParkedCarSite, x: number, z: number): ParkedC
   const gather = PARKED_CAR_FAR_METRES + PARKED_CAR_NEIGHBOUR_METRES;
   // What is near enough to hold a car in reach, or to stand in the way of one.
   const plots: ParkedCarPlot[] = [];
+  const radii: number[] = [];
   site.plots.forEach((plot, index) => {
     const reach = gather + (site.radii[index] ?? 0) + PARKED_CAR_KERB_HOUSE_METRES;
-    if (Math.hypot(plot.centroid.x - cx, plot.centroid.z - cz) <= reach) plots.push(plot);
+    if (Math.hypot(plot.centroid.x - cx, plot.centroid.z - cz) <= reach) {
+      plots.push(plot);
+      // A plot with no reach said is tested against every car, as before.
+      radii.push(site.radii[index] ?? Number.POSITIVE_INFINITY);
+    }
   });
   const pieces = site.pieces.filter(
     (piece) => gapToBox(piece, cx, cz) <= gather + PARKED_CAR_NEIGHBOUR_METRES,
@@ -833,7 +863,7 @@ export function parkedCarsAt(site: ParkedCarSite, x: number, z: number): ParkedC
       street.grade === 'ground' &&
       gapToBox(boxOfLine(street.line), cx, cz) <= gather + 2 * PARKED_CAR_NEIGHBOUR_METRES,
   );
-  const near: Near = { plots, streets, paths };
+  const near: Near = { plots, radii, streets, paths };
   const candidates: Candidate[] = [];
   for (const plot of plots) {
     for (const car of candidatesOfPlot(plot, site.seed)) {
@@ -883,10 +913,7 @@ export function parkedCarsAt(site: ParkedCarSite, x: number, z: number): ParkedC
   const off = (car: Candidate): number => Math.hypot(car.x - cx, car.z - cz);
   kept.sort((a, b) => off(a.car) - off(b.car) || (keptBefore(a.car, b.car) ? -1 : 1));
   const cars: ParkedCar[] = [];
-  let nearDrawn = 0;
   for (const { car, y, pitch } of kept.slice(0, PARKED_CARS_MAX)) {
-    const near = off(car) <= PARKED_CAR_NEAR_METRES && nearDrawn < PARKED_CARS_NEAR_MAX;
-    if (near) nearDrawn += 1;
     cars.push({
       x: car.x,
       y,
@@ -894,11 +921,62 @@ export function parkedCarsAt(site: ParkedCarSite, x: number, z: number): ParkedC
       heading: Math.atan2(car.ux, car.uz),
       pitch,
       spot: car.spot,
-      level: near ? 'near' : 'far',
+      level: 'far',
       look: car.look,
     });
   }
-  return { cars };
+  // Seen from the cell's own middle until the caller says where the rider is.
+  return parkedCarsSeenFrom({ cars }, cx, cz);
+}
+
+/** How far each car of the list being levelled is from where it is seen from. @see parkedCarsSeenFrom */
+let seenOff = new Float64Array(PARKED_CARS_MAX);
+
+/**
+ * The same cars, each at the level it is seen at from `(x, z)` — #3278: the
+ * {@link PARKED_CARS_NEAR_MAX} nearest `(x, z)` that are within
+ * {@link PARKED_CAR_NEAR_METRES} of it are `near`, the body and its wheels,
+ * and every other is `far`, the body alone. Of two as near, the one earlier
+ * in the list. Nothing else of a car changes, and neither does the order.
+ *
+ * `scene.ts` asks it every frame with the rider's place on the road, so the
+ * car beside the rider has its wheels however many stand up the road. It
+ * answers `view` ITSELF where no car's level changes, so a frame whose cars
+ * are the last frame's hands the belt the same list and it rebuilds nothing;
+ * and it allocates nothing on that path.
+ */
+export function parkedCarsSeenFrom(view: ParkedCarsInView, x: number, z: number): ParkedCarsInView {
+  const cars = view.cars;
+  const count = cars.length;
+  if (count === 0) return view;
+  if (seenOff.length < count) seenOff = new Float64Array(count);
+  const off = seenOff;
+  for (let at = 0; at < count; at += 1) {
+    const car = cars[at] as ParkedCar;
+    off[at] = Math.hypot(car.x - x, car.z - z);
+  }
+  /** Whether the car at `at` is one of the nearest, within the near band. */
+  const near = (at: number): boolean => {
+    const own = off[at] as number;
+    if (!(own <= PARKED_CAR_NEAR_METRES)) return false;
+    let nearer = 0;
+    for (let other = 0; other < count; other += 1) {
+      const theirs = off[other] as number;
+      if (theirs < own || (theirs === own && other < at)) nearer += 1;
+    }
+    return nearer < PARKED_CARS_NEAR_MAX;
+  };
+  let changed = false;
+  for (let at = 0; at < count && !changed; at += 1) {
+    changed = ((cars[at] as ParkedCar).level === 'near') !== near(at);
+  }
+  if (!changed) return view;
+  return {
+    cars: cars.map((car, at) => {
+      const level: ParkedCarLevel = near(at) ? 'near' : 'far';
+      return car.level === level ? car : { ...car, level };
+    }),
+  };
 }
 
 /**

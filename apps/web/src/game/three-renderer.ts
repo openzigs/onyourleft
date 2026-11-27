@@ -17941,8 +17941,11 @@ export interface ParkedCarStats {
  * does not move, so its place, heading, pitch and paint are baked into the
  * mesh's corners and nothing is uploaded on a frame whose cars are the last
  * frame's — `scene.ts` hands the same list until the road ahead of the
- * rider enters another cell (`parked-cars.ts` §`PARKED_CAR_CELL_METRES`), so
- * the mesh is rebuilt about once every 16 m ridden and never per frame.
+ * rider enters another cell (`parked-cars.ts` §`PARKED_CAR_CELL_METRES`) or a
+ * car gains or loses its wheels as the rider nears or passes it
+ * (§`parkedCarsSeenFrom`), so the mesh is rebuilt once every few metres
+ * ridden along a street of cars — every 5.4 m on the page's `town=streets`,
+ * 0.7 ms a rebuild at the caps on a desktop — and never per frame.
  *
  * The view builds it on the first realistic frame that carries a car, so
  * every other frame — a ride with no corridor, the owner's village and wooded

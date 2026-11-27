@@ -58,11 +58,17 @@ import {
   mappedBuildingsOf,
   onMappedGround,
 } from '../../src/game/mapped-buildings';
+import {
+  PARKED_CAR_NEAR_METRES,
+  PARKED_CARS_NEAR_MAX,
+  type ParkedCar,
+} from '../../src/game/parked-cars';
 import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 import type { ScatterItem } from '../../src/game/scatter';
 import { sideRoadNaturalMargin } from '../../src/game/scene';
 import { SETTLEMENT_CLEARED_KINDS } from '../../src/game/settlements';
+import { drawnRoadPosition } from '../../src/game/terrain';
 
 import { parseConfig } from './config';
 import { rideFrame } from './frame';
@@ -723,6 +729,49 @@ describe('the realistic page’s `parked-cars` lever — #3278', () => {
     expect(carsAt('?town=streets&levers=-parked-cars', 1_100)).toBeUndefined();
     // A Delivery round's parked cars are its own: the page asks for none of these.
     expect(carsAt('?town=streets&delivery=3', 1_100)).toBeUndefined();
+  });
+});
+
+describe('which parked cars of the page’s commercial street have their wheels — #3278', () => {
+  const street = commercialStreetFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+
+  it('gives them to the cars nearest the rider, on every frame of the street — the one beside the rider first', () => {
+    const { land, plans, urban } = plannedTown(street, []);
+    const town = {
+      corridor: street.corridor,
+      land,
+      buildings: mappedBuildingsOf(plans),
+      lots: mappedTown(street.corridor, plans, urban),
+    };
+    /** How many frames carried more cars in the near band than may have wheels: the cap at work. */
+    let capped = 0;
+    // The page's own street, 900 m to 2 700 m, as its ride takes it: 2 m a frame.
+    for (let distance = 900; distance <= 2_700; distance += 2) {
+      const cars =
+        rideFrame({
+          profile: street.profile,
+          origin: street.origin,
+          distance,
+          elapsed: 1,
+          rung: top,
+          peopleOff: true,
+          town,
+        }).parkedCars?.cars ?? [];
+      const rider = drawnRoadPosition(street.profile, street.origin, distance);
+      const off = (car: ParkedCar): number => Math.hypot(car.x - rider.x, car.z - rider.z);
+      const inBand = cars.filter((car) => off(car) <= PARKED_CAR_NEAR_METRES);
+      const near = cars.filter((car) => car.level === 'near');
+      if (inBand.length > PARKED_CARS_NEAR_MAX) capped += 1;
+      // As many with wheels as the cap and the band allow, and none outside the band.
+      expect(near).toHaveLength(Math.min(inBand.length, PARKED_CARS_NEAR_MAX));
+      for (const car of near) expect(inBand).toContain(car);
+      // No car left on empty arches is nearer the rider than one with its wheels.
+      const nearestBare = Math.min(...cars.filter((car) => car.level === 'far').map(off));
+      for (const car of near) expect(off(car)).toBeLessThanOrEqual(nearestBare);
+    }
+    // The street has stretches with more cars about the rider than the cap: what the rule is for.
+    expect(capped).toBeGreaterThan(0);
   });
 });
 

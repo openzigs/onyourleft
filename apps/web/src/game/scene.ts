@@ -197,6 +197,7 @@ import {
   PARKED_CAR_AHEAD_METRES,
   PARKED_CAR_CELL_METRES,
   parkedCarsAt,
+  parkedCarsSeenFrom,
   type ParkedCarsInView,
 } from './parked-cars';
 import { laidAlongTheGround } from './park-fields';
@@ -1331,8 +1332,16 @@ let lastParked:
  * nothing. Asked again only when that place enters another
  * {@link PARKED_CAR_CELL_METRES} cell, or the road, the corridor, the
  * buildings or the streets read are not the ones it was last asked with;
- * every frame between hands the view the same object, so its belt rebuilds
- * nothing. @see SceneFrame.parkedCars
+ * every frame between is the last answer.
+ *
+ * WHICH of them have their wheels is said every frame, about the rider's own
+ * place on the road (`parked-cars.ts` §`parkedCarsSeenFrom`): the place asked
+ * about is 40 m up the road, and on a street with more cars than the near
+ * cap the wheels went to the cars up there and not to the one beside the
+ * rider. That is a distance a car and no planning; it hands back the list it
+ * was handed until a car's level changes, so every frame between hands the
+ * view the same object and its belt rebuilds nothing.
+ * @see SceneFrame.parkedCars
  */
 function parkedCars(
   input: SceneInput,
@@ -1350,6 +1359,8 @@ function parkedCars(
   );
   const cellX = Math.floor(about.x / PARKED_CAR_CELL_METRES);
   const cellZ = Math.floor(about.z / PARKED_CAR_CELL_METRES);
+  // The rider's place on the road, and not the camera's: a lane change moves no wheel.
+  const rider = drawnRoadPosition(input.profile, input.origin, riderDistance);
   const last = lastParked;
   if (
     last !== undefined &&
@@ -1361,12 +1372,14 @@ function parkedCars(
     last.cellX === cellX &&
     last.cellZ === cellZ
   ) {
-    return last.view;
+    const seen = parkedCarsSeenFrom(last.view, rider.x, rider.z);
+    if (seen !== last.view) lastParked = { ...last, view: seen };
+    return seen;
   }
   const { profile, origin } = input;
   const land = input.landClass ?? NO_LAND_CLASS;
   const ground = routeGround(profile, origin, seed, land);
-  const view = parkedCarsAt(
+  const planned = parkedCarsAt(
     {
       seed,
       plots: buildings?.plans ?? [],
@@ -1388,6 +1401,7 @@ function parkedCars(
     about.x,
     about.z,
   );
+  const view = parkedCarsSeenFrom(planned, rider.x, rider.z);
   lastParked = { profile, corridor, buildings, streets, seed, cellX, cellZ, view };
   return view;
 }
