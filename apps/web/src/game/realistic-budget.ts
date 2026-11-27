@@ -1170,6 +1170,68 @@ export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
 export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
+ * The most triangles a frame's parked cars may add — #3278: **13 440**, in
+ * ONE draw call of their own ({@link REALISTIC_PARKED_CAR_DRAW_CALLS}).
+ *
+ * | | triangles |
+ * |---|--:|
+ * | Near: `parked-cars.ts` §`PARKED_CARS_NEAR_MAX` cars, each the heaviest body with its four wheels (the hatchback's 336 and 4 × 28) | 12 × 448 = 5 376 |
+ * | Far: the rest of §`PARKED_CARS_MAX`, each the heaviest body alone | 24 × 336 = 8 064 |
+ *
+ * ⚠️ **A hard bound, not an estimate**: `three-renderer.ts` §`ParkedCarBelt`
+ * draws no more cars than that, and each car submits its OWN body's triangles
+ * at its own level and no other's. That is the difference from a Delivery
+ * round's cars, where every obstacle instance submits the whole roster
+ * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 640 an
+ * instance): 36 cars there would be 59 040. A street's cars are mostly the
+ * lighter saloon (200 and 312), so a real frame is well under this.
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, by that constant's own
+ * rule: the cars are the realistic world's alone. `realistic-budget.test.ts`
+ * adds this to the worst frame the caps allow — with a room's remote riders,
+ * a full belt of park pieces and a holiday's decorations all in it at once —
+ * and holds the sum; no ceiling above was raised to make the room. No file
+ * and no texture: the bodies and the atlas are the committed
+ * `realistic-assets.ts` §`REALISTIC_DELIVERY_CAR` and
+ * §`REALISTIC_DELIVERY_CAR_ATLAS`, loaded since #2847, so the set's bytes do
+ * not change.
+ *
+ * ⚠️ **Never on a Delivery frame**: a round's frame carries no parked car of
+ * these (`scene.ts` §`SceneInput.parkedCars`), so
+ * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES} does not hold them. The tablet's
+ * reading is the owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, priced
+ * off the committed file) and `parked-car-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARKED_CAR_TRIANGLES = 13_440;
+
+/**
+ * The draw calls a frame's parked cars may add — #3278: **1**, one merged
+ * mesh however many cars and whichever bodies (`three-renderer.ts`
+ * §`ParkedCarBelt`), and none on a frame that carries no car.
+ *
+ * ⚠️ **Not a call on the frozen village frame.** A procedural village has no
+ * mapped driveway, apron or side street, so it has no parked car
+ * (`parked-cars.ts`' header says why none stands at its kerb), the belt is
+ * never built there, and {@link REALISTIC_VILLAGE_DRAW_CALLS} stays exactly
+ * 50 — `realistic-town.browser.spec.ts` §"#1689" still holds it to that,
+ * measured at 50 with this belt in the build. The call is spent on mapped
+ * land, which no frozen ceiling holds: measured in the pinned Chromium on
+ * 2026-11-26, each frame one call and exactly the belt's triangles over the
+ * same frame with `levers=-parked-cars` — a street of houses 43 → 44 calls
+ * (7 cars, 2 522 triangles), a main street of shops 38 → 39 (33 cars,
+ * 10 836). A city centre, whose pavements run to its building line, has no
+ * car, and its frame is the 22 calls `realistic-mapped.browser.spec.ts`
+ * holds inside {@link REALISTIC_WOODED_DRAW_CALLS}.
+ *
+ * @test-facing held by `parked-car-belt.test.ts`, which counts the meshes the
+ * belt adds to a scene; nothing in the product applies a draw-call ceiling at
+ * run time
+ */
+export const REALISTIC_PARKED_CAR_DRAW_CALLS = 1;
+
+/**
  * The most triangles a frame's village streets may add — #1535's pavements,
  * #1564's paths to the front doors and #1536's street furniture: **34 304**
  * in the realistic world since the owner's ruling of 2026-11-05 on #1274

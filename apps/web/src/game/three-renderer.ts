@@ -623,6 +623,15 @@ import {
   type ParkPiece,
 } from './park-dressing';
 import {
+  PARKED_CARS_MAX,
+  PARKED_CARS_NEAR_MAX,
+  parkedCarBody,
+  parkedCarPaint as parkedCarPaintOf,
+  type ParkedCar,
+  type ParkedCarLevel,
+  type ParkedCarsInView,
+} from './parked-cars';
+import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
   gateLogoPlaces,
@@ -17909,6 +17918,277 @@ export const PARK_DRESSING_TRIANGLES = PARK_DRESSING_CAPACITY * PARK_PIECE_TRIAN
  */
 export const PARK_FIELD_TRIANGLES = PARK_FIELD_CAPACITY * PARK_PIECE_TRIANGLES;
 
+/** The parts of a body a parked car is drawn with at each level — #3278: its body and wheels, or its body alone. */
+const PARKED_CAR_ROLES: Readonly<Record<ParkedCarLevel, readonly DeliveryCarRole[]>> = {
+  near: ['body', 'front-wheel', 'back-wheel'],
+  far: ['body'],
+};
+
+/** One body of the cars at one level, in the car's own frame: its triangles, unindexed. */
+interface ParkedCarShape {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  /** Each corner's own colour, linear RGB, before its car's paint. */
+  readonly colour: Float32Array;
+  /** Each corner's coordinate in the cars' atlas. */
+  readonly uv: Float32Array;
+  readonly triangles: number;
+}
+
+/** `body` of `car` at `level`: the parts {@link PARKED_CAR_ROLES} names, end to end. */
+function parkedCarShapeOf(
+  car: DeliveryCarGeometry,
+  body: number,
+  level: ParkedCarLevel,
+): ParkedCarShape {
+  const parts = car.parts.filter(
+    (part) => part.body === body && PARKED_CAR_ROLES[level].includes(part.role),
+  );
+  const corners = parts.reduce((sum, part) => sum + part.position.length / 3, 0);
+  const shape = {
+    position: new Float32Array(corners * 3),
+    normal: new Float32Array(corners * 3),
+    colour: new Float32Array(corners * 3),
+    uv: new Float32Array(corners * 2),
+    triangles: corners / 3,
+  };
+  let at = 0;
+  for (const part of parts) {
+    shape.position.set(part.position, at * 3);
+    shape.normal.set(part.normal, at * 3);
+    shape.colour.set(part.colour, at * 3);
+    shape.uv.set(part.uv, at * 2);
+    at += part.position.length / 3;
+  }
+  return shape;
+}
+
+/**
+ * The most triangles the parked cars of a frame can be, of `car`'s bodies —
+ * #3278: `parked-cars.ts` §`PARKED_CARS_NEAR_MAX` cars each the heaviest body
+ * with its wheels, and the rest of §`PARKED_CARS_MAX` each the heaviest body
+ * alone. A hard bound: the belt draws no more cars, and each submits its own
+ * body's triangles and no other's.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES`
+ * by `parked-car-belt.test.ts`, on the committed cars
+ */
+export function parkedCarWorstTriangles(car: DeliveryCarGeometry): number {
+  const heaviest = (level: ParkedCarLevel): number =>
+    Math.max(...car.bodies.map((_, body) => parkedCarShapeOf(car, body, level).triangles));
+  return (
+    PARKED_CARS_NEAR_MAX * heaviest('near') +
+    (PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX) * heaviest('far')
+  );
+}
+
+/**
+ * Where a parked car's paint shows — #3278, in place of three's
+ * `color_fragment`: the corner's colour where the atlas's texel says paint
+ * (alpha 1), and nothing where it does not, as a Delivery car's
+ * ({@link withDeliveryCarPose}). Exported for `parked-car-belt.test.ts`,
+ * which holds the material's program to it.
+ */
+export const PARKED_CAR_PAINT_GLSL =
+  '\tdiffuseColor.rgb *= mix( vec3( 1.0 ), vColor.rgb, oylAtlas.a );';
+
+/**
+ * The parked cars' material — #3278: physically based and in the realistic
+ * air, wearing the cars' one atlas where one is handed, read as a Delivery
+ * car's is ({@link DELIVERY_CAR_ATLAS_GLSL}): a texel of a body's paint is the
+ * corner's colour — its car's paint, baked into the mesh — times its grey, and
+ * any other texel is the pack's own colour whatever the paint.
+ */
+function parkedCarMaterial(atlas: Texture | undefined): Material {
+  const material = withAtmosphere(
+    constructed(
+      new MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.8,
+        metalness: 0,
+        vertexColors: true,
+        ...(atlas === undefined ? {} : { map: atlas }),
+      }),
+    ),
+  );
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#3278's parked cars' paint";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <map_fragment>',
+        DELIVERY_CAR_ATLAS_GLSL,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      PARKED_CAR_PAINT_GLSL,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-parked-car`;
+  return material;
+}
+
+/** What the parked cars' belt drew on its last frame — #3278. */
+export interface ParkedCarStats {
+  readonly cars: number;
+  /** How many of them with their wheels. */
+  readonly near: number;
+  readonly triangles: number;
+  /** How many times the one mesh has been rebuilt. */
+  readonly rebuilds: number;
+}
+
+/**
+ * The parked cars in reach — #3278 (`parked-cars.ts`): **one merged mesh and
+ * ONE draw call of its own**, and none on a frame that carries no car. Each
+ * car submits its own body's triangles at its own level — the body and its
+ * four wheels near, the body alone far — and no other body's: never the
+ * Delivery obstacles' roster ({@link DELIVERY_REALISTIC_OBSTACLE_TRIANGLES}),
+ * where every instance submits every kind, which is right for a handful of
+ * obstacles and wrong for a street of cars.
+ *
+ * ⚠️ **Merged, not instanced**, for {@link FurnitureBelt}'s reason: an
+ * instanced draw is ONE shape, so three bodies at two levels would be six
+ * calls, or one call in which every instance submits all six shapes; and
+ * three's `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's
+ * page's counter does not see (`browser/realistic/draws.ts`). A parked car
+ * does not move, so its place, heading, pitch and paint are baked into the
+ * mesh's corners and nothing is uploaded on a frame whose cars are the last
+ * frame's — `scene.ts` hands the same list until the road ahead of the
+ * rider enters another cell (`parked-cars.ts` §`PARKED_CAR_CELL_METRES`) or a
+ * car gains or loses its wheels as the rider nears or passes it
+ * (§`parkedCarsSeenFrom`), so the mesh is rebuilt once every few metres
+ * ridden along a street of cars — every 5.4 m on the page's `town=streets`,
+ * 0.7 ms a rebuild at the caps on a desktop — and never per frame.
+ *
+ * The view builds it on the first realistic frame that carries a car, so
+ * every other frame — a ride with no corridor, the owner's village and wooded
+ * holds, a Delivery round — makes no call and submits no triangle for it.
+ * Held to `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES` and
+ * §`REALISTIC_PARKED_CAR_DRAW_CALLS`. No shadow caster, nothing transparent,
+ * no new pass, no texture the frame had not loaded.
+ */
+export class ParkedCarBelt {
+  readonly #mesh: Mesh;
+  readonly #shapes: Readonly<Record<ParkedCarLevel, readonly ParkedCarShape[]>>;
+  readonly #matrix = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #pitch = new Quaternion();
+  readonly #at = new Vector3();
+  readonly #one = new Vector3(1, 1, 1);
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #across = new Vector3(1, 0, 0);
+  readonly #corner = new Vector3();
+  readonly #paint = new Color();
+  #held: readonly ParkedCar[] | undefined;
+  #stats: ParkedCarStats = { cars: 0, near: 0, triangles: 0, rebuilds: 0 };
+
+  constructor(car: DeliveryCarGeometry) {
+    const bodies = car.bodies.map((_, body) => body);
+    this.#shapes = {
+      near: bodies.map((body) => parkedCarShapeOf(car, body, 'near')),
+      far: bodies.map((body) => parkedCarShapeOf(car, body, 'far')),
+    };
+    this.#mesh = new Mesh(new BufferGeometry(), parkedCarMaterial(car.atlas));
+    // Spread along a street: a sphere about them all culls nothing, and it is one call.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** What the last frame drew. @see parkedCarStatsOf */
+  get stats(): ParkedCarStats {
+    return this.#stats;
+  }
+
+  /** This frame's cars: the mesh is rebuilt only when they are not the last frame's; none hides it. */
+  update(view: ParkedCarsInView | undefined): void {
+    const cars = view?.cars ?? NO_CARS;
+    if (cars !== this.#held) {
+      this.#held = cars;
+      this.#rebuild(cars.slice(0, PARKED_CARS_MAX));
+    }
+    this.#mesh.visible = this.#stats.triangles > 0;
+  }
+
+  #rebuild(cars: readonly ParkedCar[]): void {
+    const bodies = this.#shapes.near.length;
+    // No car past the near cap is drawn with its wheels, whatever the list says.
+    let nearLeft = PARKED_CARS_NEAR_MAX;
+    const drawn = cars.map((car) => {
+      const near = car.level === 'near' && nearLeft > 0;
+      if (near) nearLeft -= 1;
+      const shapes = near ? this.#shapes.near : this.#shapes.far;
+      return { car, near, shape: shapes[parkedCarBody(car, bodies)] as ParkedCarShape };
+    });
+    const corners = drawn.reduce((sum, each) => sum + each.shape.triangles * 3, 0);
+    const position = new Float32Array(corners * 3);
+    const normal = new Float32Array(corners * 3);
+    const colour = new Float32Array(corners * 3);
+    const uv = new Float32Array(corners * 2);
+    let at = 0;
+    for (const { car, shape } of drawn) {
+      // Its nose along `(sin heading, cos heading)`, tipped up the ground by its pitch.
+      this.#turn
+        .setFromAxisAngle(this.#up, car.heading)
+        .multiply(this.#pitch.setFromAxisAngle(this.#across, -car.pitch));
+      this.#matrix.compose(this.#at.set(car.x, car.y, car.z), this.#turn, this.#one);
+      this.#paint.set(PARKED_CAR_PAINTS[parkedCarPaintOf(car, PARKED_CAR_PAINTS.length)] as number);
+      for (let corner = 0; corner < shape.triangles * 3; corner += 1) {
+        const to = (at + corner) * 3;
+        this.#corner
+          .fromArray(shape.position, corner * 3)
+          .applyMatrix4(this.#matrix)
+          .toArray(position, to);
+        this.#corner
+          .fromArray(shape.normal, corner * 3)
+          .applyQuaternion(this.#turn)
+          .toArray(normal, to);
+        colour[to] = (shape.colour[corner * 3] as number) * this.#paint.r;
+        colour[to + 1] = (shape.colour[corner * 3 + 1] as number) * this.#paint.g;
+        colour[to + 2] = (shape.colour[corner * 3 + 2] as number) * this.#paint.b;
+      }
+      uv.set(shape.uv, at * 2);
+      at += shape.triangles * 3;
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(position, 3));
+    geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+    geometry.setAttribute('color', new BufferAttribute(colour, 3));
+    geometry.setAttribute('uv', new BufferAttribute(uv, 2));
+    this.#mesh.geometry.dispose();
+    this.#mesh.geometry = geometry;
+    this.#stats = {
+      cars: drawn.length,
+      near: drawn.filter((each) => each.near).length,
+      triangles: corners / 3,
+      rebuilds: this.#stats.rebuilds + 1,
+    };
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
+  }
+}
+
+/** No cars: a frame that carries none. @see ParkedCarBelt.update */
+const NO_CARS: readonly ParkedCar[] = [];
+
 /**
  * The ground's photographic material — #425.
  *
@@ -27663,6 +27943,16 @@ export function villageModelsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * What a view's parked cars' belt drew on its last frame — #3278, for the
+ * browser gate's counts. `undefined` before a realistic frame carried a car.
+ *
+ * @test-facing read by `realistic-harness.ts`; the product reads the stats nowhere
+ */
+export function parkedCarStatsOf(view: GameView): ParkedCarStats | undefined {
+  return view instanceof ThreeGameView ? view.parkedCarStats : undefined;
+}
+
+/**
  * What a view's village models drew on its last frame — #1566, for the
  * browser gate's counts. `undefined` before a realistic frame.
  *
@@ -28422,6 +28712,8 @@ class ThreeGameView implements GameView {
    * handed none. @see #updateParkDressing
    */
   #parkDressing: ParkDressingBelt | undefined;
+  /** #3278: the parked cars' belt, built on the first realistic frame that carries a car. */
+  #parkedCars: ParkedCarBelt | undefined;
   /** #3052: the open world's street names, once a frame has carried one. */
   #streetNames: StreetNameBelt | undefined;
   /**
@@ -28631,6 +28923,8 @@ class ThreeGameView implements GameView {
     const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;
     this.#terrain.updatePark(park?.ground);
     this.#updateParkDressing(park);
+    // #3278: the parked cars in reach, the realistic world's alone.
+    this.#updateParkedCars(this.#drawing === 'realistic' ? frame.parkedCars : undefined);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -28781,6 +29075,25 @@ class ThreeGameView implements GameView {
       this.#parkDressing.addTo(this.#scene);
     }
     this.#parkDressing?.update(pieces);
+  }
+
+  /**
+   * The parked cars in reach — #3278: the belt built on the first realistic
+   * frame that carries a car, from the cars the realistic world loaded, and
+   * hidden on every frame with none.
+   */
+  #updateParkedCars(view: ParkedCarsInView | undefined): void {
+    const cars = realisticWorld?.deliveryCar;
+    if (this.#parkedCars === undefined && cars !== undefined && (view?.cars.length ?? 0) > 0) {
+      this.#parkedCars = new ParkedCarBelt(cars);
+      this.#parkedCars.addTo(this.#scene);
+    }
+    this.#parkedCars?.update(view);
+  }
+
+  /** @see parkedCarStatsOf */
+  get parkedCarStats(): ParkedCarStats | undefined {
+    return this.#parkedCars?.stats;
   }
 
   /**
@@ -29714,6 +30027,7 @@ class ThreeGameView implements GameView {
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
     this.#parkDressing?.dispose();
+    this.#parkedCars?.dispose();
     this.#streetNames?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
