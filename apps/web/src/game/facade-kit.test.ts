@@ -409,6 +409,20 @@ describe('a footprint wrapped — #3334', () => {
     }
   });
 
+  it('stretches each storey to the plan’s own, so the storeys reach the eaves whatever a storey’s height', () => {
+    // Three storeys of 3.6 m, as a mapped height of 10.8 m over three levels gives.
+    const wrap = wrapped({ eaves: 10.4 + 3 * 3.6 });
+    const runs = runsOf(wrap);
+    const feet = [...new Set(runs.map((run) => run.y))].sort((a, b) => a - b);
+    expect(feet).toEqual([10, 10.4, 14, 17.6, 21.2]);
+    for (const run of runs.filter((each) => each.y >= 10.4 && each.y < 21)) {
+      expect(run.stretchY).toBeCloseTo(1.2, 6);
+      expect(run.y + KIT_STOREY_METRES * run.stretchY).toBeCloseTo(run.y + 3.6, 5);
+    }
+    // The cornice stands on the eaves, as tall as the parapet whatever the storeys are.
+    for (const run of runs.filter((each) => each.y > 21)) expect(run.stretchY).toBeCloseTo(0.5, 6);
+  });
+
   it('stands every bay on the footprint’s own outline, facing out of it, whichever way the ring runs', () => {
     const clockwise = [0, 0, 0, 12, 20, 12, 20, 0];
     for (const [ring, frontEdge] of [
