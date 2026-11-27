@@ -53,7 +53,7 @@ contributor does.
 *"To install and test your apps on a personal device, you'll need to sign in to your Apple Account in
 Xcode. If your account is not associated with a developer program membership, Xcode will indicate
 it's a Personal Team."* Building and running the app needs Xcode and a free Apple Account, and
-distributing it needs the membership. #1756 builds the iOS project unsigned for the simulator in CI,
+distributing it needs the membership. #1756 is to build the iOS project unsigned for the simulator in CI,
 with no account at all. On Android, an unsigned or self-signed build needs no Play account.
 
 ## Decision
@@ -93,8 +93,8 @@ So that D-1 cannot widen without anyone noticing, it does **not** permit any of 
    service a rider *chooses* (a hosted model on their own key, ADR 0046) stays optional, and the path
    without it keeps working.
 2. **A paid build service as the only way to build the app.** CI and a contributor's machine must
-   be able to build each client without paying anyone. On iOS, an unsigned simulator build needs no
-   Apple account (#1756), and Xcode with a free Apple Account installs on a personal device
+   be able to build each client without paying anyone. On iOS, an unsigned simulator build (to come in #1756) needs no
+   Apple account, and Xcode with a free Apple Account installs on a personal device
    (Context). [ADR 0018](0018-native-client-platform.md) D-5 lands the iOS project only in a pull
    request that can build it. A hosted build service (Xcode Cloud, a paid macOS runner) may be an
    addition, never the only way: `CLAUDE.md` §8 already forbids larger, charged runners in CI.
