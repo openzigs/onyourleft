@@ -349,6 +349,19 @@ simulation, so the rider's draft is never a second walk of the field.
 
 ---
 
+## 4c. The physics an AI group ride's bots ride through (#3300)
+
+`group-ride.ts` §`groupRidePhysics` is what `@onyourleft/domain` §`stepGroupRide` is handed, because
+that package cannot import this one. It adds no physics: the draft is `draft.ts` §`fieldDraftFactors`
+unchanged, with no lateral input (ADR 0038 D-3.4, ADR 0101 D-3.3, so no new `PHYSICS_VERSION`); a tick
+is `advance`; a holding power is `powerRequired` at a steady speed. Every rider it moves is in the
+hoods on the road's rolling resistance in the one air (`ridingConditions`), at the bot's 75 kg unless
+a mass is named. `frontSpeed` is the speed model `planGroupRide` solves with: the front rider with the
+leading-rider factor of a wheel `BOT_TACTIC_WHEEL_GAP_METRES` behind.
+
+`group-ride.test.ts` rides #3298's fixtures start to finish on it, with a scripted rider
+(`group-ride-testing.ts`), and replaces `advance` with a sentinel to hold the bots to the one tick.
+
 ## 5. Determinism is enforced in ESLint, not in the typechecker
 
 `tsconfig.json` narrows `lib` to `ES2024` and empties `types`, so `window`, `process`, `fetch` and
