@@ -2154,6 +2154,472 @@
           "sha256": "777b1b8d2b845d7d52413ef6ef76d9958cf1e602785a28bf2b9c738aa3b60278"
         }
       ]
+    },
+    {
+      "id": "quaternius-downtown-city-megakit",
+      "licence": "CC0-1.0",
+      "licencePage": "https://quaternius.com/packs/downtowncitymegakit.html",
+      "evidence": "License<div class=\"text-right\"><a href=\"https://creativecommons.org/publicdomain/zero/1.0/\" target=\"_blank\" >CC0</a>",
+      "read": "2026-11-27",
+      "authors": "Quaternius",
+      "files": [
+        {
+          "path": "Downtown City MegaKit[Standard].zip",
+          "url": "https://quaternius.itch.io/downtown-city-megakit",
+          "bytes": 234753092,
+          "sha256": "5b1a945576d54cdbb4ccc9c3d52711e6d530da74c74c586407ecc28b165335da"
+        },
+        {
+          "path": "License_Standard.txt",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#License_Standard.txt",
+          "bytes": 847,
+          "sha256": "afac5819301671301c41e90402d26e4ade5e459ad58fdf77f142147410862f1f"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Plain_3.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Plain_3.gltf",
+          "bytes": 4157,
+          "sha256": "bc86dfb9e5bb4d6fa4e7c38fd541a5b82ce8d9eb99557ce6228b480c68552bba"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Plain_3.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Plain_3.bin",
+          "bytes": 612,
+          "sha256": "7abf0a393a650bae471d2c1df7527dd4448663483cb97312a64e3ae0ec9c4dec"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Square_Single.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Square_Single.gltf",
+          "bytes": 10672,
+          "sha256": "64b21d1bbe6a320095c69bd521d2e2c0f7f7586fe86c73765ff89607664625b4"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Square_Single.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Square_Single.bin",
+          "bytes": 17260,
+          "sha256": "49a6023bb41aa66c9bbd4161fc216c5d903ff3b9f8b5c76e862661176ea85644"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Trim_Single.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Trim_Single.gltf",
+          "bytes": 10746,
+          "sha256": "cd30951c3d67ba2e811367ed09d0714d4fecc62625ca8fb72642e86355447523"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Trim_Single.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Trim_Single.bin",
+          "bytes": 34952,
+          "sha256": "ef540db1d55ace3f0f02d6bc267afb53e7d4215bff9ddf75eb523e0d0872bd32"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Trim.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Trim.gltf",
+          "bytes": 11678,
+          "sha256": "6f9b512a5bef61cadc822876bf95f3a8502b4c5da13f83bcdef6007de838cebe"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Window_Trim.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Window_Trim.bin",
+          "bytes": 65232,
+          "sha256": "518f90310c4358621e3898ad58a7ddec6898e7b08281409f46865cfe32a2c257"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Inset_Window.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Inset_Window.gltf",
+          "bytes": 9646,
+          "sha256": "af26a4877af7681b504907fcd5920139c2e1baa61f5b5025900459342585bee9"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Inset_Window.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Inset_Window.bin",
+          "bytes": 39936,
+          "sha256": "e795de38c8771076907e01a84863e52823fde5bc7fd0d8e53f1462c0695c94ef"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Inset_Window_Curved.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Inset_Window_Curved.gltf",
+          "bytes": 9650,
+          "sha256": "3c6c629f7cb342837e192956fea029984a1813c3f2ff4a19d9db08e5ee14e9f9"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Inset_Window_Curved.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Inset_Window_Curved.bin",
+          "bytes": 48768,
+          "sha256": "d992fe75a6e4038d5bf02fab07de11a0023bb7b6c58a7fc340ce72a4ba4ed3da"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_RedWhite_DoubleWindow.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_RedWhite_DoubleWindow.gltf",
+          "bytes": 13012,
+          "sha256": "f4d537874274a1a49b13c5dd9d8409f8441d5a375c77f8fa0a17fb09822117cc"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_RedWhite_DoubleWindow.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_RedWhite_DoubleWindow.bin",
+          "bytes": 78292,
+          "sha256": "3494ee7f685037f1cc6a78e6e7dafecba5b1068ac83ecb3c2556012765f67b58"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Brick_Center.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Brick_Center.gltf",
+          "bytes": 2719,
+          "sha256": "2ab7e490a616f3e33a871efe47751dba468394187619de80b991967e3d330530"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Brick_Center.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Brick_Center.bin",
+          "bytes": 660,
+          "sha256": "2759ad2718aa0116d1e6a15d06bd9fafc49141c0252e3072b1de12271fb4fb2e"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Column_Small.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Column_Small.gltf",
+          "bytes": 2333,
+          "sha256": "3a39cc79f8ceae549ae8680fe3927ecde4c592478eb8efe9e302ef903afe8911"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Brick_Column_Small.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Brick_Column_Small.bin",
+          "bytes": 2752,
+          "sha256": "2564153a3597bde42996da5f5a404603a98889309cc49efe84e604317c123021"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_Plain_3.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_Plain_3.gltf",
+          "bytes": 4904,
+          "sha256": "193fa82b2a7cdfd98e031f51d21e40a733896b30668ec705f46b128a87a9352f"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_Plain_3.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_Plain_3.bin",
+          "bytes": 2908,
+          "sha256": "46a1aa5467decbc6aede1fec8ead0c609ef7cfdc6b929774d319ee88a2f11bc2"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_Window.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_Window.gltf",
+          "bytes": 10727,
+          "sha256": "253942c661a09da5bad08ced802ecabe17624fbe1907a2fac1a84a60bc968aae"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_Window.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_Window.bin",
+          "bytes": 48372,
+          "sha256": "9bbf05ce0ae134ba9b07da45250a5320b33250160507c3b716058b2bf18c0520"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Wall.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Wall.gltf",
+          "bytes": 4920,
+          "sha256": "b6dec6c4817e76cce835d714d834aa3f6229d4a2afc8b2c9b1d042110f6524f7"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Wall.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Wall.bin",
+          "bytes": 4356,
+          "sha256": "911ac30b25d7fcdb3990c6db23d932040d53ee390a73c3fe210bf130319adaf1"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Trim_Center.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Trim_Center.gltf",
+          "bytes": 2303,
+          "sha256": "fe4c40e61284b264da4b366ae738d8e573afc2a536658bb4dedf2f1bdcc3d9b7"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Trim_Center.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Trim_Center.bin",
+          "bytes": 7312,
+          "sha256": "ea818dfa37288175f7e2b9dd8431bc2505144b516e7a72d0481865d6ade81aeb"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Plain_3.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Plain_3.gltf",
+          "bytes": 5040,
+          "sha256": "1311b5c4bffda0beefa95d90590f4fbb0c6f07fca1371c1aa6a1b829e5bb7f11"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Plain_3.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Plain_3.bin",
+          "bytes": 1876,
+          "sha256": "94a852cc914f7f84a9f1d9d63f1a43294228abe01075233c329143392d7f0425"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FullWindow.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FullWindow.gltf",
+          "bytes": 6571,
+          "sha256": "0ca31d1e8ddebbfd8910a50ee68608841fa8b59b1f91a41df71ea03e5a1054b0"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FullWindow.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FullWindow.bin",
+          "bytes": 16028,
+          "sha256": "5986f859976c39141d3fc99f4ea0956ec89ce67df2c657e02b12cbc2870055b3"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Window_Half.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Window_Half.gltf",
+          "bytes": 6633,
+          "sha256": "99f7c206eec1cb5e66d46c57936e7574f30390cfb4fd7731a4bdd75e9260bc61"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Window_Half.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Window_Half.bin",
+          "bytes": 28640,
+          "sha256": "a5ebf4c237e70d845931c4c6ad2cfe1f7b89eedef3364ba5a7ca2184d05db4a1"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Window.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Window.gltf",
+          "bytes": 10718,
+          "sha256": "6e8be236918316777d8b3707718138501856715d4edb4b667781380d22514e89"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Window.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Window.bin",
+          "bytes": 42884,
+          "sha256": "a3214c95ecccbb9604e2eb0ed417148753965c0e4eb4ad1cf93d51326c61158f"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FirstFloor_Wall.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FirstFloor_Wall.gltf",
+          "bytes": 6566,
+          "sha256": "0f4d600afb016a4911c611da8ee5b3f4254ead6f131402211f7e3ae79bbbafa6"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FirstFloor_Wall.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FirstFloor_Wall.bin",
+          "bytes": 3192,
+          "sha256": "d48f180d3f7ebe16a13db0f3aa196aed40a8a07c1ec36e9e70f1122314571ae1"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Metal_Center.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Metal_Center.gltf",
+          "bytes": 2595,
+          "sha256": "85b21a653d1dc695cd96b0fe9125c231cc4bed1855343efaeb60c03954d49d7b"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Cornice_Metal_Center.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Cornice_Metal_Center.bin",
+          "bytes": 3060,
+          "sha256": "7ef67e718e81968e0ab046a997d5005526d24fc303ae915b9bab841623b3c27b"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Column_Small_Center.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Column_Small_Center.gltf",
+          "bytes": 2407,
+          "sha256": "6c162dcf27e81b41447077fb390227b50714742ed45aafe4535f7d464fa784fa"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_Column_Small_Center.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_Column_Small_Center.bin",
+          "bytes": 1376,
+          "sha256": "8d7d18a89100cfe3c6d2ea853f6e10f9fe13b77e99237fd234c4fc1bd4f9fb65"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Window_001.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Window_001.gltf",
+          "bytes": 7915,
+          "sha256": "d3e80aa99e89533fe2af979a45be9004684926176bbeb79860c45cc574cb9506"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Window_001.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Window_001.bin",
+          "bytes": 11712,
+          "sha256": "f399e311565967fda33f8dd010831b71fcc5f143a39ef4d9851d5aae40d25649"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Window_Columns.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Window_Columns.gltf",
+          "bytes": 2586,
+          "sha256": "97da02e9f0bbbc9036d282a49f50fca7f4383ba176a31035abe0f22db3f0afe7"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Trim_FirstFloor_Window_Columns.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Trim_FirstFloor_Window_Columns.bin",
+          "bytes": 2496,
+          "sha256": "aa64ea656cd4d885ec1cce0f7229140d2aaeee7929c9ef5fda09369086186368"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FirstFloor_Window.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FirstFloor_Window.gltf",
+          "bytes": 9945,
+          "sha256": "4e9029f004d6e0031222be220b3494241a88e837b40fe3b6bb1d96b1a55f43e7"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Metal_FirstFloor_Window.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Metal_FirstFloor_Window.bin",
+          "bytes": 12840,
+          "sha256": "9bf54a1a568d6c2f2c6965eda5c1830e7376e84c62aff6a4e0e3df4dc0c6572a"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Metal_Single.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Metal_Single.gltf",
+          "bytes": 4713,
+          "sha256": "c30cbb493a15191ea6432f246b601d741694015b9e6826ee80759bc66587a39e"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Metal_Single.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Metal_Single.bin",
+          "bytes": 20832,
+          "sha256": "516af4807c1cf2d85559a6c9815e36c30ce49b4b823151cfacfabc85c1f5d79a"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Wooden.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Wooden.gltf",
+          "bytes": 3810,
+          "sha256": "7fda1b1102b8d7fbdaa0f172f0de32c03740e97c79d3514808ab323da0044f6b"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Wooden.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Wooden.bin",
+          "bytes": 33748,
+          "sha256": "e6502296fb3e77aa8a0611b4d920cb8128f96676e46f39c7b1b367e280c95084"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Door_3.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Door_3.gltf",
+          "bytes": 4722,
+          "sha256": "45fa80aa2ea960523cf7ee66765208941949cabff3381516301dd2877e29aba5"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Door_3.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Door_3.bin",
+          "bytes": 22884,
+          "sha256": "037d08964c53a761ea685a490144f44ea424407576e4b5bd9ee3c08634e0e76c"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Trim.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Trim.gltf",
+          "bytes": 7990,
+          "sha256": "79a41d327aa8486b4ca461d3d3fd012f2dd5486ad8493cf823271ea5ace745a9"
+        },
+        {
+          "path": "Exports/glTF (Godot)/DoorFrame_Trim.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/DoorFrame_Trim.bin",
+          "bytes": 54600,
+          "sha256": "6226b14e10451f341840e03e890c71074c655a69b73fafcc776c71f4a3d8d6c5"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Stairs_Rails_Metal_Straight_1.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Stairs_Rails_Metal_Straight_1.gltf",
+          "bytes": 2410,
+          "sha256": "59dfd4dd9a6c684436a4dadb75bc64cb07ea33e2c3990d6adceaea01b4880024"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Stairs_Rails_Metal_Straight_1.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Stairs_Rails_Metal_Straight_1.bin",
+          "bytes": 14448,
+          "sha256": "808dc9e62c4ab249330838f1a9defe5dd64395f9d70eb8ab6f13bbf39674c6a2"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Roof_2x2.gltf",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Roof_2x2.gltf",
+          "bytes": 2096,
+          "sha256": "fb9686ae868cad0a566767f4777c7dfc3ebb7917296eac8528c2d2ebb225159f"
+        },
+        {
+          "path": "Exports/glTF (Godot)/Roof_2x2.bin",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/Roof_2x2.bin",
+          "bytes": 140,
+          "sha256": "286c4a4634d66bb39c7ebd868e8cdcc3d1845a1e92362136e0f4f073f9e3a58f"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Concrete_Asphalt_BaseColor.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Concrete_Asphalt_BaseColor.png",
+          "bytes": 988093,
+          "sha256": "a37ca932c4287a67d9cf7f78997b5cc4b026ca7319a4c8454132d076307ca5cf"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Concrete_BaseColor.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Concrete_BaseColor.png",
+          "bytes": 1341594,
+          "sha256": "697276f680b34d6321e6b06da208a0fc3516db372d4a7de543fc2c33e895f482"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_dark_interior.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_dark_interior.png",
+          "bytes": 325090,
+          "sha256": "59e5c77292953d93c3cd239c2f06d4e80e393761195da66d886d3887ad59f1dc"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_lit_interior_1.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_lit_interior_1.png",
+          "bytes": 395226,
+          "sha256": "d20aa9f249a506eb145d76e264e59667cec4bef66c07e4baace6583a28cc3be4"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_lit_interior_2.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_lit_interior_2.png",
+          "bytes": 316427,
+          "sha256": "83c3f1b2ad84b65aab88d5744e6997730a04140e41d230e2cecfe9bfb2ae0559"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Concrete_Normal.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Concrete_Normal.png",
+          "bytes": 4416770,
+          "sha256": "e4de917d2506bff4b17d44380a136336cf16e5ea828edfdb8981f4f27e30a86a"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Concrete_ORM.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Concrete_ORM.png",
+          "bytes": 896797,
+          "sha256": "be17636c061a7c6c4f4bf23c3887a3f894da0e88394e233926e816c735a49244"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_MetalConcrete_BaseColor.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_MetalConcrete_BaseColor.png",
+          "bytes": 1488628,
+          "sha256": "adae656323f15cd2c3f1a6453685cb1ca104b700dc114076137cb3a4c253d3d0"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_MetalConcrete_Normal.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_MetalConcrete_Normal.png",
+          "bytes": 4815924,
+          "sha256": "93f95a96c32b27820c590301f00f5ba1d23d4054046d92bf6d58adbf23007419"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_MetalConcrete_ORM.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_MetalConcrete_ORM.png",
+          "bytes": 1857257,
+          "sha256": "c4d35f684d20c47f199bea2fbe098d60a000fa7d1489df0f00a4c3c1ace4fcb7"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_RedBrick_BaseColor.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_RedBrick_BaseColor.png",
+          "bytes": 1732063,
+          "sha256": "ea85bfc02c4c807265a85f7ab50656f7eaa19f6567301d362d78c1d06da161ab"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_RedBrick_Normal.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_RedBrick_Normal.png",
+          "bytes": 7273659,
+          "sha256": "147f14d7f665d2598d0d796bd02a227f6b8b0fbc790c3e0737b1b90128101c93"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_RedBrick_ORM.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_RedBrick_ORM.png",
+          "bytes": 2346959,
+          "sha256": "dfba8a1da5ca7dcff1b707a051e82717e93013c2ad36c93b7a41b0f331414b70"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Trim_BaseColor.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Trim_BaseColor.png",
+          "bytes": 4421593,
+          "sha256": "c3334902f8315783477eec63e2d462f8cefedf9c55b41ef452d8374b5603f08e"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Trim_Normal.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Trim_Normal.png",
+          "bytes": 4104873,
+          "sha256": "95fa43093067956fa6e206408f3e2f2302c18c7453b75a02f6e29fe57e2cd041"
+        },
+        {
+          "path": "Exports/glTF (Godot)/T_Trim_ORM.png",
+          "url": "https://quaternius.itch.io/downtown-city-megakit#Exports/glTF (Godot)/T_Trim_ORM.png",
+          "bytes": 2538116,
+          "sha256": "52449f201ad3cf606a2eb2972702b10051c369cdc67b6fadd109502b4735d7fb"
+        }
+      ]
     }
   ]
 }

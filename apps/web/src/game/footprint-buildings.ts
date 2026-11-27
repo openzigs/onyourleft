@@ -446,6 +446,7 @@ import {
   type HouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
+import { kitKindOf, wrapFootprint, type KitWrap } from './facade-kit';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import {
@@ -479,7 +480,7 @@ import {
   onNearbyStreet,
   type NearbyStreets,
 } from './nearby-streets';
-import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { REALISTIC_KIT_WRAP_TRIANGLES, REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
@@ -957,6 +958,15 @@ export interface FootprintPlan {
    * and what is drawn where the models are not loaded.
    */
   readonly model: HousePlacement | undefined;
+  /**
+   * The facade pieces it is wrapped in at the near level — #3334
+   * (`facade-kit.ts`): a shop, a retail strip, an office or a townhouse
+   * beside a town's or a city centre's street; `undefined` for every other
+   * plan, and with `levers=-facade-kit`. A wrapped plan keeps its extrusion
+   * as a modelled one does: it is its far level, and what is drawn where the
+   * kit is not loaded. Never both this and a {@link model}.
+   */
+  readonly kit: KitWrap | undefined;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
@@ -1798,6 +1808,8 @@ const STREAM_STOREYS = 32;
 const STREAM_ROOF_VARIANT = 33;
 /** #2021: which end a steeple stands at, where the street cannot tell. */
 const STREAM_STEEPLE = 34;
+/** #3334: what a wrapped building's facade pieces are chosen by. 35 and 36 are #3273's. */
+const STREAM_FACADE_KIT = 37;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -5341,6 +5353,15 @@ interface PartyWall {
 
 const NO_PARTY_WALLS: readonly PartyWall[] = [];
 
+/** How much of each edge a neighbour shares, metres, by the edge's index — #3334. */
+function sharedLengths(party: readonly PartyWall[]): ReadonlyMap<number, number> {
+  const shared = new Map<number, number>();
+  for (const wall of party) {
+    shared.set(wall.edge, (shared.get(wall.edge) ?? 0) + Math.abs(wall.to - wall.from));
+  }
+  return shared;
+}
+
 /**
  * Two edges of buildings that are not a terrace are one wall within this
  * perpendicular offset: **1 cm** — #3132. Such a wall was drawn by both: their
@@ -5703,6 +5724,7 @@ export function footprintPlans(
         startYear: options.mappedStartYear ?? true,
         churches: options.landmarkChurches ?? true,
         civicLandmarks: options.landmarkCivic ?? true,
+        facadeKit: options.facadeKit ?? true,
       },
     );
     plans.push(plan);
@@ -5754,6 +5776,8 @@ export function footprintPlans(
           terrace: true,
         },
         { split: options.splitRoofs ?? true, flat: false },
+        // #3334: wrapped in the downtown kit's pieces as a mapped shop is, unless the lever is off.
+        options.facadeKit ?? true,
       ),
     );
   }
@@ -6029,6 +6053,7 @@ function terracePlans(
   kept: readonly FootprintPlan[],
   others: PlanNeighbours,
   roofing: RoofSplitting,
+  facadeKit: boolean,
 ): FootprintPlan[] {
   if (land.bytes === 0) return [];
   const index = footprintIndexOf(kept.flatMap(groundRingsOf));
@@ -6134,6 +6159,9 @@ function terracePlans(
       others,
       party.get(block) ?? NO_PARTY_WALLS,
       roofing,
+      // #3334, the maintainer's ruling on PR #3343: a city centre's own street front is
+      // wrapped too, by the mapped footprints' rule and nothing else of their choices.
+      { ...NO_ARCHETYPE, facadeKit },
     ),
   );
 }
@@ -7105,6 +7133,14 @@ export interface FootprintPlanOptions {
    */
   readonly landmarkCivic?: boolean;
   /**
+   * #3334: a shop, a retail strip, an office or a townhouse beside a town's or
+   * a city centre's street wrapped in the downtown kit's facade pieces
+   * (`facade-kit.ts`); `true` by default. Off, no plan has a
+   * {@link FootprintPlan.kit} and every plan is as before
+   * (`?levers=-facade-kit`).
+   */
+  readonly facadeKit?: boolean;
+  /**
    * #2848: a paved apron before a mapped commercial footprint's front, from
    * its wall to the kerb, where no footway is mapped before it
    * (`shop-aprons.ts`); `true` by default. Off, no plan has one and every
@@ -7174,6 +7210,8 @@ interface ArchetypeChoice {
   readonly churches?: boolean;
   /** #1795: whether a mapped town hall or school is drawn as one (`-landmark-civic` off). */
   readonly civicLandmarks?: boolean;
+  /** #3334: whether it is wrapped in the downtown kit's facade pieces (`-facade-kit` off). */
+  readonly facadeKit?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -7450,6 +7488,7 @@ function canopyPlanOf(
     archetype: 'unknown',
     buildingArchetype: 'unknown',
     model: undefined,
+    kit: undefined,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount: count(),
@@ -8542,6 +8581,31 @@ function planFootprint(
           frontFrame?.nz ?? 0,
           base,
         );
+  // #3334: wrapped in the downtown kit's facade pieces, where its setting and its kind call
+  // for it (`facade-kit.ts` §`kitKindOf`): a commercial footprint, or a terrace's house,
+  // beside a town's or a city centre's street. Only a whole building with a front and a flat
+  // roof, which is what the wrap draws, so its far level — this extrusion — is the same shape.
+  // Never where a house model fits (the owner's ruling on #3273: the brick shop stays), nor a
+  // mapped type that is not a shop's or a house's, nor a landmark.
+  const kitKind =
+    choice.facadeKit === true &&
+    model === undefined &&
+    front !== undefined &&
+    roof === 'flat' &&
+    !part &&
+    !outbuilding &&
+    !pole &&
+    !church &&
+    civicLandmark === undefined &&
+    (family === undefined || family === 'commercial' || family === 'terrace' || family === 'house')
+      ? kitKindOf({
+          urban: urbanClass,
+          farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
+          use,
+          storeys,
+          terraced,
+        })
+      : undefined;
   const wallMaterialSurface =
     wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];
   const roofMaterialSurface =
@@ -8564,6 +8628,25 @@ function planFootprint(
               pole
               ? 'corrugated'
               : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  const kit =
+    kitKind === undefined || front === undefined
+      ? undefined
+      : wrapFootprint({
+          kind: kitKind,
+          ring: drawn,
+          base,
+          floor,
+          eaves,
+          storeys,
+          // What it is walled in and painted is its extrusion's, so the two levels are one building.
+          surface: wallSurface,
+          seed: Math.floor(share(STREAM_FACADE_KIT) * 0x1_0000_0000),
+          awning: shop !== undefined && shop.awning > 0,
+          parapet: PARAPET_METRES,
+          frontEdge: front.edge,
+          shared: sharedLengths(party),
+          budget: REALISTIC_KIT_WRAP_TRIANGLES,
+        });
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
@@ -8629,6 +8712,7 @@ function planFootprint(
     archetype,
     buildingArchetype,
     model,
+    kit,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,
