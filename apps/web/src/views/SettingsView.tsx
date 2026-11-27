@@ -2186,9 +2186,11 @@ function HudLayoutPanel({
               in a room, a Delivery round or a lap race keeps the full layout and draws no totals
               strip. The compact route panel is a small map with the gradient on it, in place of the
               height profile and the map. The text size applies on tablets held either way, and the
-              totals strip on a tablet on its side or a tall, narrow one held upright: a phone or a
-              short window keeps the normal size, and has no strip, because it has no room for them
-              beside the road.
+              totals strip on a tablet on its side and on one held upright that is at least 960
+              pixels wide, like 1024 by 1366, or 736 to 815 pixels wide and at least 1088 tall, like
+              800 by 1280, but not between those widths, like 834 by 1194: a phone or a short window
+              keeps the normal size, and has no strip, because it has no room for them beside the
+              road.
             </p>
             <p className="oyl-muted">
               Power changes with every pedal stroke, so by default the game shows the average of the

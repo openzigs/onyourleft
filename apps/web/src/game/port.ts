@@ -42,6 +42,7 @@ import type { KitColour, RiderBody } from '@onyourleft/store';
 import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
+import type { ParkedCarsInView } from './parked-cars';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { Embankment } from './overpasses';
 import type { PeopleInView } from './people';
@@ -596,6 +597,23 @@ export interface SceneFrame {
    * test off the belt it fills.
    */
   readonly parkDressing?: ParkDressingInView | undefined;
+  /**
+   * The parked cars about the road ahead of the rider — #3278
+   * (`parked-cars.ts`): on mapped houses' driveways, on shops' aprons and at
+   * the kerbs of mapped side streets, each a place, a heading, a look and a
+   * level of detail, drawn in
+   * ONE call of their own (`three-renderer.ts` §`ParkedCarBelt`). Scenery:
+   * no simulation, score or trainer reads one. Realistic world only.
+   * **Absent on every ride with no corridor, and on every frame of a
+   * Delivery round**, whose parked cars are its own obstacles
+   * (`scene.ts` §`SceneInput.parkedCars`); `parked-cars.ts`
+   * §`NO_PARKED_CARS` (empty) where none is in reach.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `parked-cars-scene.test.ts` reads it back off `sceneFrame`, and
+   * `parked-car-belt.test.ts` off the belt it fills.
+   */
+  readonly parkedCars?: ParkedCarsInView | undefined;
 }
 
 /**

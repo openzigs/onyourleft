@@ -321,6 +321,31 @@ describe('which world a ride draws — #475', () => {
     expect(new Set(asked())).toEqual(new Set([true]));
   });
 
+  it('says an ordinary ride may stand parked cars, in either world — #3278', async () => {
+    // The consumer of `SceneInput.parkedCars`, optional the unsafe way round:
+    // a `GameView` that forgot it would leave every street empty, with every
+    // `parked-cars-scene.test.ts` case green. `delivery-wiring.test.tsx` reads
+    // that a Delivery round says it may not.
+    const asked = (): readonly (boolean | undefined)[] =>
+      vi.mocked(sceneFrame).mock.calls.map(([input]) => input.parkedCars);
+    vi.mocked(sceneFrame).mockClear();
+    await ride();
+    await frames(1000 / 60, 5);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+    mounted?.unmount();
+    mounted = undefined;
+    rendered = [];
+
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await settleLoad({ loaded: true });
+    vi.mocked(sceneFrame).mockClear();
+    await frames(1000 / 60, 5);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+  });
+
   it('falls back to the stylised top and says so when the load fails — ADR 0026 D-7', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     // The plain top, not the shadow map's rung, though the map is the
