@@ -1584,6 +1584,32 @@ export const REALISTIC_KIT_WRAP_TRIANGLES = 3_000;
 export const MAPPED_KIT_NEAR_MAX = 6;
 
 /**
+ * How far the rider rides before the belt asks again which plans are wraps —
+ * #3334, PR #3343's review: **10 m**. A refill is a chunk's
+ * ({@link MAPPED_CHUNK_METRES}, 100 m), and six wraps are some 22 m of street
+ * a side, so chosen once a chunk they were behind the rider for most of it.
+ * The question is cheap (one pass over the plans); the answer changes about
+ * once a building passed, and only then is the belt refilled
+ * (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`).
+ *
+ * ⚠️ **So on a street of wraps the belt refills up to every 10 m, where it
+ * refilled every 100 m.** A refill writes every mapped building in the frame.
+ * What that costs a tablet's frame is not measured: it is part of the frame
+ * check owed on #3334.
+ */
+export const MAPPED_KIT_STRIDE_METRES = 10;
+
+/**
+ * How far up the road from the rider the point is that the wraps are nearest
+ * — #3334: **14 m**. With three wraps a side, about 22 m of street, the wraps
+ * then reach from about 3 m to 25 m ahead as they are chosen and from 7 m
+ * behind to 15 m ahead {@link MAPPED_KIT_STRIDE_METRES} later: beside the
+ * rider and ahead, where the camera looks. A building becomes a wrap about
+ * 25 m ahead, which is seen; six wraps cannot reach further.
+ */
+export const MAPPED_KIT_FOCUS_AHEAD_METRES = 14;
+
+/**
  * The most triangles the wraps drawn at once may be between them — #3334:
  * **18 000**, {@link MAPPED_KIT_NEAR_MAX} at {@link REALISTIC_KIT_WRAP_TRIANGLES}.
  * They come out of {@link MAPPED_BUILDING_TRIANGLES}' 23 040, which is NOT

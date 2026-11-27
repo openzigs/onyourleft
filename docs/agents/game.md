@@ -2237,7 +2237,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the terrace fixture), so `selectMappedBuildings`
                         draws only the nearest `MAPPED_KIT_NEAR_MAX` (6) as
                         wraps, a side of the street in turn (by which way
-                        each door faces), `MAPPED_KIT_TRIANGLES` (18 000),
+                        each door faces), nearest the point 14 m up the road
+                        from the RIDER (`nearWraps`; never the road's
+                        ranking), asked again every `MAPPED_KIT_STRIDE_METRES`
+                        (10 m) and the belt refilled when the answer changes,
+                        so wraps keep beside the rider through a 100 m chunk
+                        (⚠️ a refill up to every 10 m on a street of wraps);
+                        `MAPPED_KIT_TRIANGLES` (18 000),
                         out of the pooled 23 040 which is NOT raised, and one
                         wrap fewer wherever a wrap would cost the frame a
                         building or a procedural structure. What they take

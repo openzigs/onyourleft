@@ -28,8 +28,11 @@ import { richmondStreetFixture, terraceStreetFixture } from './footprint-fixture
 import { HOUSE_MODELS } from './house-models';
 import { landClassMask } from './land-class';
 import {
+  MAPPED_AHEAD_STEP_METRES,
   mappedBuildingsOf,
+  mappedChunk,
   MappedSelection,
+  nearWraps,
   roleTriangles,
   selectMappedBuildings,
   type MappedBuildings,
@@ -42,7 +45,10 @@ import {
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  MAPPED_KIT_FOCUS_AHEAD_METRES,
   MAPPED_KIT_NEAR_MAX,
+  MAPPED_KIT_STRIDE_METRES,
+  MAPPED_RANKED_AHEAD_METRES,
   MAPPED_KIT_TRIANGLES,
   REALISTIC_KIT_WRAP_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
@@ -591,6 +597,156 @@ describe('the kit a loaded scene is read as — #3334', () => {
       kitGeometriesOf(sceneOf((id) => (id === 'brick-window' ? 173 : table(id)))),
     ).toBeUndefined();
     expect(kitGeometriesOf(sceneOf(() => undefined))).toBeUndefined();
+  });
+});
+
+describe('the wraps in a moving ride — #3334, PR #3343’s review', () => {
+  /** The road ahead of `along`, as `scene.ts` §`routeAhead` builds it: a point every 25 m for 200 m. */
+  const aheadOf = (along: number): Float32Array => {
+    const steps = Math.round(MAPPED_RANKED_AHEAD_METRES / MAPPED_AHEAD_STEP_METRES);
+    const ahead = new Float32Array((steps + 1) * 2);
+    for (let step = 0; step <= steps; step += 1) {
+      const at = roadAt(along + step * MAPPED_AHEAD_STEP_METRES);
+      ahead[step * 2] = at.x;
+      ahead[step * 2 + 1] = at.z;
+    }
+    return ahead;
+  };
+
+  it('keeps the wraps beside and ahead of the rider at every point of a chunk, three a side, within the stride', () => {
+    expect(MAPPED_KIT_STRIDE_METRES).toBe(10);
+    expect(MAPPED_KIT_FOCUS_AHEAD_METRES).toBe(14);
+    const belt = aBelt(buildings, withKit);
+    let worst = 0;
+    let steps = 0;
+    let guarded = 0;
+    // Three chunks of the street, a refill asked after every 2 m as a frame asks.
+    for (let along = 1_100; along < 1_400; along += 2) {
+      const rider = roadAt(along);
+      const ahead = aheadOf(along);
+      refillMappedBuildings(
+        belt,
+        { buildings, chunk: mappedChunk(along), x: rider.x, z: rider.z, ahead },
+        [],
+        0,
+        REALISTIC_STRUCTURE_ITEMS,
+      );
+      // The point the wraps are chosen about: 14 m up the road.
+      const focus = roadAt(along + MAPPED_KIT_FOCUS_AHEAD_METRES);
+      const next = roadAt(along + 1);
+      const [dx, dz] = [next.x - rider.x, next.z - rider.z];
+      const wraps: [number[], number[]] = [[], []];
+      const every: [number[], number[]] = [[], []];
+      const drawn = new Set<number>();
+      for (let place = 0; ; place += 1) {
+        const at = belt.drawnAt(place);
+        if (at === undefined) break;
+        if (at.modelAt >= 0) drawn.add(at.plan);
+      }
+      plans.forEach((plan, index) => {
+        if (plan.kit === undefined) return;
+        if (
+          Math.hypot(plan.centroid.x - rider.x, plan.centroid.z - rider.z) >
+          MAPPED_BUILDING_NEAR_METRES
+        ) {
+          return;
+        }
+        const side =
+          (plan.centroid.x - rider.x) * -dz + (plan.centroid.z - rider.z) * dx > 0 ? 0 : 1;
+        const apart = Math.hypot(plan.centroid.x - focus.x, plan.centroid.z - focus.z);
+        every[side].push(apart);
+        if (drawn.has(index)) wraps[side].push(apart);
+      });
+      for (const side of [0, 1] as const) {
+        every[side].sort((a, b) => a - b);
+        const label = `${String(along)} m, side ${String(side)}`;
+        // Three a side; or fewer by the wraps the frame gave up where a sixth, or a fifth,
+        // would have cost it a building (`selectMappedBuildings`' guard).
+        const short = MAPPED_KIT_NEAR_MAX - belt.stats.kitted;
+        expect(short, label).toBeLessThanOrEqual(2);
+        expect(wraps[side].length, label).toBeGreaterThanOrEqual(3 - short);
+        expect(wraps[0].length + wraps[1].length, label).toBe(belt.stats.kitted);
+        if (short > 0) guarded += 1;
+        // Its farthest wrap is no farther from that point than the third-nearest wrappable
+        // building of its side, but for the stride the choice may be old by.
+        const over = Math.max(...wraps[side]) - (every[side][2] as number);
+        expect(over, label).toBeLessThanOrEqual(MAPPED_KIT_STRIDE_METRES + 0.5);
+        worst = Math.max(worst, over);
+      }
+      steps += 1;
+    }
+    // Most of the ride draws all six.
+    expect(guarded).toBeLessThan(steps / 2);
+    // Control: the choice does go stale between strides, and is renewed.
+    expect(worst).toBeGreaterThan(1);
+    // A refill a chunk, and one more only where the wraps changed: never more than one a
+    // stride, and never one a frame.
+    expect(belt.refills).toBeGreaterThan(3);
+    expect(belt.refills).toBeLessThanOrEqual(3 + 300 / MAPPED_KIT_STRIDE_METRES);
+    expect(belt.refills).toBeLessThan(steps / 3);
+  });
+
+  it('asks again only once the stride is ridden, and never where the kit is not loaded', () => {
+    const rider = roadAt(1_150);
+    const view = (along: number) => {
+      const at = roadAt(along);
+      return { buildings, chunk: mappedChunk(1_150), x: at.x, z: at.z, ahead: aheadOf(along) };
+    };
+    const belt = aBelt(buildings, withKit);
+    belt.refill(
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      mappedChunk(1_150),
+      undefined,
+      aheadOf(1_150),
+    );
+    expect(belt.needsRefill(mappedChunk(1_150), view(1_150))).toBe(false);
+    expect(belt.needsRefill(mappedChunk(1_150), view(1_159))).toBe(false);
+    // 30 m on, the three nearest a side are other buildings.
+    expect(belt.needsRefill(mappedChunk(1_150), view(1_180))).toBe(true);
+    // A stride on with the same six still the nearest: asked, and no refill. The write is
+    // what costs, so it is made only when the answer changes.
+    let same = 0;
+    const steady = aBelt(buildings, withKit);
+    for (let along = 1_100; along < 1_400; along += 1) {
+      const on = along + MAPPED_KIT_STRIDE_METRES + 1;
+      const [here, there] = [roadAt(along), roadAt(on)];
+      const before = nearWraps(buildings, here.x, here.z, aheadOf(along));
+      if (before.join() !== nearWraps(buildings, there.x, there.z, aheadOf(on)).join()) continue;
+      same += 1;
+      steady.refill(here.x, here.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, aheadOf(along));
+      expect(steady.needsRefill(7, { ...view(on), chunk: 7 }), String(along)).toBe(false);
+    }
+    expect(same).toBeGreaterThan(0);
+    // With no view, a chunk's refill only, as before.
+    expect(belt.needsRefill(mappedChunk(1_150))).toBe(false);
+    const bare = aBelt(buildings, houseModels);
+    bare.refill(
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      mappedChunk(1_150),
+      undefined,
+      aheadOf(1_150),
+    );
+    expect(bare.needsRefill(mappedChunk(1_150), view(1_180))).toBe(false);
+  });
+
+  it('chooses the wraps about the point up the road, whatever the road’s own ranking is', () => {
+    const rider = roadAt(1_250);
+    const chosen = nearWraps(buildings, rider.x, rider.z, aheadOf(1_250));
+    expect(chosen.length).toBe(MAPPED_KIT_NEAR_MAX);
+    const focus = roadAt(1_250 + MAPPED_KIT_FOCUS_AHEAD_METRES);
+    for (const index of chosen) {
+      const plan = plans[index] as FootprintPlan;
+      // Each within a building or two of that point: 22 m of street a side, and its depth.
+      expect(Math.hypot(plan.centroid.x - focus.x, plan.centroid.z - focus.z)).toBeLessThan(30);
+    }
+    // With no road ahead, about the rider.
+    const about = nearWraps(buildings, rider.x, rider.z, undefined);
+    expect(about).not.toEqual(chosen);
+    expect(nearWraps(buildings, rider.x, rider.z, undefined, 0)).toEqual([]);
   });
 });
 

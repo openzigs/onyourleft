@@ -116,7 +116,12 @@
  * times its extrusion: `mapped-buildings.ts` §`selectMappedBuildings` draws
  * the nearest wrapped plans as wraps up to `MAPPED_KIT_NEAR_MAX` of them, a
  * side of the street in turn ({@link KitWrap.facing}), and every wrapped plan
- * past them as its extrusion. The worst frame is `realistic-budget.ts`' to state.
+ * past them as its extrusion. They are the nearest to the rider, chosen again
+ * every `MAPPED_KIT_STRIDE_METRES` as the rider moves (`nearWraps`).
+ *
+ * ⚠️ **Planned only where they can be drawn**: `GameView`'s press plans wraps
+ * for a ride that asked for the realistic world, and Delivery's house count
+ * and the demo player plan none (`FootprintPlanOptions.facadeKit`). The worst frame is `realistic-budget.ts`' to state.
  *
  * ## A gap, from PR #3343's review, not closed here
  *
@@ -1122,6 +1127,12 @@ export interface KitWrap {
    * `mapped-buildings.ts` shares the frame's wraps between a street's sides.
    */
   readonly facing: readonly [number, number];
+  /**
+   * How many fronts were laid and priced to plan it: 1 where even the
+   * cheapest cannot be wholly in relief, which is every long block of a city
+   * street, and what planning a ride costs.
+   */
+  readonly attempts: number;
 }
 
 /** What {@link wrapFootprint} reads of a plan. */
@@ -1449,31 +1460,44 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
     return { placed, triangles, whole };
   };
 
-  // The seeded door, cornice and window first. Then whatever puts the WHOLE front in relief,
-  // giving up the least: a cheaper window before the plain cornice, and that before the
-  // cheapest door. Then the cheapest of all three, as far as the budget goes.
+  // The cheapest of all three FIRST: where even that cannot put the whole front in relief
+  // nothing can, and the front is settled in one attempt (PR #3343's review: a street of
+  // long blocks laid twenty-eight fronts each to learn it, and planning a city street went
+  // from 155 ms to 896 ms). Where it can, the seeded door, cornice and window, then whatever
+  // puts the WHOLE front in relief giving up the least: a cheaper window before the plain
+  // cornice, and that before the cheapest door.
   const cheapestDoor = KIT_HOUSE_DOORS[0] as KitPieceId;
-  const byCost = [...skin.windows].sort(
-    (a, b) => reliefOf(kitPieceIndex(b.piece)) / b.span - reliefOf(kitPieceIndex(a.piece)) / a.span,
-  );
-  const windows = [skin.windows[style.window] as KitWindow, ...byCost];
-  let taken:
-    { attempt: Attempt; window: KitWindow; door: KitPieceId; cornice: KitPieceId } | undefined;
-  search: for (const doorPiece of new Set([style.door, cheapestDoor])) {
-    for (const cornice of new Set([style.cornice, plainCornice])) {
-      for (const window of windows) {
-        const attempt = pay(lay(window, doorPiece, cornice));
-        if (attempt?.whole === true) {
-          taken = { attempt, window, door: doorPiece, cornice };
-          break search;
+  let attempts = 1;
+  const cheapest = pay(lay(first, cheapestDoor, plainCornice));
+  if (cheapest === undefined) return undefined;
+  let taken: { attempt: Attempt; window: KitWindow; door: KitPieceId; cornice: KitPieceId } = {
+    attempt: cheapest,
+    window: first,
+    door: cheapestDoor,
+    cornice: plainCornice,
+  };
+  if (cheapest.whole) {
+    const byCost = [...skin.windows].sort(
+      (a, b) =>
+        reliefOf(kitPieceIndex(b.piece)) / b.span - reliefOf(kitPieceIndex(a.piece)) / a.span,
+    );
+    const windows = [skin.windows[style.window] as KitWindow, ...byCost];
+    search: for (const doorPiece of new Set([style.door, cheapestDoor])) {
+      for (const cornice of new Set([style.cornice, plainCornice])) {
+        for (const window of windows) {
+          // The cheapest of all three is the one already laid.
+          if (window === first && doorPiece === cheapestDoor && cornice === plainCornice) {
+            break search;
+          }
+          attempts += 1;
+          const attempt = pay(lay(window, doorPiece, cornice));
+          if (attempt?.whole === true) {
+            taken = { attempt, window, door: doorPiece, cornice };
+            break search;
+          }
         }
       }
     }
-  }
-  if (taken === undefined) {
-    const attempt = pay(lay(first, cheapestDoor, plainCornice));
-    if (attempt === undefined) return undefined;
-    taken = { attempt, window: first, door: cheapestDoor, cornice: plainCornice };
   }
 
   // What is drawn, in the order it was laid; neighbours of one piece, level and line: one run.
@@ -1579,6 +1603,7 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
     front: { bays: frontBays, relief: frontRelief },
     // The wall's outward normal: its piece's +Z, (-az, ax).
     facing: [-door.az, door.ax],
+    attempts,
   };
 }
 

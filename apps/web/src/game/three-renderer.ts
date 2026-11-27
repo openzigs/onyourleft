@@ -376,6 +376,7 @@ import {
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
+  nearWraps,
   rankFrom,
   roleTriangles,
   selectMappedBuildings,
@@ -667,6 +668,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  MAPPED_KIT_STRIDE_METRES,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -25004,6 +25006,9 @@ export class MappedBuildingBelt {
   };
   /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
   #chunk: number | undefined;
+  /** #3334: where the rider was when the wraps were last chosen or asked after, and which they were. */
+  #wrapsAt = { x: 0, z: 0 };
+  #wraps: readonly number[] = [];
   #refills = 0;
   #shown = true;
   /** Whether the browser gate has turned the mapped buildings off — its control. */
@@ -25176,9 +25181,24 @@ export class MappedBuildingBelt {
     return this.#materials.get(surface);
   }
 
-  /** Whether a frame at `chunk` needs a refill: the rider's chunk changed, or the rung did. */
-  needsRefill(chunk: number): boolean {
-    return chunk !== this.#chunk;
+  /**
+   * Whether a frame at `chunk` needs a refill: the rider's chunk changed, or
+   * the rung did — or, #3334, with the downtown kit loaded and `view` given,
+   * the rider is `realistic-budget.ts` §`MAPPED_KIT_STRIDE_METRES` on from
+   * where the wraps were last chosen and would now be chosen otherwise
+   * (`mapped-buildings.ts` §`nearWraps`), so the wraps keep beside the rider
+   * and do not wait a chunk. One distance a frame until the stride is ridden.
+   */
+  needsRefill(chunk: number, view?: MappedBuildingsInView): boolean {
+    if (chunk !== this.#chunk) return true;
+    if (view === undefined || this.#houses?.kit === undefined) return false;
+    if (Math.hypot(view.x - this.#wrapsAt.x, view.z - this.#wrapsAt.z) < MAPPED_KIT_STRIDE_METRES) {
+      return false;
+    }
+    this.#wrapsAt = { x: view.x, z: view.z };
+    const now = nearWraps(this.buildings, view.x, view.z, view.ahead);
+    const were = this.#wraps;
+    return now.length !== were.length || now.some((plan, at) => plan !== were[at]);
   }
 
   /** The rung changed: the next frame refills, whatever its chunk. */
@@ -25248,6 +25268,10 @@ export class MappedBuildingBelt {
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
+    // #3334: where the wraps were chosen, and which, for `needsRefill` to ask again.
+    this.#wrapsAt = { x: riderX, z: riderZ };
+    this.#wraps =
+      this.#houses?.kit === undefined ? [] : nearWraps(this.buildings, riderX, riderZ, ahead);
     const selection = this.#selection;
     selectMappedBuildings(
       this.buildings,
@@ -26269,7 +26293,7 @@ export function refillMappedBuildings(
   billboards: number,
   structureItems: number,
 ): number | undefined {
-  if (!belt.needsRefill(view.chunk)) return undefined;
+  if (!belt.needsRefill(view.chunk, view)) return undefined;
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
   let count = 0;

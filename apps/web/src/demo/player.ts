@@ -187,6 +187,9 @@ export function createDemoPlayer(
       origin,
       FOOTPRINT_MAX_VERTICES,
       urban,
+      // #3334: the demo draws the stylised world, where no wrap of the downtown kit's
+      // pieces is ever drawn, so none is planned.
+      { facadeKit: false },
     );
     return {
       mappedBuildings: mappedBuildingsOf(plans),

@@ -48,6 +48,7 @@
  */
 
 import type { FootprintPlan, FootprintRole } from './footprint-buildings';
+import type { KitWrap } from './facade-kit';
 import {
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
@@ -57,6 +58,7 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_KIT_FOCUS_AHEAD_METRES,
   MAPPED_KIT_NEAR_MAX,
   MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_NEAR_METRES,
@@ -578,6 +580,78 @@ export function selectMappedBuildings(
   }
 }
 
+const NO_WRAPS: readonly number[] = [];
+
+/**
+ * The plans a refill at `(x, z)` may draw as wraps of the downtown kit's
+ * facade pieces — #3334: the at most `wraps` near wrapped plans nearest the
+ * point {@link MAPPED_KIT_FOCUS_AHEAD_METRES} up the road from the rider
+ * (the rider, with no road `ahead`), taken from the street's two sides in
+ * turn. A side is which way a building's door faces: with the nearest's, or
+ * against it (the maintainer's ruling on PR #3343: nearest first alone put
+ * all six on the rider's side).
+ *
+ * ⚠️ **From the rider, not by the road's ranking** — PR #3343's review. Every
+ * other choice of a refill ranks a building by its distance from the 200 m of
+ * road ahead, which is much the same for every building beside it; ranked so,
+ * the six wraps were wherever the index put them, and held for a whole
+ * {@link MAPPED_CHUNK_METRES}. The belt asks this again every
+ * `MAPPED_KIT_STRIDE_METRES` and refills when the answer changes
+ * (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`).
+ *
+ * Ahead of the rider, because the camera looks up the road: a wrap behind the
+ * rider is three thousand triangles nobody sees.
+ */
+export function nearWraps(
+  buildings: MappedBuildings,
+  x: number,
+  z: number,
+  ahead: Float32Array | undefined,
+  wraps: number = MAPPED_KIT_NEAR_MAX,
+): readonly number[] {
+  let focusX = x;
+  let focusZ = z;
+  if (ahead !== undefined && ahead.length >= 4) {
+    const dx = (ahead[2] as number) - (ahead[0] as number);
+    const dz = (ahead[3] as number) - (ahead[1] as number);
+    const span = Math.hypot(dx, dz);
+    if (span > 0) {
+      focusX += (dx / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+      focusZ += (dz / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+    }
+  }
+  const { plans } = buildings;
+  const near: { readonly index: number; readonly apart: number }[] = [];
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index] as FootprintPlan;
+    if (plan.kit === undefined) continue;
+    // Near is the rider's, as the walk's near level is.
+    if (Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES) {
+      continue;
+    }
+    near.push({ index, apart: Math.hypot(plan.centroid.x - focusX, plan.centroid.z - focusZ) });
+  }
+  // Ties broken by index, so the same ride draws the same town every time.
+  near.sort((a, b) => a.apart - b.apart || a.index - b.index);
+  const sides: [number[], number[]] = [[], []];
+  const facing = plans[near[0]?.index ?? 0]?.kit?.facing;
+  if (facing === undefined) return NO_WRAPS;
+  for (const { index } of near) {
+    const kit = (plans[index] as FootprintPlan).kit as KitWrap;
+    const alike = kit.facing[0] * facing[0] + kit.facing[1] * facing[1] >= 0;
+    const side = sides[alike ? 0 : 1];
+    if (side.length < wraps) side.push(index);
+  }
+  const chosen: number[] = [];
+  for (let turn = 0; chosen.length < wraps && turn < wraps; turn += 1) {
+    for (const side of sides) {
+      const index = side[turn];
+      if (index !== undefined && chosen.length < wraps) chosen.push(index);
+    }
+  }
+  return chosen;
+}
+
 /**
  * {@link selectMappedBuildings}' one walk, drawing at most `wraps` plans as
  * their wraps of facade pieces — #3334; 0 where the kit is not loaded.
@@ -623,33 +697,8 @@ function walkMappedBuildings(
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const landmarks = landmarksAhead(plans, order, inReach);
-  // #3334: which plans may be wraps — the nearest `wraps` near wrapped plans of the walk,
-  // taken from the street's two sides in turn (the maintainer's ruling on PR #3343: nearest
-  // first alone put all six on the rider's side). A side is which way a building's door
-  // faces: with the nearest's, or against it.
-  const kitted: number[] = [];
-  if (wraps > 0) {
-    const sides: [number[], number[]] = [[], []];
-    let facing: readonly [number, number] | undefined;
-    for (let at = 0; at < inReach; at += 1) {
-      const index = order[at] as number;
-      const plan = plans[index] as FootprintPlan;
-      if (plan.kit === undefined) continue;
-      if (Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES) {
-        continue;
-      }
-      facing ??= plan.kit.facing;
-      const alike = plan.kit.facing[0] * facing[0] + plan.kit.facing[1] * facing[1] >= 0;
-      const side = sides[alike ? 0 : 1];
-      if (side.length < wraps) side.push(index);
-    }
-    for (let turn = 0; kitted.length < wraps && turn < wraps; turn += 1) {
-      for (const side of sides) {
-        const index = side[turn];
-        if (index !== undefined && kitted.length < wraps) kitted.push(index);
-      }
-    }
-  }
+  // #3334: which plans may be wraps: the nearest to the rider, never the road's ranking.
+  const kitted = wraps > 0 ? nearWraps(buildings, x, z, ahead, wraps) : NO_WRAPS;
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   // #1638: past MAPPED_BUILDING_MAX only where a city centre's far-level cap is on.
   const most = Math.min(mappedBuildingCap(buildings), into.plans.length);

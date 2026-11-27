@@ -844,6 +844,27 @@ describe('a footprint wrapped — #3334', () => {
     expect(traded).toBeGreaterThan(20);
   });
 
+  it('settles a front no window can fill in one attempt, and searches only where the cheapest front is whole', () => {
+    // PR #3343's review: a long block laid twenty-eight fronts to learn that none fits.
+    let most = 0;
+    for (let seed = 0; seed < 60; seed += 1) {
+      for (const kind of KIT_KINDS) {
+        for (const surface of ['brick', 'render', 'stone']) {
+          const long = wrapped({ seed, kind, surface });
+          if (long.front.relief < long.front.bays) expect(long.attempts).toBe(1);
+        }
+      }
+      // An 8 m front is whole: the search runs, and never past every door, cornice and window.
+      const whole = wrapped({ seed, ring: NARROW });
+      expect(whole.front.relief).toBe(whole.front.bays);
+      expect(whole.attempts).toBeLessThanOrEqual(1 + 2 * 2 * 7);
+      most = Math.max(most, whole.attempts);
+    }
+    expect(most).toBeGreaterThan(2);
+    // The 20 m block is never whole, whatever it is built of.
+    expect(wrapped({}).attempts).toBe(1);
+  });
+
   it('pays for a front too long for any window a whole row at a time, the door and the ground floor first', () => {
     // The 20 m block: ten bays on three storeys, more than 3 000 triangles in any window.
     for (let seed = 0; seed < 30; seed += 1) {
