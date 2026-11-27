@@ -201,7 +201,7 @@ export interface WorkerOptions {
  * which is ADR 0024 D-3 rule 1 and #407's first criterion. A page running
  * bundle v1 that later `lazy()`-imports a chunk from v2's precache is served an
  * asset its own bundle does not expect, or a 404 — create-react-app#3613 — and
- * this client is eleven models and four lazy chunks deep, so that is the likely
+ * this client is twenty-six models and four lazy chunks deep, so that is the likely
  * case rather than the exotic one. `worker-core.test.ts` asserts the install
  * handler leaves the worker waiting, and moving the call turns it red.
  */

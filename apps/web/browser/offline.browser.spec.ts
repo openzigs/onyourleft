@@ -66,7 +66,7 @@
  *   correct" is as far as this goes.
  * - **Nothing about a whole offline RIDE.** The trainer game needs a saved
  *   route in IndexedDB before it loads its renderer at all, so what is asserted
- *   is that the renderer chunk and all twelve scenery assets are served by the
+ *   is that the renderer chunk and all twenty-eight scenery assets are served by the
  *   worker with the network off, and that the module still imports. Driving a
  *   ride is validation 0002's job and it needs a trainer.
  */
@@ -288,15 +288,19 @@ test.describe('what the worker actually cached', () => {
     expect(precached).toEqual(EXPECTED_PRECACHE);
   });
 
-  test('holds the renderer, the map, the charts and all twelve scenery assets', () => {
+  test('holds the renderer, the map, the charts and all twenty-eight scenery assets', () => {
     // Named categories rather than filenames, because filenames carry a content
     // hash. #406's own table of what a shell-only precache would have missed.
     const has = (fragment: string): boolean => precached.some((entry) => entry.includes(fragment));
     for (const chunk of ['three-renderer', 'maplibre', 'FitnessChart', 'TraceChart']) {
       expect(has(chunk), `${chunk} is not precached`).toBe(true);
     }
-    expect(precached.filter((entry) => entry.endsWith('.glb'))).toHaveLength(11);
-    expect(has('colormap')).toBe(true);
+    // Twenty-six models since #3287 — the eleven a mesh is drawn from and the
+    // fifteen folded in beside them (`scenery-models.ts`
+    // §`STYLISED_FOLD_MODELS`) — and the two City Kits' atlases: a ride with
+    // no network draws the same houses a ride with one does.
+    expect(precached.filter((entry) => entry.endsWith('.glb'))).toHaveLength(11 + 15);
+    expect(precached.filter((entry) => entry.includes('colormap'))).toHaveLength(2);
     expect(precached).toContain('index.html');
     expect(precached).toContain('manifest.webmanifest');
   });
@@ -309,7 +313,7 @@ test.describe('what the worker actually cached', () => {
     // Both halves, so neither can pass by the other being empty: the set is
     // really in `dist` (it ships in the APK), and not one file of it reached
     // the cache a real browser filled. The stylised half is the two cases
-    // above: every other file in `dist`, and all eleven models by count.
+    // above: every other file in `dist`, and all twenty-six models by count.
     expect(REALISTIC_IN_DIST.length).toBeGreaterThan(10);
     expect(precached.filter((entry) => entry.startsWith('realistic/'))).toEqual([]);
     for (const file of REALISTIC_IN_DIST) expect(precached).not.toContain(file);
