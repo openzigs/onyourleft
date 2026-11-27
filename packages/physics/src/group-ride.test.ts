@@ -10,7 +10,7 @@
  * sets its own timeout (#1688): the hilly ride is ridden once and shared.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   BOT_MASS_KILOGRAMS,
@@ -60,10 +60,17 @@ const HILLY = courseOf(HILLY_COURSE);
 const TARGET_KMH = 30;
 const KMH = 1 / 3.6;
 
-/** #3298's hilly fixture, start to finish, with a rider who holds the wheel: ridden once. */
+/**
+ * #3298's hilly fixture, start to finish, with a rider who holds the wheel:
+ * ridden once, in a hook, so the ride's cost (about 3 s under coverage on the
+ * nightly runner, #1688) is no case's and no case's timeout is spent on it.
+ */
 let hillyRide: GroupRide | undefined;
+beforeAll(() => {
+  hillyRide = rideGroup({ course: HILLY, targetKmh: TARGET_KMH });
+});
 function hilly(): GroupRide {
-  hillyRide ??= rideGroup({ course: HILLY, targetKmh: TARGET_KMH });
+  if (hillyRide === undefined) throw new Error('the hilly ride is ridden in beforeAll');
   return hillyRide;
 }
 

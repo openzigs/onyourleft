@@ -30,12 +30,12 @@ const CP = 300;
 const MASS = 75;
 const GROUP_MPS = 8;
 
-function bot(id: string, cp = CP): LineMember {
+function bot(id: string, cp = CP, floorWatts = 0): LineMember {
   const capacity: BotCapacity = {
     cpWatts: cp,
     wPrimeJoules: 20_000,
     peakWatts: 2 * cp,
-    floorWatts: 0,
+    floorWatts,
   };
   return { id, kind: 'bot', capacity };
 }
@@ -81,7 +81,8 @@ function standIn(): GroupPhysics & {
         distances.some((other) => other - own >= 0.05 && other - own <= 30) ? 0.6 : 1,
       );
     },
-    holdWatts: (speed, _grade, k) => drag(speed, k) * speed,
+    // A climb costs 5 W for each percent and each m/s, so a test can tell one road from another.
+    holdWatts: (speed, grade, k) => drag(speed, k) * speed + 5 * grade * speed,
     advance(from, powerWatts, gradePercent, seconds, dragFactor) {
       advanced.push({ from, powerWatts, gradePercent, seconds, dragFactor });
       const force = powerWatts / Math.max(from.speedMps, 1) - drag(from.speedMps, dragFactor);
@@ -136,7 +137,7 @@ describe('one tick', () => {
     expect(tick.draft).toEqual({ b1: 1, b2: 0.6, you: 0.6, b3: 0.6 });
   });
 
-  it('rides every bot through the physics at its own draft factor, for the tick, on the grade under it', () => {
+  it('rides every bot through the physics at its own draft factor, for the tick', () => {
     const physics = standIn();
     const state = start();
     const tick = stepGroupRide(state, { elapsedSeconds: 0.5, rider: RIDER_AT }, roadOn(physics));
@@ -156,6 +157,42 @@ describe('one tick', () => {
       expect(tick.state.bots[id]?.dragFactor).toBe(call.dragFactor);
       expect(tick.state.bots[id]?.distanceM).toBeGreaterThan(call.from.distanceM);
     });
+  });
+
+  it("rides each bot on the grade under that bot, and reads a wheel's surplus on the road under the wheel", () => {
+    // Level to 120 m and 6 % beyond: b1 (130 m) climbs while b2 (110 m), the rider (100 m) and b3 (90 m) do not.
+    const hill = courseOf([
+      [120, 0],
+      [9_880, 6],
+    ]);
+    const physics = standIn();
+    const form: GroupRideState = start();
+    const at = (distanceM: number, id: string) => ({
+      ...(form.bots[id] as NonNullable<typeof form.bots.b1>),
+      distanceM,
+    });
+    const b1 = { ...at(130, 'b1'), powerWatts: physics.holdWatts(GROUP_MPS, 6, 1) + 30 };
+    const state: GroupRideState = {
+      ...form,
+      bots: { b1, b2: at(110, 'b2'), b3: at(90, 'b3') },
+    };
+    const tick = stepGroupRide(
+      state,
+      { elapsedSeconds: 0.5, rider: RIDER_AT },
+      { course: hill, plan: PLAN, physics },
+    );
+    const grades = physics.advanced.map((call) => call.gradePercent);
+    expect(grades[0]).toBeCloseTo(6, 6);
+    expect(grades[1]).toBeCloseTo(0, 6);
+    expect(grades[2]).toBeCloseTo(0, 6);
+    // b2 holds b1 at the gap: what holds b1's speed on b2's road, and the 30 W b1 is putting into speeding up on its own.
+    const expected = botWheelWatts({
+      gapMetres: 20,
+      closingMetresPerSecond: 0,
+      holdWatts: physics.holdWatts(GROUP_MPS, 0, 0.6) + 30,
+      cpWatts: CP,
+    });
+    expect(tick.state.bots.b2?.powerWatts).toBeCloseTo(expected, 9);
   });
 
   it("rides the front at the plan's power at its odometer, with the ledger's correction", () => {
@@ -415,6 +452,18 @@ describe('a bot asked for less than nothing', () => {
     expect(call.dragFactor).toBeCloseTo(0.6 + 0.4 * (-wanted / open), 9);
     expect(tick.state.bots.b3?.dragFactor).toBe(call.dragFactor);
     expect(tick.draft.b3).toBe(0.6);
+  });
+
+  it("eases under its capacity floor on a wheel: the floor is a lap race bot's own, not a wheel's", () => {
+    // A floor of 100 W is what a lap race plan gives a bot; a bot in the shelter of a wheel ahead may ride under it.
+    const physics = standIn();
+    const state = start([bot('b1'), bot('b2'), RIDER, bot('b3', CP, 100)]);
+    const tick = stepGroupRide(
+      state,
+      { elapsedSeconds: 0.5, rider: { distanceM: 100, speedMps: GROUP_MPS - 2 } },
+      roadOn(physics),
+    );
+    expect(tick.state.bots.b3?.powerWatts).toBe(0);
   });
 
   it('never takes more wind than the open air', () => {
