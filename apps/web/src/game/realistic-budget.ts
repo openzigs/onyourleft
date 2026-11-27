@@ -1558,8 +1558,8 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * ## Raised to 47 MiB for the people's models — the owner's request of 2026-11-18
  *
  * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).**
- * ⚠️ **This rise is the pull request's own and waits on the owner's
- * confirmation**: asked for "a real model for the pedestrian", the owner
+ * **Confirmed by the owner on 2026-11-26** (#3337, below). It began as
+ * the pull request's own rise, which waited on that confirmation: asked for "a real model for the pedestrian", the owner
  * named no figure. Measured on the committed files: the set with its
  * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
  * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
@@ -1584,17 +1584,43 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
  * three — which is what keeps the cost to one GLB rather than 1.5 MB.
  *
- * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
- * and this one has not been ruled on**: the issue asks for the body and its
- * stated cost, not for a figure. As before, the APK carries the same bytes
+ * The ceiling itself was the owner's to rule on, as each rise above was, and
+ * the issue asked for the body and its stated cost, not for a figure; the
+ * owner confirmed the 47 MiB on 2026-11-26 and then raised it (below). As before, the APK carries the same bytes
  * more, and a browser's first download does not move: the file is outside
  * the precache, and a ride fetches it only when it draws a female rider.
+ *
+ * ## Raised to 100 MiB for real model files — #3337, the owner's ruling of 2026-11-26
+ *
+ * **Old ceiling 47 MiB (49 283 072 bytes), new 100 MiB (104 857 600).** The
+ * owner ruled on #3337 (2026-11-26) to raise it to make room for real model
+ * files — buildings, cars, scenery — under epic #3249, and in the same ruling
+ * **confirmed the 46 to 47 MiB rise** above (the people's models and the
+ * female rider), which had waited on that. This change adds nothing to the
+ * build: it moves the ceiling and no file, so the set is still the
+ * 49 051 685 bytes the female rider's section measured, and 55 805 915 under
+ * the new ceiling.
+ *
+ * What that does to a download: **every megabyte the set grows by ships in the
+ * APK and in the Play download**, since every file in `dist` is copied into
+ * the app (ADR 0026 D-7). The whole Android app is about 49 MB today. Play's
+ * base-module limit is 500 MB and it warns a rider installing on mobile data
+ * above 200 MB, so a full 100 MiB would roughly triple the app yet stay well
+ * under that warning. A **browser's first download** of the app does not move:
+ * the realistic files are outside the service worker's precache by their
+ * location (`realistic-assets.ts` §`REALISTIC_DIRECTORY`), and are fetched
+ * only when a rider picks the realistic world.
+ *
+ * ⚠️ **The ceiling is room, not a reason to stop counting.** ADR 0099 D-4
+ * stands: every new model states what it costs the build, in the pull request
+ * that adds it, and `realistic-budget.test.ts` still reads every committed
+ * file back off disk against this figure.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 100 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
