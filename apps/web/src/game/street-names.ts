@@ -34,6 +34,19 @@
  * the rider is on when it is chosen: the letters' tops away from the rider,
  * as a name painted across a side street reads from the road it meets.
  *
+ * ## A route ride's name reads across its lane ({@link routeNameLayout})
+ *
+ * A label with a route distance (`route-street-names.ts`, #3245) is painted
+ * as a real road marking is — the owner's ruling of 2026-11-26 on #3344, as
+ * "SLOW" or "BUS" is painted: in the rider's own lane, right of the centre
+ * line, each letter upright to the approaching rider (its up along the way the
+ * route runs) and {@link ROUTE_STREET_NAME_STRETCH} times as long along the
+ * road as it is wide, so it reads at a shallow angle. The name reads left to
+ * right across the lane; one too wide for it is wrapped at a space onto two
+ * lines, stacked along the road with the first nearest the rider, and what is
+ * still too wide is shrunk, never past the lane's lines. The open world's
+ * labels keep their style above.
+ *
  * ## Cost
  *
  * **One draw call** for every name in view, however many streets there are:
@@ -47,6 +60,8 @@
  *
  * Pure, and names no rendering library.
  */
+
+import { CENTRE_LINE_WIDTH_METRES, EDGE_LINE_WIDTH_METRES, ROAD_WIDTH_METRES } from './terrain';
 
 /**
  * Every character the glyph atlas holds, in its cell order: printable ASCII,
@@ -128,6 +143,100 @@ export const STREET_NAME_MAX_STRETCH = 1.5;
  */
 export const STREET_NAME_PASS_SLACK_METRES = 30;
 
+/**
+ * How much longer along the road than across it a route ride's letter is
+ * painted, against the glyph atlas's own square cell: **2.75** — #3344, the
+ * owner's "about 2.5 to 3× tall", as road-marking type is stretched to read
+ * at a shallow viewing angle.
+ */
+export const ROUTE_STREET_NAME_STRETCH = 2.75;
+
+/**
+ * How wide a route ride's letter is painted across its lane at the most,
+ * metres: **0.7**, four to the lane, as "SLOW" is. A name wider than its lane
+ * at that is wrapped, then shrunk ({@link routeNameLayout}).
+ */
+export const ROUTE_STREET_NAME_GLYPH_WIDTH_METRES = 0.7;
+
+/** How far inside its lane's lines a route ride's name is kept, metres: **0.2**. */
+export const ROUTE_STREET_NAME_LANE_MARGIN_METRES = 0.2;
+
+/** How far apart a wrapped name's two lines are along the road, as a share of a letter's length: **0.5**. */
+export const ROUTE_STREET_NAME_LINE_GAP_SHARE = 0.5;
+
+/**
+ * The near and far side of the room a route ride's name has, metres right of
+ * the centreline: the rider's lane (`lanes.ts` keeps right), from the centre
+ * line's right edge to the right edge line, each
+ * {@link ROUTE_STREET_NAME_LANE_MARGIN_METRES} in.
+ */
+const LANE_INNER_METRES = CENTRE_LINE_WIDTH_METRES / 2 + ROUTE_STREET_NAME_LANE_MARGIN_METRES;
+const LANE_OUTER_METRES =
+  ROAD_WIDTH_METRES / 2 - EDGE_LINE_WIDTH_METRES - ROUTE_STREET_NAME_LANE_MARGIN_METRES;
+
+/** How wide a line of a route ride's name may be, metres: **2.875**. */
+export const ROUTE_STREET_NAME_LINE_WIDTH_METRES = LANE_OUTER_METRES - LANE_INNER_METRES;
+
+/** How a route ride's name is laid across its lane — #3344. @see routeNameLayout */
+export interface RouteNameLayout {
+  /** One or two lines, the first nearest the approaching rider. */
+  readonly lines: readonly string[];
+  /** How many letters the lines hold. */
+  readonly letters: number;
+  /** How wide each letter is, across the lane, metres. */
+  readonly width: number;
+  /** How long each letter is, along the road, metres: {@link ROUTE_STREET_NAME_STRETCH} times its width. */
+  readonly length: number;
+  /** From the near edge of the first line to the far edge of the last, along the road, metres. */
+  readonly extent: number;
+}
+
+/**
+ * How a route ride's `text` is painted across the rider's lane — #3344: on
+ * one line where it fits at {@link ROUTE_STREET_NAME_GLYPH_WIDTH_METRES} a
+ * letter; else wrapped at the space that makes its longer line shortest; and
+ * every letter shrunk alike until the longer line fits
+ * {@link ROUTE_STREET_NAME_LINE_WIDTH_METRES}. A name with no space is shrunk.
+ */
+export function routeNameLayout(text: string): RouteNameLayout {
+  const characters = Array.from(text.trim());
+  let lines = [characters];
+  if (
+    characters.length * ROUTE_STREET_NAME_GLYPH_WIDTH_METRES >
+    ROUTE_STREET_NAME_LINE_WIDTH_METRES
+  ) {
+    let longest = characters.length;
+    for (const [index, character] of characters.entries()) {
+      if (character !== ' ') continue;
+      const first = Array.from(characters.slice(0, index).join('').trim());
+      const second = Array.from(
+        characters
+          .slice(index + 1)
+          .join('')
+          .trim(),
+      );
+      const longer = Math.max(first.length, second.length);
+      if (first.length > 0 && second.length > 0 && longer < longest) {
+        longest = longer;
+        lines = [first, second];
+      }
+    }
+  }
+  const longest = Math.max(1, ...lines.map((line) => line.length));
+  const width = Math.min(
+    ROUTE_STREET_NAME_GLYPH_WIDTH_METRES,
+    ROUTE_STREET_NAME_LINE_WIDTH_METRES / longest,
+  );
+  const length = ROUTE_STREET_NAME_STRETCH * width;
+  return {
+    lines: lines.map((line) => line.join('')),
+    letters: lines.reduce((sum, line) => sum + line.length, 0),
+    width,
+    length,
+    extent: length * (lines.length + (lines.length - 1) * ROUTE_STREET_NAME_LINE_GAP_SHARE),
+  };
+}
+
 /** A route ride's road, as its labels are laid on it (@see streetNamesInView). */
 export interface RouteLabelRoad {
   /** The road's height at a route distance, metres. */
@@ -158,9 +267,10 @@ export interface StreetNameLabel {
   /**
    * A route ride's label only (#3245, `route-street-names.ts`): the route
    * distance of its middle, metres, `alongX, alongZ` pointing the way the
-   * route runs. With it each letter is laid rigid on the road's own height
-   * ({@link streetNamesInView}'s `heightAlong`), not on the ground under its
-   * corners.
+   * route runs. With it the name is painted across the rider's lane
+   * ({@link routeNameLayout}, #3344) and each letter laid rigid on the road's
+   * own height ({@link streetNamesInView}'s `route`), not on the ground under
+   * its corners.
    */
   readonly along?: number | undefined;
 }
@@ -261,17 +371,119 @@ export const NO_STREET_NAMES: StreetNamesInView = Object.freeze({
   cells: new Uint16Array(0),
 });
 
-/** Whether a letter's four corners make edges no longer than {@link STREET_NAME_MAX_STRETCH} times its painted size. */
-function paintedSize(quad: readonly number[]): boolean {
+/**
+ * Whether a letter's four corners make edges no longer than
+ * {@link STREET_NAME_MAX_STRETCH} times its painted size: `width` from its
+ * bottom-left corner to its bottom-right and top-left to top-right, `height`
+ * from bottom to top on each side.
+ */
+export function paintedSize(quad: readonly number[], width: number, height: number): boolean {
   const edge = (a: number, b: number): number =>
     Math.hypot(
       (quad[b * 3] as number) - (quad[a * 3] as number),
       (quad[b * 3 + 1] as number) - (quad[a * 3 + 1] as number),
       (quad[b * 3 + 2] as number) - (quad[a * 3 + 2] as number),
     );
-  const along = STREET_NAME_GLYPH_ADVANCE_METRES * STREET_NAME_MAX_STRETCH;
-  const across = STREET_NAME_GLYPH_HEIGHT_METRES * STREET_NAME_MAX_STRETCH;
-  return edge(0, 1) <= along && edge(3, 2) <= along && edge(0, 3) <= across && edge(1, 2) <= across;
+  const wide = width * STREET_NAME_MAX_STRETCH;
+  const tall = height * STREET_NAME_MAX_STRETCH;
+  return edge(0, 1) <= wide && edge(3, 2) <= wide && edge(0, 3) <= tall && edge(1, 2) <= tall;
+}
+
+/** One letter to draw: its cell, its four corners and the size it is painted at. */
+interface Letter {
+  readonly cell: number;
+  /** Twelve floats, as {@link StreetNamesInView.corners} holds them. */
+  readonly quad: readonly number[];
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * An open-world label's letters (#3052): laid along its street, read from the
+ * side the rider is on, each corner standing on the ground under it.
+ */
+function openWorldLetters(
+  label: StreetNameLabel,
+  rider: { readonly x: number; readonly z: number },
+  heightAt: (x: number, z: number) => number | undefined,
+  y: number,
+): Letter[] {
+  // The letters' tops away from the rider: `up` across the street, the
+  // reading direction a quarter turn from it (`x` is WEST: east is −x).
+  let upX = -label.alongZ;
+  let upZ = label.alongX;
+  if (upX * (label.x - rider.x) + upZ * (label.z - rider.z) < 0) {
+    upX = -upX;
+    upZ = -upZ;
+  }
+  const readX = -upZ;
+  const readZ = upX;
+  const width = STREET_NAME_GLYPH_ADVANCE_METRES;
+  const height = STREET_NAME_GLYPH_HEIGHT_METRES;
+  const start = -paintedLength(label.text) / 2;
+  return Array.from(label.text, (letter, index) => {
+    const from = start + index * width;
+    const quad: number[] = [];
+    for (const [offset, up] of [
+      [from, -height / 2],
+      [from + width, -height / 2],
+      [from + width, height / 2],
+      [from, height / 2],
+    ] as const) {
+      const x = label.x + readX * offset + upX * up;
+      const z = label.z + readZ * offset + upZ * up;
+      quad.push(x, (heightAt(x, z) ?? y) + STREET_NAME_LIFT_METRES, z);
+    }
+    return { cell: glyphCell(letter) as number, quad, width, height };
+  });
+}
+
+/**
+ * A route ride's label's letters — #3344, as a road marking reads: in the
+ * rider's lane, right of the centre line; each letter upright to the
+ * approaching rider, its up the way the route runs and its bottom edge
+ * across the lane; the lines of {@link routeNameLayout} left to right across
+ * the lane, the first line nearest. Each letter rigid on the road's height at
+ * its route distance (#3261's tablet checks): level across the road, tilted
+ * only with its grade, the same on every frame. With no `route`, each corner
+ * stands on the ground under it.
+ */
+function routeLetters(
+  label: StreetNameLabel,
+  layout: RouteNameLayout,
+  heightAt: (x: number, z: number) => number | undefined,
+  y: number,
+  route: RouteLabelRoad | undefined,
+): Letter[] {
+  const along = label.along as number;
+  // The rider's right, keeping right on the way the route runs (`x` is WEST).
+  const rightX = -label.alongZ;
+  const rightZ = label.alongX;
+  const { width, length } = layout;
+  const middle = (LANE_INNER_METRES + LANE_OUTER_METRES) / 2;
+  const letters: Letter[] = [];
+  for (const [line, text] of layout.lines.entries()) {
+    const characters = Array.from(text);
+    const near = -layout.extent / 2 + line * length * (1 + ROUTE_STREET_NAME_LINE_GAP_SHARE);
+    const left = middle - (characters.length * width) / 2;
+    for (const [index, letter] of characters.entries()) {
+      const from = left + index * width;
+      const quad: number[] = [];
+      for (const [across, ahead] of [
+        [from, near],
+        [from + width, near],
+        [from + width, near + length],
+        [from, near + length],
+      ] as const) {
+        const x = label.x + rightX * across + label.alongX * ahead;
+        const z = label.z + rightZ * across + label.alongZ * ahead;
+        const level = route === undefined ? (heightAt(x, z) ?? y) : route.heightAt(along + ahead);
+        quad.push(x, level + STREET_NAME_LIFT_METRES, z);
+      }
+      letters.push({ cell: glyphCell(letter) as number, quad, width, height: length });
+    }
+  }
+  return letters;
 }
 
 /** The last choice, by labels: reused until the rider moves on. */
@@ -298,7 +510,8 @@ export function streetNamesInView(
    * height there: every letter a rigid rectangle, level across the road and
    * tilted only with its grade, at the same place on every frame. Without
    * it, or for a label with no `along` (an open-world street's), each corner
-   * stands on `heightAt`.
+   * stands on `heightAt`. A label with `along` reads across the rider's lane
+   * either way (#3344, {@link routeNameLayout}).
    */
   route?: RouteLabelRoad,
 ): StreetNamesInView {
@@ -326,57 +539,21 @@ export function streetNamesInView(
   const cells: number[] = [];
   for (const { label } of near) {
     if (drawn.length >= STREET_NAMES_PER_FRAME) break;
-    const letters = Array.from(label.text);
-    if (cells.length + letters.length > STREET_NAME_GLYPHS_PER_FRAME) continue;
+    const layout = label.along === undefined ? undefined : routeNameLayout(label.text);
+    const count = layout?.letters ?? Array.from(label.text).length;
+    if (cells.length + count > STREET_NAME_GLYPHS_PER_FRAME) continue;
     const y = heightAt(label.x, label.z);
     if (y === undefined) continue;
-    // The letters' tops away from the rider: `up` across the street, the
-    // reading direction a quarter turn from it (`x` is WEST: east is −x).
-    // #3261's tablet check: a route ride's label always away from a rider
-    // keeping right on the way the route runs, so it is never turned over
-    // as the rider passes it or moves across the road.
-    let upX = -label.alongZ;
-    let upZ = label.alongX;
-    if (
-      label.along === undefined ? upX * (label.x - rider.x) + upZ * (label.z - rider.z) < 0 : true
-    ) {
-      upX = -upX;
-      upZ = -upZ;
-    }
-    const readX = -upZ;
-    const readZ = upX;
-    const width = STREET_NAME_GLYPH_ADVANCE_METRES;
-    const height = STREET_NAME_GLYPH_HEIGHT_METRES;
-    const start = -paintedLength(label.text) / 2;
-    // Which way the name reads along the route: +1 the way the route runs.
-    const reads = readX * label.alongX + readZ * label.alongZ < 0 ? -1 : 1;
-    const along = label.along;
-    const quad: number[] = [];
+    const letters =
+      layout === undefined
+        ? openWorldLetters(label, rider, heightAt, y)
+        : routeLetters(label, layout, heightAt, y, route);
     let any = false;
-    for (const [index, letter] of letters.entries()) {
-      const cell = glyphCell(letter) as number;
-      const from = start + index * width;
-      quad.length = 0;
-      for (const [offset, up] of [
-        [from, -height / 2],
-        [from + width, -height / 2],
-        [from + width, height / 2],
-        [from, height / 2],
-      ] as const) {
-        const x = label.x + readX * offset + upX * up;
-        const z = label.z + readZ * offset + upZ * up;
-        // Rigid on a route ride: each edge across the road at one height,
-        // the road's own there. Otherwise each corner on the ground under it.
-        const level =
-          along !== undefined && route !== undefined
-            ? route.heightAt(along + reads * offset)
-            : (heightAt(x, z) ?? y);
-        quad.push(x, level + STREET_NAME_LIFT_METRES, z);
-      }
+    for (const letter of letters) {
       // The last guard: a letter drawn much larger than it is painted is not drawn.
-      if (!paintedSize(quad)) continue;
-      corners.push(...quad);
-      cells.push(cell);
+      if (!paintedSize(letter.quad, letter.width, letter.height)) continue;
+      corners.push(...letter.quad);
+      cells.push(letter.cell);
       any = true;
     }
     if (any) drawn.push(label);

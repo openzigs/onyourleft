@@ -788,3 +788,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   and D-5.7's *"no street name"* no longer hold for a street's name on a saved route. D-3.5 stands
   word for word: nothing in the store leaves the device. **Status: proposed**, in force only once the
   owner accepts ADR 0100; the pull request is not to be merged before that.
+- **2026-11-26** — **The entry above for ADR 0100 is in force.** The owner accepted
+  [ADR 0100](0100-a-saved-route-ride-names-the-street-it-is-on.md) on 2026-11-26 (*"Accept as
+  proposed"*), and its pull request [#3261](https://github.com/openzigs/onyourleft/pull/3261)
+  merged, so that entry's *"Status: proposed"* no longer holds. Recorded for
+  [#3344](https://github.com/openzigs/onyourleft/issues/3344); D-3.5 still stands word for word.

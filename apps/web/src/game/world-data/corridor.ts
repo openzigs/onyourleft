@@ -108,7 +108,7 @@ export const READ_TIMEOUT_MS = 120_000;
  * #2974's, #2975's and #2688's, and there is no Dexie schema change. #2974
  * changed no packed field, so the packed version stayed 6 at reader 7; #2975
  * adds one, so it is 7 at reader 8; #2688 adds another, so it is 8 at reader 9.
- * **10** since #3245 (ADR 0100, proposed), which keeps a street's name a
+ * **10** since #3245 (ADR 0100), which keeps a street's name a
  * version-9 record never decoded, so a route kept before it gains its names on
  * its next read; the packed version is 9 at reader 10.
  */
@@ -125,7 +125,7 @@ export type CorridorState =
   | { readonly kind: 'unavailable'; readonly why: 'offline' | 'outside-coverage' | 'refused' };
 
 /**
- * A corridor's street — #3245, ADR 0100 (proposed): a {@link StreetFeature}
+ * A corridor's street — #3245, ADR 0100: a {@link StreetFeature}
  * and, where the tile named it and the glyph atlas can paint it
  * (`street-names.ts` §`paintable`), its mapped `name`. What a route ride
  * paints along the street the route is on (`route-street-names.ts`). Absent
@@ -463,7 +463,7 @@ export interface CorridorReadOptions {
   readonly mustStop?: (() => boolean) | undefined;
   /**
    * #3052, ADR 0096: decode each street's mapped name onto it. The open
-   * world's area reader asks for it, and since #3245 (ADR 0100, proposed) a
+   * world's area reader asks for it, and since #3245 (ADR 0100) a
    * route's corridor read (`world-data/corridor-port.ts`). The demo's bake
    * does not, so the published bundle carries no name.
    */

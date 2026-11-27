@@ -3498,6 +3498,10 @@ function GameScreen({
       // #3245: and the names of the streets a saved route is on, placed ONCE,
       // here, from the same corridor. None where the world is not drawn from
       // it, and none on a built-in circuit or level, whose line is ours.
+      // ⚠️ `onLevel` names none today without this guard: a level's corridor
+      // is its own file's (`levels.ts` §`levelCorridor`), with no street at
+      // all. It is kept so ADR 0100 D-2.6's "a built-in level has no labels"
+      // does not rest on what a level file happens to hold.
       const routeLabels =
         worldCorridorRef.current === undefined || onCircuit || onLevel
           ? []

@@ -146,3 +146,34 @@ route ride does not have. The store's other contents.
 
 - #3245 (the owner's request of 2026-11-26), #3052, ADR 0096.
 - ADR 0054 D-2.2, D-2.4, D-3.3, D-3.5 and D-5.7; ADR 0056; ADR 0004 D.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-26** — **Placement rules that landed after acceptance**, in
+  [#3261](https://github.com/openzigs/onyourleft/pull/3261) after the maintainer's tablet checks of
+  that day, and recorded for [#3344](https://github.com/openzigs/onyourleft/issues/3344). D-2.4's
+  straight-road rule is stricter than it says: the drawn road's heading also turns no more than 5°
+  from the name's line anywhere under it and 10 m past each end. No letter is placed within 100 m,
+  along the route, of a turn where the road comes back along itself (more than 120° between its
+  heading over the 30 m before a point and the 30 m after it). A label is drawn only while the rider
+  is on its pass of the road: no more than 30 m further from the rider along the route than in a
+  straight line. Every letter is laid rigid on the road's own height at its route distance, and a
+  letter whose drawn edge is longer than 1.5 times its painted size is not drawn at all
+  (`route-street-names.ts`, `street-names.ts`).
+- **2026-11-26** — **The owner's ruling on
+  [#3344](https://github.com/openzigs/onyourleft/issues/3344): a route ride's name reads across the
+  lane, like a real road marking.** D-2.5's *"drawn exactly as the open world's are"* no longer holds
+  for how the letters are laid. A route ride's name is painted in the rider's own lane, right of the
+  centre line and 0.2 m inside its lines: each letter upright to the approaching rider, its up the
+  way the route runs; 2.75 times as long along the road as it is wide, as road-marking type is
+  stretched; at most 0.7 m wide; reading left to right across the lane. A name too wide for the lane
+  is wrapped at a space onto two lines, stacked along the road with the first nearest the rider, and
+  what is still too wide is shrunk, never past the lane's lines (`street-names.ts`
+  §`routeNameLayout`). Where a name fits (D-2.4) is measured along the road from its first line's
+  near edge to its last line's far edge, and the 1.5 times guard is measured against each letter's
+  own painted size. The glyph atlas, the belt and the one draw call of D-2.5 stand, and so does every
+  rule of the entry above. The open world's labels are unchanged (D-5). **Status: in force when
+  #3344's pull request merges**, after the maintainer's tablet flash scan and frame check and the
+  owner's look.

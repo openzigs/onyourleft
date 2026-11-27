@@ -18,7 +18,7 @@ import {
   routeStreetNameLabels,
   type RouteStreet,
 } from './route-street-names';
-import { paintedLength, type StreetNameLabel } from './street-names';
+import { routeNameLayout, type StreetNameLabel } from './street-names';
 import { corridorOrigin } from './terrain';
 
 const SIDE_METRES = 1_500;
@@ -75,7 +75,7 @@ describe('a saved route ride names the street it is on — #3245', () => {
     expect([...along.keys()].sort()).toStrictEqual([...SIDES].sort());
     for (const [side, name] of SIDES.entries()) {
       const at = along.get(name) ?? [];
-      const half = paintedLength(name) / 2;
+      const half = routeNameLayout(name).extent / 2;
       const joined = side * SIDE_METRES;
       // Just after the turn: its nearest letter the join distance past the
       // corner, give or take where the corner's own samples end.
@@ -92,7 +92,8 @@ describe('a saved route ride names the street it is on — #3245', () => {
     const labels = routeStreetNameLabels(sides([name, name, name, name]), profile, origin());
     const at = alongByName(labels).get(name) ?? [];
     // One street the whole 6 km: joined once, at the start, and never again.
-    expect(at[0]).toBeLessThan(ROUTE_STREET_NAME_JOIN_METRES + paintedLength(name));
+    // Give or take where the route's first corner's own samples end.
+    expect(at[0]).toBeLessThan(ROUTE_STREET_NAME_JOIN_METRES + routeNameLayout(name).extent + 20);
     expect(at.length).toBeGreaterThanOrEqual(4);
     expect(at.length).toBeLessThanOrEqual(6);
     for (let index = 1; index < at.length; index += 1) {
@@ -198,13 +199,21 @@ describe('a saved route ride names the street it is on — #3245', () => {
   });
 
   it('paints a name only where the whole of it fits on its street', () => {
-    // A street of 60 m: the join distance and a 30-letter name do not fit.
+    // #3344: painted across the lane, a 30-letter name is wrapped and shrunk
+    // to a few metres of road, so a 60 m street has room for it, once, and
+    // the whole of it lies on the street past the join distance.
     const long = 'Testaaaaaaaaaaaaaaaaaaaaa Road';
-    const short = streetAlong(200, 260, long);
-    expect(routeStreetNameLabels([short], profile, origin())).toStrictEqual([]);
-    // And a short name that does fit is painted, once.
-    const fits = routeStreetNameLabels([streetAlong(200, 260, 'Test Rd')], profile, origin());
-    expect(fits.map((label) => label.text)).toStrictEqual(['Test Rd']);
+    const extent = routeNameLayout(long).extent;
+    const fits = routeStreetNameLabels([streetAlong(200, 260, long)], profile, origin());
+    expect(fits.map((label) => label.text)).toStrictEqual([long]);
+    const at = alongByName(fits).get(long)?.[0] ?? Number.NaN;
+    // The street matches the road up to 8 m past either end of it.
+    expect(at - extent / 2).toBeGreaterThanOrEqual(200 - 8 + ROUTE_STREET_NAME_JOIN_METRES);
+    expect(at + extent / 2).toBeLessThanOrEqual(260 + 8);
+    // A street too short for the join distance and the name has none.
+    expect(
+      routeStreetNameLabels([streetAlong(200, 210, 'Test Rd')], profile, origin()),
+    ).toStrictEqual([]);
   });
 
   it('keeps one street one street across a short unnamed gap and a stray short match in it', () => {
@@ -235,7 +244,7 @@ describe('a saved route ride names the street it is on — #3245', () => {
       origin(),
     );
     const at = alongByName(labels).get('Testa Way') ?? [];
-    const half = paintedLength('Testa Way') / 2;
+    const half = routeNameLayout('Testa Way').extent / 2;
     expect(at).toHaveLength(2);
     expect(at[0]).toBeLessThan(600);
     // The second label is the join label of the street's second stretch.
@@ -248,7 +257,7 @@ describe('a saved route ride names the street it is on — #3245', () => {
     // A street that starts just before the first corner: its join label
     // would straddle the corner, so it is laid wholly past it.
     const name = 'Testcorner Way';
-    const half = paintedLength(name) / 2;
+    const half = routeNameLayout(name).extent / 2;
     const [a, corner, b] = [roadAt(1_470), roadAt(SIDE_METRES), roadAt(1_800)];
     const bent: RouteStreet = {
       line: Float32Array.of(a.x, a.z, corner.x, corner.z, b.x, b.z),

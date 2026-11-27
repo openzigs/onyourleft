@@ -40,11 +40,7 @@ import { FIXTURE_LATITUDE } from './route-fixtures-testing';
 import { routeStreetNameLabels } from './route-street-names';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import {
-  STREET_NAME_GLYPH_ADVANCE_METRES,
-  STREET_NAME_GLYPH_HEIGHT_METRES,
-  type StreetNameLabel,
-} from './street-names';
+import { routeNameLayout, type StreetNameLabel } from './street-names';
 import { corridorOrigin } from './terrain';
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
@@ -193,7 +189,7 @@ describe('no label on a sharp bend or near a turnaround — #3261’s tablet che
       const { labels, alongs, bends } = ride(degrees);
       expect(labels.length).toBeGreaterThan(1);
       for (const [index, label] of labels.entries()) {
-        const half = (Array.from(label.text).length * STREET_NAME_GLYPH_ADVANCE_METRES) / 2;
+        const half = routeNameLayout(label.text).extent / 2;
         for (const bend of bends) {
           expect(Math.abs((alongs[index] as number) - bend)).toBeGreaterThan(
             half + BEND_CLEAR_METRES,
@@ -208,7 +204,7 @@ describe('no label on a sharp bend or near a turnaround — #3261’s tablet che
     // The way back is named too, so the route still has a label past the turn.
     expect(alongs.some((along) => along > turn)).toBe(true);
     for (const [index, label] of labels.entries()) {
-      const half = (Array.from(label.text).length * STREET_NAME_GLYPH_ADVANCE_METRES) / 2;
+      const half = routeNameLayout(label.text).extent / 2;
       expect(Math.abs((alongs[index] as number) - turn)).toBeGreaterThanOrEqual(
         half + TURN_CLEAR_METRES,
       );
@@ -240,6 +236,8 @@ function framesPast(at: Ride): ReturnType<typeof sceneFrame>['streetNames'][] {
 
 /** Holds every letter of `views` to a flat rectangle of the painted size; how many there were. */
 function rigidLetters(views: readonly ReturnType<typeof sceneFrame>['streetNames'][]): number {
+  // Every label here is {@link NAME}, laid across the lane (#3344).
+  const { width, length } = routeNameLayout(NAME);
   let letters = 0;
   for (const view of views) {
     const corners = view?.corners ?? new Float32Array(0);
@@ -252,17 +250,15 @@ function rigidLetters(views: readonly ReturnType<typeof sceneFrame>['streetNames
       const [a, b, c, d] = [corner(0), corner(1), corner(2), corner(3)];
       const plan = (p: readonly number[], q: readonly number[]): number =>
         Math.hypot((q[0] as number) - (p[0] as number), (q[2] as number) - (p[2] as number));
-      expect(plan(a, b)).toBeCloseTo(STREET_NAME_GLYPH_ADVANCE_METRES, 3);
-      expect(plan(d, c)).toBeCloseTo(STREET_NAME_GLYPH_ADVANCE_METRES, 3);
-      expect(plan(a, d)).toBeCloseTo(STREET_NAME_GLYPH_HEIGHT_METRES, 3);
-      expect(plan(b, c)).toBeCloseTo(STREET_NAME_GLYPH_HEIGHT_METRES, 3);
+      // #3344: its bottom and top edges across the lane, its sides along the road.
+      expect(plan(a, b)).toBeCloseTo(width, 3);
+      expect(plan(d, c)).toBeCloseTo(width, 3);
+      expect(plan(a, d)).toBeCloseTo(length, 3);
+      expect(plan(b, c)).toBeCloseTo(length, 3);
       // Square in plan, and flat across the road: each edge across it at one height.
-      expect(plan(a, c)).toBeCloseTo(
-        Math.hypot(STREET_NAME_GLYPH_ADVANCE_METRES, STREET_NAME_GLYPH_HEIGHT_METRES),
-        3,
-      );
-      expect(d[1]).toBeCloseTo(a[1], 4);
-      expect(c[1]).toBeCloseTo(b[1], 4);
+      expect(plan(a, c)).toBeCloseTo(Math.hypot(width, length), 3);
+      expect(b[1]).toBeCloseTo(a[1], 4);
+      expect(c[1]).toBeCloseTo(d[1], 4);
       letters += 1;
     }
   }
@@ -319,7 +315,7 @@ describe('every letter rigid, and steady from frame to frame — #3261’s table
       if (view === undefined) continue;
       let letter = 0;
       for (const label of view.labels) {
-        const count = Array.from(label.text).length;
+        const count = routeNameLayout(label.text).letters;
         const corners = view.corners.slice(letter * 12, (letter + count) * 12);
         letter += count;
         const before = seen.get(label.key);

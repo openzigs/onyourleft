@@ -223,7 +223,7 @@ export function createWorldCorridorPort(options: WorldCorridorPortOptions): Worl
       log,
       mustStop: options.recording,
       yieldToIdle: options.yieldToIdle,
-      // #3245, ADR 0100 (proposed): each street's name, kept with the corridor
+      // #3245, ADR 0100: each street's name, kept with the corridor
       // on this device alone, for the name painted along the route's street.
       streetNames: true,
     });

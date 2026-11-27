@@ -2,7 +2,7 @@
 
 /**
  * **The street a saved route is on, painted on the road now and then** —
- * #3245, under ADR 0100 (proposed).
+ * #3245, under ADR 0100.
  *
  * The open world paints every named street at each junction mouth and every
  * 200 m (`street-names.ts` §`streetNameLabels`, #3052). A route ride is much
@@ -32,9 +32,13 @@
  *
  * ## Where a label goes
  *
- * On the drawn road's centreline, laid along it, painted exactly as the open
- * world's are (`street-names.ts` §`streetNamesInView`, one draw call for all
- * of them). **Only where the whole name fits**: inside its street's stretch,
+ * Its middle on the drawn road's centreline, painted across the rider's lane
+ * as a road marking is (#3344, `street-names.ts` §`routeNameLayout`: each
+ * letter upright to the approaching rider and stretched along the road, a
+ * long name wrapped or shrunk to the lane), in the open world's one draw call
+ * (`street-names.ts` §`streetNamesInView`). **Only where the whole name
+ * fits** along the road, from its first line's near edge to its last line's
+ * far edge: inside its street's stretch,
  * and where the road runs straight under it, within
  * {@link STRAIGHT_METRES} of the name's line along its whole length and
  * turning no more than {@link STRAIGHT_DEGREES} from it there and
@@ -57,7 +61,7 @@
 import type { RouteProfile } from '@onyourleft/domain';
 
 import { drawnRoadPoints, squaredToSegment, type DrawnRoadPoints } from './road-grid';
-import { paintable, paintedLength, type StreetNameLabel } from './street-names';
+import { paintable, routeNameLayout, type StreetNameLabel } from './street-names';
 import type { CorridorOrigin } from './terrain';
 
 /**
@@ -373,7 +377,7 @@ export function routeStreetNameLabels(
   const nearATurn = (at: number, half: number): boolean =>
     turns.some((turn) => Math.abs(turn - at) < half + ROUTE_STREET_NAME_TURN_CLEAR_METRES);
   for (const stretch of stretchesOf(cells, road)) {
-    const half = paintedLength(stretch.name) / 2;
+    const half = routeNameLayout(stretch.name).extent / 2;
     let at = stretch.from + ROUTE_STREET_NAME_JOIN_METRES + half;
     while (at + half <= stretch.to) {
       const place = nearATurn(at, half) ? undefined : straightPlace(road, at, half);

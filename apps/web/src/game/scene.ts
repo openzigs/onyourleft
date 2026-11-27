@@ -2753,6 +2753,14 @@ function drawnRider(input: SceneInput): EasedPlace {
  * (`nearby-streets.ts` §`routeGround`) — #3052's names are painted on it —
  * or `undefined` off the drawn ground.
  */
+function streetSurfaceAt(
+  input: SceneInput,
+  seed: number,
+): (x: number, z: number) => number | undefined {
+  const ground = routeGround(input.profile, input.origin, seed, input.landClass ?? NO_LAND_CLASS);
+  return (x, z) => ground.about(x, z)?.(x, z);
+}
+
 /** A route ride's road as its street names are laid on it — #3261. @see RouteLabelRoad */
 function routeLabelRoad(input: SceneInput, seed: number): RouteLabelRoad {
   const profile = input.profile;
@@ -2767,14 +2775,6 @@ function routeLabelRoad(input: SceneInput, seed: number): RouteLabelRoad {
       return Math.min(apart, profile.totalDistance - apart);
     },
   };
-}
-
-function streetSurfaceAt(
-  input: SceneInput,
-  seed: number,
-): (x: number, z: number) => number | undefined {
-  const ground = routeGround(input.profile, input.origin, seed, input.landClass ?? NO_LAND_CLASS);
-  return (x, z) => ground.about(x, z)?.(x, z);
 }
 
 export interface PlacedRider {

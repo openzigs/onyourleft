@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * #3245, ADR 0100 (proposed): a corridor's street keeps its name through the
+ * #3245, ADR 0100: a corridor's street keeps its name through the
  * store's pack — as `n`, only where the glyph atlas can paint it whole — and
  * a packed name is held to that rule again when it is read back, so a blob
  * edited on the device cannot put another string on the road. Every name here
