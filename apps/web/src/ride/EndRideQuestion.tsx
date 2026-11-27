@@ -24,6 +24,11 @@
  *   nothing to delete, so neither answer is offered and nothing is asked
  *   twice; the one question stays, so a stray press or back does not end the
  *   ride.
+ * - **At the end of a point-to-point route** (#3336, the owner's ruling of
+ *   2026-11-26), the game opens it itself, labelled as the finish
+ *   (`finished`): the same answers, and *Keep riding* rides on along the road
+ *   `game/past-the-finish.ts` draws on past the end. No press opened it, so
+ *   focus is not moved into it.
  *
  * ## Keep riding is the default, and that is behaviour rather than a style
  *
@@ -105,6 +110,12 @@ export const END_RIDE_TEXT = {
   askNotRecorded: 'Nothing is being recorded, so nothing is saved or deleted.',
   /** That step's one answer that ends the ride (#2381). */
   end: 'End ride',
+  /**
+   * The `ask` step's label when the game opened it at the end of a
+   * point-to-point route — #3336, the owner's ruling of 2026-11-26: a finish
+   * with *End ride* or *Keep riding*. ⚠️ Draft wording for the owner.
+   */
+  finishLabel: 'Route finished. End this ride?',
 } as const;
 
 export interface EndRideQuestionProps {
@@ -153,6 +164,12 @@ export interface EndRideQuestionProps {
   readonly surface: 'ride-screen' | 'hud';
   /** A class for the surface's own layout. */
   readonly className: string;
+  /**
+   * Whether the game opened it at the end of the route — #3336: the `ask`
+   * step is labelled {@link END_RIDE_TEXT.finishLabel}, and its answers are
+   * the same. Absent is false.
+   */
+  readonly finished?: boolean;
 }
 
 /** The question. @see EndRideQuestionProps */
@@ -177,7 +194,11 @@ export function EndRideQuestion(props: EndRideQuestionProps): JSX.Element {
   const hud = props.surface === 'hud';
   // #2381: nothing under the ride to save or delete — one step, see above.
   const unrecorded = props.recorded === false && props.onEnd !== undefined;
-  const label = discarding ? END_RIDE_TEXT.discardLabel : END_RIDE_TEXT.askLabel;
+  const label = discarding
+    ? END_RIDE_TEXT.discardLabel
+    : props.finished === true
+      ? END_RIDE_TEXT.finishLabel
+      : END_RIDE_TEXT.askLabel;
   const sentence = discarding
     ? END_RIDE_TEXT.discardWarning
     : unrecorded

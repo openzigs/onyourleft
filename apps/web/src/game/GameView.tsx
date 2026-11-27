@@ -1318,6 +1318,19 @@ interface RideRoad extends Pick<OpenWorldRoadView, 'profile' | 'origin'> {
   readonly follower?: OpenWorldRoad | undefined;
 }
 
+/**
+ * What the end-of-ride question says after its label — #2381: with no
+ * recording under the ride, nothing is saved or deleted.
+ */
+function endQuestionSentence(trainer: GameTrainerPort | undefined): string {
+  const under = trainer?.rideRecording?.();
+  return under === undefined
+    ? END_RIDE_TEXT.askNotRecorded
+    : under.savable
+      ? END_RIDE_TEXT.ask
+      : END_RIDE_TEXT.askNothingRecorded;
+}
+
 /** Before any ride: no profile has been read, and nothing reads this one. */
 const NO_RIDE_ROAD: RideRoad = {
   profile: {
@@ -1821,6 +1834,17 @@ function GameScreen({
    * ride: the simulation runs on as it was and nothing is sent to the trainer.
    */
   const [endAsk, setEndAsk] = useState<EndRideStep | undefined>(undefined);
+  /**
+   * Whether the question open now was opened by the finish — #3336: the end of
+   * a point-to-point route, reached. Labelled as the finish, and opened with
+   * no press, so focus stays where it is (`Button.tsx` §`focusOnMount`).
+   */
+  const [endAtFinish, setEndAtFinish] = useState(false);
+  /** {@link endAsk}, for the frame loop, which the question's opening does not re-run. */
+  const endAskRef = useRef<EndRideStep | undefined>(undefined);
+  useEffect(() => {
+    endAskRef.current = endAsk;
+  }, [endAsk]);
   /** How the last game ride was ended, said on the picker — #2349. */
   const [rideEnded, setRideEnded] = useState<RideEndedAs | undefined>(undefined);
   /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
@@ -3543,6 +3567,7 @@ function GameScreen({
       setStarting(undefined);
       // #2349: a new ride starts with no question open and nothing said of the last.
       setEndAsk(undefined);
+      setEndAtFinish(false);
       setRideEnded(undefined);
       // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
@@ -4614,6 +4639,18 @@ function GameScreen({
           : courseLineEvent(course, lapsDoneRef.current, simulation.state.ride.distance);
       if (course !== undefined && crossed !== undefined) {
         lapsDoneRef.current = courseLapsDone(course, simulation.state.ride.distance);
+        // #3336, the owner's ruling of 2026-11-26: the end of a point-to-point
+        // route is a finish, with *End ride* or *Keep riding* — the end-of-ride
+        // question, opened by the line. Asking changes nothing: the ride runs
+        // on, on the road `scene.ts` draws on past the end, until it is
+        // answered. Never over a question the rider has open already.
+        if (!course.loop && endAskRef.current === undefined) {
+          setEndAsk('ask');
+          setEndAtFinish(true);
+          setAnnouncement(
+            `${END_RIDE_TEXT.finishLabel} ${endQuestionSentence(trainerPortRef.current)}`,
+          );
+        }
         // #3153, the review of PR #3160: a capture keeps its laps in memory, as its figures.
         const capture = captureRecordingRef.current;
         const laps =
@@ -5576,19 +5613,13 @@ function GameScreen({
    */
   const askToEnd = (): void => {
     setEndAsk('ask');
-    const under = props.trainer?.rideRecording?.();
-    // #2381: with no recording under the ride, nothing is saved or deleted.
-    const sentence =
-      under === undefined
-        ? END_RIDE_TEXT.askNotRecorded
-        : under.savable
-          ? END_RIDE_TEXT.ask
-          : END_RIDE_TEXT.askNothingRecorded;
-    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${sentence}`);
+    setEndAtFinish(false);
+    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${endQuestionSentence(props.trainer)}`);
   };
   /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
   const keepRiding = (): void => {
     setEndAsk(undefined);
+    setEndAtFinish(false);
   };
   useRideBack(onTheStage, () => {
     if (endAsk === undefined) {
@@ -5654,6 +5685,7 @@ function GameScreen({
     const recorded = trainerPort?.rideRecording?.() !== undefined;
     teardown();
     setEndAsk(undefined);
+    setEndAtFinish(false);
     // #2392's review: a ride ended while its town loaded has no round waiting.
     setTownLoading(false);
     setPhase('choosing');
@@ -6425,12 +6457,15 @@ function GameScreen({
             <EndRideQuestion
               className="oyl-end-ride oyl-end-ride--hud"
               step={endAsk}
+              // #3336: opened by the finish line, so labelled as the finish.
+              finished={endAtFinish}
               canSave={recordedUnder?.savable === true}
               // #2381: with nothing recorded, one step: *End ride* or
               // *Keep riding*, and no deletion to warn of.
               recorded={recordedUnder !== undefined}
-              // Opened by a press — *End ride*, or back — every time.
-              focusOnOpen
+              // Opened by a press — *End ride*, or back — every time but the
+              // finish (#3336), which no press opened.
+              focusOnOpen={!endAtFinish}
               // The HUD's ONE region says it (#445): @see askToEnd
               surface="hud"
               onSave={() => {
