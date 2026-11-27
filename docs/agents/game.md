@@ -17,14 +17,14 @@ are in **`apps/web/src/game/`**. Every one of those issues says `Component: apps
 paragraph exists to stop that being read as a mistake.
 
 **`apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`.** The Android shell wraps
-**apps/web's build** — that is #85's own premise, _"the mobile shell wraps the same web build, so
+**apps/web's build** — that is #85's own premise, *"the mobile shell wraps the same web build, so
 there is exactly one client and a divergence between the two is impossible rather than merely
-discouraged"_. So a renderer under `apps/mobile/src` would typecheck, test green, and **never be
+discouraged"*. So a renderer under `apps/mobile/src` would typecheck, test green, and **never be
 copied into the APK**. It would be the false pass `apps/mobile/README.md` §4 warns about, arrived at
 from a new direction.
 
 Three things reinforce it. [ADR 0008](../adr/0008-mobile-client-architecture.md) D-1 chose
-Capacitor partly _for_ web UI reuse. §2's layout already describes `apps/mobile` as the shell. And
+Capacitor partly *for* web UI reuse. §2's layout already describes `apps/mobile` as the shell. And
 both gates that can verify this work — the accessibility gate (§4e) and the browser gate (§4f) —
 run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting the HUD in
 `apps/mobile` would place it outside the one gate built to check exactly that.
@@ -42,12 +42,12 @@ relates to #40's Web Bluetooth transport.
 stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in
 `apps/web` reached for #87's Capacitor BLE transport, so the shell shipped a web build that could
 not pair with anything on Android. Three things were missing and all three are now there:
-`apps/mobile` declared no `exports` (so nothing _could_ import it), nothing implemented
+`apps/mobile` declared no `exports` (so nothing *could* import it), nothing implemented
 `CapacitorBlePort` against the real `BleClient` (so there was nothing to hand the transport), and
 `main.tsx` had no way to tell a WebView from a browser.
 
 **How the choice is made now.** `support/capacitor.ts` asks `Capacitor.isNativePlatform()` — not the
-user agent, because a Capacitor WebView _is_ Chrome and reports itself as Chrome, and not
+user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome, and not
 `'Capacitor' in window`, because Capacitor's web build defines that global too. `main.tsx`'s
 `buildPlatform` — named `buildRideController` until #284 gave it a second thing to build — is
 asynchronous for exactly this: inside the shell it `import()`s
@@ -66,7 +66,7 @@ is `availability()`'s production caller now, and the Devices screen is what reac
 there: `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
 `openWebBluetoothTrainer`, `apps/mobile/src/ble/fitness-machine-channel.ts` implements
 `packages/sensors/protocol`'s `FitnessMachineChannel` over the plugin, and everything that decides
-_what may be written_ — `createTrainerControl`, the bounding, the quantisation, the feature gating
+*what may be written* — `createTrainerControl`, the bounding, the quantisation, the feature gating
 — is the same platform-free code on both, which is #39's promise being kept for the one operation
 that writes. What is **not** established is that any of it has reached a trainer: that is
 [validation 0002](../validation/0002-android-shell-and-game.md) Parts B–D, and its result tables
@@ -74,8 +74,8 @@ are still empty. Write "works on Android" again only when one of them is filled 
 
 ⚠️ **The write is `port.write`, never `port.writeWithoutResponse`, and the wrong one is declared on
 the port so the swap is a red test.** `FitnessMachineChannel` warns that an unacknowledged write
-_"compiles, satisfies every test in this file, and reintroduces exactly the fire-and-forget failure
-the client exists to prevent"_ — so `plugin-port.ts` declares the unsafe sibling, `ble-client.ts`
+*"compiles, satisfies every test in this file, and reintroduces exactly the fire-and-forget failure
+the client exists to prevent"* — so `plugin-port.ts` declares the unsafe sibling, `ble-client.ts`
 implements it, nothing calls it, and `fitness-machine-channel.test.ts` asserts it stays uncalled.
 The same shape `web-bluetooth/src/gatt.ts` uses for `writeValueWithoutResponse`.
 
@@ -93,7 +93,7 @@ an FTMS Reset", is reading an old file. On the owner's trainer an acknowledged `
 (2026-09-21) — while also revoking control. The owner **accepted end-of-ride retention** on the
 condition, measured and met, that the app can take control again. So `TrainerControl.letGo()` in
 `packages/sensors/protocol` sends a **Stop** and keeps control, and every release goes through
-`ride/controller.ts` §`releaseTrainer` — _End ERG_, the end of a workout, stopping a ride, and a game
+`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, and a game
 ride ending by button or by navigating away. What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
@@ -102,8 +102,8 @@ trainer's floor before its Stop.** A ramp test ended with the machine keeping it
 the simulator) through the Stop, under a spent rider. So a workout's release hands `beginRelease` the
 machine's own minimum, written as a `0x05` immediately before the `0x08` on the client's one queue,
 unless the session knows the trainer is already at the floor with nothing on the wire. A step-down
-the trainer does not confirm is told as `workout/session.ts` §`STEP_DOWN_UNCONFIRMED` on _Not
-released_. _End ERG_ and a game ride's release are unchanged.
+the trainer does not confirm is told as `workout/session.ts` §`STEP_DOWN_UNCONFIRMED` on *Not
+released*. *End ERG* and a game ride's release are unchanged.
 ⚠️ **Easing a rider DURING a workout is a different command**
 ([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
 Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
@@ -2405,10 +2405,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         fills that yet, so a real map's crossings are
                         crossbucks alone); on a bridge a deck carrying the
                         same track on a plate girder with its ballast's edge
-                        and a railing, on capped piers, level across its span
-                        and 6.8 m over the route where it crosses it (an open
-                        span 32 m each side, ending at a short abutment in a
-                        grass embankment that falls at 1 in 2); a
+                        and a railing, on capped piers, level across its span;
+                        where it crosses the route its track is 6.8 m over
+                        the ROAD's own height (5.25 m clear under the girder),
+                        an open span for at most 32 m each side — to the
+                        mapped bridge's end if that is nearer, and for as far
+                        as the road runs under it — ending at a short abutment
+                        in a grass embankment that falls at 1 in 2, none of
+                        it on the carriageway; a
                         `disused` line rusted and grown over, with no sign at
                         its crossing. ⚠️ **Grounded on
                         `cross-streets.ts` §`standingBesideRoad`**, the one

@@ -37,9 +37,11 @@
  *   battered piers wherever it is high over the ground — level from one end
  *   of the mapped span to the other, so it crosses water and low ground
  *   instead of following them.
- *   Where it crosses the route it clears the road by
- *   {@link DECK_CLEARANCE_METRES} ({@link overLift}) as an open span
- *   {@link DECK_SPAN_HALF_METRES} each side, on two piers a side; it ends at
+ *   Where it crosses the route its track is {@link DECK_CLEARANCE_METRES}
+ *   over the ROAD's own height there ({@link overLift}), whatever the ground
+ *   at its ends, as an open span of at most {@link DECK_SPAN_HALF_METRES}
+ *   each side — to the mapped bridge's end if that is nearer, and for as far
+ *   as the road runs under it — on two piers a side; it ends at
  *   an abutment — a short face under the girder's bearing with a wing wall
  *   each side — in a grass embankment whose sides fall at 1 in
  *   {@link EMBANKMENT_RUN}, and the track climbs to it on that bank.
@@ -175,7 +177,7 @@ export const DECK_KERB_METRES = 0.35;
 /** How high over the deck's ballast its railing's top rail is, in metres: **1.1**. */
 export const DECK_RAILING_METRES = 1.1;
 
-/** How far each side of the route's crossing a rail bridge is an open span, in metres: **32**. Past it, an abutment and walls. */
+/** How far each side of the route's crossing a rail bridge is an open span, in metres: **32** at the most. It ends sooner where the mapped bridge does, and runs on for as far as the road is under it; past it, an abutment in a grass bank. */
 export const DECK_SPAN_HALF_METRES = 32;
 
 /** How far from the route's crossing a bridge's piers stand, each side, in metres: **8** and **24**, so spans of 16 m. */
@@ -249,6 +251,13 @@ export const DECK_PIER_CLEAR_METRES = 2;
 const HELD_CORE_METRES = ROAD_WIDTH_METRES / 2 + BALLAST_CROWN_METRES / 2 + EMBANKMENT_CLEAR_METRES;
 
 /**
+ * Within this of the road's centreline a bed is over the carriageway, in
+ * metres: the track joined to a bridge that is mapped to end there is open
+ * span too, and the bridge's abutment is where that ends.
+ */
+const OVER_CARRIAGEWAY_METRES = ROAD_WIDTH_METRES / 2 + BALLAST_CROWN_METRES / 2;
+
+/**
  * Over how many metres more that hold eases off: what an abutment's face, its
  * wings turned back and the bank's front under it reach from the bed.
  */
@@ -309,7 +318,7 @@ export const ABUTMENT = linearColour(0x6b6860);
 /** A disused line's ballast: grown over. */
 export const BALLAST_OVERGROWN = linearColour(0x56613f);
 /** A pier's concrete, under its cap. */
-export const TRACK_WALL = linearColour(0x86837b);
+export const PIER_CONCRETE = linearColour(0x86837b);
 /** A crossbuck's boards and a gate's white bands. */
 export const CROSSBUCK_WHITE = linearColour(0xe9e7df);
 /** A signal's post. */
@@ -329,6 +338,8 @@ export interface RailTrackPiece {
   readonly line: Float32Array;
   /** How far along its mapped line the first station is, in metres: the sleepers' phase. */
   readonly fromMetres: number;
+  /** How long its last step is, where it ends at its line's own end short of a whole step. */
+  readonly tail?: number;
   /** A line mapped on a bridge: a deck, level between {@link span}'s ends. */
   readonly deck: boolean;
   /** A line mapped as disused: rusted rails, ballast grown over. */
@@ -392,6 +403,8 @@ const found = new WeakMap<WorldCorridor, { profile: RouteProfile; track: RailTra
 interface Run {
   readonly points: number[];
   readonly fromMetres: number;
+  /** How long its last step is, where the line's end is not a whole step on: under a step. */
+  tail?: number;
 }
 
 /**
@@ -411,16 +424,22 @@ function runsOf(
   let travelled = 0;
   /** How far along the line the next station is. */
   let next = 0;
+  /** Whether the walk reached the line's end: not stopped by the budget or a bad coordinate. */
+  let whole = true;
   for (let at = 0; at + 3 < line.length; at += 2) {
     const ax = line[at] as number;
     const az = line[at + 1] as number;
     const bx = line[at + 2] as number;
     const bz = line[at + 3] as number;
-    if (![ax, az, bx, bz].every(Number.isFinite)) break;
+    if (![ax, az, bx, bz].every(Number.isFinite)) {
+      whole = false;
+      break;
+    }
     const length = Math.hypot(bx - ax, bz - az);
     if (!(length > 0)) continue;
     if (length > budget.metres) {
       budget.metres = 0;
+      whole = false;
       break;
     }
     budget.metres -= length;
@@ -439,6 +458,17 @@ function runsOf(
       run.points.push(x, z);
     }
     travelled += length;
+  }
+  // The line's own end, where it is not a whole step on: a mapped line is cut wherever its tags
+  // change, and the track must reach the cut or every bridge would stand a gap from its track.
+  const tail = travelled - (next - RAIL_TRACK_STEP_METRES);
+  if (whole && run !== undefined && tail > 0.05) {
+    const ex = line[line.length - 2] as number;
+    const ez = line[line.length - 1] as number;
+    if (near(ex, ez)) {
+      run.points.push(ex, ez);
+      run.tail = tail;
+    }
   }
   return runs.filter((each) => each.points.length >= 4);
 }
@@ -547,7 +577,9 @@ export function railTrack(
                 run.points[run.points.length - 1] as number,
               ] as const,
               fromMetres: run.fromMetres,
-              metres: (stations - 1) * RAIL_TRACK_STEP_METRES,
+              metres:
+                (stations - 1) * RAIL_TRACK_STEP_METRES -
+                (run.tail === undefined ? 0 : RAIL_TRACK_STEP_METRES - run.tail),
             }
           : undefined;
         for (let first = 0; first + 1 < stations; first += RAIL_TRACK_PIECE_STEPS) {
@@ -567,6 +599,7 @@ export function railTrack(
           pieces.push({
             line,
             fromMetres: run.fromMetres + first * RAIL_TRACK_STEP_METRES,
+            ...(run.tail !== undefined && last === stations - 1 ? { tail: run.tail } : {}),
             deck,
             disused: rail.kindDetail === 'disused',
             ...(span === undefined ? {} : { span }),
@@ -764,7 +797,7 @@ interface Row {
   /** Across the track: its direction turned a quarter. */
   readonly ax: number;
   readonly az: number;
-  /** The crown's two edges and the shoulders' or the walls' feet. */
+  /** The crown's two edges and the shoulders' or the bank's feet. */
   readonly footLeft: Point;
   readonly left: Point;
   readonly right: Point;
@@ -779,7 +812,7 @@ interface Row {
   readonly under: number;
   /** How far across the track its farther foot is, in metres: what the scenery keeps off. */
   readonly reach: number;
-  /** A deck's row in its open span: a girder on piers. A deck's other rows are an abutment's walls. */
+  /** A deck's row in its open span: a girder on piers. A deck's other rows are on the bank past its abutment. */
   readonly open: boolean;
   /** How far from where its track's bridge crosses the route; `Infinity` where it crosses none. */
   readonly over: number;
@@ -847,11 +880,16 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     lastDistance = centre?.near.distance;
     if (centre === undefined) return undefined;
     // A deck over the road's corridor, and where an abutment's wings would reach into it, holds
-    // its clearance and is open, however far along its line.
+    // its clearance and is open, however far along its line. So does the track joined to it,
+    // where the bridge is mapped to end at the road's edge or in it: no bank stands in a road.
     const hold =
-      piece.deck && piece.overs.length > 0
-        ? 1 - smooth((centre.near.distance - HELD_CORE_METRES) / HELD_EDGE_METRES)
-        : 0;
+      piece.overs.length === 0
+        ? 0
+        : piece.deck
+          ? 1 - smooth((centre.near.distance - HELD_CORE_METRES) / HELD_EDGE_METRES)
+          : centre.near.distance < OVER_CARRIAGEWAY_METRES
+            ? 1
+            : 0;
     const held = hold > 0;
     const lift = overLift(lifting, x, z, hold);
     let over = Infinity;
@@ -859,7 +897,8 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       over = Math.min(over, Math.hypot(x - crossing.x, z - crossing.z));
     }
     // A bridge over the route is an open span beside the road and an abutment past it.
-    const open = piece.deck && (piece.overs.length === 0 || over <= DECK_SPAN_HALF_METRES || held);
+    const open =
+      held || (piece.deck && (piece.overs.length === 0 || over <= DECK_SPAN_HALF_METRES));
     const lifted = lift > LIFTED_METRES;
     // A line at grade stops at water, as a street does; a deck, and a track on its way up to one, crosses it.
     if (
@@ -943,6 +982,11 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       over,
     };
   };
+  /** How long the step that ends at station `index` is, and how far along the piece that station. */
+  const stepOf = (index: number): number =>
+    index === count - 1 && piece.tail !== undefined ? piece.tail : RAIL_TRACK_STEP_METRES;
+  const alongOf = (index: number): number =>
+    index === 0 ? 0 : (index - 1) * RAIL_TRACK_STEP_METRES + stepOf(index);
   const rowAt = (index: number): Row | undefined => {
     const before = Math.max(0, index - 1);
     const after = Math.min(count - 1, index + 1);
@@ -951,7 +995,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       piece.line[index * 2 + 1] as number,
       (piece.line[after * 2] as number) - (piece.line[before * 2] as number),
       (piece.line[after * 2 + 1] as number) - (piece.line[before * 2 + 1] as number),
-      index * RAIL_TRACK_STEP_METRES,
+      alongOf(index),
     );
   };
   const crownColour = piece.disused ? BALLAST_OVERGROWN : BALLAST;
@@ -997,7 +1041,11 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
   /** The track from row `a` to row `b`: `metres` of it, starting `from` along the mapped line. */
   const stretch = (a: Row, b: Row, from: number, metres: number): void => {
     const paved = a.onRoad && b.onRoad;
-    const span = a.open && b.open;
+    // A step from an open row to the bank is the bank's, up to the open row — unless that row's
+    // bed is over the carriageway, when the step is span and the bank starts at its far row.
+    const span =
+      (a.open && b.open) ||
+      (a.open !== b.open && (a.open ? a : b).distance < OVER_CARRIAGEWAY_METRES);
     // The bed: a shoulder or a wall each side, or an open span's girder, and the crown.
     if (span) {
       fascia(a, b, -1);
@@ -1129,7 +1177,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       }
     };
     const shaftTop = near ? girder - DECK_PIER_CAP_METRES[2] : girder;
-    crossed(foot, shaftTop, DECK_PIER_METRES, DECK_PIER_BATTER, PIER_FOOT, TRACK_WALL);
+    crossed(foot, shaftTop, DECK_PIER_METRES, DECK_PIER_BATTER, PIER_FOOT, PIER_CONCRETE);
     if (near) {
       crossed(
         shaftTop,
@@ -1213,6 +1261,14 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     let shoulder = half + EMBANKMENT_RUN * (crown - seat);
     while (shoulder > cheek && !(standsClear(shoulder) && standsClear(-shoulder))) shoulder -= 1;
     shoulder = Math.max(cheek, shoulder);
+    // The face itself, and where its wings start: a bridge mapped to end at the road's edge, or
+    // in it, has no room for an abutment at all, and concrete never stands on the carriageway.
+    const faceClear = [-1, -0.5, 0, 0.5, 1].every((share) => {
+      const point = at(share * cheek, 0, 0.05);
+      const stood = standingAt(ground, point[0], point[2], end.distance + cheek + 1);
+      return stood !== undefined && stood.near.distance >= ON_CARRIAGEWAY_METRES;
+    });
+    if (!faceClear || !standsClear(shoulder) || !standsClear(-shoulder)) return;
     if (near) {
       mesh.quad(
         ABUTMENT,
@@ -1273,20 +1329,41 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
   const spanEnd = piece.span === undefined ? 0 : piece.span.fromMetres + piece.span.metres;
   const startsSpan = piece.span !== undefined && piece.fromMetres === piece.span.fromMetres;
   const endsSpan =
-    piece.span !== undefined &&
-    Math.abs(piece.fromMetres + (count - 1) * RAIL_TRACK_STEP_METRES - spanEnd) < 0.01;
+    piece.span !== undefined && Math.abs(piece.fromMetres + alongOf(count - 1) - spanEnd) < 0.01;
   let cuts = 0;
   let a = rowAt(0);
   for (let index = 1; index < count; index += 1) {
     const b = rowAt(index);
     if (a !== undefined && b !== undefined) {
       piers(a, b, Math.round(piece.fromMetres / RAIL_TRACK_STEP_METRES) + index - 1);
-      if (a.open !== b.open) abutment(a.open ? a : b, a.open ? b : a);
+      if (a.open !== b.open) {
+        const last = a.open ? a : b;
+        const bank = a.open ? b : a;
+        if (last.distance < OVER_CARRIAGEWAY_METRES) {
+          abutment(bank, { x: 2 * bank.x - last.x, z: 2 * bank.z - last.z });
+        } else {
+          abutment(last, bank);
+        }
+      }
       // A bridge mapped shorter than its open span ends where the mapped span does.
-      if (index === 1 && startsSpan && a.open && a.over <= DECK_SPAN_HALF_METRES) {
+      // …unless that is in the road's corridor, where the track joined to it is open too and
+      // the abutment is where that ends.
+      if (
+        index === 1 &&
+        startsSpan &&
+        a.open &&
+        a.over <= DECK_SPAN_HALF_METRES &&
+        a.distance >= OVER_CARRIAGEWAY_METRES
+      ) {
         abutment(a, { x: 2 * a.x - b.x, z: 2 * a.z - b.z });
       }
-      if (index === count - 1 && endsSpan && b.open && b.over <= DECK_SPAN_HALF_METRES) {
+      if (
+        index === count - 1 &&
+        endsSpan &&
+        b.open &&
+        b.over <= DECK_SPAN_HALF_METRES &&
+        b.distance >= OVER_CARRIAGEWAY_METRES
+      ) {
         abutment(b, { x: 2 * b.x - a.x, z: 2 * b.z - a.z });
       }
       const from = piece.fromMetres + (index - 1) * RAIL_TRACK_STEP_METRES;
@@ -1300,17 +1377,17 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
               a.z + (b.z - a.z) * t,
               b.x - a.x,
               b.z - a.z,
-              (index - 1 + t) * RAIL_TRACK_STEP_METRES,
+              (index - 1) * RAIL_TRACK_STEP_METRES + t * stepOf(index),
             )
           : undefined;
       if (edge === undefined) {
-        stretch(a, b, from, RAIL_TRACK_STEP_METRES);
+        stretch(a, b, from, stepOf(index));
       } else {
         cuts += 1;
         // The cut is the carriageway's last row, whichever side of it the arithmetic lands.
         const last: Row = { ...edge, onRoad: true };
-        stretch(a, last, from, t * RAIL_TRACK_STEP_METRES);
-        stretch(last, b, from + t * RAIL_TRACK_STEP_METRES, (1 - t) * RAIL_TRACK_STEP_METRES);
+        stretch(a, last, from, t * stepOf(index));
+        stretch(last, b, from + t * stepOf(index), (1 - t) * stepOf(index));
       }
     }
     a = b;

@@ -74,7 +74,7 @@ import {
   SLEEPER_PROUD_METRES,
   SLEEPER_SPACING_METRES,
   SLEEPER_WIDTH_METRES,
-  TRACK_WALL,
+  PIER_CONCRETE,
 } from './rail-track';
 import {
   RAIL_CROSSING_FURNITURE_TRIANGLES,
@@ -268,6 +268,61 @@ describe('a mapped line is drawn as track — #3253', () => {
     expect(trackOf(frameAt(from + 300, corridorOf([])))).toEqual([]);
     expect(trackOf(frameAt(from + 300, corridorOf(undefined)))).toEqual([]);
     expect(trackOf(frameAt(from + 300))).toEqual([]);
+  });
+
+  it('to the line’s own end, so two lines that meet between stations leave no gap', () => {
+    // 301.5 m and then 198.5 m: neither a whole number of steps.
+    const joined = quadsOf(
+      trackOf(
+        frameAt(
+          from + 300,
+          corridorOf([
+            rail([
+              [from, BESIDE],
+              [from + 301.5, BESIDE],
+            ]),
+            rail([
+              [from + 301.5, BESIDE],
+              [from + 500, BESIDE],
+            ]),
+          ]),
+        ),
+      ),
+    ).filter(is(BALLAST));
+    const spans = joined
+      .map((quad) => quad.corners.map((corner) => corner.along))
+      .map((alongs) => [Math.min(...alongs), Math.max(...alongs)] as const)
+      .sort((a, b) => a[0] - b[0]);
+    for (let index = 1; index < spans.length; index += 1) {
+      const gap =
+        (spans[index] as readonly [number, number])[0] -
+        (spans[index - 1] as readonly [number, number])[1];
+      expect(gap).toBeLessThan(0.05);
+    }
+    expect(Math.abs((spans.at(-1) as readonly [number, number])[1] - (from + 500))).toBeLessThan(3);
+    // And the sleepers keep their spacing through the short last step.
+    const sleepers = quadsOf(
+      trackOf(
+        frameAt(
+          from + 300,
+          corridorOf([
+            rail([
+              [from, BESIDE],
+              [from + 301.5, BESIDE],
+            ]),
+          ]),
+        ),
+      ),
+    )
+      .filter(is(SLEEPER))
+      .map((quad) => centre(quad).along)
+      .sort((a, b) => a - b);
+    for (let index = 1; index < sleepers.length; index += 1) {
+      expect((sleepers[index] as number) - (sleepers[index - 1] as number)).toBeCloseTo(
+        SLEEPER_SPACING_METRES,
+        2,
+      );
+    }
   });
 
   it('a ballast bed: a crown its stated width, and a shoulder each side down to the ground', () => {
@@ -844,7 +899,7 @@ describe('a rail bridge — #3253', () => {
   it('is carried past its span on a grass embankment whose sides fall at 1 in 2, and no wall', () => {
     expect(EMBANKMENT_RUN).toBe(2);
     // No concrete wall anywhere: #3270's two blank walls are gone.
-    expect(quads.filter(is(TRACK_WALL))).toEqual([]);
+    expect(quads.filter(is(PIER_CONCRETE))).toEqual([]);
     const banks = quads.filter(is(EMBANKMENT_GRASS));
     const sides = banks.filter(
       (quad) =>
@@ -1115,7 +1170,7 @@ function bridgeOver(site: number, length: number): WorldCorridor {
 }
 
 /**
- * The girder's underside over the carriageway, each metre across it: how far
+ * The girder's underside over the carriageway, nine points along each web: how far
  * over the ROAD's height at that spot, the way a rider under it sees.
  */
 function clearancesUnder(quads: readonly Quad[]): number[] {
@@ -1123,11 +1178,13 @@ function clearancesUnder(quads: readonly Quad[]): number[] {
   const out: number[] = [];
   for (const quad of quads.filter(is(DECK_GIRDER))) {
     const low = [...quad.corners].sort((a, b) => a.y - b.y).slice(0, 2) as [Corner, Corner];
-    const [from, to] = low[0].lateral <= low[1].lateral ? low : [low[1], low[0]];
-    if (to.lateral - from.lateral < 0.5) continue;
-    for (let lateral = -half; lateral <= half; lateral += 1) {
-      if (lateral < from.lateral || lateral > to.lateral) continue;
-      const t = (lateral - from.lateral) / (to.lateral - from.lateral);
+    const [from, to] = low;
+    // Along its lower edge, whichever way it lies: a web that runs nearly along the road is
+    // over it for its whole length and is sampled as one square across it is.
+    for (let step = 0; step <= 8; step += 1) {
+      const t = step / 8;
+      const lateral = from.lateral + (to.lateral - from.lateral) * t;
+      if (Math.abs(lateral) > half) continue;
       out.push(from.y + (to.y - from.y) * t - roadAt(from.along + (to.along - from.along) * t));
     }
   }
@@ -1207,7 +1264,7 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
   const site = dryStretch(80, 200, 2_600) + 40;
   const solids = (quads: readonly Quad[]): Quad[] =>
     quads.filter((quad) =>
-      [EMBANKMENT_GRASS, ABUTMENT, PIER_FOOT, PIER_CAP, TRACK_WALL].some((c) => is(c)(quad)),
+      [EMBANKMENT_GRASS, ABUTMENT, PIER_FOOT, PIER_CAP, PIER_CONCRETE].some((c) => is(c)(quad)),
     );
   const frame = (corridor: WorldCorridor) => quadsOf(trackOf(frameAt(site - 30, corridor)));
 
@@ -1235,6 +1292,7 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     expect(quads.filter(is(EMBANKMENT_GRASS)).length).toBeGreaterThan(20);
     expect(inTheRoad(solids(quads))).toBe(0);
     // And its girder is over the road all the way the road runs under it.
+    expect(clearancesUnder(quads).length).toBeGreaterThan(8);
     expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
       DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
     );
@@ -1267,6 +1325,7 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
       .map((quad) => Math.abs(quad.corners.reduce((sum, c) => sum + c.along, 0) / 4 - site));
     expect(Math.max(...along)).toBeGreaterThan(DECK_SPAN_HALF_METRES);
     expect(inTheRoad(solids(quads))).toBe(0);
+    expect(clearancesUnder(quads).length).toBeGreaterThan(8);
     expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
       DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
     );
@@ -1296,6 +1355,43 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     expect(inTheRoad(solids(quads))).toBe(0);
   });
 
+  it.each([
+    ['square to the road and ending in it', [-3, 3], 0],
+    ['square to the road and ending at its edge', [-4, 4], 0],
+    ['at an angle, its ends half a metre off the road’s edge', [-4, 4], 16],
+    ['square to the road, its ends a metre off the road’s edge', [-4.5, 4.5], 0],
+    ['at 20 degrees, its ends clear of the road but its abutments’ faces not', [-5.4, 5.4], 15],
+  ] as const)('on a bridge mapped to end by the road, %s: no concrete on it', (_, ends, lean) => {
+    const quads = frame(
+      corridorOf([
+        rail([
+          [site - lean * 10, -200],
+          [site - lean, ends[0]],
+        ]),
+        rail(
+          [
+            [site - lean, ends[0]],
+            [site + lean, ends[1]],
+          ],
+          'bridge',
+        ),
+        rail([
+          [site + lean, ends[1]],
+          [site + lean * 10, 200],
+        ]),
+      ]),
+    );
+    // Non-vacuity: the bridge is there, over the road.
+    expect(quads.filter(is(DECK_GIRDER)).length).toBeGreaterThan(0);
+    expect(clearancesUnder(quads).length).toBeGreaterThan(0);
+    expect(inTheRoad(quads.filter(is(ABUTMENT)))).toBe(0);
+    // And never two abutments at one end: a face and two wings an end at the most.
+    expect(quads.filter(is(ABUTMENT)).length).toBeLessThanOrEqual(6);
+    for (const tone of [EMBANKMENT_GRASS, PIER_FOOT, PIER_CAP, PIER_CONCRETE]) {
+      expect([tone, inTheRoad(quads.filter(is(tone)))]).toEqual([tone, 0]);
+    }
+  });
+
   it.each([12, 24, 48])(
     'on a %i m bridge, shorter than the open span: an abutment each end',
     (length) => {
@@ -1310,6 +1406,7 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
       }
       expect(inTheRoad(solids(quads))).toBe(0);
       // It clears the road, and its girder is the open span.
+      expect(clearancesUnder(quads).length).toBeGreaterThan(8);
       expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
         DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
       );
@@ -1410,10 +1507,6 @@ describe('what the track costs — #3253', () => {
     expect(Math.max(...far.map((road) => triangles([road])))).toBeGreaterThanOrEqual(120);
     expect(Math.max(...signs.map((road) => triangles([road])))).toBe(64);
     expect(triangles(track)).toBeGreaterThan(REALISTIC_RAIL_TRACK_TRIANGLES * 0.7);
-    console.log(
-      `#3253 a frame of more railway than fits: ${String(triangles(track))} triangles in ` +
-        `${String(near.length)} near pieces, ${String(far.length)} far and ${String(signs.length)} crossings' signs`,
-    );
   });
 
   it('is drawn nearest first, and never past the fog', () => {
