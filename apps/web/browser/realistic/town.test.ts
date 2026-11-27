@@ -37,6 +37,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import {
   churchStreetFixture,
+  cityStreetscapeFixture,
   civicStreetFixture,
   commercialStreetFixture,
   datedStreetFixture,
@@ -47,6 +48,7 @@ import {
   neighbourhoodFixture,
   planFingerprint,
   poiStreetFixture,
+  terraceStreetFixture,
   typedStreetFixture,
   untaggedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
@@ -639,6 +641,40 @@ describe('the realistic page’s `shop-aprons` lever — #2848', () => {
       for (const role of FOOTPRINT_ROLES) {
         if (role === 'apron') expect(plan.triangles[role]).toHaveLength(0);
         else expect(plan.triangles[role]).toStrictEqual(on[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
+describe('the realistic page’s `facade-kit` lever — #3334', () => {
+  it.each([
+    ['terrace', terraceStreetFixture(), 'townhouse'],
+    ['city', cityStreetscapeFixture(), 'office'],
+  ] as const)(
+    'wraps the mapped footprints of `town=%s` on the product’s page, as the press classes the street',
+    (town, street, kind) => {
+      const { plans } = plannedTown(street, parseConfig(`?town=${town}`).leversOff);
+      const wrapped = plans.filter((plan) => plan.kit !== undefined);
+      expect(wrapped.length).toBeGreaterThan(10);
+      expect(wrapped.some((plan) => plan.kit?.kind === kind)).toBe(true);
+      // By setting, as the press read it: every wrap stands beside a town's or a city centre's stretch.
+      for (const plan of wrapped) expect(['town', 'city-centre']).toContain(plan.urban);
+    },
+  );
+
+  it('plans every footprint with no wrap, and otherwise as the product does, with `levers=-facade-kit`', () => {
+    const street = terraceStreetFixture();
+    const on = plannedTown(street, parseConfig('?town=terrace').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=terrace&levers=-facade-kit').leversOff,
+    ).plans;
+    expect(off.length).toBe(on.length);
+    expect(on.some((plan) => plan.kit !== undefined)).toBe(true);
+    off.forEach((plan, index) => {
+      expect(plan.kit).toBeUndefined();
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(on[index]?.triangles[role]);
       }
     });
   });

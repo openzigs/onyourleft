@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { RouteProfile } from '@onyourleft/domain';
 
-import { footprintPlans } from '../footprint-buildings';
+import { footprintPlans, type FootprintPlanOptions } from '../footprint-buildings';
 import {
   buildingBeside,
   landBeside,
@@ -59,7 +59,34 @@ function threeInARow(): { readonly profile: RouteProfile; readonly corridor: Wor
   };
 }
 
+/** The options every `footprintPlans` call was handed, in order — #3334. */
+const planned: (FootprintPlanOptions | undefined)[] = [];
+vi.mock('../footprint-buildings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../footprint-buildings')>();
+  return {
+    ...actual,
+    footprintPlans: (...args: Parameters<typeof actual.footprintPlans>) => {
+      planned.push(args[6]);
+      return actual.footprintPlans(...args);
+    },
+  };
+});
+
 describe('#2294 — the most houses a round can hold on a route', () => {
+  it('plans no wrap of the downtown kit’s pieces to count houses: nothing is drawn here (#3334)', () => {
+    const town = deliveryTown('a-route', {});
+    planned.length = 0;
+    const counted = roundHousesOn(town.corridor, town.profile);
+    expect(planned.map((options) => options?.facadeKit)).toEqual([false]);
+    // And the count is the count a ride's own plans give. (No footprint of this town is
+    // wrapped either way; that a wrap changes no house's count rests on `plan.kit` being
+    // read by the belt and the selection alone.)
+    const land = landClassMask(town.corridor);
+    const origin = corridorOrigin(town.profile);
+    const { plans } = footprintPlans(town.corridor, land, town.profile, origin);
+    expect(counted).toBe(countRoundHouses(mappedBuildingsOf(plans), town.profile, origin));
+  });
+
   it('counts the towns the chooser’s rides are ridden through, capped at the most a round holds', () => {
     const counted = (layout: Parameters<typeof deliveryTown>[1]): number => {
       const town = deliveryTown('a-route', layout);

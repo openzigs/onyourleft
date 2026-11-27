@@ -323,6 +323,21 @@ export type Layer = (typeof LAYERS)[number];
  *   garage has a driveway, whose ground is cleared, the product plants trees
  *   (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`).
  *
+ * - `facade-kit` — #3334: a mapped shop, retail strip, office or terraced
+ *   house beside a `town` or `city-centre` stretch wrapped, at the near
+ *   level, in the downtown kit's facade pieces (`facade-kit.ts`): shop fronts
+ *   on the ground floor, windows above, a cornice, each building its own. Off, no plan has a
+ *   wrap and every one is drawn as its extrusion, as before; each plan's
+ *   extrusion is the same bytes either way. Read at load, as
+ *   `commercial-archetypes` is. The owner's BY-EYE pair and the tablet's cost
+ *   pair (one draw call for every wrap in view, inside the mapped buildings'
+ *   six; a wrap is at most 3 000 triangles and the nearest six are wraps, a side of the street in turn); pair it with
+ *   `town=terrace`, whose houses stand to 1 200 m and its shops and offices
+ *   beyond, or with `town=city-street`, whose street front is a city centre's
+ *   own lots (#1637), wrapped as a mapped shop is. ⚠️ Not `town=city`: its
+ *   street front is procedural house lots, which are no footprint plan and
+ *   which no wrap reaches; it draws the same frame either way. The product
+ *   always wraps them.
  * - `shop-aprons` — #2848: the paved apron before each mapped commercial
  *   footprint's front, from its wall to the kerb, where no footway is mapped
  *   before it (`shop-aprons.ts`). Off, no plan has one and every plan is as
@@ -514,6 +529,7 @@ export const LEVERS = [
   'crag',
   'decorations',
   'dormer-variants',
+  'facade-kit',
   'facade-trims',
   'facade-wreath',
   'fir-prepass',
@@ -995,6 +1011,16 @@ export function archetypePorchesWithLevers(leversOff: readonly Lever[]): boolean
  */
 export function commercialArchetypesWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('commercial-archetypes');
+}
+
+/**
+ * Whether this run wraps a town's and a city centre's shops, offices and
+ * terraced houses in the downtown kit's facade pieces — #3334: the product
+ * always does; `-facade-kit` plans every footprint with no wrap. Read at
+ * load, as `commercial-archetypes` is.
+ */
+export function facadeKitWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('facade-kit');
 }
 
 /**
