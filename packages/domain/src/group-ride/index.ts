@@ -83,3 +83,17 @@ export {
   startCues,
   stepCues,
 } from './cues';
+
+// The group stepped through the one physics (#3300): the plan's power on the
+// front, the lap race's wheel rule behind it, one draft call for every rider.
+// The rider is read and never written; the physics is the caller's.
+export type {
+  GroupBot,
+  GroupPhysics,
+  GroupRideInput,
+  GroupRideSetup,
+  GroupRideState,
+  GroupRideTick,
+  GroupRoad,
+} from './step';
+export { startGroupRide, stepGroupRide } from './step';

@@ -149,7 +149,14 @@ export {
 // Each bot's race-aware tactics (#2462, ADR 0067 D-0, D-1, D-7): utility over
 // seven states, chosen once per decision window, telling the power model how
 // hard to ride inside a capacity it never changes. Wired into the race by #2463.
-export type { BotEffort, BotTactic, RaceView, TacticDecision, TacticMemory } from './tactics';
+export type {
+  BotEffort,
+  BotTactic,
+  RaceView,
+  TacticDecision,
+  TacticMemory,
+  WheelHold,
+} from './tactics';
 export {
   BOT_TACTIC_ATTACK_MS,
   BOT_TACTIC_ATTACK_SURGE,
@@ -186,6 +193,7 @@ export {
   BOT_TACTIC_WHEEL_SURGE,
   BOT_TACTICS,
   botLaunchMetres,
+  botWheelWatts,
   decideTactic,
   TACTIC_MEMORY_AT_START,
 } from './tactics';
