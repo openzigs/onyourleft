@@ -2136,8 +2136,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         takes only a model of the style its setting calls for
                         (`houseStyleOf`): `modern` beside a `village`, `town` or
                         `city-centre` stretch, `traditional` on farmland and
-                        beside a `rural` or unclassed one, and a seeded 0.15 of
-                        a village stretch's traditional. ⚠️ All thirteen are
+                        beside a `rural` or unclassed one, and a seeded 0.5 of
+                        a village stretch's traditional (the owner's ruling on
+                        #3273: a village is a mix). The style chooses among
+                        RESIDENTIAL models only, so the brick shop still stands
+                        on a town's main street (#3334). ⚠️ All thirteen are
                         `traditional` and NO modern model is committed, so a
                         modern footprint is drawn as its extrusion: a modern
                         model joins as a row with `style: 'modern'`, held to

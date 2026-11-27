@@ -256,9 +256,10 @@ describe('the realistic page’s `house-styles` lever — #3251', () => {
     });
     expect(drawn.rural.off).toBeGreaterThan(5);
     expect(drawn.rural.on).toBe(drawn.rural.off);
-    // The village stretch: only the seeded traditional share keeps a model.
+    // The village stretch: its houses' seeded traditional half keeps a model, and its shops all do.
     expect(drawn.village.off).toBeGreaterThan(10);
-    expect(drawn.village.on).toBeLessThan(drawn.village.off / 2);
+    expect(drawn.village.on).toBeLessThan(drawn.village.off);
+    expect(drawn.village.on).toBeGreaterThan(0);
   });
 
   it('plans the street, with `levers=-house-styles`, as the planner with them off does, its models back', () => {
@@ -291,7 +292,7 @@ describe('the realistic page’s `house-styles` lever — #3251', () => {
         plannedTown(town, parseConfig(`?town=${query}${levers}`).leversOff).plans.filter((plan) =>
           plan.archetype.startsWith('contemporary'),
         ).length;
-      expect(contemporary(''), query).toBeGreaterThan(20);
+      expect(contemporary(''), query).toBeGreaterThan(10);
       expect(contemporary('&levers=-house-styles'), query).toBe(0);
       // And with no class there is no modern setting.
       expect(contemporary('&levers=-urban-class'), query).toBe(0);

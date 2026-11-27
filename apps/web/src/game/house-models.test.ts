@@ -425,14 +425,14 @@ describe('a model on a procedural plot — #1566', () => {
 const classed = (urban: UrbanClass): UrbanClassMap => ({ classAt: () => urban });
 
 /**
- * The committed set and a modern twin of each model after it: the same
- * footprint, storeys, use and front, so a footprint one fits the other fits,
- * and only the style tells them apart. The committed set has no modern model.
+ * Every committed model restyled modern: the same footprint, storeys, use,
+ * front and id, so a footprint the committed one fits this one fits, and only
+ * the style tells the two sets apart. The committed set has no modern model.
  */
-const BOTH_STYLES: readonly HouseModel[] = [
-  ...HOUSE_MODELS,
-  ...HOUSE_MODELS.map((model): HouseModel => ({ ...model, style: 'modern' })),
-];
+const ALL_MODERN: readonly HouseModel[] = HOUSE_MODELS.map((model): HouseModel => ({
+  ...model,
+  style: 'modern',
+}));
 
 describe('the style a setting calls for — #3251', () => {
   it('is traditional beside a rural or unclassed stretch and modern beside a town or a city centre', () => {
@@ -453,7 +453,9 @@ describe('the style a setting calls for — #3251', () => {
     }
   });
 
-  it('keeps a seeded share of a village stretch traditional, and none of a town’s', () => {
+  it('keeps a seeded half of a village stretch traditional, and none of a town’s', () => {
+    // The owner's ruling on #3273: a village is a mix, about half and half.
+    expect(TRADITIONAL_SHARE_IN_A_SUBURB).toBe(0.5);
     const under = TRADITIONAL_SHARE_IN_A_SUBURB - 1e-9;
     expect(houseStyleOf({ urban: 'village', farmland: false, share: under })).toBe('traditional');
     expect(
@@ -461,9 +463,6 @@ describe('the style a setting calls for — #3251', () => {
     ).toBe('modern');
     expect(houseStyleOf({ urban: 'town', farmland: false, share: 0 })).toBe('modern');
     expect(houseStyleOf({ urban: 'city-centre', farmland: false, share: 0 })).toBe('modern');
-    // A small share: most of a suburb's street is modern.
-    expect(TRADITIONAL_SHARE_IN_A_SUBURB).toBeGreaterThan(0);
-    expect(TRADITIONAL_SHARE_IN_A_SUBURB).toBeLessThan(0.5);
   });
 
   it('fits a model only to a footprint of its own style, and to any with no style asked', () => {
@@ -478,7 +477,26 @@ describe('the style a setting calls for — #3251', () => {
     expect(houseModelFits(modern, fitsExactly)).toBe(true);
   });
 
-  it('states that every committed model is traditional, so a modern footprint is drawn as none of them', () => {
+  it('chooses among residential models only: the brick shop fits a commercial footprint in any setting', () => {
+    const shop = HOUSE_MODELS[MAIN_STREET_MODEL] as HouseModel;
+    expect(shop.use).toBe('commercial');
+    expect(shop.style).toBe('traditional');
+    const lot: HouseFitInput = {
+      long: shop.length,
+      short: shop.depth,
+      rectangularity: 1,
+      storeys: shop.storeys,
+      use: 'commercial',
+      front: shop.front,
+    };
+    for (const style of ['modern', 'traditional', undefined] as const) {
+      expect(houseModelFits(shop, { ...lot, style }), String(style)).toBe(true);
+    }
+    // Control: a house of the same style is refused the modern footprint.
+    expect(houseModelFits(houseModel, { ...fitsExactly, style: 'modern' })).toBe(false);
+  });
+
+  it('states that every committed model is traditional, so a modern house’s footprint is drawn as none of them', () => {
     expect(HOUSE_MODELS.map((model) => model.style)).toEqual(HOUSE_MODELS.map(() => 'traditional'));
     expect(houseModelsFitting({ ...fitsExactly, style: 'modern' })).toEqual([]);
     expect(houseModelsFitting({ ...fitsExactly, style: 'traditional' }).length).toBeGreaterThan(0);
@@ -508,12 +526,12 @@ describe('a street of each class, as a ride plans it — #3251', () => {
   const street = richmondStreetFixture();
   const mask = landClassMask(street.corridor);
 
-  /** The styles of the street's modelled plans beside a stretch of `urban`, from `models`. */
-  function stylesBeside(
+  /** The street's plans beside a stretch of `urban`. */
+  function plansBeside(
     urban: UrbanClass | undefined,
     options: Parameters<typeof footprintPlans>[6] = {},
-  ): { traditional: number; modern: number; plans: number } {
-    const { plans } = footprintPlans(
+  ): ReturnType<typeof footprintPlans>['plans'] {
+    return footprintPlans(
       street.corridor,
       mask,
       street.profile,
@@ -521,61 +539,106 @@ describe('a street of each class, as a ride plans it — #3251', () => {
       undefined,
       urban === undefined ? undefined : classed(urban),
       options,
-    );
-    const models = options.houseModels ?? HOUSE_MODELS;
-    const styles = plans.flatMap((plan) =>
-      plan.model === undefined ? [] : [(models[plan.model.model] as HouseModel).style],
+    ).plans;
+  }
+
+  /** How many of the street's plans are drawn as a house model, and as the shop. */
+  function drawnBeside(
+    urban: UrbanClass | undefined,
+    options: Parameters<typeof footprintPlans>[6] = {},
+  ): { houses: number; shops: number } {
+    const uses = plansBeside(urban, options).flatMap((plan) =>
+      plan.model === undefined ? [] : [(HOUSE_MODELS[plan.model.model] as HouseModel).use],
     );
     return {
-      traditional: styles.filter((style) => style === 'traditional').length,
-      modern: styles.filter((style) => style === 'modern').length,
-      plans: plans.length,
+      houses: uses.filter((use) => use === 'residential').length,
+      shops: uses.filter((use) => use === 'commercial').length,
     };
   }
 
   // A class changes more than the style — an untagged footprint's storeys and what it is
-  // inferred to be (#1634, #2023) — so how MANY of the street's 54 narrow lots fit a model
-  // differs by class. What is held is the style of every one that does, and that many do.
-  it('draws a rural road’s houses and one with no class as traditional models, every one', () => {
+  // inferred to be (#1634, #2023) — so how MANY of the street's narrow lots fit a model
+  // differs by class. What is held is which SET's houses are drawn, and that many are.
+  it('draws a rural road’s houses and one with no class from the traditional set, and none from a modern one', () => {
     for (const urban of ['rural', 'unknown', undefined] as const) {
-      const drawn = stylesBeside(urban, { houseModels: BOTH_STYLES });
-      expect(drawn.modern, String(urban)).toBe(0);
-      expect(drawn.traditional, String(urban)).toBeGreaterThan(30);
+      expect(drawnBeside(urban).houses, String(urban)).toBeGreaterThan(15);
+      expect(drawnBeside(urban, { houseModels: ALL_MODERN }).houses, String(urban)).toBe(0);
     }
   });
 
-  it('draws a town’s and a city centre’s as modern models, every one', () => {
+  it('draws a town’s and a city centre’s houses from a modern set, and none from the traditional one', () => {
     for (const urban of ['town', 'city-centre'] as const) {
-      const drawn = stylesBeside(urban, { houseModels: BOTH_STYLES });
-      expect(drawn.traditional, urban).toBe(0);
-      expect(drawn.modern, urban).toBeGreaterThan(30);
+      expect(drawnBeside(urban).houses, urban).toBe(0);
+      expect(drawnBeside(urban, { houseModels: ALL_MODERN }).houses, urban).toBeGreaterThan(10);
     }
   });
 
-  it('draws a suburban street’s as modern models, but for a small seeded share', () => {
-    const suburb = stylesBeside('village', { houseModels: BOTH_STYLES });
-    expect(suburb.traditional).toBeGreaterThan(0);
-    expect(suburb.modern).toBeGreaterThan(3 * suburb.traditional);
-    expect(suburb.traditional + suburb.modern).toBeGreaterThan(30);
+  it('keeps the brick shop on a town’s and a city centre’s street, as beside a rural one', () => {
+    for (const urban of ['town', 'city-centre', 'village', 'rural'] as const) {
+      expect(drawnBeside(urban).shops, urban).toBeGreaterThan(5);
+      // And as many as with the style not asked: the style does not choose among shops.
+      expect(drawnBeside(urban).shops, urban).toBe(
+        drawnBeside(urban, { houseStyles: false }).shops,
+      );
+    }
+  });
+
+  it('draws a village street as a mix, about half from each set and no house from both', () => {
+    const traditional = plansBeside('village');
+    const modern = plansBeside('village', { houseModels: ALL_MODERN });
+    const either = plansBeside('village', { houseStyles: false });
+    let old = 0;
+    let fresh = 0;
+    let fitted = 0;
+    either.forEach((plan, index) => {
+      if (plan.model === undefined) return;
+      if ((HOUSE_MODELS[plan.model.model] as HouseModel).use !== 'residential') return;
+      fitted += 1;
+      const asOld = traditional[index]?.model !== undefined;
+      const asNew = modern[index]?.model !== undefined;
+      // Each house that fits a model is one style's or the other's, never both and never neither.
+      expect(asOld !== asNew).toBe(true);
+      old += asOld ? 1 : 0;
+      fresh += asNew ? 1 : 0;
+    });
+    expect(fitted).toBeGreaterThan(15);
+    expect(old + fresh).toBe(fitted);
+    // About half: each between three and seven in ten.
+    expect(old).toBeGreaterThan(0.3 * fitted);
+    expect(old).toBeLessThan(0.7 * fitted);
     // Seeded per footprint: the same street on every read.
-    expect(stylesBeside('village', { houseModels: BOTH_STYLES })).toEqual(suburb);
+    expect(plansBeside('village').map((plan) => plan.model?.model)).toEqual(
+      traditional.map((plan) => plan.model?.model),
+    );
   });
 
-  it('draws no committed model beside a town or a city centre, where the set has no modern one, and many beside a rural stretch', () => {
-    expect(stylesBeside('town')).toMatchObject({ traditional: 0, modern: 0 });
-    expect(stylesBeside('city-centre')).toMatchObject({ traditional: 0, modern: 0 });
-    expect(stylesBeside('rural').traditional).toBeGreaterThan(30);
+  it('takes any model that fits with the lever off, as before, from either set', () => {
+    const before = drawnBeside('town', { houseStyles: false });
+    expect(before.houses).toBeGreaterThan(15);
+    expect(drawnBeside('town', { houseStyles: false, houseModels: ALL_MODERN })).toEqual(before);
   });
 
-  it('takes any model that fits with the lever off, as before', () => {
-    const before = stylesBeside('town', { houseStyles: false });
-    expect(before.modern).toBe(0);
-    expect(before.traditional).toBeGreaterThan(30);
-    // And of both styles where the set has both: the style is not asked, so as many are drawn.
-    const either = stylesBeside('town', { houseStyles: false, houseModels: BOTH_STYLES });
-    expect(either.traditional + either.modern).toBe(before.traditional);
-    expect(either.traditional).toBeGreaterThan(0);
-    expect(either.modern).toBeGreaterThan(0);
+  it('names a plan’s model by its place in the committed set, whatever set it was fitted from', () => {
+    // The modern set reversed: a model's place in it is not its place in `HOUSE_MODELS`.
+    const reversed = [...ALL_MODERN].reverse();
+    const forward = plansBeside('town', { houseModels: ALL_MODERN });
+    const backward = plansBeside('town', { houseModels: reversed });
+    let modelled = 0;
+    backward.forEach((plan, index) => {
+      const rectangle = minimumAreaRectangle(plan.footprint);
+      if (plan.model === undefined) return;
+      modelled += 1;
+      const model = HOUSE_MODELS[plan.model.model] as HouseModel;
+      // The committed model at that place fits the footprint it is laid on: its own stretch.
+      expect(plan.model.stretchX).toBeCloseTo((2 * rectangle.halfLong) / model.length, 9);
+      expect(plan.model.stretchZ).toBeCloseTo((2 * rectangle.halfShort) / model.depth, 9);
+      expect(plan.model.stretchX).toBeGreaterThanOrEqual(HOUSE_FIT.stretch.least - 1e-9);
+      expect(plan.model.stretchX).toBeLessThanOrEqual(HOUSE_FIT.stretch.most + 1e-9);
+      expect(forward[index]?.model).toBeDefined();
+    });
+    expect(modelled).toBeGreaterThan(15);
+    // Not vacuous: the sets differ in length somewhere, so a place read as an index would misfit.
+    expect(new Set(HOUSE_MODELS.map((model) => model.length)).size).toBeGreaterThan(3);
   });
 
   it('keeps a mapped house on farmland traditional beside a town, and its twin on residential land modern', () => {
@@ -585,28 +648,27 @@ describe('a street of each class, as a ride plans it — #3251', () => {
       ...NO_BUILDING_FIELDS,
       buildingType: 'house' as const,
     };
-    const styleOn = (kind: string): string | undefined => {
+    const modelledOn = (kind: string, houseModels?: readonly HouseModel[]): boolean => {
       const corridor = {
         ...street.corridor,
         landUse: [landBeside(street.profile, street.origin, 'landuse', kind, 950, 1_450, -70, 70)],
         buildings: [house],
       };
-      const land = landClassMask(corridor);
       const { plans } = footprintPlans(
         corridor,
-        land,
+        landClassMask(corridor),
         street.profile,
         street.origin,
         undefined,
         classed('town'),
-        { houseModels: BOTH_STYLES },
+        houseModels === undefined ? {} : { houseModels },
       );
-      const [plan] = plans;
-      if (plan?.model === undefined) return undefined;
-      return (BOTH_STYLES[plan.model.model] as HouseModel).style;
+      return plans[0]?.model !== undefined;
     };
-    expect(styleOn('farmland')).toBe('traditional');
-    expect(styleOn('residential')).toBe('modern');
+    expect(modelledOn('farmland')).toBe(true);
+    expect(modelledOn('farmland', ALL_MODERN)).toBe(false);
+    expect(modelledOn('residential')).toBe(false);
+    expect(modelledOn('residential', ALL_MODERN)).toBe(true);
   });
 });
 
@@ -648,15 +710,20 @@ describe('a modern model on sloping ground — #3251', () => {
 
   it('stands every one at its plan’s foot, at or under the ground at each corner and never floating', () => {
     const { plans } = footprintPlans(corridor, land, profile, origin, undefined, classed('town'), {
-      houseModels: BOTH_STYLES,
+      houseModels: ALL_MODERN,
     });
+    // Control: beside a town the committed, traditional set stands none here.
+    expect(
+      footprintPlans(corridor, land, profile, origin, undefined, classed('town')).plans.some(
+        (plan) => plan.model !== undefined,
+      ),
+    ).toBe(false);
     let corners = 0;
     let rise = 0;
     for (const plan of plans) {
       const placed = plan.model;
       if (placed === undefined) continue;
-      const model = BOTH_STYLES[placed.model] as HouseModel;
-      expect(model.style).toBe('modern');
+      const model = HOUSE_MODELS[placed.model] as HouseModel;
       // The foot the extrusion stands at: one building, whichever it is drawn as.
       expect(placed.y0).toBe(plan.base);
       const grounds: number[] = [];

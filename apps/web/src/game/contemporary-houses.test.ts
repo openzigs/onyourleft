@@ -250,14 +250,31 @@ describe('a street of houses beside each class — #3251', () => {
     }
   });
 
-  it('draws a suburban street mostly contemporary, with a seeded few of #1782’s among them', () => {
+  it('draws a village street as a mix: about half contemporary, and the rest as before', () => {
+    // The owner's ruling on #3273: a village is about half traditional, half contemporary.
+    const before = plansBeside('village', { houseStyles: false });
     const plans = plansBeside('village');
     const modern = contemporaryOf(plans).length;
-    const traditional = plans.filter(
-      (plan) => plan.archetype !== 'unknown' && !isContemporary(plan.archetype),
-    ).length;
-    expect(traditional).toBeGreaterThan(0);
-    expect(modern).toBeGreaterThan(3 * traditional);
+    expect(modern).toBeGreaterThan(0.3 * plans.length);
+    expect(modern).toBeLessThan(0.7 * plans.length);
+    // Every house that is not contemporary is planned exactly as it was.
+    let kept = 0;
+    plans.forEach((plan, index) => {
+      if (isContemporary(plan.archetype)) return;
+      kept += 1;
+      // But for its paint, which a town moves off a neighbour's, and its neighbours changed.
+      expect(planFingerprint([plan], false)).toBe(
+        planFingerprint([before[index] as FootprintPlan], false),
+      );
+    });
+    expect(kept).toBeGreaterThan(0.3 * plans.length);
+    // #1782's archetypes are still on the street, more than one of them.
+    const traditional = new Set(
+      plans
+        .map((plan) => plan.archetype)
+        .filter((each) => each !== 'unknown' && !isContemporary(each)),
+    );
+    expect(traditional.size).toBeGreaterThan(2);
     // Both roofs are on the street, and the same street on every read.
     const kinds = new Set(contemporaryOf(plans).map((plan) => plan.archetype));
     expect([...kinds].sort()).toEqual(['contemporary-flat', 'contemporary-low']);
@@ -444,6 +461,18 @@ describe('the footprints that keep what they were — #3251', () => {
     }
   });
 
+  it('makes no contemporary house of a building part, which has no front and stands on another', () => {
+    const part = {
+      ...buildingBeside(road, roadOrigin, [rectangleBeside(1_100, 19.5, 12, 9)], 6, {
+        minHeightMetres: 3,
+      }),
+      ...NO_BUILDING_FIELDS,
+    };
+    expect(isContemporary(planOne(part, 'town').archetype)).toBe(false);
+    // Control: the same ring as a building is one.
+    expect(isContemporary(planOne(houseAt(1_100), 'town').archetype)).toBe(true);
+  });
+
   it('keeps a mapped pitched roof pitched, under a contemporary house’s low grey roof', () => {
     const gabled = planOne(houseAt(1_100, { roofShape: 'gabled' }), 'town');
     expect(gabled.archetype).toBe('contemporary-low');
@@ -596,6 +625,26 @@ describe('the modern flats — #3251', () => {
     const typed = blockAt(3, { buildingType: 'apartments' });
     expect(planOne(typed, 'town').buildingArchetype).toBe('modern-flats');
     expect(planOne(typed, 'village').buildingArchetype).not.toBe('modern-flats');
+  });
+
+  it('are the flats, and no contemporary house, where a three-storey block fits both bands', () => {
+    // 250 m² of three storeys: inside the contemporary house's 40 to 300 m² and one to three
+    // storeys, and inside the flats' 200 m² and three to four. The flats are chosen first.
+    const both = {
+      ...buildingBeside(road, roadOrigin, [rectangleBeside(1_100, 22, 25, 10)], 9),
+      ...NO_BUILDING_FIELDS,
+    };
+    const plan = planOne(both, 'town');
+    expect(plan.storeys).toBe(3);
+    expect(plan.buildingArchetype).toBe('modern-flats');
+    expect(plan.archetype).toBe('unknown');
+    expect(plan.garage).toBe(false);
+    // Control: the same block of two storeys is under the flats' band, and is a house.
+    const two = {
+      ...buildingBeside(road, roadOrigin, [rectangleBeside(1_100, 22, 25, 10)], 6),
+      ...NO_BUILDING_FIELDS,
+    };
+    expect(planOne(two, 'town').buildingArchetype).not.toBe('modern-flats');
   });
 
   it('leave a two-storey block a garden apartment, and a mapped pitched roof pitched', () => {

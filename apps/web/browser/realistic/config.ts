@@ -378,10 +378,12 @@ export type Layer = (typeof LAYERS)[number];
  * - `house-styles` — #3251: a mapped footprint's house model chosen by its
  *   setting (`house-models.ts` §`houseStyleOf`): a modern model beside a
  *   `village`, `town` or `city-centre` stretch, a traditional one on farmland
- *   and beside a `rural` or unclassed stretch, and a small seeded share of a
- *   village stretch's traditional. Every committed model is traditional, so
- *   on, a footprint beside a town is drawn as its extrusion where before it
- *   was drawn as one of #1585's models. And a modern footprint's extrusion
+ *   and beside a `rural` or unclassed stretch, and a seeded half of a
+ *   village stretch's traditional (the owner's ruling on #3273: a village is
+ *   a mix). The style chooses among RESIDENTIAL models only: the brick shop
+ *   fits a commercial footprint in any setting. Every committed model is
+ *   traditional, so on, a house beside a town is drawn as its extrusion where
+ *   before it was drawn as one of #1585's models. And a modern footprint's extrusion
  *   is a CONTEMPORARY house (`house-archetypes.ts` §`contemporaryArchetypeOf`:
  *   a flat or low 25° roof, plain windows with no sash bars or shutters, a
  *   picture window, a garage on most, render or boards, no porch, dormer or

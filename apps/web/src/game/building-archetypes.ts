@@ -195,8 +195,10 @@ export const MAIN_STREET_AWNING_SHARE = 2 / 3;
 // --- Modern flats — #3251 ----------------------------------------------------
 
 /**
- * A modern block of flats — #3251, the owner's ruling of 2026-11-26, *"3 to 4
- * storey flats in town"*: a residential footprint of three or four storeys
+ * A modern block of flats — #3251, as the maintainer session proposed it on
+ * 2026-11-26 (*"3 to 4 storey flats in town"*; a proposal, not an owner's
+ * ruling, and the issue's own words are a 3 to 5 storey block, whose fifth
+ * storey is #3334's): a residential footprint of three or four storeys
  * and **200 m² or more** beside a `town` or `city-centre` stretch, not
  * terraced. Flat-roofed, in render (a surface every town already draws, so
  * none is added), its windows plain, with no garage, shutters, porch or dormer.

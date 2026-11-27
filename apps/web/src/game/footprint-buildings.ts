@@ -453,6 +453,7 @@ import {
 import {
   frontOf,
   HOUSE_MODELS,
+  houseModelIndexOf,
   houseModelsFitting,
   houseStyleOf,
   placeHouseModel,
@@ -7131,11 +7132,15 @@ export interface FootprintPlanOptions {
    */
   readonly houseStyles?: boolean;
   /**
-   * The models a footprint may be drawn as; absent, `house-models.ts`
-   * §`HOUSE_MODELS`, which is what the renderer draws a plan's model from.
+   * The models a footprint is FITTED from; absent, `house-models.ts`
+   * §`HOUSE_MODELS`. A set may restyle or leave out the committed models and
+   * may not add one: the model chosen is placed as the committed model of
+   * its id (`house-models.ts` §`houseModelIndexOf`), so a plan's
+   * `model.model` is always a place in `HOUSE_MODELS`, which is what the
+   * renderer draws, whatever set was passed.
    *
    * @test-facing a test's own set, so the choice by setting (#3251) is held
-   * with a model of each style while the committed set has one style only
+   * with modern models while the committed set has traditional ones only
    */
   readonly houseModels?: readonly HouseModel[];
   /**
@@ -7789,14 +7794,15 @@ function planFootprint(
   const shape = footprintShapeOf(drawn.length / 2, split?.length);
   // #3251: a contemporary house, first, where the setting calls for the modern style: an
   // untyped footprint or a mapped house that no building archetype took, while #1782's
-  // archetypes are on. A mapped bungalow, a church and every other mapped type keep theirs.
+  // archetypes are on. A mapped bungalow, a church and every other mapped type keep theirs: a
+  // church is a mapped civic type, so the family test is the one that keeps it out. A part has
+  // no front and is no house; and the modern flats, chosen above, are not a house either.
   const contemporary =
     choice.on &&
     houseStyle === 'modern' &&
     frontFrame !== undefined &&
     (family === undefined || family === 'house') &&
-    buildingArchetype === 'unknown' &&
-    !church
+    buildingArchetype === 'unknown'
       ? contemporaryArchetypeOf(
           {
             area,
@@ -8636,16 +8642,17 @@ function planFootprint(
           },
           houseModels,
         );
+  // The model chosen, of the set it was fitted from, placed as the committed model of its id.
+  const chosen = houseModels[fitting[seededEntry(share(STREAM_HOUSE_MODEL), fitting.length)] ?? -1];
   const model =
-    fitting.length === 0
+    chosen === undefined
       ? undefined
       : placeHouseModel(
-          fitting[seededEntry(share(STREAM_HOUSE_MODEL), fitting.length)] as number,
+          houseModelIndexOf(chosen.id),
           rectangle,
           frontFrame?.nx ?? 0,
           frontFrame?.nz ?? 0,
           base,
-          houseModels,
         );
   const wallMaterialSurface =
     wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];

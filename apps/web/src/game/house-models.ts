@@ -45,12 +45,18 @@
  * |---|---|
  * | on farmland, whatever the street's class | `traditional` |
  * | beside a `rural` stretch, or one with no class (`unknown`) | `traditional` |
- * | beside a `village` stretch, which is also what a suburb reads as | `modern`, but {@link TRADITIONAL_SHARE_IN_A_SUBURB} of its footprints, seeded, `traditional` |
+ * | beside a `village` stretch, which is also what a suburb reads as | a mix: {@link TRADITIONAL_SHARE_IN_A_SUBURB} of its footprints, seeded, `traditional`, the rest `modern` |
  * | beside a `town` or `city-centre` stretch | `modern` |
  *
- * A footprint is drawn as a model of its style or as none: where no model of
+ * A house is drawn as a model of its style or as none: where no model of
  * that style fits, it keeps its extrusion, and is never given a model of the
  * other style in its place.
+ *
+ * ⚠️ **The style chooses among RESIDENTIAL models only** — the owner's ruling
+ * of 2026-11-26 on #3273: *keep the brick shop*. A commercial model fits a
+ * commercial footprint whatever the setting, so the brick shop still stands
+ * on a town's and a city centre's main street until a modern shop exists
+ * (#3334).
  *
  * ⚠️ **Every model committed today is `traditional`.** No modern model is in
  * the set, so a modern footprint is drawn as its extrusion — and that
@@ -284,12 +290,13 @@ export const MODERN_URBAN_CLASSES: ReadonlySet<UrbanClass> = new Set([
 
 /**
  * The share of a `village` stretch's footprints that keep the traditional
- * style — #3251, *"a small seeded share of traditional houses can stay on
- * suburban streets, so a street does not look like one development"*:
- * **0.15**, about one house in seven. The issue names no figure; this one is
- * a sketch, to be tuned on the owner's look pair (`levers=-house-styles`).
+ * style — **0.5**, the owner's ruling of 2026-11-26 on #3273: *villages are a
+ * mix, about half traditional and half contemporary*. A `village` stretch is
+ * a country village as much as a suburb (#1633's classes have no suburb), so
+ * #1782's houses and the contemporary ones stand side by side on it, each
+ * footprint's side seeded. It was 0.15 in this change's first draft.
  */
-export const TRADITIONAL_SHARE_IN_A_SUBURB = 0.15;
+export const TRADITIONAL_SHARE_IN_A_SUBURB = 0.5;
 
 /** What {@link houseStyleOf} reads of a footprint. */
 export interface HouseSetting {
@@ -305,7 +312,7 @@ export interface HouseSetting {
  * The style a footprint's model is drawn in, by its setting — #3251, the
  * module's table: traditional on farmland and beside a rural or unclassed
  * stretch, modern beside a village, town or city-centre stretch, but for
- * {@link TRADITIONAL_SHARE_IN_A_SUBURB} of a village's.
+ * {@link TRADITIONAL_SHARE_IN_A_SUBURB} of a village's, which is half.
  */
 export function houseStyleOf(setting: HouseSetting): HouseStyle {
   if (setting.farmland || !MODERN_URBAN_CLASSES.has(setting.urban)) return 'traditional';
@@ -340,7 +347,8 @@ export function houseModelFits(model: HouseModel, plan: HouseFitInput): boolean 
   return (
     plan.front === model.front &&
     plan.use === model.use &&
-    (plan.style === undefined || plan.style === model.style) &&
+    // #3273's ruling: the style chooses among residential models; a commercial one fits any.
+    (plan.style === undefined || model.use !== 'residential' || plan.style === model.style) &&
     plan.rectangularity >= HOUSE_FIT.rectangularity &&
     Math.abs(plan.storeys - model.storeys) <= HOUSE_FIT.storeys &&
     along >= least &&
@@ -350,7 +358,19 @@ export function houseModelFits(model: HouseModel, plan: HouseFitInput): boolean 
   );
 }
 
-/** The models that fit a plan, by their place in {@link HOUSE_MODELS}. */
+/**
+ * A model's place in {@link HOUSE_MODELS}, by its id — #3251. A plan's
+ * placement names its model by that place, and the renderer draws
+ * {@link HOUSE_MODELS} at it, so a model chosen from any other list is found
+ * here by what it IS and never by where it stood in that list.
+ */
+export function houseModelIndexOf(id: HouseModelId): number {
+  const index = HOUSE_MODELS.findIndex((model) => model.id === id);
+  if (index < 0) throw new Error('no such house model');
+  return index;
+}
+
+/** The models that fit a plan, by their place in `models` ({@link HOUSE_MODELS} unless given). */
 export function houseModelsFitting(
   plan: HouseFitInput,
   models: readonly HouseModel[] = HOUSE_MODELS,
