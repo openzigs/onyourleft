@@ -63,7 +63,7 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { KIT_ATLAS_PIXELS, KIT_PIECES, kitCardOf } from './facade-kit';
+import { KIT_ATLAS_PIXELS, KIT_PIECES, kitCardOf, kitPaletteOf } from './facade-kit';
 import { committedKitPieces } from './facade-kit-testing';
 import {
   footwaysFixture,
@@ -4844,13 +4844,16 @@ describe('the downtown kit, loaded by the product’s own loader — #3334', () 
       // file's, triangle for triangle, as the bytes read without the loader say.
       const committed = committedKitPieces();
       const position = mapped.kitMesh.geometry.getAttribute('position');
+      const colour = mapped.kitMesh.geometry.getAttribute('color');
       let checked = 0;
       for (let place = 0; ; place += 1) {
         const drawn = mapped.drawnAt(place);
         if (drawn === undefined) break;
-        const wrap = plans[drawn.plan]?.kit;
-        if (drawn.modelAt < 0 || wrap === undefined) continue;
+        const plan = plans[drawn.plan];
+        const wrap = plan?.kit;
+        if (drawn.modelAt < 0 || plan === undefined || wrap === undefined) continue;
         const vertices = wrap.triangles * 3;
+        const colours = new Set<string>();
         const into = {
           position: new Float32Array(vertices * 3),
           normal: new Float32Array(vertices * 3),
@@ -4865,7 +4868,7 @@ describe('the downtown kit, loaded by the product’s own loader — #3334', () 
             atlas: picture as never,
           },
           wrap,
-          [1, 1, 1],
+          kitPaletteOf(wrap.style.skin, plan.paint),
           0,
           into,
           0,
@@ -4876,7 +4879,17 @@ describe('the downtown kit, loaded by the product’s own loader — #3334', () 
           expect(position.getX(at)).toBeCloseTo(into.position[vertex * 3] as number, 3);
           expect(position.getY(at)).toBeCloseTo(into.position[vertex * 3 + 1] as number, 3);
           expect(position.getZ(at)).toBeCloseTo(into.position[vertex * 3 + 2] as number, 3);
+          // And its colour: the loader read each vertex's class out of the GLB's second
+          // texture coordinates, and the belt wore the building's own colour for it.
+          expect(colour.getX(at)).toBeCloseTo(into.colour[vertex * 3] as number, 5);
+          expect(colour.getY(at)).toBeCloseTo(into.colour[vertex * 3 + 1] as number, 5);
+          expect(colour.getZ(at)).toBeCloseTo(into.colour[vertex * 3 + 2] as number, 5);
+          colours.add(
+            `${String(colour.getX(at))},${String(colour.getY(at))},${String(colour.getZ(at))}`,
+          );
         }
+        // More than one colour a building: its wall, its trim and the glass as it is.
+        expect(colours.size).toBeGreaterThanOrEqual(2);
         checked += 1;
       }
       expect(checked).toBe(mapped.stats.kitted);

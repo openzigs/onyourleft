@@ -327,12 +327,12 @@ export type Layer = (typeof LAYERS)[number];
  * - `facade-kit` — #3334: a mapped shop, retail strip, office or terraced
  *   house beside a `town` or `city-centre` stretch wrapped, at the near
  *   level, in the downtown kit's facade pieces (`facade-kit.ts`): shop fronts
- *   on the ground floor, a window a bay above, a cornice. Off, no plan has a
+ *   on the ground floor, windows above, a cornice, each building its own. Off, no plan has a
  *   wrap and every one is drawn as its extrusion, as before; each plan's
  *   extrusion is the same bytes either way. Read at load, as
  *   `commercial-archetypes` is. The owner's BY-EYE pair and the tablet's cost
  *   pair (one draw call for every wrap in view, inside the mapped buildings'
- *   six; a wrap is at most an extrusion's 640 triangles); pair it with
+ *   six; a wrap is at most 3 000 triangles and the nearest six are wraps); pair it with
  *   `town=terrace`, whose houses stand to 1 200 m and its shops and offices
  *   beyond. ⚠️ Not `town=city`: its street front is a city centre's own lots
  *   (#1637), which no footprint was mapped for and are not wrapped, and its

@@ -480,7 +480,7 @@ import {
   onNearbyStreet,
   type NearbyStreets,
 } from './nearby-streets';
-import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { REALISTIC_KIT_WRAP_TRIANGLES, REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
@@ -1808,6 +1808,8 @@ const STREAM_STOREYS = 32;
 const STREAM_ROOF_VARIANT = 33;
 /** #2021: which end a steeple stands at, where the street cannot tell. */
 const STREAM_STEEPLE = 34;
+/** #3334: what a wrapped building's facade pieces are chosen by. 35 and 36 are #3273's. */
+const STREAM_FACADE_KIT = 37;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -8598,21 +8600,6 @@ function planFootprint(
           terraced,
         })
       : undefined;
-  const kit =
-    kitKind === undefined || front === undefined
-      ? undefined
-      : wrapFootprint({
-          kind: kitKind,
-          ring: drawn,
-          base,
-          floor,
-          eaves,
-          storeys,
-          parapet: PARAPET_METRES,
-          frontEdge: front.edge,
-          shared: sharedLengths(party),
-          budget: FOOTPRINT_MAX_TRIANGLES,
-        });
   const wallMaterialSurface =
     wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];
   const roofMaterialSurface =
@@ -8635,6 +8622,25 @@ function planFootprint(
               pole
               ? 'corrugated'
               : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  const kit =
+    kitKind === undefined || front === undefined
+      ? undefined
+      : wrapFootprint({
+          kind: kitKind,
+          ring: drawn,
+          base,
+          floor,
+          eaves,
+          storeys,
+          // What it is walled in and painted is its extrusion's, so the two levels are one building.
+          surface: wallSurface,
+          seed: Math.floor(share(STREAM_FACADE_KIT) * 0x1_0000_0000),
+          awning: shop !== undefined && shop.awning > 0,
+          parapet: PARAPET_METRES,
+          frontEdge: front.edge,
+          shared: sharedLengths(party),
+          budget: REALISTIC_KIT_WRAP_TRIANGLES,
+        });
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.

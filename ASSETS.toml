@@ -2565,7 +2565,7 @@ inputsha256 = "25a31cfa53976cbdae38d8c1b6e8216d5191f2e6f5769e6af82a98b1cbb91e97"
 script = "apps/web/tools/realistic/blender/process_vehicle.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
-# #3334: the facade pieces a mapped footprint in a town is wrapped in, twelve pieces of Quaternius's CC0 Downtown City MegaKit, and their atlas (ADR 0099 D-1).
+# #3334: the facade pieces a mapped footprint in a town is wrapped in, pieces of Quaternius's CC0 Downtown City MegaKit, and their atlas (ADR 0099 D-1).
 # The kit's own page (`input`) read "License CC0" on 2026-11-27 (UTC), and so does the archive's own License_Standard.txt ("CC0 1.0 Universal (CC0 1.0)").
 # The archive is the owner's own download through the kit's itch.io page (`url`), placed by hand and never committed (ADR 0049 D-11):
 # "Downtown City MegaKit[Standard].zip", 234 753 092 bytes, SHA-256 5b1a945576d54cdbb4ccc9c3d52711e6d530da74c74c586407ecc28b165335da, pinned in inputs.lock.json.
@@ -2574,26 +2574,26 @@ path = "apps/web/public/realistic/downtown_kit.glb"
 source = "itch.io (the owner’s download, #3334), quaternius-downtown-city-megakit by Quaternius; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"
 read = "2026-11-27"
-sha256 = "0243a48343ce521c63d42651388f487981b1bd7143a08e27d0f44291912503c7"
+sha256 = "f55c5d8030ddd5594bf5270242c32d5bde7ef45104917d0eee174d8bbe0b8f71"
 creator = "Quaternius"
 url = "https://quaternius.itch.io/downtown-city-megakit"
-modified = "12 of the kit's pieces (Brick_Plain_3, Brick_Window_Square_Single, Trim_FirstFloor_Window_001, Trim_FirstFloor_Wall, Metal_FirstFloor_Window, Metal_FirstFloor_Wall, DoorFrame_Metal_Single, Metal_Window_Half, Metal_Plain_3, Cornice_Brick_Center, Cornice_Metal_Center, Roof_2x2), each read from its glTF: the faces nobody outside a building sees dropped (the kit's MI_InteriorWall, MI_FakeInterior, MI_InteriorFloor and MI_InteriorRoof), the roof piece stood upright, the door frame's opening closed with a pane of glass, its texture coordinates replaced by a projection straight onto the wall's plane into its cell of the pieces' atlas, faces of no area dissolved and every face shaded flat, and its materials, pictures and vertex colours dropped; one mesh a piece named by its id, geometry and texture coordinates only, the picture in the atlas"
+modified = "39 facade pieces from 29 of the kit's models (Brick_Plain_3, Brick_Window_Square_Single, Brick_Window_Trim_Single, Brick_Window_Trim, Brick_Inset_Window, Brick_Inset_Window_Curved, Brick_RedWhite_DoubleWindow, Cornice_Brick_Center, Brick_Column_Small, Trim_Plain_3, Trim_Window, Trim_FirstFloor_Wall, Cornice_Trim_Center, Metal_Plain_3, Metal_FullWindow, Metal_Window_Half, Metal_Window, Metal_FirstFloor_Wall, Cornice_Metal_Center, Metal_Column_Small_Center, Trim_FirstFloor_Window_001, Trim_FirstFloor_Window_Columns, Metal_FirstFloor_Window, DoorFrame_Metal_Single, DoorFrame_Wooden, Door_3, DoorFrame_Trim, Stairs_Rails_Metal_Straight_1, Roof_2x2), each read from its glTF: the faces nobody outside a building sees dropped (the kit's MI_InteriorWall, MI_FakeInterior, MI_InteriorFloor and MI_InteriorRoof), the roof piece stood upright, a door frame's opening closed with the kit's own door leaf or a pane of glass, its texture coordinates replaced by a projection straight onto the wall's plane into its cell of the pieces' atlas, a second set added that carries each face's colour class (wall, trim, accent or fixed), faces of no area dissolved and every face shaded flat, and its materials, pictures and vertex colours dropped; 8 of the pieces are another's mesh in a second cell of the atlas (the brick pieces walled in the kit's concrete) and have no mesh of their own; four are not the kit's: an awning, a sign band and a ladder made by this repository's script of a few boxes and quads, and a slab it lays under the kit's own railing; one mesh a piece named by its id, geometry and texture coordinates only, the picture in the atlas"
 input = "https://quaternius.com/packs/downtowncitymegakit.html"
-inputsha256 = "3fbaf37de0d10398d2628c831b90efc00cac387c2350a0d9499dd00f4e3c8b5b"
+inputsha256 = "505cd49d795d386a3803342cca96cd8848ec708e6d60937cf180a67446f4ad9c"
 script = "apps/web/tools/realistic/blender/process_downtown_kit.py"
 tool = "Blender 4.4.3"
 
 [[asset]]
-path = "apps/web/public/realistic/downtown_kit_atlas_1024.ktx2"
+path = "apps/web/public/realistic/downtown_kit_atlas_2048.ktx2"
 source = "itch.io (the owner’s download, #3334), quaternius-downtown-city-megakit by Quaternius; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"
 read = "2026-11-27"
-sha256 = "5372375789b01c3bbf2c7b92e5f4d715c1d744750de44a0839b5921d6ff7c26a"
+sha256 = "63f4f82757a73de685b5ac654c9f2a33bcf0d5f9bbe01618dcfb01c866d7fa18"
 creator = "Quaternius"
 url = "https://quaternius.itch.io/downtown-city-megakit"
-modified = "the facade pieces' one atlas, made in the same run as the pieces: each piece's colour baked by Cycles on one thread, as an emission read through the kit's own texture coordinates from the kit's own colour pictures (its brick, trim, metal and concrete, and asphalt), looking straight at the piece, into the piece's own cell of one 1024 px square at 80 px a metre with a margin of 8 px; glass one flat dark colour, the kit's wear masks (its vertex colours) and its normal and roughness pictures not used; then encoded as KTX2 (Basis Universal ETC1S, sRGB, with its full mipmap chain) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+modified = "the facade pieces' one atlas, made in the same run as the pieces: each piece's colour baked by Cycles on one thread, as an emission, looking straight at the piece, into the piece's own cell of one 2048 px square at 96 px a metre with a margin of 8 px: its brick, metal and asphalt the kit's own colour pictures through the kit's own texture coordinates; its trim, its painted shop fronts and the walls of its render and stone pieces (the kit's trim and concrete pictures) baked as a neutral grey that keeps the picture's grain, for the renderer to colour a building at a time; its dark trim the trim's picture darkened; its glass one of the kit's own interior pictures laid across the piece's glass, dimmed under a flat sky colour; the awning, sign band, ladder and landing this repository's script makes in flat greys; the kit's wear masks (its vertex colours) and its normal and roughness pictures not used; then encoded as KTX2 (Basis Universal ETC1S, sRGB, with its full mipmap chain) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
 input = "https://quaternius.com/packs/downtowncitymegakit.html"
-inputsha256 = "3fbaf37de0d10398d2628c831b90efc00cac387c2350a0d9499dd00f4e3c8b5b"
+inputsha256 = "505cd49d795d386a3803342cca96cd8848ec708e6d60937cf180a67446f4ad9c"
 script = "apps/web/tools/realistic/blender/process_downtown_kit.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 

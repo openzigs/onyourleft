@@ -808,16 +808,16 @@ export const REALISTIC_HOUSE_ATLAS = 'house_models_atlas.ktx2';
 
 /**
  * The facade pieces a mapped footprint in a town is wrapped in — #3334:
- * twelve pieces of Quaternius's CC0 Downtown City MegaKit in one GLB of
- * geometry alone, a mesh a piece named by its id, every one mapped into the
- * one colour atlas beside it, so every wrapped building drawn is one draw
- * call between them. `facade-kit.ts` says what each piece is, where it is in
- * the atlas, and which footprints are wrapped.
+ * pieces of Quaternius's CC0 Downtown City MegaKit in one GLB of geometry
+ * alone, a mesh a piece named by its id, every one mapped into the one colour
+ * atlas beside it, so every wrapped building drawn is one draw call between
+ * them. `facade-kit.ts` says what each piece is, where it is in the atlas,
+ * and which footprints are wrapped.
  */
 export const REALISTIC_DOWNTOWN_KIT = {
   model: 'downtown_kit.glb',
-  /** KTX2 ETC1S, 1024 px. */
-  atlas: 'downtown_kit_atlas_1024.ktx2',
+  /** KTX2 ETC1S, 2048 px. */
+  atlas: 'downtown_kit_atlas_2048.ktx2',
 } as const;
 
 /**

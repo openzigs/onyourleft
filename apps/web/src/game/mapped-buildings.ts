@@ -57,6 +57,7 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_KIT_NEAR_MAX,
   MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_REACH_METRES,
@@ -326,7 +327,13 @@ export class MappedSelection {
    * {@link modelled} is.
    */
   readonly kitted: Uint8Array;
-  /** How many are drawn as wraps, and their triangles — #3334. */
+  /**
+   * 1 where the wrap at that place is drawn with its plan's paved apron
+   * (#2848), in its extrusion's wall surface — #3334. Read only where
+   * {@link kitted} is 1.
+   */
+  readonly paved: Uint8Array;
+  /** How many are drawn as wraps, and their triangles (the wraps' alone, no apron's) — #3334. */
   kitCount = 0;
   kitTriangles = 0;
   /** How many are drawn whole, and how many at the far level. */
@@ -355,6 +362,7 @@ export class MappedSelection {
     this.far = new Uint8Array(capacity);
     this.modelled = new Uint8Array(capacity);
     this.kitted = new Uint8Array(capacity);
+    this.paved = new Uint8Array(capacity);
   }
 
   reset(): void {
@@ -492,12 +500,20 @@ function landmarksAhead(
  *
  * **Facade-kit wraps** — #3334. With `kit` (the downtown kit loaded), a near
  * plan that is wrapped (`FootprintPlan.kit`) is drawn as its wrap, at the
- * wrap's triangles — never more than an extrusion's ceiling — in ONE more
- * group of its own, counted inside `surfaceSlots` exactly as the models'
- * group is. With no slot left for it the plan is drawn as its extrusion.
- * A wrap costs several times its extrusion's triangles, out of
- * `triangleBudget` as a model's are, so where the budget binds the walk stops
- * nearer the rider than it did (`facade-kit.ts`' header has the figures).
+ * wrap's triangles — up to `realistic-budget.ts`
+ * §`REALISTIC_KIT_WRAP_TRIANGLES`, 3 000 — in ONE more group of its own,
+ * counted inside `surfaceSlots` exactly as the models' group is. With no slot
+ * left for it the plan is drawn as its extrusion. A wrap costs some thirty
+ * times its extrusion's triangles, out of `triangleBudget` as a model's are,
+ * so only the first `MAPPED_KIT_NEAR_MAX` wrapped plans of the walk are
+ * wraps — `MAPPED_KIT_TRIANGLES` between them at the most — and every
+ * wrapped plan past them is its extrusion, and still drawn.
+ * ⚠️ **And never at a building's cost**: where the wraps would leave the
+ * frame fewer buildings, or fewer procedural structures ranked in, than the
+ * same refill draws with no wrap, the walk is run again with one wrap fewer
+ * until it does not — at most eight walks a refill, and a refill is a chunk's,
+ * not a frame's. What the wraps do take is what `refillMappedBuildings` would
+ * have left the field boundaries (walls, hedges, fences).
  * Without `kit` every wrapped plan is its extrusion, as before #3334.
  *
  * **A city centre's far boxes** — #1638, off by default. Where `buildings`
@@ -522,6 +538,56 @@ export function selectMappedBuildings(
   models?: readonly number[],
   ahead?: Float32Array,
   kit = false,
+): void {
+  const walk = (wraps: number): void => {
+    walkMappedBuildings(
+      buildings,
+      x,
+      z,
+      triangleBudget,
+      into,
+      surfaceSlots,
+      rivals,
+      models,
+      ahead,
+      wraps,
+    );
+  };
+  walk(kit ? MAPPED_KIT_NEAR_MAX : 0);
+  if (into.kitCount === 0) return;
+  // #3334: never fewer buildings, nor fewer structures ranked in, than the same refill draws
+  // with no wrap at all. Where the wraps took triangles a farther building or a structure
+  // was drawn in, one wrap fewer, until none is.
+  const { count, rivals: ranked } = into;
+  let wraps = into.kitCount;
+  walk(0);
+  const bare = { count: into.count, rivals: into.rivals };
+  if (count >= bare.count && ranked >= bare.rivals) {
+    walk(wraps);
+    return;
+  }
+  while (wraps > 0) {
+    wraps -= 1;
+    walk(wraps);
+    if (into.count >= bare.count && into.rivals >= bare.rivals) return;
+  }
+}
+
+/**
+ * {@link selectMappedBuildings}' one walk, drawing at most `wraps` plans as
+ * their wraps of facade pieces — #3334; 0 where the kit is not loaded.
+ */
+function walkMappedBuildings(
+  buildings: MappedBuildings,
+  x: number,
+  z: number,
+  triangleBudget: number,
+  into: MappedSelection,
+  surfaceSlots: number,
+  rivals: RivalStructures,
+  models: readonly number[] | undefined,
+  ahead: Float32Array | undefined,
+  wraps: number,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -593,9 +659,10 @@ export function selectMappedBuildings(
     // wraps' group the plan is drawn as its extrusion, as a model's is.
     const kitTriangles =
       far ||
-      !kit ||
       plan.kit === undefined ||
       modelTriangles !== undefined ||
+      // The nearest few only: `wraps` of them, so never more than `MAPPED_KIT_TRIANGLES`.
+      into.kitCount >= wraps ||
       (into.kitCount === 0 && into.surfaces.length + (into.modelCount > 0 ? 1 : 0) + 1 > slots)
         ? undefined
         : plan.kit.triangles;
@@ -622,6 +689,23 @@ export function selectMappedBuildings(
       continue;
     }
     if (kitTriangles !== undefined) {
+      // Its paved apron (#2848) is ground, and no piece of the kit: drawn with the wrap, in
+      // its extrusion's own surface, where that surface's slot is open or can be and the
+      // frame has its few triangles. PR #3343's look check: without it a wrapped shop stood
+      // on grass where its extrusion stood on its pavement.
+      const apron = roleTriangles(plan, 'apron');
+      const paving = surfaceOfRole(plan, 'apron');
+      const paved =
+        apron > 0 &&
+        into.triangles + rivalTriangles + kitTriangles + apron <= triangleBudget &&
+        (slotOf(into, paving) >= 0 || into.surfaces.length + 1 + modelGroup + 1 <= slots);
+      if (paved) {
+        if (slotOf(into, paving) < 0) into.surfaces.push(paving);
+        const slot = slotOf(into, paving);
+        into.surfaceTriangles[slot] = (into.surfaceTriangles[slot] ?? 0) + apron;
+        into.triangles += apron;
+      }
+      into.paved[into.count] = paved ? 1 : 0;
       into.plans[into.count] = index;
       into.far[into.count] = 0;
       into.modelled[into.count] = 0;

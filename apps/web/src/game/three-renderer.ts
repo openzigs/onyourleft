@@ -317,11 +317,16 @@ import { HOUSE_MODELS, placedPoint, placeOnPlot, type HousePlacement } from './h
 import {
   KIT_PIECES,
   KIT_RUN_FLOATS,
+  KIT_TINT_CLASSES,
   kitCardOf,
-  kitPaintOf,
+  kitMeshIndex,
+  kitPaletteOf,
   kitPieceIndex,
   kitPlacedPoint,
   kitProjectedUv,
+  kitSkinned,
+  type KitGeometry,
+  type KitPalette,
   type KitWrap,
 } from './facade-kit';
 import {
@@ -7460,10 +7465,13 @@ export interface RealisticHouses {
  * `facade-kit.ts` §`KIT_PIECES`, and their atlas — #3334.
  */
 export interface RealisticKit {
-  /** Each piece in relief: its own geometry, out of the kit's GLB. */
-  readonly pieces: readonly HouseGeometry[];
+  /**
+   * Each piece in relief: its geometry out of the kit's GLB — or, for a piece
+   * that is another's in a second skin, that one's, mapped into its own cell.
+   */
+  readonly pieces: readonly KitGeometry[];
   /** Each piece's card: its rectangle on the wall's plane (`facade-kit.ts` §`kitCardOf`). */
-  readonly cards: readonly HouseGeometry[];
+  readonly cards: readonly KitGeometry[];
   readonly atlas: Texture;
 }
 
@@ -7481,14 +7489,51 @@ export function kitGeometriesOf(
   scene.traverse((node) => {
     if (!named.has(node.name)) named.set(node.name, node);
   });
-  const pieces: HouseGeometry[] = [];
-  for (const piece of KIT_PIECES) {
+  const own = new Map<number, KitGeometry>();
+  for (const [index, piece] of KIT_PIECES.entries()) {
+    if (kitMeshIndex(index) !== index) continue;
     const node = named.get(piece.id);
-    const geometry = node === undefined ? undefined : houseGeometryOf(node);
+    const geometry = node === undefined ? undefined : kitGeometryOf(node);
     if (geometry?.triangles !== piece.triangles) return undefined;
-    pieces.push(geometry);
+    own.set(index, geometry);
+  }
+  const pieces: KitGeometry[] = [];
+  for (const [index, piece] of KIT_PIECES.entries()) {
+    const from = kitMeshIndex(index);
+    const geometry = own.get(from);
+    if (geometry === undefined) return undefined;
+    if (geometry.triangles !== piece.triangles) return undefined;
+    pieces.push(kitSkinned(index, geometry));
   }
   return { pieces, cards: KIT_PIECES.map((_, index) => kitCardOf(index)) };
+}
+
+/**
+ * A kit piece's mesh as the belt copies it — #3334: {@link houseGeometryOf}'s
+ * triangles and each vertex's colour class, which the pipeline wrote in the
+ * first of its second texture coordinates (`facade-kit.ts`
+ * §`KIT_TINT_CLASSES`); `undefined` where the mesh has none, or one that is
+ * no class.
+ */
+export function kitGeometryOf(node: Object3D): KitGeometry | undefined {
+  let found: Mesh | undefined;
+  node.traverse((each) => {
+    if (found === undefined && (each as Partial<Mesh>).isMesh === true) found = each as Mesh;
+  });
+  const classes = found?.geometry.getAttribute('uv1');
+  const geometry = houseGeometryOf(node);
+  if (found === undefined || classes === undefined || geometry === undefined) return undefined;
+  const flat = found.geometry.index === null ? found.geometry : found.geometry.toNonIndexed();
+  const from = flat.getAttribute('uv1');
+  const tint = new Uint8Array(from.count);
+  let known = true;
+  for (let vertex = 0; vertex < from.count; vertex += 1) {
+    const value = Math.round(from.getX(vertex));
+    if (!(value >= 0 && value < KIT_TINT_CLASSES.length)) known = false;
+    tint[vertex] = value;
+  }
+  if (flat !== found.geometry) flat.dispose();
+  return known && tint.length === geometry.triangles * 3 ? { ...geometry, tint } : undefined;
 }
 
 /**
@@ -25239,6 +25284,11 @@ export class MappedBuildingBelt {
         this.#wallAt[at] = -1;
         this.#roofAt[at] = -1;
         this.#spireAt[at] = -1;
+        // And its paved apron, where the selection counted it: ground, in its wall's surface.
+        if (selection.paved[at] === 1) {
+          const slot = surfaces.indexOf(plan.surfaces.wall);
+          this.#cursors[slot] = this.#append(plan, 'apron', this.#cursors[slot] as number);
+        }
         continue;
       }
       this.#modelAt[at] = -1;
@@ -25400,8 +25450,8 @@ export class MappedBuildingBelt {
 
   /**
    * Writes a plan's wrap of facade pieces from vertex `at` of the models'
-   * buffer — #3334 ({@link writeKitWrap}), in the shade its wall paint
-   * chooses (`facade-kit.ts` §`kitPaintOf`) and #621's seeded tint. Returns
+   * buffer — #3334 ({@link writeKitWrap}), in the three colours its own paints
+   * choose (`facade-kit.ts` §`kitPaletteOf`) and #621's seeded tint. Returns
    * the vertex after it.
    */
   #appendKit(plan: FootprintPlan, wrap: KitWrap, at: number): number {
@@ -25410,7 +25460,7 @@ export class MappedBuildingBelt {
     return writeKitWrap(
       kit,
       wrap,
-      kitPaintOf(plan.paint.wall),
+      kitPaletteOf(wrap.style.skin, plan.paint),
       plan.tint,
       {
         position: this.#modelPosition.array as Float32Array,
@@ -26022,24 +26072,27 @@ function writeHouseModel(
 
 /**
  * Writes a footprint's wrap of the downtown kit's facade pieces from vertex
- * `at` — #3334: every bay of every run, the piece in relief or its card,
+ * `at` — #3334: every repeat of every run, the piece in relief or its card,
  * each vertex placed by `facade-kit.ts` §`kitPlacedPoint`, its normal turned
- * with the wall and taken through the stretch's inverse; then the flat roof,
- * its texture coordinates laid across the roof piece's cell. One colour and
- * one tint. Returns the vertex after it, `wrap.triangles` triangles on.
+ * with the wall and taken through the stretch's inverse, and coloured by its
+ * class out of `palette` (a `fixed` vertex is the atlas as it is); then the
+ * flat roof, its texture coordinates laid across the roof piece's cell. One
+ * tint. Returns the vertex after it, `wrap.triangles` triangles on.
  */
 export function writeKitWrap(
   kit: RealisticKit,
   wrap: KitWrap,
-  colour: Rgb,
+  palette: KitPalette,
   tint: number,
   into: HouseModelArrays,
   at: number,
 ): number {
-  const [red, green, blue] = colour;
+  /** By a vertex's class: `facade-kit.ts` §`KIT_TINT_CLASSES`' order. */
+  const colours: readonly Rgb[] = [[1, 1, 1], palette.wall, palette.trim, palette.accent];
   const { runs } = wrap;
   let to = at;
-  const paint = (): void => {
+  const paint = (colourClass: number): void => {
+    const [red, green, blue] = colours[colourClass] ?? [1, 1, 1];
     into.colour[to * 3] = red;
     into.colour[to * 3 + 1] = green;
     into.colour[to * 3 + 2] = blue;
@@ -26079,7 +26132,7 @@ export function writeKitWrap(
         into.normal[to * 3 + 2] = nz / length;
         into.uv[to * 2] = geometry.uv[vertex * 2] as number;
         into.uv[to * 2 + 1] = geometry.uv[vertex * 2 + 1] as number;
-        paint();
+        paint(geometry.tint[vertex] as number);
         to += 1;
       }
     }
@@ -26106,7 +26159,7 @@ export function writeKitWrap(
     );
     into.uv[to * 2] = u;
     into.uv[to * 2 + 1] = v;
-    paint();
+    paint(0);
     to += 1;
   }
   return to;

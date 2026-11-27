@@ -1612,7 +1612,7 @@ export const DELIVERY_CAR_ATLAS_MADE = 'cars_atlas.png';
 /**
  * The facade pieces a mapped footprint in a town is wrapped in — #3334, the
  * owner's direction of 2026-11-26 on it (*"build this with Quaternius's
- * Downtown City MegaKit"*), under ADR 0099 D-1: twelve pieces out of the
+ * Downtown City MegaKit"*), under ADR 0099 D-1: pieces out of the
  * kit's free **Standard** archive, 153 models, which its own page and the
  * archive's `License_Standard.txt` both state as CC0.
  *
@@ -1634,7 +1634,7 @@ export const DELIVERY_CAR_ATLAS_MADE = 'cars_atlas.png';
  * version adds engine projects and shaders, and nothing here reads it.
  *
  * {@link DOWNTOWN_KIT_SCRIPT} reads each piece's glTF out of `export`, with
- * the pictures those twelve name (`pictures`: the importer reads every one,
+ * the pictures they name (`pictures`: the importer reads every one,
  * so all are inputs, and only the colour pictures are baked).
  */
 export const DOWNTOWN_KIT_SOURCE = {
@@ -1649,6 +1649,10 @@ export const DOWNTOWN_KIT_SOURCE = {
   export: 'Exports/glTF (Godot)',
   pictures: [
     'T_Concrete_Asphalt_BaseColor.png',
+    'T_Concrete_BaseColor.png',
+    'T_dark_interior.png',
+    'T_lit_interior_1.png',
+    'T_lit_interior_2.png',
     'T_Concrete_Normal.png',
     'T_Concrete_ORM.png',
     'T_MetalConcrete_BaseColor.png',
@@ -1666,8 +1670,19 @@ export const DOWNTOWN_KIT_SOURCE = {
 /** The picture {@link DOWNTOWN_KIT_SCRIPT} writes beside the kit's GLB, before `encode-ktx2.ts` — #3334. */
 export const DOWNTOWN_KIT_ATLAS_MADE = 'downtown_kit_atlas.png';
 
-/** One piece as {@link DOWNTOWN_KIT_SCRIPT} is told it: `process_downtown_kit.py`'s `<piece>`. */
+/** One piece as {@link DOWNTOWN_KIT_SCRIPT} is told it: `process_downtown_kit.py`'s `<piece>`, its options last. */
 export function downtownKitPieceArgument(piece: KitPiece, cell: KitCell): string {
+  const options = [
+    piece.lies === true ? 'lies=1' : undefined,
+    piece.mesh === undefined ? undefined : `mesh=${piece.mesh}`,
+    piece.skin === undefined ? undefined : `skin=${piece.skin}`,
+    piece.wall === undefined ? undefined : `wall=${piece.wall.join(',')}`,
+    piece.accent === undefined ? undefined : `accent=${piece.accent.join(',')}`,
+    piece.fixed === undefined ? undefined : `fixed=${piece.fixed.join(',')}`,
+    piece.glass === undefined ? undefined : `glass=${piece.glass}`,
+    piece.leaf === undefined ? undefined : `leaf=${piece.leaf}`,
+    piece.made === undefined ? undefined : `made=${piece.made}`,
+  ].filter((option) => option !== undefined);
   return [
     piece.id,
     piece.source,
@@ -1677,8 +1692,17 @@ export function downtownKitPieceArgument(piece: KitPiece, cell: KitCell): string
     String(cell.y),
     String(cell.width),
     String(cell.height),
-    piece.lies === true ? '1' : '0',
+    options.join(';'),
   ].join('|');
+}
+
+/** The kit's files the pieces are read from — #3334: each piece's own and its door leaf's, once each. */
+export function downtownKitFiles(pieces: readonly KitPiece[] = KIT_PIECES): readonly string[] {
+  return [
+    ...new Set(
+      pieces.flatMap((piece) => [piece.source, piece.leaf ?? '']).filter((name) => name !== ''),
+    ),
+  ];
 }
 
 /**
@@ -1943,9 +1967,9 @@ export const SOURCES: readonly AssetSource[] = [
           path: DOWNTOWN_KIT_SOURCE.licenceFile,
           mustContain: DOWNTOWN_KIT_SOURCE.licenceFilePhrase,
         },
-        ...KIT_PIECES.flatMap((piece) => [
-          { path: `${DOWNTOWN_KIT_SOURCE.export}/${piece.source}.gltf` },
-          { path: `${DOWNTOWN_KIT_SOURCE.export}/${piece.source}.bin` },
+        ...downtownKitFiles().flatMap((file) => [
+          { path: `${DOWNTOWN_KIT_SOURCE.export}/${file}.gltf` },
+          { path: `${DOWNTOWN_KIT_SOURCE.export}/${file}.bin` },
         ]),
         ...DOWNTOWN_KIT_SOURCE.pictures.map((picture) => ({
           path: `${DOWNTOWN_KIT_SOURCE.export}/${picture}`,
@@ -2392,8 +2416,9 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   // piece, or dissolved a different face, is not this one.
   [REALISTIC_DOWNTOWN_KIT.model]: {
     pieces: KIT_PIECES.length,
+    meshes: KIT_PIECES.filter((piece: KitPiece) => piece.mesh === undefined).length,
     triangles: KIT_PIECES.reduce((sum, piece) => sum + piece.triangles, 0),
-    sourceTriangles: 1205,
+    sourceTriangles: 9567,
     repeatedTrianglesDropped: 0,
   },
   [REALISTIC_DELIVERY_CAR]: {
@@ -2740,7 +2765,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     modified: `three of the pack's cars, the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), each read from its OBJ: kept whole, its four wheels split off as their own parts at their hubs, scaled evenly to ${DELIVERY_CAR_SOURCE.bodies.map((body) => `${String(body.lengthMetres)} m`).join(', ')} long and stood on the origin, its texture coordinates moved into its cell of the cars' atlas; an amber indicator added at each corner; every corner coloured white (the indicators amber), the pack's own normals kept, and its material and picture dropped; geometry, colour a corner and texture coordinates only, the picture in the atlas`,
     credit: { creator: 'GGBotNet', url: DELIVERY_CAR_SOURCE.page },
   },
-  // #3334: the downtown kit's twelve facade pieces and their one atlas (ADR 0099 D-1).
+  // #3334: the downtown kit's facade pieces and their one atlas (ADR 0099 D-1).
   {
     file: REALISTIC_DOWNTOWN_KIT.model,
     from: DOWNTOWN_KIT_SOURCE.id,
@@ -2760,11 +2785,11 @@ export const OUTPUTS: readonly OutputSpec[] = [
           file: REALISTIC_DOWNTOWN_KIT.atlas,
           made: DOWNTOWN_KIT_ATLAS_MADE,
           ktx2: DOWNTOWN_KIT_ATLAS_KTX2,
-          modified: `the facade pieces' one atlas, made in the same run as the pieces: each piece's colour baked by Cycles on one thread, as an emission read through the kit's own texture coordinates from the kit's own colour pictures (its brick, trim, metal and concrete, and asphalt), looking straight at the piece, into the piece's own cell of one ${String(KIT_ATLAS_PIXELS)} px square at ${String(KIT_PIXELS_PER_METRE)} px a metre with a margin of ${String(KIT_GUTTER_PIXELS)} px; glass one flat dark colour, the kit's wear masks (its vertex colours) and its normal and roughness pictures not used`,
+          modified: `the facade pieces' one atlas, made in the same run as the pieces: each piece's colour baked by Cycles on one thread, as an emission, looking straight at the piece, into the piece's own cell of one ${String(KIT_ATLAS_PIXELS)} px square at ${String(KIT_PIXELS_PER_METRE)} px a metre with a margin of ${String(KIT_GUTTER_PIXELS)} px: its brick, metal and asphalt the kit's own colour pictures through the kit's own texture coordinates; its trim, its painted shop fronts and the walls of its render and stone pieces (the kit's trim and concrete pictures) baked as a neutral grey that keeps the picture's grain, for the renderer to colour a building at a time; its dark trim the trim's picture darkened; its glass one of the kit's own interior pictures laid across the piece's glass, dimmed under a flat sky colour; the awning, sign band, ladder and landing this repository's script makes in flat greys; the kit's wear masks (its vertex colours) and its normal and roughness pictures not used`,
         },
       ],
     },
-    modified: `${String(KIT_PIECES.length)} of the kit's pieces (${KIT_PIECES.map((piece) => piece.source).join(', ')}), each read from its glTF: the faces nobody outside a building sees dropped (the kit's MI_InteriorWall, MI_FakeInterior, MI_InteriorFloor and MI_InteriorRoof), the roof piece stood upright, the door frame's opening closed with a pane of glass, its texture coordinates replaced by a projection straight onto the wall's plane into its cell of the pieces' atlas, faces of no area dissolved and every face shaded flat, and its materials, pictures and vertex colours dropped; one mesh a piece named by its id, geometry and texture coordinates only, the picture in the atlas`,
+    modified: `${String(KIT_PIECES.length)} facade pieces from ${String(downtownKitFiles().length)} of the kit's models (${downtownKitFiles().join(', ')}), each read from its glTF: the faces nobody outside a building sees dropped (the kit's MI_InteriorWall, MI_FakeInterior, MI_InteriorFloor and MI_InteriorRoof), the roof piece stood upright, a door frame's opening closed with the kit's own door leaf or a pane of glass, its texture coordinates replaced by a projection straight onto the wall's plane into its cell of the pieces' atlas, a second set added that carries each face's colour class (wall, trim, accent or fixed), faces of no area dissolved and every face shaded flat, and its materials, pictures and vertex colours dropped; ${String(KIT_PIECES.filter((piece: KitPiece) => piece.mesh !== undefined).length)} of the pieces are another's mesh in a second cell of the atlas (the brick pieces walled in the kit's concrete) and have no mesh of their own; four are not the kit's: an awning, a sign band and a ladder made by this repository's script of a few boxes and quads, and a slab it lays under the kit's own railing; one mesh a piece named by its id, geometry and texture coordinates only, the picture in the atlas`,
     credit: { creator: 'Quaternius', url: DOWNTOWN_KIT_SOURCE.page },
   },
 ];

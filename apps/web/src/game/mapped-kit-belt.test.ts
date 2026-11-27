@@ -18,9 +18,9 @@ import {
   KIT_ATLAS_PIXELS,
   KIT_CELLS,
   KIT_GUTTER_PIXELS,
-  KIT_PAINTS,
   KIT_PIECES,
-  kitPaintOf,
+  kitMeshIndex,
+  kitPaletteOf,
 } from './facade-kit';
 import { committedKit } from './facade-kit-testing';
 import { FOOTPRINT_VERTEX_FLOATS, footprintPlans, type FootprintPlan } from './footprint-buildings';
@@ -30,6 +30,7 @@ import { landClassMask } from './land-class';
 import {
   mappedBuildingsOf,
   MappedSelection,
+  roleTriangles,
   selectMappedBuildings,
   type MappedBuildings,
 } from './mapped-buildings';
@@ -38,7 +39,11 @@ import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_NEAR_METRES,
+  MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  MAPPED_KIT_NEAR_MAX,
+  MAPPED_KIT_TRIANGLES,
+  REALISTIC_KIT_WRAP_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
@@ -151,25 +156,29 @@ describe('the fixture — #3334', () => {
     expect(kinds.filter((kind) => kind === 'townhouse').length).toBeGreaterThan(10);
     expect(kinds.filter((kind) => kind === 'shop').length).toBeGreaterThan(5);
     expect(kinds.filter((kind) => kind === 'office').length).toBeGreaterThan(5);
-    // Every wrap is priced inside one structure's triangles.
+    // Every wrap is priced inside one building's triangles.
     for (const plan of plans) {
       if (plan.kit === undefined) continue;
-      expect(plan.kit.triangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+      expect(plan.kit.triangles).toBeLessThanOrEqual(REALISTIC_KIT_WRAP_TRIANGLES);
     }
     // The gutter is what a cell's edge may bleed into: the cells are that far apart.
     expect(KIT_GUTTER_PIXELS).toBe(8);
-    // A shade is a shade: the first is the kit's own colours, and none is far from them.
-    expect(KIT_PAINTS[0]).toEqual([1, 1, 1]);
-    for (const shade of KIT_PAINTS) {
-      for (const channel of shade) {
-        expect(channel).toBeGreaterThanOrEqual(0.5);
-        expect(channel).toBeLessThanOrEqual(1.5);
-      }
-    }
-    expect(kitPaintOf(KIT_PAINTS.length + 1)).toBe(KIT_PAINTS[1]);
-    expect(kitPaintOf(0)).toBe(KIT_PAINTS[0]);
   });
 });
+
+/** The structures a refill at 1 250 m leaves the field boundaries with the kit: what `realistic-budget.ts` states. */
+const FIELD_BOUNDARIES_LEFT = 5;
+
+/**
+ * The frames `realistic-budget.ts` states for the tablet check, at 1 250 m on the
+ * street: billboards and procedural structures in the frame, then the buildings drawn
+ * and the structures ranked in, without the kit and with it.
+ */
+const FRAMES = [
+  [0, 0, { count: 36, rivals: 0 }, { count: 36, rivals: 0 }],
+  [4, 0, { count: 36, rivals: 0 }, { count: 36, rivals: 0 }],
+  [8, 6, { count: 36, rivals: 6 }, { count: 36, rivals: 6 }],
+] as const;
 
 describe('a refill’s selection, with the kit loaded — #3334', () => {
   const select = (
@@ -201,14 +210,20 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
     let kitTriangles = 0;
     let other = 0;
     let farWrapped = 0;
+    let nearExtruded = 0;
     for (let at = 0; at < selection.count; at += 1) {
       const plan = plans[selection.plans[at] as number] as FootprintPlan;
       const far = selection.far[at] === 1;
-      expect(selection.kitted[at], String(at)).toBe(!far && plan.kit !== undefined ? 1 : 0);
+      // Never a far plan, and never one with no wrap.
+      if (selection.kitted[at] === 1) expect(!far && plan.kit !== undefined, String(at)).toBe(true);
       expect(selection.modelled[at]).toBe(0);
-      if (selection.kitted[at] === 1) kitTriangles += plan.kit?.triangles ?? NaN;
-      else other += far ? plan.farTriangleCount : plan.triangleCount;
+      if (selection.kitted[at] === 1) {
+        kitTriangles += plan.kit?.triangles ?? NaN;
+        // And its paved apron, where it has one: ground, drawn with the wrap.
+        if (selection.paved[at] === 1) other += roleTriangles(plan, 'apron');
+      } else other += far ? plan.farTriangleCount : plan.triangleCount;
       if (far && plan.kit !== undefined) farWrapped += 1;
+      if (!far && plan.kit !== undefined && selection.kitted[at] === 0) nearExtruded += 1;
       // Near is near: a wrap is never drawn past the near level's reach.
       if (selection.kitted[at] === 1) {
         expect(
@@ -216,6 +231,8 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
         ).toBeLessThanOrEqual(MAPPED_BUILDING_NEAR_METRES);
       }
     }
+    // A near wrapped plan is its extrusion only once the wraps' cap is reached.
+    if (nearExtruded > 0) expect(selection.kitCount).toBe(MAPPED_KIT_NEAR_MAX);
     expect(selection.kitTriangles).toBe(kitTriangles);
     expect(selection.triangles).toBe(kitTriangles + other);
     expect(selection.triangles).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
@@ -273,39 +290,74 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
     return into;
   };
 
-  it('prices a wrap far above the extrusion it replaces, and never above one structure', () => {
-    // PR #3343's review: a wrap is NOT the triangles its extrusion was. It is inside the one
-    // structure the frame's structure term prices a building at, which is the ceiling it holds.
+  it('prices a wrap far above the extrusion it replaces, and never above one building', () => {
     const wrapped = plans.filter((plan) => plan.kit !== undefined);
     const mean = (of: (plan: FootprintPlan) => number): number =>
       wrapped.reduce((sum, plan) => sum + of(plan), 0) / wrapped.length;
     const wraps = mean((plan) => plan.kit?.triangles ?? NaN);
     const extrusions = mean((plan) => plan.triangleCount);
-    expect(wraps).toBeLessThan(10 * extrusions);
+    console.log(
+      `#3334: a wrap averages ${wraps.toFixed(0)} triangles and its extrusion ${extrusions.toFixed(0)}`,
+    );
+    // Some thirty times: which is why only the nearest few are wraps at once.
+    expect(wraps).toBeGreaterThan(20 * extrusions);
     for (const plan of wrapped) {
-      expect(plan.kit?.triangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+      expect(plan.kit?.triangles).toBeLessThanOrEqual(REALISTIC_KIT_WRAP_TRIANGLES);
       expect(plan.triangleCount).toBeLessThan(plan.kit?.triangles ?? NaN);
     }
   });
 
-  it('pools the frame’s structure triangles, so a frame of billboards and rivals draws fewer buildings with the kit', () => {
-    // What the kit costs where the budget binds — the figures `facade-kit.ts` states, at
-    // 1 250 m on this street: [billboards, rivals], then the buildings drawn and the rivals
-    // ranked in without the kit and with it. With nothing else in the frame every building is
-    // still drawn; with billboards and procedural structures in it, the wraps take the
-    // triangles the farthest buildings and structures were drawn in.
-    for (const [billboards, rivals, without, withKit] of [
-      [0, 0, { count: 36, rivals: 0 }, { count: 36, rivals: 0 }],
-      [4, 0, { count: 36, rivals: 0 }, { count: 34, rivals: 0 }],
-      [8, 6, { count: 36, rivals: 6 }, { count: 27, rivals: 2 }],
-    ] as const) {
+  it('draws the nearest six wrapped plans as wraps and every other as its extrusion, so no building goes undrawn', () => {
+    expect(MAPPED_KIT_NEAR_MAX).toBe(6);
+    expect(MAPPED_KIT_TRIANGLES).toBe(MAPPED_KIT_NEAR_MAX * REALISTIC_KIT_WRAP_TRIANGLES);
+    // Among the shops and offices, where every plan in reach is wrapped: far more than six near.
+    for (const along of [1_100, 1_150, 1_250]) {
+      const rider = roadAt(along);
+      const selection = select(true, MAPPED_BUILDING_DRAW_CALLS, rider);
+      const without = select(false, MAPPED_BUILDING_DRAW_CALLS, rider);
+      let nearWrapped = 0;
+      let lastWrap = -1;
+      let firstExtruded = selection.count;
+      for (let at = 0; at < selection.count; at += 1) {
+        const plan = plans[selection.plans[at] as number] as FootprintPlan;
+        if (selection.far[at] === 1 || plan.kit === undefined) continue;
+        nearWrapped += 1;
+        if (selection.kitted[at] === 1) lastWrap = at;
+        else firstExtruded = Math.min(firstExtruded, at);
+      }
+      // Control: the cap binds here.
+      expect(nearWrapped, String(along)).toBeGreaterThan(MAPPED_KIT_NEAR_MAX);
+      expect(selection.kitCount, String(along)).toBe(MAPPED_KIT_NEAR_MAX);
+      expect(selection.kitTriangles, String(along)).toBeLessThanOrEqual(MAPPED_KIT_TRIANGLES);
+      // The nearest: no wrapped plan is an extrusion before the last wrap in the walk.
+      expect(firstExtruded, String(along)).toBeGreaterThan(lastWrap);
+      // And every building the frame drew without the kit, it draws with it.
+      expect(selection.count, String(along)).toBe(without.count);
+      expect(selection.count, String(along)).toBe(MAPPED_BUILDING_MAX);
+      expect([...selection.plans.subarray(0, selection.count)]).toEqual([
+        ...without.plans.subarray(0, without.count),
+      ]);
+    }
+  });
+
+  it('holds the worst frame: the structure term’s 23 040 triangles with the kit as without it, wraps at most 18 000 of them', () => {
+    // The pool is not raised, and the wraps' share leaves the rest of the frame its own.
+    expect(MAPPED_BUILDING_TRIANGLES).toBe(23_040);
+    expect(MAPPED_KIT_TRIANGLES).toBe(18_000);
+    expect(MAPPED_BUILDING_TRIANGLES - MAPPED_KIT_TRIANGLES).toBe(5_040);
+    // What a refill at 1 250 m on this street spends — [billboards, rivals], then the
+    // buildings drawn and the rivals ranked in, without the kit and with it.
+    for (const [billboards, rivals, without, withKit] of FRAMES) {
       const label = `${String(billboards)} billboards, ${String(rivals)} rivals`;
       const extruded = refill(false, billboards, rivals, MAPPED_BUILDING_DRAW_CALLS, 1_250);
       const wrapped = refill(true, billboards, rivals, MAPPED_BUILDING_DRAW_CALLS, 1_250);
+      console.log(
+        `#3334: ${label}: ${String(extruded.count)} buildings and ${String(extruded.rivals)} rivals in ${String(extruded.triangles)} triangles without the kit; ${String(wrapped.count)} and ${String(wrapped.rivals)} in ${String(wrapped.triangles)} with it (${String(wrapped.kitCount)} wraps, ${String(wrapped.kitTriangles)})`,
+      );
       expect({ count: extruded.count, rivals: extruded.rivals }, label).toEqual(without);
       expect({ count: wrapped.count, rivals: wrapped.rivals }, label).toEqual(withKit);
-      expect(extruded.triangles, label).toBe(2_842);
-      expect(wrapped.kitCount, label).toBe(wrapped.count);
+      expect(wrapped.kitCount, label).toBeLessThanOrEqual(MAPPED_KIT_NEAR_MAX);
+      expect(wrapped.kitTriangles, label).toBeLessThanOrEqual(MAPPED_KIT_TRIANGLES);
       // The ceiling is held: the buildings and the rivals ranked in are inside the frame's term.
       expect(
         wrapped.triangles + wrapped.rivals * REALISTIC_TRIANGLES.structure,
@@ -314,7 +366,36 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
         (REALISTIC_STRUCTURE_ITEMS - billboards) * REALISTIC_TRIANGLES.structure,
       );
     }
-    expect(refill(true, 0, 0, MAPPED_BUILDING_DRAW_CALLS, 1_250).triangles).toBe(21_658);
+  });
+
+  it('paves a wrapped shop’s apron with its wrap, in its extrusion’s own surface, and counts it', () => {
+    // Among the shops, whose aprons run from their fronts to the kerb (#2848).
+    const selection = select(true, MAPPED_BUILDING_DRAW_CALLS, roadAt(1_250));
+    let paved = 0;
+    let aprons = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = plans[selection.plans[at] as number] as FootprintPlan;
+      if (selection.kitted[at] !== 1) continue;
+      const apron = roleTriangles(plan, 'apron');
+      expect(selection.paved[at], String(at)).toBe(apron > 0 ? 1 : 0);
+      if (apron === 0) continue;
+      paved += 1;
+      aprons += apron;
+      // Its surface's slot is open, though no wall of the plan is drawn in it.
+      expect(selection.surfaces).toContain(plan.surfaces.wall);
+    }
+    expect(paved).toBeGreaterThan(0);
+    // The belt draws them: the extrusions' mesh holds exactly the selection's surfaces' triangles.
+    const belt = aBelt(buildings, withKit);
+    const rider = roadAt(1_250);
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.triangles).toBe(selection.triangles);
+    expect(belt.mesh.geometry.drawRange.count).toBe((stats.triangles - stats.kitTriangles) * 3);
+    // With no slot for its surface, the wrap is drawn and its apron is not.
+    const one = select(true, 1, roadAt(1_250));
+    expect(one.kitCount).toBeGreaterThan(0);
+    expect([...one.paved.subarray(0, one.count)].every((each) => each === 0)).toBe(true);
+    expect(aprons).toBeGreaterThan(0);
   });
 
   it('draws a wrapped plan as its extrusion where no slot is left for the wraps’ group', () => {
@@ -329,20 +410,33 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
 });
 
 describe('the kit a loaded scene is read as — #3334', () => {
-  /** A scene as the loader leaves one: a node a piece, named by its id, holding `triangles`. */
-  function sceneOf(triangles: (id: string) => number | undefined): never {
-    const nodes = KIT_PIECES.flatMap((piece) => {
-      const count = triangles(piece.id);
+  /**
+   * A scene as the loader leaves one: a node for each piece that has a mesh of its own,
+   * named by its id, holding `triangles`, every vertex of colour class `colourClass`.
+   */
+  function sceneOf(
+    triangles: (id: string) => number | undefined,
+    colourClass: number | null = 1,
+  ): never {
+    const nodes = KIT_PIECES.flatMap((piece, index) => {
+      const count = kitMeshIndex(index) === index ? triangles(piece.id) : undefined;
       if (count === undefined) return [];
-      const attribute = (size: number): { array: Float32Array } => ({
+      const attribute = (
+        size: number,
+      ): { array: Float32Array; count: number; getX: () => number } => ({
         array: new Float32Array(count * 3 * size),
+        count: count * 3,
+        getX: () => colourClass ?? 0,
       });
       const node = {
         name: piece.id,
         isMesh: true,
         geometry: {
           index: null,
-          getAttribute: (name: string) => attribute(name === 'uv' ? 2 : 3),
+          getAttribute: (name: string) =>
+            name === 'uv1' && colourClass === null
+              ? undefined
+              : attribute(name === 'uv' || name === 'uv1' ? 2 : 3),
         },
         traverse: (visit: (each: unknown) => void): void => {
           visit(node);
@@ -368,6 +462,22 @@ describe('the kit a loaded scene is read as — #3334', () => {
       KIT_PIECES.map((piece) => piece.triangles),
     );
     expect(kit?.cards.map((card) => card.triangles)).toEqual(KIT_PIECES.map(() => 2));
+    // A piece that wears another's mesh is that mesh, in its own cell of the atlas.
+    const render = KIT_PIECES.findIndex((piece) => piece.id === 'render-window');
+    const brick = KIT_PIECES.findIndex((piece) => piece.id === 'brick-window');
+    expect(kit?.pieces[render]?.position).toBe(kit?.pieces[brick]?.position);
+    expect(kit?.pieces[render]?.uv).not.toEqual(kit?.pieces[brick]?.uv);
+    expect(inACell(kit?.pieces[render]?.uv[0] ?? NaN, kit?.pieces[render]?.uv[1] ?? NaN)).toBe(
+      true,
+    );
+    // Every vertex carries its colour class.
+    expect([...new Set(kit?.pieces[brick]?.tint)]).toEqual([1]);
+  });
+
+  it('refuses a scene whose vertices carry no colour class, or one that is no class', () => {
+    expect(kitGeometriesOf(sceneOf(table, null))).toBeUndefined();
+    expect(kitGeometriesOf(sceneOf(table, 4))).toBeUndefined();
+    expect(kitGeometriesOf(sceneOf(table, 3))).toBeDefined();
   });
 
   it('refuses a scene with a piece missing, or one that is not the triangles a wrap was priced at', () => {
@@ -410,13 +520,14 @@ describe('the belt, with the committed kit — #3334', () => {
     let seen = 0;
     let vertices = 0;
     const shades = new Set<string>();
+    const looks = new Set<string>();
     for (let place = 0; ; place += 1) {
       const drawn = belt.drawnAt(place);
       if (drawn === undefined) break;
       const plan = plans[drawn.plan] as FootprintPlan;
       if (drawn.modelAt < 0) {
-        // An extrusion: far, or not wrapped.
-        expect(drawn.far || plan.kit === undefined).toBe(true);
+        // An extrusion: far, not wrapped, or past the wraps' cap.
+        if (!drawn.far && plan.kit !== undefined) expect(stats.kitted).toBe(MAPPED_KIT_NEAR_MAX);
         continue;
       }
       const wrap = plan.kit;
@@ -430,8 +541,8 @@ describe('the belt, with the committed kit — #3334', () => {
         const x = position[vertex * 3] as number;
         const y = position[vertex * 3 + 1] as number;
         const z = position[vertex * 3 + 2] as number;
-        // On its own mapped footprint, within the deepest relief of any piece.
-        expect(outside(plan.footprint, x, z)).toBeLessThanOrEqual(0.11);
+        // On its own mapped footprint, within what hangs furthest off any wall: a metre.
+        expect(outside(plan.footprint, x, z)).toBeLessThanOrEqual(1.01);
         lowest = Math.min(lowest, y);
         highest = Math.max(highest, y);
         // A unit normal, and a texel inside a piece's cell of the atlas.
@@ -448,20 +559,30 @@ describe('the belt, with the committed kit — #3334', () => {
       // From the plan's foot to its parapet's top.
       expect(lowest).toBeCloseTo(plan.base, 3);
       expect(highest).toBeCloseTo(plan.eaves + 0.5, 3);
-      // In one colour, first vertex to last: the shade its wall paint chooses.
-      const shade = kitPaintOf(plan.paint.wall);
-      for (const vertex of [from, to - 1]) {
-        for (let channel = 0; channel < 3; channel += 1) {
-          expect(colour[vertex * 3 + channel]).toBeCloseTo(shade[channel] as number, 6);
-        }
+      // Every vertex in one of its own three colours, or the atlas as it is; and its wall's
+      // colour on some of them.
+      const palette = kitPaletteOf(wrap.style.skin, plan.paint);
+      const own = [[1, 1, 1], palette.wall, palette.trim, palette.accent].map((each) =>
+        each.map((channel) => Math.fround(channel)).join(),
+      );
+      const worn = new Set<string>();
+      for (let vertex = from; vertex < to; vertex += 1) {
+        worn.add([...colour.slice(vertex * 3, vertex * 3 + 3)].join());
       }
-      shades.add(shade.join());
+      for (const each of worn) expect(own).toContain(each);
+      expect(worn.has(own[1] as string)).toBe(true);
+      expect(worn.size).toBeGreaterThanOrEqual(2);
+      shades.add(`${wrap.style.skin} ${own[1] as string}`);
+      looks.add([wrap.window, wrap.door, wrap.cornice, wrap.style.sign].join());
       vertices += to - from;
     }
     expect(seen).toBe(stats.kitted);
     expect(vertices).toBe(stats.kitTriangles * 3);
-    // Not one long building: the wraps drawn wear more than two shades between them.
+    // Not one long building: the six wraps drawn are walled in more than two colours and
+    // built of more than two sets of pieces between them.
+    expect(stats.kitted).toBe(MAPPED_KIT_NEAR_MAX);
     expect(shades.size).toBeGreaterThan(2);
+    expect(looks.size).toBeGreaterThan(2);
   });
 
   it('draws real pieces: the wraps’ triangles are more than their cards alone, and each piece is the committed one', () => {
@@ -550,8 +671,13 @@ describe('the belt, with the committed kit — #3334', () => {
     };
     const without = left(houseModels);
     const withTheKit = left(withKit);
-    expect(withTheKit).toBeLessThan(without / 4);
-    expect(withTheKit).toBeGreaterThanOrEqual(0);
+    console.log(
+      `#3334: the field boundaries are left ${String(without)} structures without the kit and ${String(withTheKit)} with it`,
+    );
+    expect(withTheKit).toBeLessThan(without);
+    // The wraps' share of the pool leaves 5 040 triangles: seven structures, less what the
+    // frame's other thirty buildings are.
+    expect(withTheKit).toBeGreaterThanOrEqual(FIELD_BOUNDARIES_LEFT);
   });
 
   it('draws house models and wraps together, each in its own range of the one buffer', () => {
@@ -568,7 +694,12 @@ describe('the belt, with the committed kit — #3334', () => {
     ).plans;
     const belt = aBelt(mappedBuildingsOf(richmondPlans), withKit);
     // Among its shops: the lots the brick shop fits, and the ones it does not.
-    const rider = roadAt(1_250, richmond);
+    // ⚠️ On this street the house models take most of the frame's triangles (seven of them
+    // are 20 622), and a wrap is never drawn at a building's cost: at 1 250 m, among the
+    // models, none is. At 1 220 m one fits beside eight models.
+    const among = roadAt(1_250, richmond);
+    expect(belt.refill(among.x, among.z, MAPPED_BUILDING_TRIANGLES).kitted).toBe(0);
+    const rider = roadAt(1_220, richmond);
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     expect(stats.modelled).toBeGreaterThan(0);
     expect(stats.kitted).toBeGreaterThan(0);

@@ -1495,40 +1495,81 @@ export const REALISTIC_HOUSE_MODEL_SURFACES = {
 /**
  * What the downtown kit's facade pieces may add — #3334's own ceiling, inside
  * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
- * **1 MiB** of texture memory as the tablet is handed it, and **256 KiB** of
- * build. The one atlas is 1024² ETC1S, half a byte a texel and a third again
- * for its mipmaps, 0.67 MiB estimated; the GLB of twelve pieces and the atlas
- * are 153 952 bytes (73 900 and 80 052). `facade-kit.test.ts` reads both off
- * the committed files.
+ * **3 MiB** of texture memory as the tablet is handed it, and **1 MiB** of
+ * build. The one atlas is 2048² ETC1S, half a byte a texel and a third again
+ * for its mipmaps, 2.67 MiB estimated; the GLB and the atlas are 887 010
+ * bytes (560 112 and 326 898). `facade-kit.test.ts` reads both off the
+ * committed files. It was 1 MiB and 256 KiB for twelve pieces in a 1024²
+ * atlas; the look check on PR #3343 asked for the kit to be used properly,
+ * after the owner raised {@link REALISTIC_BUILD_BYTES} to 100 MiB (#3339).
  *
- * ADR 0099 D-4: what each piece costs. In triangles, in relief, as
- * `facade-kit.ts` §`KIT_PIECES` records and that test holds to the GLB: the
- * plain brick wall 2, the brick window 172, the stone shop front 142, the
- * stone pier 44, the metal shop front 148, the metal pier 30, the metal door
- * 241, the metal window 308, the plain metal wall 12, the brick cornice 6,
- * the metal cornice 26 and the roof 2 — 1 133 between them, and 2 each as a
- * card. In bytes they share the two files above: about 65 a triangle of the
- * GLB, and a cell of the atlas each.
- *
- * ⚠️ **One draw call, and no ceiling raised — but more triangles a frame
- * than the extrusions were**: the wraps are one mesh in one material, counted
- * inside {@link MAPPED_BUILDING_DRAW_CALLS} as the house models' is, and a
- * wrapped building holds {@link REALISTIC_TRIANGLES}' `structure`, 640 — the
- * ceiling of the extrusion it replaces (ADR 0099 D-4.1), where a house model
- * costs several structures. It spends far more of that ceiling than its
- * extrusion did (602 against 78 on the terrace fixture), out of
- * {@link MAPPED_BUILDING_TRIANGLES}' pool: a street of wraps leaves the field
- * boundaries fewer structures and, in a frame that billboards and procedural
- * structures share, draws fewer buildings. The measured figures are
- * `facade-kit.ts`' header's, held by `mapped-kit-belt.test.ts`.
+ * ADR 0099 D-4: what each piece costs in triangles is `facade-kit.ts`
+ * §`KIT_PIECES`, which that test holds to the GLB: 39 pieces, 31 meshes
+ * (eight are a mesh again in another skin), 9 407 triangles between them and
+ * 2 each as a card. In bytes they share the two files.
  *
  * @test-facing held by `facade-kit.test.ts`, which reads the committed kit
  * back off disk against it; the renderer spends it only on the realistic path
  */
 export const REALISTIC_DOWNTOWN_KIT_SURFACES = {
-  textureBytes: 1 * MEBIBYTE,
-  buildBytes: 256 * 1024,
+  textureBytes: 3 * MEBIBYTE,
+  buildBytes: 1 * MEBIBYTE,
 } as const;
+
+/**
+ * The most triangles one building wrapped in the downtown kit's facade
+ * pieces may be, at the near level — #3334, the maintainer's direction on
+ * PR #3343: **3 000**, the house models' price a building (#3273's
+ * `REALISTIC_BUILDING_MODEL_TRIANGLES`, which is not on `main` as this is
+ * written; the two are one number, and this is to be written as that one once
+ * it is). It was {@link REALISTIC_TRIANGLES}' `structure`, 640, under which
+ * most of a wrap's bays were flat cards and the wrap read worse than the
+ * painted extrusion it replaced.
+ *
+ * `footprint-buildings.ts` hands it to `facade-kit.ts` §`wrapFootprint`,
+ * which spends it on the street front first.
+ */
+export const REALISTIC_KIT_WRAP_TRIANGLES = 3_000;
+
+/**
+ * The most buildings drawn as wraps at once — #3334: **6**, the nearest
+ * wrapped plans of the walk (`mapped-buildings.ts` §`selectMappedBuildings`);
+ * every wrapped plan past them is its extrusion, as a far one is.
+ *
+ * ⚠️ **It is what keeps the worst frame where it was.** A wrap is some thirty
+ * times its extrusion's triangles, and with no cap a street of them took the
+ * whole of {@link MAPPED_BUILDING_TRIANGLES} for seven buildings and left the
+ * other twenty-nine undrawn.
+ */
+export const MAPPED_KIT_NEAR_MAX = 6;
+
+/**
+ * The most triangles the wraps drawn at once may be between them — #3334:
+ * **18 000**, {@link MAPPED_KIT_NEAR_MAX} at {@link REALISTIC_KIT_WRAP_TRIANGLES}.
+ * They come out of {@link MAPPED_BUILDING_TRIANGLES}' 23 040, which is NOT
+ * raised: at least 5 040 are left for the frame's other mapped buildings and
+ * the procedural structures ranked with them, where a street of extrusions
+ * spends about 2 800 on all thirty-six.
+ *
+ * **The worst frame**: the structure term is 23 040 triangles with the kit as
+ * without it, of which wraps are never more than 18 000, in one draw call
+ * inside {@link MAPPED_BUILDING_DRAW_CALLS}. And never at a building's cost:
+ * `mapped-buildings.ts` §`selectMappedBuildings` draws one wrap fewer until
+ * the frame has every building, and every procedural structure, it has with
+ * no wrap. What the wraps do take is the field boundaries': on the terrace
+ * fixture at 1 250 m a refill is 2 842 mapped triangles without the kit and
+ * 19 334 with it (six wraps, 16 822, and their paved aprons), and leaves walls, hedges and fences 5
+ * structures where it left 31; with 8 billboards and 6 procedural structures
+ * in the frame, four wraps (11 160) and all 36 buildings and 6 structures
+ * still. `mapped-kit-belt.test.ts` holds the arithmetic, the selection and
+ * each of those figures. What it does to a tablet's frame is not measured: the
+ * frame check is owed (#3334).
+ *
+ * @test-facing the wraps' share of the worst frame, stated: it is the product of
+ * the two constants the product does read, and `mapped-kit-belt.test.ts` holds
+ * every refill's wraps to it
+ */
+export const MAPPED_KIT_TRIANGLES = MAPPED_KIT_NEAR_MAX * REALISTIC_KIT_WRAP_TRIANGLES;
 
 /**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
@@ -1657,9 +1698,11 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * ## The downtown kit's facade pieces, inside the 100 MiB — #3334
  *
  * Measured on the committed files: the kit's GLB and its atlas
- * ({@link REALISTIC_DOWNTOWN_KIT_SURFACES}) add **153 952**, so the set with
- * its transcoder is **49 205 637**, 55 651 963 under 100 MiB. Nothing was
- * raised for them: they are the first files to spend #3337's room. The APK
+ * ({@link REALISTIC_DOWNTOWN_KIT_SURFACES}) add **887 010** (560 112 and
+ * 326 898; they were 153 952 before the kit was used properly, PR #3343's
+ * look check), so the set with its transcoder is **49 938 695**, 54 918 905
+ * under 100 MiB. Nothing was raised for them: they are the first files to
+ * spend #3337's room. The APK
  * carries the same bytes more, and a browser's first download does not move.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed

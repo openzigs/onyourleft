@@ -15,7 +15,7 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { KIT_PIECES, kitCardOf, type KitGeometry } from './facade-kit';
+import { KIT_PIECES, kitCardOf, kitMeshIndex, kitSkinned, type KitGeometry } from './facade-kit';
 import { readGlb } from './model-bytes-testing';
 import { REALISTIC_DOWNTOWN_KIT } from './realistic-assets';
 import { accessorValues } from './realistic-bytes-testing';
@@ -38,19 +38,24 @@ interface KitDocument {
 export interface CommittedKitPiece extends KitGeometry {
   /** The attributes its one primitive carries. */
   readonly attributes: readonly string[];
+  /** Whether the GLB holds a mesh of its own name: not for a piece that wears another's. */
+  readonly own: boolean;
 }
 
 /**
  * Every piece of `facade-kit.ts` §`KIT_PIECES` out of the committed GLB, by
- * its node's name, its one primitive's indices followed so that it is three
- * vertices a triangle. Refuses a piece that is missing or has more than one
- * primitive.
+ * its node's name — or, for a piece that wears another's mesh, by that one's,
+ * mapped into its own cell as the product maps it (`kitSkinned`) — its one
+ * primitive's indices followed so that it is three vertices a triangle, and
+ * each vertex's colour class out of its second texture coordinates. Refuses a
+ * piece that is missing or has more than one primitive.
  */
 export function committedKitPieces(): readonly CommittedKitPiece[] {
   const { json, binary } = readGlb(join(SHIPPED_REALISTIC, REALISTIC_DOWNTOWN_KIT.model));
   const document = json as unknown as KitDocument & Parameters<typeof accessorValues>[0];
-  return KIT_PIECES.map((piece) => {
-    const node = document.nodes?.find((each) => each.name === piece.id);
+  return KIT_PIECES.map((piece, at) => {
+    const named = KIT_PIECES[kitMeshIndex(at)]?.id;
+    const node = document.nodes?.find((each) => each.name === named);
     const mesh = node?.mesh === undefined ? undefined : document.meshes?.[node.mesh];
     const [primitive, ...rest] = mesh?.primitives ?? [];
     if (primitive === undefined || rest.length > 0) {
@@ -77,12 +82,20 @@ export function committedKitPieces(): readonly CommittedKitPiece[] {
       });
       return out;
     };
-    return {
+    const classes = expand(values('TEXCOORD_1'), 2);
+    const geometry: KitGeometry = {
       position: expand(position, 3),
       normal: expand(normal, 3),
       uv: expand(uv, 2),
+      tint: Uint8Array.from({ length: indices.length }, (_, vertex) =>
+        Math.round(classes[vertex * 2] as number),
+      ),
       triangles: indices.length / 3,
+    };
+    return {
+      ...kitSkinned(at, geometry),
       attributes: Object.keys(primitive.attributes).sort(),
+      own: document.nodes?.some((each) => each.name === piece.id) === true,
     };
   });
 }

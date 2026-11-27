@@ -15,10 +15,9 @@ import type { BuildingFeature } from '@onyourleft/map-features';
 import { describe, expect, it } from 'vitest';
 
 import { FOUNDATION_METRES } from './buildings';
-import { KIT_STYLES, type KitKind } from './facade-kit';
+import { KIT_HUNG, KIT_PIECES, KIT_RUN_FLOATS, kitPaletteOf, type KitKind } from './facade-kit';
 import { committedKit } from './facade-kit-testing';
 import {
-  FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_ROLES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
@@ -35,7 +34,7 @@ import {
 } from './footprint-fixtures-testing';
 import { landClassMask, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
-import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { REALISTIC_KIT_WRAP_TRIANGLES, REALISTIC_TRIANGLES } from './realistic-budget';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -44,8 +43,11 @@ import { writeKitWrap, type RealisticKit } from './three-renderer';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
-/** Every kind a footprint is wrapped as: the styles' own keys. */
-const KIT_KINDS = Object.keys(KIT_STYLES) as readonly KitKind[];
+/** Every kind a footprint is wrapped as. */
+const KIT_KINDS: readonly KitKind[] = ['retail', 'shop', 'office', 'townhouse'];
+
+/** A wrap drawn in no colour of its own: the atlas as it is. */
+const UNPAINTED = { wall: [1, 1, 1], trim: [1, 1, 1], accent: [1, 1, 1] } as const;
 
 /** Level to 1 000 m, then climbing at 6 %: the street stands on the climb. */
 const road = northRoute(3_000, (along) => (along <= 1_000 ? 10 : 10 + (along - 1_000) * 0.06));
@@ -153,7 +155,7 @@ function drawn(plan: FootprintPlan): Float32Array {
     tint: new Float32Array(vertices),
   };
   // The belt's writer fills exactly the triangles the plan was priced at.
-  expect(writeKitWrap(kit, wrap, [1, 1, 1], 0, into, 0)).toBe(vertices);
+  expect(writeKitWrap(kit, wrap, UNPAINTED, 0, into, 0)).toBe(vertices);
   return into.position;
 }
 
@@ -253,9 +255,14 @@ describe('a wrapped building on sloping ground — #3334', () => {
             outside(plan.footprint, position[at] as number, position[at + 2] as number),
           );
         }
-        // It fits: no vertex stands further outside the mapped outline than the
-        // deepest relief of any piece, 11 cm.
-        expect(farthest).toBeLessThanOrEqual(0.11);
+        // It fits: no vertex stands further outside the mapped outline than what hangs
+        // furthest off any wall, a fire escape's landing of a metre; and with nothing hung
+        // on it, than the deepest relief of any bay, the moulded cornice's 53 cm.
+        const hung = Array.from(
+          { length: (plan.kit?.runs.length ?? 0) / KIT_RUN_FLOATS },
+          (_, run) => KIT_PIECES[plan.kit?.runs[run * KIT_RUN_FLOATS] as number]?.id,
+        ).some((id) => id !== undefined && KIT_HUNG.has(id));
+        expect(farthest).toBeLessThanOrEqual(hung ? 1.01 : 0.54);
         // And it fills it: every corner of the outline has a vertex of the wrap on it.
         for (let corner = 0; corner < plan.footprint.length; corner += 2) {
           let nearest = Infinity;
@@ -302,17 +309,64 @@ describe('a wrapped building on sloping ground — #3334', () => {
     },
   );
 
-  it('holds every wrap to one structure’s triangles, with real pieces in every one', () => {
-    expect(FOOTPRINT_MAX_TRIANGLES).toBe(REALISTIC_TRIANGLES.structure);
+  it('gives every wrap a building’s 3 000 triangles, and spends them: none is held to a structure’s 640', () => {
+    expect(REALISTIC_KIT_WRAP_TRIANGLES).toBe(3_000);
     for (const urban of ['town', 'city-centre'] as const) {
       const mapped = plansOf(urban).plans.slice(0, WRAPPED.length);
       expect(mapped.length).toBe(WRAPPED.length);
       for (const plan of mapped) {
-        expect(plan.kit?.triangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
-        // Its door, at least, is the kit's own geometry and not a card.
+        expect(plan.kit?.triangles).toBeLessThanOrEqual(REALISTIC_KIT_WRAP_TRIANGLES);
+        // More of the kit's own geometry than the structure class's ceiling ever held.
+        expect(plan.kit?.triangles).toBeGreaterThan(REALISTIC_TRIANGLES.structure);
         expect(plan.kit?.relief).toBeGreaterThan(0);
       }
+      // The terrace's houses, 6 to 8 m wide: every bay of every street front is real geometry.
+      for (const plan of mapped.slice(0, TERRACE.length)) {
+        expect(plan.kit?.front.relief).toBe(plan.kit?.front.bays);
+      }
     }
+  });
+});
+
+describe('each building its own — #3334, the look check on PR #3343', () => {
+  const { plans } = plansOf('town');
+  const mapped = plans.slice(0, WRAPPED.length);
+
+  it('walls a wrap in what its extrusion is walled in, in the extrusion’s own paint', () => {
+    for (const plan of mapped) {
+      const wrap = plan.kit;
+      const wall = plan.surfaces.wall;
+      if (wrap?.kind !== 'office') {
+        expect(wrap?.style.skin, wall).toBe(
+          wall === 'brick' ? 'brick' : wall === 'stone' || wall === 'concrete' ? 'stone' : 'render',
+        );
+      }
+      // An awning on the wrap where the extrusion has one, and never on a house.
+      expect(wrap?.style.sign === 'awning').toBe(plan.shop.awning && wrap?.kind !== 'office');
+    }
+    // `paintTown` keeps two neighbours' paints apart, and so their wraps' colours.
+    const terrace = mapped.slice(0, TERRACE.length);
+    for (let at = 1; at < terrace.length; at += 1) {
+      const [before, here] = [terrace[at - 1], terrace[at]] as [FootprintPlan, FootprintPlan];
+      if (before.kit?.style.skin !== here.kit?.style.skin) continue;
+      expect(kitPaletteOf(here.kit?.style.skin ?? 'brick', here.paint).wall).not.toEqual(
+        kitPaletteOf(before.kit?.style.skin ?? 'brick', before.paint).wall,
+      );
+    }
+  });
+
+  it('builds a terrace of six houses as more than one house six times', () => {
+    const terrace = mapped.slice(0, TERRACE.length).map((plan) => plan.kit);
+    const looks = new Set(
+      terrace.map((wrap) =>
+        [wrap?.style.skin, wrap?.window, wrap?.door, wrap?.cornice, wrap?.style.pilasters].join(),
+      ),
+    );
+    expect(looks.size).toBeGreaterThanOrEqual(4);
+    // And the same six on every load.
+    const again = plansOf('town').plans.slice(0, TERRACE.length);
+    expect(again.map((plan) => plan.kit?.window)).toEqual(terrace.map((wrap) => wrap?.window));
+    expect(again.map((plan) => plan.kit?.style)).toEqual(terrace.map((wrap) => wrap?.style));
   });
 });
 

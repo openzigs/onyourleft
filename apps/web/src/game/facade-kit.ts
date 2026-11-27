@@ -7,10 +7,10 @@
  * streets with facade pieces: storefronts on the ground floor, upper floors,
  * cornice. Do not place pre-built blocks that ignore the map.*
  *
- * The kit is CC0 (`ASSETS.toml`, ADR 0099 D-1). Twelve of its pieces are
- * taken ({@link KIT_PIECES}); `tools/realistic/blender/process_downtown_kit.py`
- * writes them into one GLB, each mapped into one colour atlas, so every
- * wrapped building drawn is one draw call between them.
+ * The kit is CC0 (`ASSETS.toml`, ADR 0099 D-1). {@link KIT_PIECES} is what is
+ * taken of it; `tools/realistic/blender/process_downtown_kit.py` writes the
+ * pieces into one GLB, each mapped into one colour atlas, so every wrapped
+ * building drawn is one draw call between them.
  *
  * ## Which footprints, by setting
  *
@@ -22,13 +22,52 @@
  *
  * | the footprint | is drawn as |
  * |---|---|
- * | commercial, one storey | `retail`: a metal and glass shop front, a metal parapet |
- * | commercial, two or three storeys | `shop`: a stone shop front under brick upper floors |
- * | commercial, four storeys or more | `office`: a metal and glass front, floor after floor |
- * | residential, in a terrace, two to four storeys | `townhouse`: brick, a window a bay |
+ * | commercial, one storey | `retail`: a shop front under a parapet |
+ * | commercial, two or three storeys | `shop`: a shop front under upper floors |
+ * | commercial, four storeys or more | `office`: floor after floor |
+ * | residential, in a terrace, two to four storeys | `townhouse`: a window a bay |
  *
  * Every other footprint keeps its extrusion (or its house model): a detached
  * house, a block of flats, a civic or industrial building, a part.
+ *
+ * ## What a building looks like is its own — the look check on PR #3343
+ *
+ * The first wrap was one brick, one window and flat cards, and read worse
+ * than the painted terrace it replaced. Since the rework {@link kitStyleOf}
+ * chooses, for each building, seeded from its footprint:
+ *
+ * - its **skin** ({@link KitSkin}), from what its extrusion is walled in, so
+ *   that a wrap and its own far level are one building: the kit's red brick;
+ *   `render`, the kit's brick pieces walled in its concrete, baked neutral and
+ *   worn in the plan's own house paint; `stone`, the kit's cream trim as a
+ *   wall; or `metal`, its metal and glass;
+ * - its **window** ({@link KIT_SKINS}): a square sash, one under a keyed
+ *   lintel, a tall one, a wide one two bays across, an arched one, a pair in
+ *   quoins; metal glazing in three patterns;
+ * - its **cornice**: the skin's own parapet, or the kit's deep moulded one;
+ * - its **shop front** ({@link KIT_SHOPFRONTS}): a painted timber front
+ *   between columns, a metal one over a stall riser, or glazing to the floor,
+ *   under an awning or a sign band, in one of the main street's deep colours;
+ * - its **door**; **pilasters** up some fronts; and a **fire escape** on some
+ *   brick ones of three storeys or more.
+ *
+ * ⚠️ **What the kit does not hold**: an awning, a sign band, or a fire escape.
+ * The awning and the sign band are the pipeline's own few triangles
+ * (`process_downtown_kit.py` §`MADE`), as the pane behind a door frame is; the
+ * fire escape is the kit's own metal railing on a landing and a ladder the
+ * pipeline makes. Everything else drawn is the kit's geometry.
+ *
+ * ## Three colours a building, a class a vertex
+ *
+ * Every vertex of a piece carries a {@link KitTintClass}: its `wall`, its
+ * `trim` (a sill, a lintel, a cornice), its `accent` (a shop front's timber,
+ * an awning's canvas) or `fixed` (glass, a dark frame, metal). The belt
+ * multiplies each by the building's own colour for that class
+ * ({@link kitPaletteOf}). The pipeline bakes the `trim` and `accent` classes
+ * and the `render` and `stone` walls **neutral**, a grey of
+ * {@link KIT_NEUTRAL_LEVEL} that keeps the picture's grain, so the colour is
+ * the building's and not the atlas's; brick and metal are baked as they are,
+ * and their colour is a shade.
  *
  * ## The wrap
  *
@@ -39,57 +78,48 @@
  * is exactly as tall as the extrusion it replaces, which is its far level.
  *
  * - an edge **facing the street** ({@link KIT_FRONT_COSINE} of the door's
- *   edge) has the style's shop front on its ground floor, and the door's edge
- *   a door in its middle bay;
- * - every other edge has the style's solid ground floor;
- * - upper storeys have the style's window on every edge;
+ *   edge) has the style's front on its ground floor, and the door's edge a
+ *   door in its middle bay;
+ * - upper storeys have the style's window; a window two bays wide takes its
+ *   bays in pairs, and an odd bay left over the skin's first window;
  * - a **party wall** — an edge mostly shared with a neighbour — is plain;
- * - a plinth of the plain piece from the plan's foot to its floor, so a wrap
- *   on falling ground stands in it as an extrusion does;
+ * - a plinth of the plain piece from the plan's foot to its floor;
  * - a cornice a bay at the eaves, as tall as the extrusion's parapet;
  * - a flat roof at the eaves, the outline triangulated.
  *
- * ## Two levels a piece, one budget a building
+ * ## One budget a building
  *
- * A piece is drawn either in **relief**, its own geometry (2 to 308
- * triangles), or as its **card**: two triangles on the wall's plane wearing
- * the same cell of the atlas, which the pipeline baked looking straight at
- * the piece. The texture coordinates of the relief are that same projection,
- * so the two agree texel for texel.
+ * A piece is drawn either in **relief**, its own geometry, or as its
+ * **card**: two triangles on the wall's plane wearing the same cell of the
+ * atlas, which the pipeline baked looking straight at the piece.
  *
- * ⚠️ **A wrapped building holds the structure class's ceiling**,
- * `realistic-budget.ts` §`REALISTIC_TRIANGLES.structure`, 640 — ADR 0099
- * D-4.1: *"a new model takes a class that exists and holds that class's
- * ceiling"*. So a wrap never costs the frame more than the one structure its
- * structure term prices a building at, which a house model does.
+ * ⚠️ **A wrapped building holds `realistic-budget.ts`
+ * §`REALISTIC_KIT_WRAP_TRIANGLES`, 3 000** — the house models' price a
+ * building, the maintainer's direction on PR #3343 — and no longer the
+ * structure class's 640, under which most bays were cards. Every bay starts
+ * as a card. Then a door, a cornice and a window are chosen that put the WHOLE
+ * street front in relief inside the budget, with its sign, its columns, its
+ * pilasters and its fire escape (the seeded choice first, then the
+ * richest window that fits, then the plain cornice, then the cheapest door),
+ * and what is left is spent, a whole row at a time, on
+ * the sign, the columns, the pilasters, the fire escape, and the other walls'
+ * ground floors and windows. A front too long for any window keeps the
+ * cheapest, and its rows stay cards from where the budget ends, the ground
+ * floor last. A footprint whose cards alone pass the budget keeps its
+ * extrusion.
  *
- * ⚠️ **It is not the triangles its extrusion was, and it takes them from the
- * frame's pooled 23 040** (`realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`)
- * as a house model does — PR #3343's review, which measured it;
- * `mapped-kit-belt.test.ts` holds each figure. On `terraceStreetFixture`
- * classed a town, a wrap averages **602** triangles (497 to 639) where the
- * extrusion it replaces averaged **78** (36 to 136). One refill there at
- * 1 250 m, 36 buildings either way with nothing else in the frame, goes from
- * 2 842 mapped triangles to **21 658**, so what `refillMappedBuildings` leaves
- * the field boundaries (walls, hedges, fences) falls from 31 structures to
- * **2**. Where billboards and procedural structures share the frame the
- * farthest buildings go undrawn too: with 4 billboards 36 buildings become
- * **34**; with 8 billboards and 6 structures ranked in, **27**, and 2 of the
- * 6 structures. No ceiling is passed in any of them. What that does to a
- * tablet's frame is not measured: the frame check is owed (#3334).
+ * ⚠️ **How many are wraps at once is capped**, since a wrap is some thirty
+ * times its extrusion: `mapped-buildings.ts` §`selectMappedBuildings` draws
+ * the nearest wrapped plans as wraps up to `MAPPED_KIT_NEAR_MAX` of them and
+ * `MAPPED_KIT_TRIANGLES` between them, and every wrapped plan past either as
+ * its extrusion. The worst frame is `realistic-budget.ts`' to state.
  *
- * Every bay starts as a card; then, while the
- * budget allows, bays are raised to relief nearest the rider's eye first: the
- * door, the ground floor of the street front outward from it, the front's
- * cornice, then the front's upper storeys from the first up. A footprint
- * whose cards alone pass the budget keeps its extrusion.
+ * ## A gap, from PR #3343's review, not closed here
  *
- * ## Two gaps, from PR #3343's review, not closed here
+ * A wrapped plan's paved apron (#2848) IS drawn at the near level since the
+ * rework, in its extrusion's own surface (`mapped-buildings.ts`
+ * §`MappedSelection.paved`): it is ground, and no piece of the kit. Still open:
  *
- * - **Nothing a wrapped plan draws on the ground is drawn at the near level**:
- *   the belt writes a wrapped plan's pieces and none of its extrusion's roles
- *   (`three-renderer.ts` §`MappedBuildingBelt`), as it does for a house model,
- *   so a wrapped shop's apron (#2848) is cleared of scenery and not paved.
  * - **With an even number of bays the door is not on the middle of its
  *   edge**, where `FootprintPlan.frontStep` and the extrusion's door are: it
  *   is the bay before the middle, up to a metre along the wall.
@@ -100,13 +130,15 @@
 
 import { triangulate } from '@onyourleft/map-features';
 
+import { SIGN_PAINTS, TRIM_PAINTS, WALL_PAINTS, type Rgb } from './building-paint';
+import { uniformFrom } from './seeded';
 import type { UrbanClass } from './urban-class';
 
-/** The atlas's side, pixels: **1024**. */
-export const KIT_ATLAS_PIXELS = 1024;
+/** The atlas's side, pixels: **2048**. */
+export const KIT_ATLAS_PIXELS = 2048;
 
-/** A piece's texels a metre, in the atlas: **80**, 1.25 cm a texel. */
-export const KIT_PIXELS_PER_METRE = 80;
+/** A piece's texels a metre, in the atlas: **96**, about a centimetre a texel. */
+export const KIT_PIXELS_PER_METRE = 96;
 
 /**
  * The gutter round each piece's cell, pixels: **8**, which the bake's margin
@@ -115,58 +147,417 @@ export const KIT_PIXELS_PER_METRE = 80;
  */
 export const KIT_GUTTER_PIXELS = 8;
 
+/**
+ * What colours a vertex — the module's header: its place here is the number
+ * the pipeline writes in the vertex's second texture coordinate.
+ */
+export const KIT_TINT_CLASSES = ['fixed', 'wall', 'trim', 'accent'] as const;
+
+/** One of {@link KIT_TINT_CLASSES}. */
+export type KitTintClass = (typeof KIT_TINT_CLASSES)[number];
+
 /** One piece of the kit taken. */
 export interface KitPiece {
   readonly id: string;
-  /** Its name in the kit: `<source>.gltf` under the archive's glTF export. */
+  /**
+   * Its name in the kit: `<source>.gltf` under the archive's glTF export; `''`
+   * where the pipeline makes the whole of it ({@link made}).
+   */
   readonly source: string;
   /** Its extent along the wall and up it, metres. */
   readonly width: number;
   readonly height: number;
   /** Its triangles in relief, as the pipeline reported them. Its card is {@link KIT_CARD_TRIANGLES}. */
   readonly triangles: number;
+  /** What colours its card, which is one class across: what most of its face is. */
+  readonly tint: KitTintClass;
   /**
    * Whether the kit models it lying flat (the roof): the pipeline stands it
    * up to bake it, and nothing draws it in relief.
    */
   readonly lies?: true;
+  /**
+   * The piece whose geometry it wears, where it is that piece in another
+   * skin: its own cell of the atlas, and no mesh of its own in the GLB.
+   */
+  readonly mesh?: string;
+  /** `render`: its wall is baked from the kit's concrete, neutral, not from its brick. */
+  readonly skin?: 'render';
+  /** The kit materials that are its `wall`; the kit's two bricks where it names none. */
+  readonly wall?: readonly string[];
+  /** The kit materials that are its `accent`, beside the kit's `MI_Trim_Green`. */
+  readonly accent?: readonly string[];
+  /** The kit materials baked as they are and never coloured, beside the kit's metal and glass. */
+  readonly fixed?: readonly string[];
+  /** What is seen through its glass: a lit shop, or a dark room. */
+  readonly glass?: 'lit-1' | 'lit-2' | 'dark';
+  /** The kit's door leaf hung in its frame: `<leaf>.gltf`. */
+  readonly leaf?: string;
+  /** What the pipeline makes of it itself — the module's header. */
+  readonly made?: 'awning' | 'fascia' | 'balcony' | 'ladder';
 }
 
+/** A kit material named in {@link KitPiece.wall} and its like. */
+const TRIM = 'MI_Trim';
+const METAL = 'MI_Trim_MetalConcrete';
+
 /**
- * The twelve pieces taken, as `process_downtown_kit.py` reported them on
+ * The pieces taken, as `process_downtown_kit.py` reported them on
  * 2026-11-27 — held to the committed GLB by `facade-kit.test.ts`. Their
- * order is their place in the atlas ({@link kitCell}) and in the GLB.
+ * order is their place in the atlas ({@link kitCell}).
  *
  * Each piece's `triangles` is what is left once the pipeline has dropped the
  * faces nobody outside sees (the kit's `MI_InteriorWall` and
- * `MI_FakeInterior`): 1 133 between the twelve, of the kit's own 1 205
- * (`tools/realistic/sources.ts` §`EXPECTED_REPORTS`).
+ * `MI_FakeInterior`) and added what it makes itself.
  */
 export const KIT_PIECES = [
-  { id: 'brick-plain', source: 'Brick_Plain_3', width: 2, height: 3, triangles: 2 },
-  { id: 'brick-window', source: 'Brick_Window_Square_Single', width: 2, height: 3, triangles: 172 },
+  // The kit's red brick.
+  { id: 'brick-plain', source: 'Brick_Plain_3', width: 2, height: 3, triangles: 2, tint: 'wall' },
   {
-    id: 'stone-storefront',
+    id: 'brick-window',
+    source: 'Brick_Window_Square_Single',
+    width: 2,
+    height: 3,
+    triangles: 172,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-lintel',
+    source: 'Brick_Window_Trim_Single',
+    width: 2,
+    height: 3,
+    triangles: 408,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-tall',
+    source: 'Brick_Window_Trim',
+    width: 2,
+    height: 3,
+    triangles: 634,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-wide',
+    source: 'Brick_Inset_Window',
+    width: 4,
+    height: 3,
+    triangles: 466,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-arch',
+    source: 'Brick_Inset_Window_Curved',
+    width: 4,
+    height: 3,
+    triangles: 630,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-quoin',
+    source: 'Brick_RedWhite_DoubleWindow',
+    width: 4,
+    height: 3,
+    triangles: 760,
+    tint: 'wall',
+    glass: 'dark',
+  },
+  {
+    id: 'brick-cornice',
+    source: 'Cornice_Brick_Center',
+    width: 2,
+    height: 1,
+    triangles: 6,
+    tint: 'wall',
+  },
+  {
+    id: 'brick-pilaster',
+    source: 'Brick_Column_Small',
+    width: 0.5,
+    height: 3,
+    triangles: 32,
+    tint: 'wall',
+  },
+  // The same pieces walled in render.
+  {
+    id: 'render-plain',
+    source: 'Brick_Plain_3',
+    width: 2,
+    height: 3,
+    triangles: 2,
+    tint: 'wall',
+    mesh: 'brick-plain',
+    skin: 'render',
+  },
+  {
+    id: 'render-window',
+    source: 'Brick_Window_Square_Single',
+    width: 2,
+    height: 3,
+    triangles: 172,
+    tint: 'wall',
+    mesh: 'brick-window',
+    skin: 'render',
+    glass: 'dark',
+  },
+  {
+    id: 'render-lintel',
+    source: 'Brick_Window_Trim_Single',
+    width: 2,
+    height: 3,
+    triangles: 408,
+    tint: 'wall',
+    mesh: 'brick-lintel',
+    skin: 'render',
+    glass: 'dark',
+  },
+  {
+    id: 'render-wide',
+    source: 'Brick_Inset_Window',
+    width: 4,
+    height: 3,
+    triangles: 466,
+    tint: 'wall',
+    mesh: 'brick-wide',
+    skin: 'render',
+    glass: 'dark',
+  },
+  {
+    id: 'render-arch',
+    source: 'Brick_Inset_Window_Curved',
+    width: 4,
+    height: 3,
+    triangles: 630,
+    tint: 'wall',
+    mesh: 'brick-arch',
+    skin: 'render',
+    glass: 'dark',
+  },
+  {
+    id: 'render-cornice',
+    source: 'Cornice_Brick_Center',
+    width: 2,
+    height: 1,
+    triangles: 6,
+    tint: 'wall',
+    mesh: 'brick-cornice',
+    skin: 'render',
+  },
+  {
+    id: 'render-pilaster',
+    source: 'Brick_Column_Small',
+    width: 0.5,
+    height: 3,
+    triangles: 32,
+    tint: 'wall',
+    mesh: 'brick-pilaster',
+    skin: 'render',
+  },
+  // The kit's cream trim as a wall: stone.
+  {
+    id: 'stone-plain',
+    source: 'Trim_Plain_3',
+    width: 2,
+    height: 3,
+    triangles: 28,
+    tint: 'wall',
+    wall: [TRIM],
+  },
+  {
+    id: 'stone-window',
+    source: 'Trim_Window',
+    width: 2,
+    height: 3,
+    triangles: 556,
+    tint: 'wall',
+    wall: [TRIM],
+    glass: 'dark',
+  },
+  {
+    id: 'stone-pier',
+    source: 'Trim_FirstFloor_Wall',
+    width: 2,
+    height: 3,
+    triangles: 44,
+    tint: 'wall',
+    wall: [TRIM],
+  },
+  {
+    id: 'stone-cornice',
+    source: 'Cornice_Trim_Center',
+    width: 2,
+    height: 1,
+    triangles: 112,
+    tint: 'trim',
+  },
+  // Its metal and glass.
+  {
+    id: 'metal-plain',
+    source: 'Metal_Plain_3',
+    width: 2,
+    height: 3,
+    triangles: 12,
+    tint: 'wall',
+    wall: [METAL],
+  },
+  {
+    id: 'metal-glazing',
+    source: 'Metal_FullWindow',
+    width: 2,
+    height: 3,
+    triangles: 208,
+    tint: 'wall',
+    wall: [METAL],
+    glass: 'dark',
+  },
+  {
+    id: 'metal-window',
+    source: 'Metal_Window_Half',
+    width: 2,
+    height: 3,
+    triangles: 308,
+    tint: 'wall',
+    wall: [METAL],
+    glass: 'dark',
+  },
+  {
+    id: 'metal-wide',
+    source: 'Metal_Window',
+    width: 4,
+    height: 3,
+    triangles: 556,
+    tint: 'wall',
+    wall: [METAL, 'MI_RedBrick'],
+    glass: 'dark',
+  },
+  {
+    id: 'metal-pier',
+    source: 'Metal_FirstFloor_Wall',
+    width: 2,
+    height: 3,
+    triangles: 30,
+    tint: 'wall',
+    wall: [METAL],
+  },
+  {
+    id: 'metal-cornice',
+    source: 'Cornice_Metal_Center',
+    width: 2,
+    height: 1,
+    triangles: 26,
+    tint: 'wall',
+    wall: [METAL],
+  },
+  {
+    id: 'metal-fin',
+    source: 'Metal_Column_Small_Center',
+    width: 0.5,
+    height: 3,
+    triangles: 16,
+    tint: 'wall',
+    wall: [METAL],
+  },
+  // Shop fronts and doors.
+  {
+    id: 'timber-storefront',
     source: 'Trim_FirstFloor_Window_001',
     width: 2,
     height: 3,
     triangles: 142,
+    tint: 'accent',
+    glass: 'lit-1',
   },
-  { id: 'stone-pier', source: 'Trim_FirstFloor_Wall', width: 2, height: 3, triangles: 44 },
+  {
+    id: 'timber-columns',
+    source: 'Trim_FirstFloor_Window_Columns',
+    width: 2,
+    height: 3,
+    triangles: 32,
+    tint: 'accent',
+  },
   {
     id: 'metal-storefront',
     source: 'Metal_FirstFloor_Window',
     width: 2,
     height: 3,
     triangles: 148,
+    tint: 'fixed',
+    glass: 'lit-2',
   },
-  { id: 'metal-pier', source: 'Metal_FirstFloor_Wall', width: 2, height: 3, triangles: 30 },
-  { id: 'metal-door', source: 'DoorFrame_Metal_Single', width: 2, height: 3, triangles: 241 },
-  { id: 'metal-window', source: 'Metal_Window_Half', width: 2, height: 3, triangles: 308 },
-  { id: 'metal-plain', source: 'Metal_Plain_3', width: 2, height: 3, triangles: 12 },
-  { id: 'brick-cornice', source: 'Cornice_Brick_Center', width: 2, height: 1, triangles: 6 },
-  { id: 'metal-cornice', source: 'Cornice_Metal_Center', width: 2, height: 1, triangles: 26 },
-  { id: 'roof', source: 'Roof_2x2', width: 2, height: 2, triangles: 2, lies: true },
+  {
+    id: 'shop-glazing',
+    source: 'Metal_FullWindow',
+    width: 2,
+    height: 3,
+    triangles: 208,
+    tint: 'fixed',
+    mesh: 'metal-glazing',
+    glass: 'lit-1',
+  },
+  {
+    id: 'metal-door',
+    source: 'DoorFrame_Metal_Single',
+    width: 2,
+    height: 3,
+    triangles: 241,
+    tint: 'fixed',
+    glass: 'dark',
+  },
+  {
+    id: 'wood-door',
+    source: 'DoorFrame_Wooden',
+    width: 2,
+    height: 3,
+    triangles: 716,
+    tint: 'fixed',
+    fixed: [TRIM],
+    leaf: 'Door_3',
+    glass: 'dark',
+  },
+  {
+    id: 'arch-door',
+    source: 'DoorFrame_Trim',
+    width: 2,
+    height: 3,
+    triangles: 818,
+    tint: 'trim',
+    glass: 'dark',
+  },
+  // What the kit does not hold: the pipeline's own, and a landing under the kit's railing.
+  { id: 'awning', source: '', width: 2, height: 1, triangles: 52, tint: 'accent', made: 'awning' },
+  {
+    id: 'fascia',
+    source: '',
+    width: 2,
+    height: 0.5,
+    triangles: 14,
+    tint: 'accent',
+    made: 'fascia',
+  },
+  {
+    id: 'balcony',
+    source: 'Stairs_Rails_Metal_Straight_1',
+    width: 2,
+    height: 1.25,
+    triangles: 180,
+    tint: 'fixed',
+    made: 'balcony',
+  },
+  {
+    id: 'ladder',
+    source: '',
+    width: 0.5,
+    height: 3,
+    triangles: 132,
+    tint: 'fixed',
+    made: 'ladder',
+  },
+  { id: 'roof', source: 'Roof_2x2', width: 2, height: 2, triangles: 2, tint: 'fixed', lies: true },
 ] as const satisfies readonly KitPiece[];
 
 /** One of {@link KIT_PIECES}' ids. */
@@ -175,6 +566,13 @@ export type KitPieceId = (typeof KIT_PIECES)[number]['id'];
 /** A piece's place in {@link KIT_PIECES}, by its id. */
 export function kitPieceIndex(id: KitPieceId): number {
   return KIT_PIECES.findIndex((piece) => piece.id === id);
+}
+
+/** The place in {@link KIT_PIECES} of the piece whose geometry piece `index` wears: its own, or its {@link KitPiece.mesh}'s. */
+export function kitMeshIndex(index: number): number {
+  const piece: KitPiece | undefined = KIT_PIECES[index];
+  if (piece?.mesh === undefined) return index;
+  return KIT_PIECES.findIndex((each) => each.id === piece.mesh);
 }
 
 /** A card's triangles: **2**, the piece's rectangle on the wall's plane. */
@@ -297,77 +695,322 @@ export function kitKindOf(setting: KitSetting): KitKind | undefined {
   return undefined;
 }
 
-/** The pieces one kind is built of. */
-export interface KitStyle {
-  /** The ground floor of an edge facing the street. */
-  readonly front: KitPieceId;
-  /** The door, in the middle bay of the door's edge. */
-  readonly door: KitPieceId;
-  /** The ground floor of every other edge. */
-  readonly ground: KitPieceId;
-  /** Every upper storey. */
-  readonly upper: KitPieceId;
-  /** A party wall, the plinth, and a bay too narrow or too wide for a window. */
-  readonly plain: KitPieceId;
-  readonly cornice: KitPieceId;
+// --- What a building looks like ----------------------------------------------
+
+/** What a wrap is walled in — the module's header. */
+export type KitSkin = 'brick' | 'render' | 'stone' | 'metal';
+
+/** A window, and how many bays across it is. */
+export interface KitWindow {
+  readonly piece: KitPieceId;
+  readonly span: 1 | 2;
 }
 
-/** Each kind's pieces — the module's table. */
-export const KIT_STYLES: Readonly<Record<KitKind, KitStyle>> = {
-  retail: {
-    front: 'metal-storefront',
-    door: 'metal-door',
-    ground: 'brick-plain',
-    upper: 'brick-plain',
+/** A skin's pieces. */
+export interface KitSkinPieces {
+  /** A party wall, the plinth, and a bay too narrow or too wide for a window. */
+  readonly plain: KitPieceId;
+  /**
+   * Its windows. The first is the skin's cheapest, one bay across: what a
+   * wall that does not face the street has, and an odd bay beside a wide one.
+   */
+  readonly windows: readonly KitWindow[];
+  /** Its cornices: the first is every wall's that does not face the street. */
+  readonly cornices: readonly KitPieceId[];
+  /** The ground floor of a commercial wall that does not face the street. */
+  readonly pier: KitPieceId;
+  /** What stands between its bays, where it has pilasters. */
+  readonly pilaster?: KitPieceId;
+}
+
+/** Each skin's pieces — the module's table. */
+export const KIT_SKINS: Readonly<Record<KitSkin, KitSkinPieces>> = {
+  brick: {
     plain: 'brick-plain',
-    cornice: 'metal-cornice',
+    windows: [
+      { piece: 'brick-window', span: 1 },
+      { piece: 'brick-lintel', span: 1 },
+      { piece: 'brick-tall', span: 1 },
+      { piece: 'brick-wide', span: 2 },
+      { piece: 'brick-arch', span: 2 },
+      { piece: 'brick-quoin', span: 2 },
+    ],
+    cornices: ['brick-cornice', 'stone-cornice'],
+    pier: 'brick-plain',
+    pilaster: 'brick-pilaster',
   },
-  shop: {
-    front: 'stone-storefront',
-    door: 'metal-door',
-    ground: 'stone-pier',
-    upper: 'brick-window',
-    plain: 'brick-plain',
-    cornice: 'brick-cornice',
+  render: {
+    plain: 'render-plain',
+    windows: [
+      { piece: 'render-window', span: 1 },
+      { piece: 'render-lintel', span: 1 },
+      { piece: 'render-wide', span: 2 },
+      { piece: 'render-arch', span: 2 },
+    ],
+    cornices: ['render-cornice', 'stone-cornice'],
+    pier: 'render-plain',
+    pilaster: 'render-pilaster',
   },
-  office: {
-    front: 'metal-storefront',
-    door: 'metal-door',
-    ground: 'metal-pier',
-    upper: 'metal-window',
+  stone: {
+    plain: 'stone-plain',
+    // The first is the render skin's square sash, which a stone wall's paint suits as well:
+    // the kit's one stone window is 556 triangles, and an office front of twenty bays
+    // could put a storey and a half of them in relief.
+    windows: [
+      { piece: 'render-window', span: 1 },
+      { piece: 'stone-window', span: 1 },
+      { piece: 'render-lintel', span: 1 },
+    ],
+    cornices: ['stone-cornice'],
+    pier: 'stone-pier',
+  },
+  metal: {
     plain: 'metal-plain',
-    cornice: 'metal-cornice',
-  },
-  townhouse: {
-    front: 'brick-window',
-    door: 'metal-door',
-    ground: 'brick-window',
-    upper: 'brick-window',
-    plain: 'brick-plain',
-    cornice: 'brick-cornice',
+    windows: [
+      { piece: 'metal-glazing', span: 1 },
+      { piece: 'metal-window', span: 1 },
+      { piece: 'metal-wide', span: 2 },
+    ],
+    cornices: ['metal-cornice'],
+    pier: 'metal-pier',
+    pilaster: 'metal-fin',
   },
 };
 
-/**
- * The shades a wrap's pieces are multiplied by, a colour a vertex — #3334: the
- * kit's own brick and stone as they are, then buff, dark, warm and cool. The
- * atlas is one picture of one brick, so without them a terrace of wraps reads
- * as one long building (seen on the realistic page's `town=terrace`,
- * 2026-11-27); a plan's shade is chosen by its wall paint, which `paintTown`
- * keeps off its neighbours'. Within a half of 1 on purpose: a lighter or a
- * darker brick, never a paint.
- */
-export const KIT_PAINTS: readonly (readonly [number, number, number])[] = [
-  [1, 1, 1],
-  [1.4, 1.28, 1.1],
-  [0.72, 0.68, 0.68],
-  [1.25, 0.98, 0.9],
-  [0.95, 1.02, 1.14],
+/** A shop front: what fills a bay of the street's ground floor, and its door. */
+export interface KitShopfront {
+  readonly front: KitPieceId;
+  readonly door: KitPieceId;
+  /** The columns that stand before each of its bays. */
+  readonly columns?: KitPieceId;
+}
+
+/** The shop fronts — the module's table: painted timber, metal over a stall riser, glazing to the floor. */
+export const KIT_SHOPFRONTS: readonly KitShopfront[] = [
+  { front: 'timber-storefront', door: 'wood-door', columns: 'timber-columns' },
+  { front: 'metal-storefront', door: 'metal-door' },
+  { front: 'shop-glazing', door: 'metal-door' },
 ];
 
-/** The shade a plan's wrap wears, by its wall paint's place in its list (`FootprintPaint.wall`). */
-export function kitPaintOf(wall: number): readonly [number, number, number] {
-  return KIT_PAINTS[Math.abs(Math.trunc(wall)) % KIT_PAINTS.length] ?? [1, 1, 1];
+/** A townhouse's doors, the cheapest first: what a front too dear for the seeded one has. */
+export const KIT_HOUSE_DOORS: readonly KitPieceId[] = ['metal-door', 'wood-door', 'arch-door'];
+
+/** What hangs over a shop front. */
+export type KitSign = 'none' | 'awning' | 'fascia';
+
+/**
+ * The shares the seeded choices are made by — the module's table: a shop
+ * with no awning has a sign band six times in ten; pilasters stand up four
+ * fronts in ten; a fire escape hangs on one brick front in three of
+ * {@link KIT_ESCAPE_STOREYS} or more; an office of no brick is metal six
+ * times in ten, and stone otherwise.
+ */
+export const KIT_SHARES = { fascia: 0.6, pilasters: 0.4, escape: 1 / 3, metalOffice: 0.6 } as const;
+
+/** A fire escape hangs on a front of at least this many storeys: **3**. */
+export const KIT_ESCAPE_STOREYS = 3;
+
+/** The seeded streams {@link kitStyleOf} draws from, each its own (`seeded.ts` §`uniformFrom`). */
+const STREAM = {
+  skin: 0,
+  window: 1,
+  cornice: 2,
+  shopfront: 3,
+  door: 4,
+  sign: 5,
+  pilasters: 6,
+  escape: 7,
+} as const;
+
+/** What one building is built of. @see kitStyleOf */
+export interface KitStyle {
+  readonly skin: KitSkin;
+  /** The window its street front has, if the front can pay for it: a place in the skin's list. */
+  readonly window: number;
+  /** The street front's cornice. */
+  readonly cornice: KitPieceId;
+  /** Its shop front; `undefined` for a townhouse. */
+  readonly shopfront: KitShopfront | undefined;
+  /** Its door, if the front can pay for it. */
+  readonly door: KitPieceId;
+  readonly sign: KitSign;
+  readonly pilasters: boolean;
+  readonly escape: boolean;
+}
+
+/** What {@link kitStyleOf} reads of a plan. */
+export interface KitStyleInput {
+  readonly kind: KitKind;
+  /** What its extrusion is walled in: `FootprintPlan.surfaces.wall`. */
+  readonly surface: string;
+  readonly storeys: number;
+  /** A whole number its seeded choices are drawn from, the footprint's own. */
+  readonly seed: number;
+  /** Whether its extrusion has an awning: `FootprintPlan.shop.awning`. */
+  readonly awning: boolean;
+}
+
+/** The entry a draw in `[0, 1)` comes to, of `count`. */
+function entry(share: number, count: number): number {
+  return Math.min(count - 1, Math.floor(share * count));
+}
+
+/** The skin of a wall surface: what the extrusion wears, in the kit's terms. */
+function skinOf(surface: string): KitSkin {
+  if (surface === 'brick') return 'brick';
+  if (surface === 'stone' || surface === 'concrete') return 'stone';
+  return 'render';
+}
+
+/**
+ * What a building is built of, seeded from its footprint — the module's
+ * header. Two buildings of one kind and one wall differ in their window,
+ * their cornice, their shop front, their sign, their pilasters and their
+ * fire escape, and every choice is the same on every load.
+ */
+export function kitStyleOf(input: KitStyleInput): KitStyle {
+  const draw = (stream: number): number => uniformFrom(input.seed >>> 0, stream);
+  const skin: KitSkin =
+    input.kind !== 'office'
+      ? skinOf(input.surface)
+      : input.surface === 'brick'
+        ? 'brick'
+        : draw(STREAM.skin) < KIT_SHARES.metalOffice
+          ? 'metal'
+          : 'stone';
+  const pieces = KIT_SKINS[skin];
+  const shopfront =
+    input.kind === 'townhouse'
+      ? undefined
+      : input.kind === 'office'
+        ? // An office's ground floor is metal and glass, whatever is above it.
+          KIT_SHOPFRONTS[1 + entry(draw(STREAM.shopfront), KIT_SHOPFRONTS.length - 1)]
+        : KIT_SHOPFRONTS[entry(draw(STREAM.shopfront), KIT_SHOPFRONTS.length)];
+  const commercial = input.kind === 'shop' || input.kind === 'retail';
+  return {
+    skin,
+    window: entry(draw(STREAM.window), pieces.windows.length),
+    cornice: pieces.cornices[entry(draw(STREAM.cornice), pieces.cornices.length)] as KitPieceId,
+    shopfront,
+    door:
+      shopfront?.door ??
+      (KIT_HOUSE_DOORS[entry(draw(STREAM.door), KIT_HOUSE_DOORS.length)] as KitPieceId),
+    sign: !commercial
+      ? 'none'
+      : input.awning
+        ? 'awning'
+        : draw(STREAM.sign) < KIT_SHARES.fascia
+          ? 'fascia'
+          : 'none',
+    pilasters: pieces.pilaster !== undefined && draw(STREAM.pilasters) < KIT_SHARES.pilasters,
+    escape:
+      skin === 'brick' &&
+      input.kind !== 'office' &&
+      input.storeys >= KIT_ESCAPE_STOREYS &&
+      draw(STREAM.escape) < KIT_SHARES.escape,
+  };
+}
+
+// --- Its colours --------------------------------------------------------------
+
+/**
+ * The grey the pipeline bakes a neutral class at, linear: **0.8**
+ * (`process_downtown_kit.py` §`NEUTRAL_LEVEL`). A colour worn over it is
+ * divided by it, so the paint a chart names is the paint drawn.
+ */
+export const KIT_NEUTRAL_LEVEL = 0.8;
+
+/** The albedo of the white a `render` paint is laid over (`building-paint.ts` §`WALL_PAINTS`): **0.89**. */
+const RENDER_WHITE = 0.89;
+
+/**
+ * The shades of the kit's brick, a multiplier: a red, buff, a dark brown, a
+ * warm orange and a plum. ⚠️ None is the kit's brick as it is: its picture is
+ * a dark brown (a linear 0.15, 0.08, 0.06), and beside the photographed brick
+ * an extrusion wears a terrace of it read dull (PR #3343's look check), so
+ * every shade but the dark one lifts it.
+ */
+export const KIT_BRICK_SHADES: readonly Rgb[] = [
+  [1.45, 1.3, 1.2],
+  [1.9, 1.7, 1.4],
+  [1, 0.95, 0.95],
+  [1.75, 1.3, 1.1],
+  [1.35, 1.2, 1.35],
+];
+
+/** The stones a `stone` wall is, an albedo: Portland, Bath, buff sandstone, grey limestone. */
+export const KIT_STONE_PAINTS: readonly Rgb[] = [
+  [0.72, 0.7, 0.62],
+  [0.74, 0.62, 0.42],
+  [0.6, 0.5, 0.36],
+  [0.52, 0.52, 0.5],
+];
+
+/** The shades of the kit's metal, a multiplier: as it is, bronze, blue-grey, pale, dark. */
+export const KIT_METAL_SHADES: readonly Rgb[] = [
+  [1, 1, 1],
+  [1.3, 1.05, 0.8],
+  [0.8, 0.95, 1.2],
+  [1.5, 1.5, 1.45],
+  [0.65, 0.65, 0.7],
+];
+
+/**
+ * The paints a wrap's trim is — its sills, lintels, quoins and moulded
+ * cornice: white, cream and grey (`building-paint.ts` §`TRIM_PAINTS`' light
+ * three) and a buff stone. Never that list's black, green or navy: those are
+ * a painted timber frame's, and a lintel is stone.
+ */
+export const KIT_TRIM_PAINTS: readonly Rgb[] = [
+  TRIM_PAINTS[0] as Rgb,
+  TRIM_PAINTS[1] as Rgb,
+  TRIM_PAINTS[5] as Rgb,
+  [0.66, 0.56, 0.4],
+];
+
+/** A building's three colours, each multiplied into its class's vertices. */
+export interface KitPalette {
+  readonly wall: Rgb;
+  readonly trim: Rgb;
+  readonly accent: Rgb;
+}
+
+/** A list's entry at a seeded place, whatever the place. */
+function pick(list: readonly Rgb[], at: number): Rgb {
+  return list[Math.abs(Math.trunc(at)) % list.length] ?? [1, 1, 1];
+}
+
+/** An albedo as a multiplier over the neutral grey. */
+function over(albedo: Rgb, white = 1): Rgb {
+  const scale = white / KIT_NEUTRAL_LEVEL;
+  return [albedo[0] * scale, albedo[1] * scale, albedo[2] * scale];
+}
+
+/**
+ * A wrap's colours, from its plan's own paints (`FootprintPaint`), so that
+ * `paintTown`'s rule — no two neighbours alike — and a mapped colour hold for
+ * the wrap as for the extrusion: a `render` wall is the very house paint its
+ * extrusion wears; brick, stone and metal are a shade chosen by the same
+ * entry; the trim by its trim's; and a shop front, its awning and its sign
+ * band one of the main street's sign paints (`SIGN_PAINTS`), by its door's.
+ */
+export function kitPaletteOf(
+  skin: KitSkin,
+  paint: { readonly wall: number; readonly trim: number; readonly door: number },
+): KitPalette {
+  const wall =
+    skin === 'brick'
+      ? pick(KIT_BRICK_SHADES, paint.wall)
+      : skin === 'metal'
+        ? pick(KIT_METAL_SHADES, paint.wall)
+        : skin === 'stone'
+          ? over(pick(KIT_STONE_PAINTS, paint.wall))
+          : over(pick(WALL_PAINTS.render ?? [], paint.wall), RENDER_WHITE);
+  return {
+    wall,
+    trim: over(pick(KIT_TRIM_PAINTS, paint.trim)),
+    accent: over(pick(SIGN_PAINTS, paint.door)),
+  };
 }
 
 // --- The wrap ---------------------------------------------------------------
@@ -395,6 +1038,32 @@ export const KIT_FRONT_COSINE = Math.SQRT1_2;
 /** An edge is a party wall where a neighbour shares at least this share of it: **0.5**. */
 export const KIT_PARTY_SHARE = 0.5;
 
+/**
+ * Where the pieces that hang on a front are, metres: an awning's and a sign
+ * band's top this far under the first floor; a pilaster at a front's end this
+ * far in from its corner, so that two neighbours' do not stand in one place;
+ * a fire escape's ladder this share of a bay off its bay's middle.
+ */
+export const KIT_HANG = { under: 0.05, pilasterInset: 0.25, ladderAside: 0.3 } as const;
+
+/** No footprint of more storeys than this is wrapped: **40**, past any the map has beside a route. */
+export const KIT_STOREYS_MOST = 40;
+
+/**
+ * The pieces that hang on a wall and are no bay of it: drawn in relief or not
+ * at all, and never as a card.
+ */
+export const KIT_HUNG: ReadonlySet<KitPieceId> = new Set([
+  'awning',
+  'fascia',
+  'timber-columns',
+  'brick-pilaster',
+  'render-pilaster',
+  'metal-fin',
+  'balcony',
+  'ladder',
+]);
+
 /** A plinth shorter than this is not drawn: **1 cm**. */
 const PLINTH_MIN_METRES = 0.01;
 
@@ -409,17 +1078,26 @@ export function bayCount(length: number): number {
 /**
  * How many floats a run is, in {@link KitWrap.runs}: the piece's place in
  * {@link KIT_PIECES}; 1 in relief, 0 as its card; the middle of its first
- * bay's foot, `x, y, z`; the unit vector along the wall, `ax, az`, which is
+ * repeat's foot, `x, y, z`; the unit vector along the wall, `ax, az`, which is
  * where the piece's +X points — its +Z, the wall's outward normal, is
  * `(-az, ax)`, as `house-models.ts` §`HousePlacement`'s; its stretch along the
- * wall and up it; and how many bays it runs, each a bay further along.
+ * wall and up it; how many times it repeats; and how far along the wall each
+ * repeat is from the last, metres.
  */
-export const KIT_RUN_FLOATS = 10;
+export const KIT_RUN_FLOATS = 11;
 
 /** A footprint wrapped. @see wrapFootprint */
 export interface KitWrap {
   readonly kind: KitKind;
-  /** Its runs of bays, {@link KIT_RUN_FLOATS} floats each. */
+  /** What it is built of, as chosen: {@link kitStyleOf}'s. */
+  readonly style: KitStyle;
+  /** The window its street front has: the style's, or the richest its budget paid for. */
+  readonly window: KitPieceId;
+  /** Its door: the style's, or the cheapest where its budget did not pay for that. */
+  readonly door: KitPieceId;
+  /** Its street front's cornice: the style's, or the skin's plain one, likewise. */
+  readonly cornice: KitPieceId;
+  /** Its runs, {@link KIT_RUN_FLOATS} floats each. */
   readonly runs: Float32Array;
   /**
    * Its flat roof's triangles: `x, y, z` a vertex, local metres, wound
@@ -428,22 +1106,22 @@ export interface KitWrap {
   readonly roof: Float32Array;
   /** The roof's extent, `minX, minZ, maxX, maxZ`: what its texture coordinates are laid across. */
   readonly roofBounds: readonly [number, number, number, number];
-  /** What it costs the frame: every bay's triangles and the roof's. */
+  /** What it costs the frame: every run's triangles and the roof's. */
   readonly triangles: number;
   /** How many of its bays are in relief. */
   readonly relief: number;
+  /** How many of its street front's bays are, and how many of those are in relief. */
+  readonly front: { readonly bays: number; readonly relief: number };
 }
 
 /** What {@link wrapFootprint} reads of a plan. */
-export interface KitWrapInput {
-  readonly kind: KitKind;
+export interface KitWrapInput extends KitStyleInput {
   /** The outer ring as drawn, `x, z` pairs in local metres, either way round. */
   readonly ring: ArrayLike<number>;
   /** The plinth's foot, the ground floor, and where the walls end, metres. */
   readonly base: number;
   readonly floor: number;
   readonly eaves: number;
-  readonly storeys: number;
   /** How tall its parapet is, which its cornice is stretched to. */
   readonly parapet: number;
   /** The edge its front door is on. */
@@ -452,16 +1130,6 @@ export interface KitWrapInput {
   readonly shared: ReadonlyMap<number, number>;
   /** The most triangles it may be. */
   readonly budget: number;
-}
-
-/** One bay, before it is a run. */
-interface Bay {
-  readonly edge: number;
-  /** -1 the plinth, 0 the ground floor, then up; `storeys` the cornice. */
-  readonly storey: number;
-  readonly at: number;
-  piece: number;
-  relief: boolean;
 }
 
 /** An edge, measured. */
@@ -477,6 +1145,28 @@ interface Edge {
   readonly party: boolean;
 }
 
+/**
+ * One piece on a wall, before it is a run. A bay's is drawn as its card until
+ * its row is paid for; one that hangs on the wall (a sign, a pilaster) is not
+ * drawn at all until its row is.
+ */
+interface Placed {
+  readonly piece: number;
+  readonly edge: Edge;
+  /** How far along the edge its middle is, and how far up, metres. */
+  readonly along: number;
+  readonly y: number;
+  readonly stretchX: number;
+  readonly stretchY: number;
+  /** The row it is paid for with: {@link wrapFootprint}'s order. */
+  readonly row: number;
+  /** Whether it is a bay of the wall, with a card, or hangs on it. */
+  readonly bay: boolean;
+  /** Whether it is on an edge facing the street. */
+  readonly front: boolean;
+  relief: boolean;
+}
+
 /** Twice a ring's signed area: positive where it runs counter-clockwise in `x, z`. */
 function twiceArea(ring: ArrayLike<number>): number {
   const n = ring.length / 2;
@@ -489,6 +1179,40 @@ function twiceArea(ring: ArrayLike<number>): number {
   return twice;
 }
 
+/** A piece's triangles in relief, by its place. */
+function reliefOf(piece: number): number {
+  return (KIT_PIECES[piece] as KitPiece).triangles;
+}
+
+/**
+ * The rows a wrap is paid for in, nearest the rider's eye first — the
+ * module's "One budget a building". The street front's are `door` to
+ * `frontTop`, which a window must pay for whole.
+ */
+const ROW = {
+  door: 0,
+  frontGround: 1,
+  frontCornice: 2,
+  /** The street front's storey `s` is row `frontStorey + s`, `s` from 1. */
+  frontStorey: 2,
+  /** After every storey a wrap can have ({@link KIT_STRETCH} bounds none; 64 is past any). */
+  sign: 64,
+  columns: 65,
+  pilasters: 66,
+  escape: 67,
+  otherGround: 68,
+  otherCornice: 69,
+  otherStorey: 69,
+} as const;
+
+/** What a front is built with, once {@link wrapFootprint} has tried it against the budget. */
+interface Attempt {
+  readonly placed: Placed[];
+  readonly triangles: number;
+  /** Whether the whole street front is in relief, and everything that hangs on it drawn. */
+  readonly whole: boolean;
+}
+
 /**
  * Wraps a footprint in the kit's pieces — the module's rules — or returns
  * `undefined` where it cannot be: its storeys would be stretched past
@@ -498,18 +1222,13 @@ function twiceArea(ring: ArrayLike<number>): number {
 export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
   const { ring, base, floor, eaves, storeys, budget } = input;
   const n = ring.length / 2;
-  if (n < 3 || storeys < 1 || input.frontEdge < 0 || input.frontEdge >= n) return undefined;
+  if (n < 3 || storeys < 1 || storeys > KIT_STOREYS_MOST) return undefined;
+  if (input.frontEdge < 0 || input.frontEdge >= n) return undefined;
   const stretchY = (eaves - floor) / (storeys * KIT_STOREY_METRES);
   if (!(stretchY >= KIT_STRETCH.least && stretchY <= KIT_STRETCH.most)) return undefined;
-  const style = KIT_STYLES[input.kind];
-  const piece = {
-    front: kitPieceIndex(style.front),
-    door: kitPieceIndex(style.door),
-    ground: kitPieceIndex(style.ground),
-    upper: kitPieceIndex(style.upper),
-    plain: kitPieceIndex(style.plain),
-    cornice: kitPieceIndex(style.cornice),
-  };
+  const style = kitStyleOf(input);
+  const skin = KIT_SKINS[style.skin];
+  const plain = kitPieceIndex(skin.plain);
   // The wall runs so that the piece's +Z, (-az, ax), is the outward normal.
   const outward = twiceArea(ring) > 0 ? 1 : -1;
   const measure = (index: number): Omit<Edge, 'front' | 'party'> => {
@@ -542,101 +1261,266 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
     const facing = edge.ax * door.ax + edge.az * door.az;
     edges.push({ ...edge, party, front: !party && facing >= KIT_FRONT_COSINE });
   }
-  const plinth = floor - base >= PLINTH_MIN_METRES;
-  const bays: Bay[] = [];
-  /** A window or a shop front only in a bay it is not stretched out of shape in. */
-  const shaped = (edge: Edge, wanted: number): number => {
-    const stretch = edge.length / edge.bays / KIT_BAY_METRES;
-    return stretch >= KIT_STRETCH.least && stretch <= KIT_STRETCH.most ? wanted : piece.plain;
-  };
-  for (const edge of edges) {
-    const doorAt = edge.index === input.frontEdge ? Math.floor((edge.bays - 1) / 2) : -1;
-    for (let at = 0; at < edge.bays; at += 1) {
-      if (plinth)
-        bays.push({ edge: edge.index, storey: -1, at, piece: piece.plain, relief: false });
-      for (let storey = 0; storey < storeys; storey += 1) {
-        const wanted = edge.party
-          ? piece.plain
-          : storey > 0
-            ? piece.upper
-            : at === doorAt
-              ? piece.door
-              : edge.front
-                ? piece.front
-                : piece.ground;
-        bays.push({ edge: edge.index, storey, at, piece: shaped(edge, wanted), relief: false });
+  const hasPlinth = floor - base >= PLINTH_MIN_METRES;
+  const doorBay = Math.floor((door.bays - 1) / 2);
+  const storeyMetres = KIT_STOREY_METRES * stretchY;
+  const roofTriangles = n - 2;
+  const commercial = input.kind !== 'townhouse';
+  const first = skin.windows[0] as KitWindow;
+  const plainCornice = skin.cornices[0] as KitPieceId;
+
+  /** Everything the wrap would draw with `window` and `frontCornice` on its front and `doorPiece` in its door's bay. */
+  const lay = (window: KitWindow, doorPiece: KitPieceId, frontCornice: KitPieceId): Placed[] => {
+    const placed: Placed[] = [];
+    for (const edge of edges) {
+      const width = edge.length / edge.bays;
+      const stretch = width / KIT_BAY_METRES;
+      /** A window or a shop front only in a bay it is not stretched out of shape in. */
+      const shaped = stretch >= KIT_STRETCH.least && stretch <= KIT_STRETCH.most;
+      const own = edge.index === input.frontEdge;
+      const put = (
+        id: KitPieceId,
+        row: number,
+        along: number,
+        y: number,
+        up: number,
+        span = 1,
+      ): void => {
+        const piece = kitPieceIndex(id);
+        const kit = KIT_PIECES[piece] as KitPiece;
+        // A bay of the wall, or what hangs on it.
+        const bay = !KIT_HUNG.has(id);
+        placed.push({
+          piece,
+          edge,
+          along,
+          y,
+          // A bay's piece fills its bay; what hangs on the wall is as wide as a bay where it
+          // is the kit's module, and its own width where it is narrower (a pilaster).
+          stretchX: bay ? (width * span) / kit.width : kit.width === KIT_BAY_METRES ? stretch : 1,
+          stretchY: up,
+          row,
+          bay,
+          front: edge.front,
+          relief: false,
+        });
+      };
+      for (let at = 0; at < edge.bays; at += 1) {
+        const middle = width * (at + 0.5);
+        if (hasPlinth) {
+          placed.push({
+            piece: plain,
+            edge,
+            along: middle,
+            y: base,
+            stretchX: stretch,
+            stretchY: (floor - base) / (KIT_PIECES[plain] as KitPiece).height,
+            row: edge.front ? ROW.frontGround : ROW.otherGround,
+            bay: true,
+            front: edge.front,
+            relief: false,
+          });
+        }
+        // The ground floor.
+        const isDoor = own && at === doorBay;
+        const ground: KitPieceId =
+          edge.party || !shaped
+            ? skin.plain
+            : isDoor
+              ? doorPiece
+              : !commercial
+                ? first.piece
+                : edge.front
+                  ? (style.shopfront as KitShopfront).front
+                  : skin.pier;
+        put(
+          ground,
+          isDoor ? ROW.door : edge.front ? ROW.frontGround : ROW.otherGround,
+          middle,
+          floor,
+          stretchY,
+        );
+        // The cornice: the front's on the street, the skin's own elsewhere.
+        const cornice = edge.front ? frontCornice : plainCornice;
+        put(
+          cornice,
+          edge.front ? ROW.frontCornice : ROW.otherCornice,
+          middle,
+          eaves,
+          input.parapet / (KIT_PIECES[kitPieceIndex(cornice)] as KitPiece).height,
+        );
       }
-      bays.push({ edge: edge.index, storey: storeys, at, piece: piece.cornice, relief: false });
+      // The upper storeys: the front's window in pairs where it is two bays across.
+      for (let storey = 1; storey < storeys; storey += 1) {
+        const y = floor + storey * storeyMetres;
+        const row = (edge.front ? ROW.frontStorey : ROW.otherStorey) + storey;
+        const chosen = edge.front ? window : first;
+        for (let at = 0; at < edge.bays;) {
+          const span = chosen.span === 2 && at + 1 < edge.bays ? 2 : 1;
+          const id =
+            edge.party || !shaped ? skin.plain : span === chosen.span ? chosen.piece : first.piece;
+          put(id, row, width * (at + span / 2), y, stretchY, edge.party || !shaped ? 1 : span);
+          at += edge.party || !shaped ? 1 : span;
+        }
+      }
+      if (!own || edge.party || !shaped) continue;
+      // What hangs on the door's edge.
+      if (style.sign !== 'none') {
+        const sign = KIT_PIECES[kitPieceIndex(style.sign)] as KitPiece;
+        for (let at = 0; at < edge.bays; at += 1) {
+          put(
+            style.sign,
+            ROW.sign,
+            width * (at + 0.5),
+            floor + storeyMetres - KIT_HANG.under - sign.height,
+            1,
+          );
+        }
+      }
+      const columns = style.shopfront?.columns;
+      if (columns !== undefined) {
+        for (let at = 0; at < edge.bays; at += 1) {
+          if (at !== doorBay) put(columns, ROW.columns, width * (at + 0.5), floor, stretchY);
+        }
+      }
+      if (style.pilasters && skin.pilaster !== undefined) {
+        // Up the storeys that are wall: a shop front has its own columns.
+        for (let storey = commercial ? 1 : 0; storey < storeys; storey += 1) {
+          for (let at = 0; at <= edge.bays; at += 1) {
+            const along =
+              at === 0
+                ? KIT_HANG.pilasterInset
+                : at === edge.bays
+                  ? edge.length - KIT_HANG.pilasterInset
+                  : width * at;
+            put(skin.pilaster, ROW.pilasters, along, floor + storey * storeyMetres, stretchY);
+          }
+        }
+      }
+      if (style.escape && edge.bays >= 2) {
+        const at = doorBay + 1 < edge.bays ? doorBay + 1 : doorBay - 1;
+        for (let storey = 1; storey < storeys; storey += 1) {
+          const y = floor + storey * storeyMetres;
+          put('balcony', ROW.escape, width * (at + 0.5), y, 1);
+          if (storey + 1 < storeys) {
+            put('ladder', ROW.escape, width * (at + 0.5 + KIT_HANG.ladderAside), y, stretchY);
+          }
+        }
+      }
+    }
+    return placed;
+  };
+
+  /** Pays for `placed`'s rows in order, each whole or not at all. */
+  const pay = (placed: Placed[]): Attempt | undefined => {
+    let triangles = roofTriangles;
+    for (const each of placed) if (each.bay) triangles += KIT_CARD_TRIANGLES;
+    if (triangles > budget) return undefined;
+    const rows = new Map<number, Placed[]>();
+    for (const each of placed) {
+      const row = rows.get(each.row);
+      if (row === undefined) rows.set(each.row, [each]);
+      else row.push(each);
+    }
+    let whole = true;
+    for (const row of [...rows.keys()].sort((a, b) => a - b)) {
+      const members = rows.get(row) as Placed[];
+      let more = 0;
+      for (const each of members) {
+        more += reliefOf(each.piece) - (each.bay ? KIT_CARD_TRIANGLES : 0);
+      }
+      if (triangles + more > budget) {
+        if (row < ROW.otherGround) whole = false;
+        continue;
+      }
+      triangles += more;
+      for (const each of members) each.relief = true;
+    }
+    return { placed, triangles, whole };
+  };
+
+  // The seeded door, cornice and window first. Then whatever puts the WHOLE front in relief,
+  // giving up the least: a cheaper window before the plain cornice, and that before the
+  // cheapest door. Then the cheapest of all three, as far as the budget goes.
+  const cheapestDoor = KIT_HOUSE_DOORS[0] as KitPieceId;
+  const byCost = [...skin.windows].sort(
+    (a, b) => reliefOf(kitPieceIndex(b.piece)) / b.span - reliefOf(kitPieceIndex(a.piece)) / a.span,
+  );
+  const windows = [skin.windows[style.window] as KitWindow, ...byCost];
+  let taken:
+    { attempt: Attempt; window: KitWindow; door: KitPieceId; cornice: KitPieceId } | undefined;
+  search: for (const doorPiece of new Set([style.door, cheapestDoor])) {
+    for (const cornice of new Set([style.cornice, plainCornice])) {
+      for (const window of windows) {
+        const attempt = pay(lay(window, doorPiece, cornice));
+        if (attempt?.whole === true) {
+          taken = { attempt, window, door: doorPiece, cornice };
+          break search;
+        }
+      }
     }
   }
-  const roofTriangles = n - 2;
-  let triangles = bays.length * KIT_CARD_TRIANGLES + roofTriangles;
-  if (triangles > budget) return undefined;
-
-  // Raised to relief while the budget allows, nearest the rider's eye first.
-  const byEdge = new Map(edges.map((edge) => [edge.index, edge]));
-  const doorBay = Math.floor((door.bays - 1) / 2);
-  const rank = (bay: Bay): number => {
-    const edge = byEdge.get(bay.edge) as Edge;
-    if (!edge.front || bay.storey < 0) return Number.POSITIVE_INFINITY;
-    const own = bay.edge === input.frontEdge;
-    // The door's edge before any other front, and outward from the door along it.
-    const along = own ? Math.abs(bay.at - doorBay) : door.bays + bay.at;
-    // The ground floor, then the cornice, then each upper storey from the first.
-    const level = bay.storey === 0 ? 0 : bay.storey === storeys ? 1 : 1 + bay.storey;
-    return level * 1024 + along;
-  };
-  const ranked = bays
-    .map((bay, index) => ({ bay, index, rank: rank(bay) }))
-    .filter((each) => Number.isFinite(each.rank))
-    .sort((a, b) => a.rank - b.rank || a.index - b.index);
-  let relief = 0;
-  for (const { bay } of ranked) {
-    const kit = KIT_PIECES[bay.piece] as KitPiece;
-    const more = kit.triangles - KIT_CARD_TRIANGLES;
-    if (more <= 0 || triangles + more > budget) continue;
-    bay.relief = true;
-    triangles += more;
-    relief += 1;
+  if (taken === undefined) {
+    const attempt = pay(lay(first, cheapestDoor, plainCornice));
+    if (attempt === undefined) return undefined;
+    taken = { attempt, window: first, door: cheapestDoor, cornice: plainCornice };
   }
 
-  // Bays beside each other, on one edge and storey, in one piece and level: one run.
+  // What is drawn, in the order it was laid; neighbours of one piece, level and line: one run.
+  const drawn = taken.attempt.placed
+    .filter((each) => each.bay || each.relief)
+    .sort(
+      (a, b) =>
+        a.edge.index - b.edge.index ||
+        a.y - b.y ||
+        a.row - b.row ||
+        a.piece - b.piece ||
+        a.along - b.along,
+    );
   const runs: number[] = [];
-  let open: Bay | undefined;
-  for (const bay of [...bays].sort(
-    (a, b) => a.edge - b.edge || a.storey - b.storey || a.at - b.at,
-  )) {
+  let open: Placed | undefined;
+  let relief = 0;
+  let frontBays = 0;
+  let frontRelief = 0;
+  for (const each of drawn) {
+    if (each.bay && each.relief) relief += 1;
+    if (each.bay && each.front) {
+      frontBays += 1;
+      if (each.relief) frontRelief += 1;
+    }
+    const pitch = open === undefined ? 0 : each.along - open.along;
+    const count = runs[runs.length - 2] as number;
     if (
       open !== undefined &&
-      open.edge === bay.edge &&
-      open.storey === bay.storey &&
-      open.piece === bay.piece &&
-      open.relief === bay.relief
+      open.edge === each.edge &&
+      open.piece === each.piece &&
+      open.relief === each.relief &&
+      open.row === each.row &&
+      open.y === each.y &&
+      open.stretchX === each.stretchX &&
+      open.stretchY === each.stretchY &&
+      pitch > 0 &&
+      (count === 1 || Math.abs(pitch - (runs[runs.length - 1] as number)) < 1e-6)
     ) {
-      runs[runs.length - 1] = (runs[runs.length - 1] as number) + 1;
+      runs[runs.length - 2] = count + 1;
+      runs[runs.length - 1] = pitch;
+      open = each;
       continue;
     }
-    open = bay;
-    const edge = byEdge.get(bay.edge) as Edge;
-    const width = edge.length / edge.bays;
-    const kit = KIT_PIECES[bay.piece] as KitPiece;
-    const [y, up] =
-      bay.storey < 0
-        ? [base, (floor - base) / kit.height]
-        : bay.storey === storeys
-          ? [eaves, input.parapet / kit.height]
-          : [floor + bay.storey * KIT_STOREY_METRES * stretchY, stretchY];
+    open = each;
+    const { edge } = each;
     runs.push(
-      bay.piece,
-      bay.relief ? 1 : 0,
-      edge.x + edge.ax * width * (bay.at + 0.5),
-      y,
-      edge.z + edge.az * width * (bay.at + 0.5),
+      each.piece,
+      each.relief ? 1 : 0,
+      edge.x + edge.ax * each.along,
+      each.y,
+      edge.z + edge.az * each.along,
       edge.ax,
       edge.az,
-      width / kit.width,
-      up,
+      each.stretchX,
+      each.stretchY,
       1,
+      0,
     );
   }
 
@@ -672,19 +1556,24 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
   }
   return {
     kind: input.kind,
+    style,
+    window: taken.window.piece,
+    door: taken.door,
+    cornice: taken.cornice,
     runs: Float32Array.from(runs),
     roof,
     roofBounds: [minX, minZ, maxX, maxZ],
     // The triangulation's own count, where it is not the outline's n - 2.
-    triangles: triangles - roofTriangles + indices.length / 3,
+    triangles: taken.attempt.triangles - roofTriangles + indices.length / 3,
     relief,
+    front: { bays: frontBays, relief: frontRelief },
   };
 }
 
 /**
- * Where a piece's point stands in bay `bay` of a run — the transform the belt
- * writes every vertex through, here so a test can hold the belt to it. `run`
- * is the run's first float in `runs`.
+ * Where a piece's point stands in repeat `bay` of a run — the transform the
+ * belt writes every vertex through, here so a test can hold the belt to it.
+ * `run` is the run's first float in `runs`.
  */
 export function kitPlacedPoint(
   runs: Float32Array,
@@ -694,11 +1583,9 @@ export function kitPlacedPoint(
   y: number,
   z: number,
 ): readonly [number, number, number] {
-  const piece = KIT_PIECES[runs[run] as number] as KitPiece;
   const ax = runs[run + 5] as number;
   const az = runs[run + 6] as number;
-  const stretchX = runs[run + 7] as number;
-  const along = x * stretchX + bay * piece.width * stretchX;
+  const along = x * (runs[run + 7] as number) + bay * (runs[run + 10] as number);
   return [
     (runs[run + 2] as number) + along * ax - z * az,
     (runs[run + 3] as number) + y * (runs[run + 8] as number),
@@ -711,6 +1598,8 @@ export interface KitGeometry {
   readonly position: Float32Array;
   readonly normal: Float32Array;
   readonly uv: Float32Array;
+  /** Each vertex's place in {@link KIT_TINT_CLASSES}. */
+  readonly tint: Uint8Array;
   readonly triangles: number;
 }
 
@@ -730,11 +1619,33 @@ export function kitProjectedUv(index: number, x: number, y: number): readonly [n
 }
 
 /**
+ * Piece `index` in relief, from the geometry of the piece whose mesh it wears
+ * ({@link kitMeshIndex}): that geometry itself where the mesh is its own, and
+ * otherwise the same triangles mapped into this piece's own cell, by the
+ * projection the pipeline baked the cell by.
+ */
+export function kitSkinned(index: number, mesh: KitGeometry): KitGeometry {
+  if (kitMeshIndex(index) === index) return mesh;
+  const uv = new Float32Array(mesh.uv.length);
+  for (let vertex = 0; vertex * 2 < uv.length; vertex += 1) {
+    const [u, v] = kitProjectedUv(
+      index,
+      mesh.position[vertex * 3] as number,
+      mesh.position[vertex * 3 + 1] as number,
+    );
+    uv[vertex * 2] = u;
+    uv[vertex * 2 + 1] = v;
+  }
+  return { ...mesh, uv };
+}
+
+/**
  * A piece's card: its bay's rectangle on the wall's plane, facing out (+Z),
- * {@link KIT_CARD_TRIANGLES} triangles wearing the whole of its cell.
+ * {@link KIT_CARD_TRIANGLES} triangles wearing the whole of its cell, every
+ * vertex the piece's own {@link KitPiece.tint}.
  */
 export function kitCardOf(index: number): KitGeometry {
-  const piece = KIT_PIECES[index];
+  const piece: KitPiece | undefined = KIT_PIECES[index];
   if (piece === undefined) throw new RangeError('no such kit piece');
   const half = piece.width / 2;
   const corners: readonly (readonly [number, number])[] = [
@@ -756,5 +1667,6 @@ export function kitCardOf(index: number): KitGeometry {
     uv[vertex * 2] = u;
     uv[vertex * 2 + 1] = v;
   });
-  return { position, normal, uv, triangles: KIT_CARD_TRIANGLES };
+  const tint = new Uint8Array(corners.length).fill(KIT_TINT_CLASSES.indexOf(piece.tint));
+  return { position, normal, uv, tint, triangles: KIT_CARD_TRIANGLES };
 }

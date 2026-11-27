@@ -18,44 +18,74 @@ import {
   bayCount,
   KIT_ATLAS_PIXELS,
   KIT_BAY_METRES,
+  KIT_BRICK_SHADES,
   KIT_CARD_TRIANGLES,
   KIT_CELLS,
+  KIT_ESCAPE_STOREYS,
   KIT_GUTTER_PIXELS,
+  KIT_HOUSE_DOORS,
+  KIT_HUNG,
+  KIT_NEUTRAL_LEVEL,
   KIT_PIECES,
   KIT_PIXELS_PER_METRE,
   KIT_RUN_FLOATS,
+  KIT_SHOPFRONTS,
+  KIT_SKINS,
   KIT_STOREY_METRES,
-  KIT_STYLES,
+  KIT_TINT_CLASSES,
   KIT_URBAN_CLASSES,
   kitCardOf,
   kitCells,
   kitCellUv,
   kitKindOf,
+  kitMeshIndex,
+  kitPaletteOf,
   kitPieceIndex,
   kitPlacedPoint,
   kitProjectedUv,
+  kitStyleOf,
   wrapFootprint,
   type KitKind,
+  type KitPiece,
   type KitPieceId,
+  type KitSkin,
+  type KitStyle,
   type KitWrap,
   type KitWrapInput,
 } from './facade-kit';
+import { SIGN_PAINTS, WALL_PAINTS } from './building-paint';
 import { committedKitPieces, SHIPPED_REALISTIC } from './facade-kit-testing';
 import { REALISTIC_DOWNTOWN_KIT } from './realistic-assets';
 import {
   DEVICE_BYTES_PER_TEXEL,
   estimatedTextureBytes,
   REALISTIC_DOWNTOWN_KIT_SURFACES,
-  REALISTIC_TRIANGLES,
+  REALISTIC_KIT_WRAP_TRIANGLES,
 } from './realistic-budget';
 import { fileKtx2Facts } from './realistic-bytes-testing';
 import type { UrbanClass } from './urban-class';
 
+/** The committed files' sizes, which `realistic-budget.ts` states. */
+const GLB_BYTES = 560_112;
+const ATLAS_BYTES = 326_898;
+
 /** Every urban class a stretch of route may have (`urban-class.ts`). */
 const URBAN_CLASSES: readonly UrbanClass[] = ['unknown', 'rural', 'village', 'town', 'city-centre'];
 
-/** Every kind a footprint is wrapped as: the styles' own keys. */
-const KIT_KINDS = Object.keys(KIT_STYLES) as readonly KitKind[];
+/** Every kind a footprint is wrapped as. */
+const KIT_KINDS: readonly KitKind[] = ['retail', 'shop', 'office', 'townhouse'];
+
+/** The first seed from `from` whose style `wanted` accepts: a building of that look. */
+function seedFor(
+  over: Partial<KitWrapInput>,
+  wanted: (style: KitStyle) => boolean,
+  from = 0,
+): number {
+  for (let seed = from; seed < from + 5_000; seed += 1) {
+    if (wanted(kitStyleOf({ ...input(over), seed }))) return seed;
+  }
+  throw new Error('no seed in five thousand makes that building');
+}
 
 /** A 20 m by 12 m footprint, counter-clockwise in `x, z`, its `z = 0` edge (edge 0) the front. */
 const BLOCK = [0, 0, 20, 0, 20, 12, 0, 12];
@@ -72,7 +102,10 @@ function input(over: Partial<KitWrapInput> = {}): KitWrapInput {
     parapet: 0.5,
     frontEdge: 0,
     shared: new Map(),
-    budget: REALISTIC_TRIANGLES.structure,
+    budget: REALISTIC_KIT_WRAP_TRIANGLES,
+    surface: 'brick',
+    seed: 1,
+    awning: false,
     ...over,
   };
 }
@@ -90,6 +123,10 @@ interface Run {
   readonly stretchX: number;
   readonly stretchY: number;
   readonly bays: number;
+  /** How far along the wall each repeat is from the last, metres. */
+  readonly pitch: number;
+  /** Whether it hangs on the wall and is no bay of it. */
+  readonly hung: boolean;
 }
 
 const millimetres = (metres: number): number => Math.round(metres * 1_000) / 1_000;
@@ -112,6 +149,8 @@ function runsOf(wrap: KitWrap): readonly Run[] {
       stretchX: wrap.runs[at + 7] as number,
       stretchY: wrap.runs[at + 8] as number,
       bays: wrap.runs[at + 9] as number,
+      pitch: wrap.runs[at + 10] as number,
+      hung: KIT_HUNG.has(piece.id),
     });
   }
   return runs;
@@ -139,7 +178,7 @@ function trianglesOf(wrap: KitWrap): number {
         sum +
         run.bays *
           (run.relief
-            ? (KIT_PIECES[kitPieceIndex(run.piece)]?.triangles ?? NaN)
+            ? ((KIT_PIECES[kitPieceIndex(run.piece)] as KitPiece | undefined)?.triangles ?? NaN)
             : KIT_CARD_TRIANGLES),
       0,
     ) +
@@ -156,20 +195,51 @@ function wrapped(over: Partial<KitWrapInput> = {}): KitWrap {
 describe('the committed downtown kit — #3334', () => {
   const pieces = committedKitPieces();
 
-  it('holds every piece of the table to the committed GLB: its triangles, and geometry and texture coordinates alone', () => {
+  it('holds every piece of the table to the committed GLB: its triangles, its colour classes, and geometry and texture coordinates alone', () => {
     expect(pieces.length).toBe(KIT_PIECES.length);
-    KIT_PIECES.forEach((piece, index) => {
+    KIT_PIECES.forEach((piece: KitPiece, index) => {
       const committed = pieces[index];
       expect(committed?.triangles, piece.id).toBe(piece.triangles);
-      expect(committed?.attributes, piece.id).toEqual(['NORMAL', 'POSITION', 'TEXCOORD_0']);
+      expect(committed?.attributes, piece.id).toEqual([
+        'NORMAL',
+        'POSITION',
+        'TEXCOORD_0',
+        'TEXCOORD_1',
+      ]);
+      // A piece that wears another's mesh has none of its own in the file, and every other has.
+      expect(committed?.own, piece.id).toBe(piece.mesh === undefined);
+      expect(kitMeshIndex(index) === index, piece.id).toBe(piece.mesh === undefined);
+      // Every vertex is one of the four classes, and the piece's own class is among them.
+      const classes = new Set(committed?.tint);
+      for (const each of classes) expect(KIT_TINT_CLASSES[each], piece.id).toBeDefined();
+      expect(classes.has(KIT_TINT_CLASSES.indexOf(piece.tint)), piece.id).toBe(true);
     });
-    // No piece in relief costs more than the whole of one wrapped building.
+    // No piece in relief costs more than a third of one wrapped building.
     for (const piece of KIT_PIECES) {
-      expect(piece.triangles, piece.id).toBeLessThan(REALISTIC_TRIANGLES.structure);
+      expect(piece.triangles, piece.id).toBeLessThanOrEqual(REALISTIC_KIT_WRAP_TRIANGLES / 3);
     }
+    // 31 meshes for the 39 pieces: the render skin is the brick's geometry again.
+    expect(pieces.filter((each) => each.own).length).toBe(31);
   });
 
-  it('stands every piece on its bay: its foot on the ground, its face on the wall’s plane, its relief within 40 cm of it', () => {
+  it('classes what a building colours: brick and render walls, stone trim, a shop front’s timber, and never glass', () => {
+    const classesOf = (id: KitPieceId): readonly string[] =>
+      [...new Set(pieces[kitPieceIndex(id)]?.tint)]
+        .map((each) => KIT_TINT_CLASSES[each] as string)
+        .sort();
+    expect(classesOf('brick-plain')).toEqual(['wall']);
+    expect(classesOf('brick-lintel')).toEqual(['fixed', 'trim', 'wall']);
+    expect(classesOf('render-lintel')).toEqual(['fixed', 'trim', 'wall']);
+    expect(classesOf('stone-cornice')).toEqual(['trim']);
+    expect(classesOf('timber-storefront')).toEqual(['accent', 'fixed']);
+    expect(classesOf('awning')).toEqual(['accent']);
+    expect(classesOf('fascia')).toEqual(['accent', 'trim']);
+    expect(classesOf('metal-storefront')).toEqual(['fixed']);
+    expect(classesOf('balcony')).toEqual(['fixed']);
+    expect(classesOf('roof')).toEqual(['fixed']);
+  });
+
+  it('stands every piece on its bay: its foot on the ground, its face on the wall’s plane, its relief within 40 cm of it, and what hangs within its metre', () => {
     KIT_PIECES.forEach((piece, index) => {
       const { position } = pieces[index] as (typeof pieces)[number];
       let lowest = Infinity;
@@ -184,12 +254,19 @@ describe('the committed downtown kit — #3334', () => {
         before = Math.max(before, position[at + 2] as number);
         behind = Math.min(behind, position[at + 2] as number);
       }
-      expect(lowest, piece.id).toBeCloseTo(0, 1);
-      expect(highest, piece.id).toBeCloseTo(piece.height, 1);
-      expect(widest, piece.id).toBeCloseTo(piece.width / 2, 1);
-      // +Z is out of the building: nothing stands far before the wall, or deep behind it.
-      expect(before, piece.id).toBeLessThanOrEqual(0.11);
+      // Within the pipeline's overhang of its bay (a sill, a cornice's return, a door's hood).
+      expect(lowest, piece.id).toBeGreaterThanOrEqual(-0.2);
+      expect(lowest, piece.id).toBeLessThanOrEqual(piece.height / 2);
+      expect(highest, piece.id).toBeLessThanOrEqual(piece.height + 0.2);
+      expect(widest, piece.id).toBeLessThanOrEqual(piece.width / 2 + 0.2);
+      // +Z is out of the building: a bay's relief stands at most 54 cm before the wall (the
+      // moulded cornice) and what hangs on it a metre (an awning, a landing); none deep behind.
+      expect(before, piece.id).toBeLessThanOrEqual(KIT_HUNG.has(piece.id) ? 1.01 : 0.54);
       expect(behind, piece.id).toBeGreaterThanOrEqual(-0.41);
+      // And real depth: a window, a door or a shop front is set at least 20 cm into its wall.
+      if ('glass' in piece && piece.id !== 'metal-door') {
+        expect(behind, piece.id).toBeLessThanOrEqual(-0.2);
+      }
     });
   });
 
@@ -216,7 +293,7 @@ describe('the committed downtown kit — #3334', () => {
     expect(checked).toBe(KIT_PIECES.reduce((sum, piece) => sum + piece.triangles * 3, 0));
   });
 
-  it('ships the atlas as one 1024 px KTX2 colour picture with its mipmaps', () => {
+  it('ships the atlas as one 2048 px KTX2 colour picture with its mipmaps', () => {
     const facts = fileKtx2Facts(join(SHIPPED_REALISTIC, REALISTIC_DOWNTOWN_KIT.atlas));
     expect(facts.width).toBe(KIT_ATLAS_PIXELS);
     expect(facts.height).toBe(KIT_ATLAS_PIXELS);
@@ -244,11 +321,12 @@ describe('the committed downtown kit — #3334', () => {
     expect(memory).toBeLessThanOrEqual(REALISTIC_DOWNTOWN_KIT_SURFACES.textureBytes);
     expect(build).toBeLessThanOrEqual(REALISTIC_DOWNTOWN_KIT_SURFACES.buildBytes);
     // The figures `realistic-budget.ts` states of the committed files.
-    expect(sizes).toEqual([73_900, 80_052]);
-    // No side over 2048 px, whatever the source publishes (ADR 0026 D-6); its own 1024.
+    expect(sizes).toEqual([GLB_BYTES, ATLAS_BYTES]);
+    // No side over 2048 px, whatever the source publishes (ADR 0026 D-6).
     expect(atlas.width).toBeLessThanOrEqual(2_048);
-    // The pieces' triangles, in relief, as that file states them: 1 133 between the twelve.
-    expect(KIT_PIECES.reduce((sum, piece) => sum + piece.triangles, 0)).toBe(1_133);
+    // The pieces' triangles, in relief, as that file states them.
+    expect(KIT_PIECES.length).toBe(39);
+    expect(KIT_PIECES.reduce((sum, piece) => sum + piece.triangles, 0)).toBe(9_407);
   });
 });
 
@@ -277,9 +355,17 @@ describe('the atlas’s cells — #3334', () => {
   });
 
   it('refuses a set that does not fit the atlas', () => {
-    const tall = { id: 'tall', source: 'Tall', width: 2, height: 3, triangles: 2 };
-    expect(() => kitCells(Array.from({ length: 21 }, () => tall))).toThrow(RangeError);
-    expect(() => kitCells(Array.from({ length: 15 }, () => tall))).not.toThrow();
+    const tall: KitPiece = {
+      id: 'tall',
+      source: 'Tall',
+      width: 2,
+      height: 3,
+      triangles: 2,
+      tint: 'wall',
+    };
+    // 2048 px holds nine such cells across and six shelves down.
+    expect(() => kitCells(Array.from({ length: 55 }, () => tall))).toThrow(RangeError);
+    expect(() => kitCells(Array.from({ length: 54 }, () => tall))).not.toThrow();
   });
 
   it('makes a card of two triangles facing out, wearing the whole cell the right way up', () => {
@@ -288,6 +374,8 @@ describe('the atlas’s cells — #3334', () => {
       const cell = kitCellUv(index);
       expect(card.triangles).toBe(KIT_CARD_TRIANGLES);
       expect(card.position.length).toBe(KIT_CARD_TRIANGLES * 9);
+      // One class across it: the piece's own.
+      expect([...card.tint]).toEqual(Array(6).fill(KIT_TINT_CLASSES.indexOf(piece.tint)));
       for (let vertex = 0; vertex < 6; vertex += 1) {
         const x = card.position[vertex * 3] as number;
         const y = card.position[vertex * 3 + 1] as number;
@@ -354,25 +442,159 @@ describe('which footprints are wrapped, by setting — #3334', () => {
     }
   });
 
-  it('names a piece of the kit for every part of every kind', () => {
+  it('names a piece of the kit for every part of every skin and shop front', () => {
     expect([...KIT_KINDS].sort()).toEqual(['office', 'retail', 'shop', 'townhouse']);
-    for (const kind of KIT_KINDS) {
-      const style = KIT_STYLES[kind];
+    for (const [skin, pieces] of Object.entries(KIT_SKINS)) {
       for (const id of [
-        style.front,
-        style.door,
-        style.ground,
-        style.upper,
-        style.plain,
-        style.cornice,
+        pieces.plain,
+        pieces.pier,
+        ...pieces.cornices,
+        ...pieces.windows.map((window) => window.piece),
+        ...(pieces.pilaster === undefined ? [] : [pieces.pilaster]),
       ]) {
-        expect(kitPieceIndex(id), `${kind} ${id}`).toBeGreaterThanOrEqual(0);
+        expect(kitPieceIndex(id), `${skin} ${id}`).toBeGreaterThanOrEqual(0);
       }
+      // A window as wide as it says, and the first one bay across: what fills an odd bay.
+      for (const window of pieces.windows) {
+        expect(KIT_PIECES[kitPieceIndex(window.piece)]?.width).toBe(window.span * KIT_BAY_METRES);
+      }
+      expect(pieces.windows[0]?.span).toBe(1);
+    }
+    for (const front of [
+      ...KIT_SHOPFRONTS.flatMap((each) => [each.front, each.door]),
+      ...KIT_HOUSE_DOORS,
+    ]) {
+      expect(kitPieceIndex(front), front).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe('what one building looks like — #3334, the look check on PR #3343', () => {
+  const styleOf = (over: Partial<KitWrapInput>): KitStyle => kitStyleOf(input(over));
+
+  it('walls a wrap in what its extrusion is walled in, and an office of no brick in metal or stone', () => {
+    const skins = (kind: KitKind, surface: string): readonly KitSkin[] =>
+      [
+        ...new Set(Array.from({ length: 200 }, (_, seed) => styleOf({ kind, surface, seed }).skin)),
+      ].sort();
+    for (const kind of ['retail', 'shop', 'townhouse'] as const) {
+      expect(skins(kind, 'brick')).toEqual(['brick']);
+      expect(skins(kind, 'render')).toEqual(['render']);
+      expect(skins(kind, 'painted')).toEqual(['render']);
+      expect(skins(kind, 'stone')).toEqual(['stone']);
+      expect(skins(kind, 'concrete')).toEqual(['stone']);
+    }
+    expect(skins('office', 'brick')).toEqual(['brick']);
+    expect(skins('office', 'render')).toEqual(['metal', 'stone']);
+  });
+
+  it('gives two hundred brick shops every window, cornice, shop front and sign the kit has, each chosen apart', () => {
+    const styles = Array.from({ length: 200 }, (_, seed) => styleOf({ seed, storeys: 3 }));
+    const seen = <T>(of: (style: KitStyle) => T): number => new Set(styles.map(of)).size;
+    expect(seen((style) => style.window)).toBe(KIT_SKINS.brick.windows.length);
+    expect(seen((style) => style.cornice)).toBe(KIT_SKINS.brick.cornices.length);
+    expect(seen((style) => style.shopfront)).toBe(KIT_SHOPFRONTS.length);
+    expect(seen((style) => style.sign)).toBe(2);
+    expect(seen((style) => style.pilasters)).toBe(2);
+    expect(seen((style) => style.escape)).toBe(2);
+    // Each on its own stream (`seeded.ts` §`uniformFrom`): every window is seen under every
+    // cornice, and every shop front under either sign. One stream for two of them would
+    // give every arched window the same cornice.
+    expect(seen((style) => `${String(style.window)} ${style.cornice}`)).toBe(
+      KIT_SKINS.brick.windows.length * KIT_SKINS.brick.cornices.length,
+    );
+    expect(seen((style) => `${String(style.shopfront?.front)} ${style.sign}`)).toBe(
+      KIT_SHOPFRONTS.length * 2,
+    );
+    expect(seen((style) => `${String(style.pilasters)} ${String(style.escape)}`)).toBe(4);
+    // Each on its own stream: far more distinct buildings than any one choice has entries.
+    const whole = new Set(styles.map((style) => JSON.stringify(style)));
+    expect(whole.size).toBeGreaterThan(60);
+    // And the same building on every load.
+    expect(styleOf({ seed: 77 })).toEqual(styleOf({ seed: 77 }));
+  });
+
+  it('hangs an awning where the extrusion has one, a sign band on some other shops, and neither on a house or an office', () => {
+    for (let seed = 0; seed < 100; seed += 1) {
+      expect(styleOf({ seed, awning: true }).sign).toBe('awning');
+      expect(styleOf({ seed, kind: 'retail', awning: true }).sign).toBe('awning');
+      expect(styleOf({ seed }).sign).not.toBe('awning');
+      expect(styleOf({ seed, kind: 'townhouse', awning: true }).sign).toBe('none');
+      expect(styleOf({ seed, kind: 'office', awning: true }).sign).toBe('none');
+    }
+  });
+
+  it('hangs a fire escape only on a brick shop or house of three storeys or more', () => {
+    expect(KIT_ESCAPE_STOREYS).toBe(3);
+    const some = (over: Partial<KitWrapInput>): boolean =>
+      Array.from({ length: 200 }, (_, seed) => styleOf({ ...over, seed })).some(
+        (style) => style.escape,
+      );
+    expect(some({ storeys: 3 })).toBe(true);
+    expect(some({ storeys: 3, kind: 'townhouse' })).toBe(true);
+    expect(some({ storeys: 2 })).toBe(false);
+    expect(some({ storeys: 3, surface: 'render' })).toBe(false);
+    expect(some({ storeys: 5, kind: 'office' })).toBe(false);
+  });
+
+  it('gives a townhouse a door of its own and no shop front, and an office a metal one', () => {
+    const doors = new Set<KitPieceId>();
+    for (let seed = 0; seed < 100; seed += 1) {
+      const house = styleOf({ seed, kind: 'townhouse' });
+      expect(house.shopfront).toBeUndefined();
+      doors.add(house.door);
+      expect(styleOf({ seed, kind: 'office' }).shopfront?.front).not.toBe('timber-storefront');
+      expect(styleOf({ seed }).door).toBe(styleOf({ seed }).shopfront?.door);
+    }
+    expect([...doors].sort()).toEqual([...KIT_HOUSE_DOORS].sort());
+  });
+
+  it('colours a wrap from its plan’s own paints: the render’s house paint itself, a shade of brick, a sign paint', () => {
+    const paint = { wall: 3, trim: 1, door: 2 };
+    // Render: the very house paint (sage), over the neutral grey the atlas is baked at.
+    const sage = (WALL_PAINTS.render ?? [])[3] as readonly number[];
+    const render = kitPaletteOf('render', paint);
+    render.wall.forEach((channel, at) => {
+      expect(channel * KIT_NEUTRAL_LEVEL).toBeCloseTo((sage[at] as number) * 0.89, 6);
+    });
+    // Brick: a shade, a multiplier over the kit's own brick.
+    expect(kitPaletteOf('brick', paint).wall).toEqual(KIT_BRICK_SHADES[3]);
+    // Every shade is a brick: red over green over blue or near it, and no more than twice the kit's own.
+    for (const [red, green, blue] of KIT_BRICK_SHADES) {
+      expect(red).toBeGreaterThanOrEqual(green);
+      expect(Math.max(red, green, blue)).toBeLessThanOrEqual(2);
+      expect(Math.min(red, green, blue)).toBeGreaterThanOrEqual(0.9);
+    }
+    // The accent: the main street's sign paint, by the door's entry.
+    const navy = SIGN_PAINTS[2] as readonly number[];
+    render.accent.forEach((channel, at) => {
+      expect(channel * KIT_NEUTRAL_LEVEL).toBeCloseTo(navy[at] as number, 6);
+    });
+    // Two neighbours `paintTown` kept apart are apart as wraps, in every skin.
+    for (const skin of ['brick', 'render', 'stone', 'metal'] as const) {
+      expect(kitPaletteOf(skin, paint).wall).not.toEqual(
+        kitPaletteOf(skin, { ...paint, wall: 2 }).wall,
+      );
+    }
+    // No trim is a dark timber's: a lintel is stone.
+    for (let trim = 0; trim < 12; trim += 1) {
+      const [red, green, blue] = kitPaletteOf('brick', { ...paint, trim }).trim;
+      expect(Math.min(red, green, blue) * KIT_NEUTRAL_LEVEL).toBeGreaterThan(0.25);
     }
   });
 });
 
 describe('a footprint wrapped — #3334', () => {
+  /** A seed whose brick shop has a window one bay across, so its bays are the outline's own. */
+  const PLAIN = seedFor({}, (style) => KIT_SKINS.brick.windows[style.window]?.span === 1);
+  /** An 8 m front: four bays, which 3 000 triangles put in relief whole. */
+  const NARROW = [0, 0, 8, 0, 8, 12, 0, 12];
+  const bayRuns = (wrap: KitWrap): readonly Run[] => runsOf(wrap).filter((run) => !run.hung);
+  const hungRuns = (wrap: KitWrap, piece: KitPieceId): readonly Run[] =>
+    runsOf(wrap).filter((run) => run.piece === piece);
+  const widthOf = (run: Run): number =>
+    (KIT_PIECES[kitPieceIndex(run.piece)] as KitPiece).width * run.stretchX;
+
   it('cuts an edge into bays of about two metres, and never none', () => {
     expect(bayCount(20)).toBe(10);
     expect(bayCount(12.9)).toBe(6);
@@ -381,38 +603,40 @@ describe('a footprint wrapped — #3334', () => {
     expect(KIT_BAY_METRES).toBe(2);
   });
 
-  it('covers every edge exactly, storey by storey, from the plan’s foot to its parapet’s top', () => {
-    const wrap = wrapped();
-    const runs = runsOf(wrap);
-    // Each level of each edge: the plinth, three storeys and the cornice.
-    const levels = new Map<string, number>();
-    for (const run of runs) {
-      const edge = `${run.ax.toFixed(3)},${run.az.toFixed(3)}`;
-      const key = `${edge}@${run.y.toFixed(3)}`;
-      const piece = KIT_PIECES[kitPieceIndex(run.piece)] as (typeof KIT_PIECES)[number];
-      levels.set(key, (levels.get(key) ?? 0) + run.bays * piece.width * run.stretchX);
-    }
-    // Four edges, five levels each.
-    expect(levels.size).toBe(20);
-    for (const [key, covered] of levels) {
-      const along = key.startsWith('1.000,0.000') || key.startsWith('-1.000,0.000') ? 20 : 12;
-      expect(covered, key).toBeCloseTo(along, 4);
-    }
-    const feet = [...new Set(runs.map((run) => Number(run.y.toFixed(3))))].sort((a, b) => a - b);
-    expect(feet).toEqual([10, 10.4, 13.4, 16.4, 19.4]);
-    // The plinth reaches the floor, a storey the next, and the cornice the parapet's top.
-    for (const run of runs) {
-      const piece = KIT_PIECES[kitPieceIndex(run.piece)] as (typeof KIT_PIECES)[number];
-      const top = run.y + piece.height * run.stretchY;
-      const expected = run.y === 10 ? 10.4 : run.y > 19 ? 19.9 : run.y + KIT_STOREY_METRES;
-      expect(top, `${run.piece} at ${String(run.y)}`).toBeCloseTo(expected, 4);
+  it('covers every edge exactly, storey by storey, from the plan’s foot to its parapet’s top, whatever it is built of', () => {
+    for (let seed = 0; seed < 40; seed += 1) {
+      const wrap = wrapped({ seed });
+      const runs = bayRuns(wrap);
+      // Each level of each edge: the plinth, three storeys and the cornice.
+      const levels = new Map<string, number>();
+      for (const run of runs) {
+        const key = `${run.ax.toFixed(3)},${run.az.toFixed(3)}@${run.y.toFixed(3)}`;
+        levels.set(key, (levels.get(key) ?? 0) + run.bays * widthOf(run));
+        // A run's repeats stand a piece's width apart: no gap in it and no overlap.
+        if (run.bays > 1) expect(run.pitch, run.piece).toBeCloseTo(widthOf(run), 5);
+      }
+      // Four edges, five levels each.
+      expect(levels.size, String(seed)).toBe(20);
+      for (const [key, covered] of levels) {
+        const along = key.startsWith('1.000,0.000') || key.startsWith('-1.000,0.000') ? 20 : 12;
+        expect(covered, `${String(seed)} ${key}`).toBeCloseTo(along, 4);
+      }
+      const feet = [...new Set(runs.map((run) => Number(run.y.toFixed(3))))].sort((a, b) => a - b);
+      expect(feet).toEqual([10, 10.4, 13.4, 16.4, 19.4]);
+      // The plinth reaches the floor, a storey the next, and the cornice the parapet's top.
+      for (const run of runs) {
+        const piece = KIT_PIECES[kitPieceIndex(run.piece)] as KitPiece;
+        const top = run.y + piece.height * run.stretchY;
+        const expected = run.y === 10 ? 10.4 : run.y > 19 ? 19.9 : run.y + KIT_STOREY_METRES;
+        expect(top, `${run.piece} at ${String(run.y)}`).toBeCloseTo(expected, 4);
+      }
     }
   });
 
   it('stretches each storey to the plan’s own, so the storeys reach the eaves whatever a storey’s height', () => {
     // Three storeys of 3.6 m, as a mapped height of 10.8 m over three levels gives.
     const wrap = wrapped({ eaves: 10.4 + 3 * 3.6 });
-    const runs = runsOf(wrap);
+    const runs = bayRuns(wrap);
     const feet = [...new Set(runs.map((run) => run.y))].sort((a, b) => a - b);
     expect(feet).toEqual([10, 10.4, 14, 17.6, 21.2]);
     for (const run of runs.filter((each) => each.y >= 10.4 && each.y < 21)) {
@@ -429,51 +653,74 @@ describe('a footprint wrapped — #3334', () => {
       [BLOCK, 0],
       [clockwise, 3],
     ] as const) {
-      const wrap = wrapped({ ring, frontEdge });
-      let bays = 0;
-      for (const run of runsOf(wrap)) {
-        for (let bay = 0; bay < run.bays; bay += 1) {
-          // The bay's middle is on the outline: a step in is inside, a step out is not.
-          const [inX, , inZ] = kitPlacedPoint(wrap.runs, run.at, bay, 0, 0, -0.05);
-          const [outX, , outZ] = kitPlacedPoint(wrap.runs, run.at, bay, 0, 0, 0.05);
-          expect(inside(BLOCK, inX, inZ), `${run.piece} ${String(bay)}`).toBe(true);
-          expect(inside(BLOCK, outX, outZ), `${run.piece} ${String(bay)}`).toBe(false);
-          // And its two ends are on the outline too: inside by a hair's step in.
-          for (const end of [-0.999, 0.999]) {
-            const [x, , z] = kitPlacedPoint(wrap.runs, run.at, bay, end, 0, -0.01);
-            expect(inside(BLOCK, x, z)).toBe(true);
+      for (const seed of [PLAIN, PLAIN + 1, PLAIN + 2, PLAIN + 3]) {
+        const wrap = wrapped({ ring, frontEdge, seed });
+        let metres = 0;
+        for (const run of bayRuns(wrap)) {
+          const half = (KIT_PIECES[kitPieceIndex(run.piece)] as KitPiece).width / 2;
+          for (let bay = 0; bay < run.bays; bay += 1) {
+            // The bay's middle is on the outline: a step in is inside, a step out is not.
+            const [inX, , inZ] = kitPlacedPoint(wrap.runs, run.at, bay, 0, 0, -0.05);
+            const [outX, , outZ] = kitPlacedPoint(wrap.runs, run.at, bay, 0, 0, 0.05);
+            expect(inside(BLOCK, inX, inZ), `${run.piece} ${String(bay)}`).toBe(true);
+            expect(inside(BLOCK, outX, outZ), `${run.piece} ${String(bay)}`).toBe(false);
+            // And its two ends are on the outline too: inside by a hair's step in.
+            for (const end of [-0.999 * half, 0.999 * half]) {
+              const [x, , z] = kitPlacedPoint(wrap.runs, run.at, bay, end, 0, -0.01);
+              expect(inside(BLOCK, x, z), `${run.piece} ${String(bay)}`).toBe(true);
+            }
+            metres += widthOf(run);
           }
-          bays += 1;
         }
+        // (20 + 12 + 20 + 12) metres of wall, on five levels.
+        expect(metres).toBeCloseTo(64 * 5, 3);
       }
-      // (10 + 6 + 10 + 6) bays, five levels each.
-      expect(bays).toBe(32 * 5);
     }
   });
 
-  it('puts the shop front and the door on the edge that faces the street, and solid ground floors elsewhere', () => {
-    const wrap = wrapped();
-    const ground = runsOf(wrap).filter((run) => run.y === 10.4);
-    // Edge 0 runs along z = 0, facing -z: its wall runs toward -x.
-    const front = ground.filter((run) => run.z === 0);
-    expect(front.map((run) => run.piece).sort()).toEqual(
-      ['metal-door', 'stone-storefront', 'stone-storefront'].sort(),
-    );
-    expect(front.reduce((sum, run) => sum + run.bays, 0)).toBe(10);
-    const door = front.find((run) => run.piece === 'metal-door');
-    // The middle bay of ten: the fifth, 8 to 10 m along the 20 m edge.
-    expect(door?.bays).toBe(1);
-    expect(door?.x).toBeCloseTo(11, 4);
-    for (const run of ground.filter((each) => each.z !== 0)) {
-      expect(run.piece).toBe('stone-pier');
+  it('puts the style’s shop front and door on the edge that faces the street, and the skin’s own pieces elsewhere', () => {
+    for (let seed = 0; seed < 30; seed += 1) {
+      const wrap = wrapped({ seed });
+      const { style } = wrap;
+      const skin = KIT_SKINS[style.skin];
+      const ground = bayRuns(wrap).filter((run) => run.y === 10.4);
+      // Edge 0 runs along z = 0, facing -z: its wall runs toward -x.
+      const front = ground.filter((run) => run.z === 0);
+      expect([...new Set(front.map((run) => run.piece))].sort()).toEqual(
+        [wrap.door, style.shopfront?.front].sort(),
+      );
+      expect(front.reduce((sum, run) => sum + run.bays, 0)).toBe(10);
+      const door = front.find((run) => run.piece === wrap.door);
+      // The middle bay of ten: the fifth, 8 to 10 m along the 20 m edge.
+      expect(door?.bays).toBe(1);
+      expect(door?.x).toBeCloseTo(11, 4);
+      for (const run of ground.filter((each) => each.z !== 0)) expect(run.piece).toBe(skin.pier);
+      // An upper storey of the street front is the wrap's window, and of any other wall the skin's first.
+      for (const run of bayRuns(wrap).filter((each) => each.y > 10.4 && each.y < 19)) {
+        expect(run.piece).toBe(run.z === 0 ? wrap.window : skin.windows[0]?.piece);
+      }
+      for (const run of bayRuns(wrap).filter((each) => each.y > 19)) {
+        expect(run.piece).toBe(run.z === 0 ? wrap.cornice : skin.cornices[0]);
+      }
     }
-    // Every upper storey, on every edge, is the style's window.
-    for (const run of runsOf(wrap).filter((each) => each.y > 10.4 && each.y < 19)) {
-      expect(run.piece).toBe('brick-window');
-    }
-    for (const run of runsOf(wrap).filter((each) => each.y > 19)) {
-      expect(run.piece).toBe('brick-cornice');
-    }
+  });
+
+  it('takes a window two bays wide in pairs, and fills an odd bay with the skin’s first', () => {
+    // A 10 m front: five bays, so two pairs and one bay over, on each of two upper storeys.
+    const ring = [0, 0, 10, 0, 10, 12, 0, 12];
+    const spanOf = (id: KitPieceId): number | undefined =>
+      KIT_SKINS.brick.windows.find((each) => each.piece === id)?.span;
+    const seed = seedFor({}, (style) => KIT_SKINS.brick.windows[style.window]?.span === 2);
+    const wrap = wrapped({ seed, ring, budget: 100_000 });
+    expect(spanOf(wrap.window)).toBe(2);
+    const upper = bayRuns(wrap).filter((run) => run.z === 0 && run.y > 10.4 && run.y < 19);
+    const wide = upper.filter((run) => run.piece === wrap.window);
+    const odd = upper.filter((run) => run.piece === 'brick-window');
+    expect(KIT_SKINS.brick.windows.find((each) => each.piece === wrap.window)?.span).toBe(2);
+    expect(wide.reduce((sum, run) => sum + run.bays, 0)).toBe(4);
+    expect(odd.reduce((sum, run) => sum + run.bays, 0)).toBe(2);
+    for (const run of wide) expect(widthOf(run)).toBeCloseTo(4, 5);
+    for (const run of odd) expect(widthOf(run)).toBeCloseTo(2, 5);
   });
 
   it('leaves a party wall plain, and draws the plain piece where a bay is squeezed out of shape', () => {
@@ -484,7 +731,7 @@ describe('a footprint wrapped — #3334', () => {
         [3, 4],
       ]),
     });
-    const storeys = runsOf(wrap).filter((run) => run.y >= 10.4 && run.y < 19);
+    const storeys = bayRuns(wrap).filter((run) => run.y >= 10.4 && run.y < 19);
     for (const run of storeys.filter((each) => each.x === 20))
       expect(run.piece).toBe('brick-plain');
     expect(storeys.filter((each) => each.x === 0).some((run) => run.piece !== 'brick-plain')).toBe(
@@ -492,7 +739,7 @@ describe('a footprint wrapped — #3334', () => {
     );
     // A 1 m return in an outline: one bay at half its width, too narrow for a window.
     const notched = [0, 0, 20, 0, 20, 12, 10, 12, 10, 11, 0, 11];
-    const narrow = runsOf(wrapped({ ring: notched })).filter(
+    const narrow = bayRuns(wrapped({ ring: notched })).filter(
       (run) => run.x === 10 && run.y >= 10.4 && run.y < 19,
     );
     expect(narrow.length).toBeGreaterThan(0);
@@ -503,47 +750,214 @@ describe('a footprint wrapped — #3334', () => {
   });
 
   it('counts its triangles as its runs and roof add up, and never passes its budget', () => {
+    let wraps = 0;
     for (const kind of KIT_KINDS) {
-      for (const budget of [200, 400, REALISTIC_TRIANGLES.structure, 3_000]) {
-        const wrap = wrapFootprint(input({ kind, budget }));
-        if (wrap === undefined) continue;
-        expect(wrap.triangles, `${kind} ${String(budget)}`).toBe(trianglesOf(wrap));
-        expect(wrap.triangles, `${kind} ${String(budget)}`).toBeLessThanOrEqual(budget);
-        expect(wrap.relief).toBe(
-          runsOf(wrap).reduce((sum, run) => sum + (run.relief ? run.bays : 0), 0),
-        );
+      for (const surface of ['brick', 'render', 'stone']) {
+        for (const budget of [200, 400, 640, REALISTIC_KIT_WRAP_TRIANGLES, 100_000]) {
+          for (let seed = 0; seed < 12; seed += 1) {
+            const wrap = wrapFootprint(
+              input({ kind, surface, budget, seed, awning: seed % 2 === 0 }),
+            );
+            if (wrap === undefined) continue;
+            wraps += 1;
+            const label = `${kind} ${surface} ${String(budget)} ${String(seed)}`;
+            expect(wrap.triangles, label).toBe(trianglesOf(wrap));
+            expect(wrap.triangles, label).toBeLessThanOrEqual(budget);
+            expect(wrap.relief, label).toBe(
+              bayRuns(wrap).reduce((sum, run) => sum + (run.relief ? run.bays : 0), 0),
+            );
+          }
+        }
       }
     }
+    expect(wraps).toBeGreaterThan(300);
     // The cards alone: 32 bays on five levels, and the roof's two triangles.
-    expect(wrapped({ budget: 322 }).triangles).toBe(322);
-    expect(wrapped({ budget: 322 }).relief).toBe(0);
-    expect(wrapFootprint(input({ budget: 321 }))).toBeUndefined();
+    expect(wrapped({ seed: PLAIN, budget: 322 }).triangles).toBe(322);
+    // Nothing in relief there costs a triangle more than its card: the plain wall is its card.
+    for (const run of runsOf(wrapped({ seed: PLAIN, budget: 322 })).filter((each) => each.relief)) {
+      expect(KIT_PIECES[kitPieceIndex(run.piece)]?.triangles, run.piece).toBe(KIT_CARD_TRIANGLES);
+    }
+    expect(wrapFootprint(input({ seed: PLAIN, budget: 321 }))).toBeUndefined();
   });
 
-  it('raises the door first, then the street front’s ground floor outward from it, while the budget allows', () => {
-    const cards = 322;
-    const door = KIT_PIECES[kitPieceIndex('metal-door')]?.triangles ?? NaN;
-    const front = KIT_PIECES[kitPieceIndex('stone-storefront')]?.triangles ?? NaN;
-    const reliefOf = (budget: number): readonly Run[] =>
-      runsOf(wrapped({ budget })).filter((run) => run.relief);
-    // One triangle short of the door in relief: nothing is raised but the cheap cornice.
-    expect(reliefOf(cards + door - 3).every((run) => run.piece !== 'metal-door')).toBe(true);
-    const withDoor = reliefOf(cards + door - 2);
-    expect(withDoor.map((run) => run.piece)).toEqual(['metal-door']);
-    // Then the shop fronts beside the door, nearest first.
-    const withOne = reliefOf(cards + door - 2 + front - 2);
-    expect(withOne.map((run) => run.piece).sort()).toEqual(['metal-door', 'stone-storefront']);
-    const beside = withOne.find((run) => run.piece === 'stone-storefront');
-    expect(Math.abs((beside?.x ?? NaN) - 11)).toBeCloseTo(2, 4);
-    // With room for everything, every bay of the street front is in relief and no other is.
-    const all = runsOf(wrapped({ budget: 100_000 }));
-    for (const run of all) {
-      const piece = KIT_PIECES[kitPieceIndex(run.piece)] as (typeof KIT_PIECES)[number];
-      const onFront = run.z === 0 && run.y >= 10.4;
-      expect(run.relief, `${run.piece} at ${String(run.y)}`).toBe(
-        onFront && piece.triangles > KIT_CARD_TRIANGLES,
-      );
+  it('puts the whole street front in relief at 3 000 triangles, where 640 left most of it flat cards', () => {
+    expect(REALISTIC_KIT_WRAP_TRIANGLES).toBe(3_000);
+    const windows = new Set<KitPieceId>();
+    const cornices = new Set<KitPieceId>();
+    const doors = new Set<KitPieceId>();
+    for (const kind of ['shop', 'townhouse'] as const) {
+      for (const surface of ['brick', 'render']) {
+        for (const storeys of [2, 3]) {
+          for (let seed = 0; seed < 60; seed += 1) {
+            const label = `${kind} ${surface} ${String(storeys)} ${String(seed)}`;
+            const over = { kind, surface, seed, storeys, eaves: 10.4 + storeys * 3, ring: NARROW };
+            const wrap = wrapped(over);
+            // Four bays on every level, every one its real geometry.
+            expect(wrap.front.bays, label).toBeGreaterThanOrEqual(12);
+            expect(wrap.front.relief, label).toBe(wrap.front.bays);
+            windows.add(wrap.window);
+            cornices.add(wrap.cornice);
+            doors.add(wrap.door);
+            // The same building under the structure class's ceiling: most of its front is cards.
+            const before = wrapped({ ...over, budget: 640 });
+            expect(before.front.relief, label).toBeLessThan(before.front.bays / 2);
+          }
+        }
+      }
     }
+    // And not by giving every building the cheapest of everything: eight or more of the two
+    // skins' ten windows are seen, every cornice and every door.
+    expect(windows.size).toBeGreaterThanOrEqual(8);
+    expect([...cornices].sort()).toEqual(['brick-cornice', 'render-cornice', 'stone-cornice']);
+    expect([...doors].sort()).toEqual(['arch-door', 'metal-door', 'wood-door']);
+  });
+
+  it('keeps the seeded window where the front can pay for it, and takes the richest it can where not', () => {
+    const costOf = (id: KitPieceId): number => {
+      const window = KIT_SKINS.brick.windows.find((each) => each.piece === id);
+      return (KIT_PIECES[kitPieceIndex(id)] as KitPiece).triangles / (window?.span ?? 1);
+    };
+    let kept = 0;
+    let traded = 0;
+    for (let seed = 0; seed < 200; seed += 1) {
+      // A 12 m front of three storeys: six bays, which no window fills at 3 000. The cheapest
+      // of everything, as far as the budget goes.
+      const long = wrapped({ seed, ring: [0, 0, 12, 0, 12, 12, 0, 12] });
+      expect(long.front.relief).toBeLessThan(long.front.bays);
+      expect([long.window, long.door, long.cornice]).toEqual([
+        'brick-window',
+        'metal-door',
+        'brick-cornice',
+      ]);
+      // An 8 m one: four bays, which the square sash, the wide and the arched window fill.
+      const wrap = wrapped({ seed, ring: NARROW });
+      expect(wrap.front.relief).toBe(wrap.front.bays);
+      const seeded = KIT_SKINS.brick.windows[wrap.style.window]?.piece as KitPieceId;
+      if (wrap.window === seeded) kept += 1;
+      else {
+        traded += 1;
+        // Never a dearer window than the one chosen for it, and never a card for it.
+        expect(costOf(wrap.window)).toBeLessThan(costOf(seeded));
+      }
+    }
+    expect(kept).toBeGreaterThan(20);
+    expect(traded).toBeGreaterThan(20);
+  });
+
+  it('pays for a front too long for any window a whole row at a time, the door and the ground floor first', () => {
+    // The 20 m block: ten bays on three storeys, more than 3 000 triangles in any window.
+    for (let seed = 0; seed < 30; seed += 1) {
+      const wrap = wrapped({ seed });
+      expect(wrap.front.relief).toBeLessThan(wrap.front.bays);
+      expect([wrap.window, wrap.door, wrap.cornice]).toEqual([
+        'brick-window',
+        'metal-door',
+        'brick-cornice',
+      ]);
+      const front = bayRuns(wrap).filter((run) => run.z === 0);
+      const reliefAt = (y: number): readonly boolean[] => [
+        ...new Set(
+          front
+            .filter((run) => run.y === y && run.piece !== wrap.door && run.piece !== 'brick-plain')
+            .map((run) => run.relief),
+        ),
+      ];
+      // The door and the shop fronts beside it are real geometry on every one of them.
+      expect(front.find((run) => run.piece === wrap.door)?.relief, String(seed)).toBe(true);
+      expect(reliefAt(10.4), String(seed)).toEqual([true]);
+      // A row is in relief whole or not at all, and an upper storey never before the one under it.
+      expect(reliefAt(13.4).length).toBe(1);
+      expect(reliefAt(16.4).length).toBe(1);
+      if (reliefAt(16.4)[0] === true) expect(reliefAt(13.4)).toEqual([true]);
+    }
+    // With room for everything, every bay of the wrap is in relief.
+    const all = wrapped({ budget: 100_000 });
+    expect(all.front.relief).toBe(all.front.bays);
+    for (const run of runsOf(all)) expect(run.relief, run.piece).toBe(true);
+  });
+
+  it('hangs an awning or a sign band over every bay of the shop front, under the first floor', () => {
+    const awning = wrapped({ ring: NARROW, awning: true });
+    const canvas = hungRuns(awning, 'awning');
+    expect(canvas.reduce((sum, run) => sum + run.bays, 0)).toBe(4);
+    for (const run of canvas) {
+      expect(run.z).toBe(0);
+      expect(run.relief).toBe(true);
+      // Its top 5 cm under the first floor, 3 m over the ground floor's 10.4.
+      expect(run.y + 1).toBeCloseTo(13.35, 3);
+      expect(widthOf(run)).toBeCloseTo(2, 5);
+    }
+    expect(hungRuns(awning, 'fascia')).toEqual([]);
+    const seed = seedFor({}, (style) => style.sign === 'fascia');
+    const band = hungRuns(wrapped({ ring: NARROW, seed }), 'fascia');
+    expect(band.reduce((sum, run) => sum + run.bays, 0)).toBe(4);
+    for (const run of band) expect(run.y + 0.5).toBeCloseTo(13.35, 3);
+    // A house has neither.
+    const house = wrapped({ ring: NARROW, kind: 'townhouse', awning: true });
+    expect([...hungRuns(house, 'awning'), ...hungRuns(house, 'fascia')]).toEqual([]);
+  });
+
+  it('stands pilasters between the bays of some fronts, a fire escape on some brick ones, and columns before a timber shop front', () => {
+    const NONE = { sign: 'none' } as const;
+    const pilastered = seedFor({}, (style) => style.pilasters && style.sign === NONE.sign);
+    const piers = hungRuns(wrapped({ ring: NARROW, seed: pilastered }), 'brick-pilaster');
+    // Up the two upper storeys of a shop (its ground floor is the shop front's), five a storey.
+    expect([...new Set(piers.map((run) => run.y))].sort()).toEqual([13.4, 16.4]);
+    expect(piers.reduce((sum, run) => sum + run.bays, 0)).toBe(10);
+    for (const run of piers) {
+      expect(run.z).toBe(0);
+      expect(run.stretchX).toBe(1);
+    }
+    // The corners' stand 25 cm in, so two neighbours' are not in one place.
+    const along = piers.flatMap((run) =>
+      Array.from({ length: run.bays }, (_, bay) => millimetres(run.x - bay * run.pitch)),
+    );
+    expect([...new Set(along)].sort((a, b) => a - b)).toEqual([0.25, 2, 4, 6, 7.75]);
+    // A house's stand from its ground floor.
+    const house = hungRuns(
+      wrapped({
+        ring: NARROW,
+        kind: 'townhouse',
+        budget: 100_000,
+        seed: seedFor({ kind: 'townhouse' }, (style) => style.pilasters),
+      }),
+      'brick-pilaster',
+    );
+    expect([...new Set(house.map((run) => run.y))].sort()).toEqual([10.4, 13.4, 16.4]);
+
+    const escaping = seedFor({}, (style) => style.escape);
+    const escape = wrapped({ ring: NARROW, seed: escaping });
+    const landings = hungRuns(escape, 'balcony');
+    const ladders = hungRuns(escape, 'ladder');
+    // A landing at each upper floor, and a ladder between the two.
+    expect(landings.map((run) => run.y).sort()).toEqual([13.4, 16.4]);
+    expect(ladders.map((run) => run.y)).toEqual([13.4]);
+    // On the bay beside the door's, not over it: the wall runs toward -x from x = 8, the
+    // door's bay is its second (x from 4 to 6) and the landing's its third, about x = 3.
+    for (const run of landings) expect(run.x).toBeCloseTo(3, 4);
+    expect(hungRuns(wrapped({ ring: NARROW, seed: pilastered }), 'balcony')).toEqual([]);
+
+    const timber = seedFor({}, (style) => style.shopfront?.columns !== undefined);
+    const columns = hungRuns(wrapped({ ring: NARROW, seed: timber }), 'timber-columns');
+    // One before each shop-front bay, and none before the door.
+    expect(columns.reduce((sum, run) => sum + run.bays, 0)).toBe(3);
+    for (const run of columns) expect(run.y).toBe(10.4);
+  });
+
+  it('never draws what hangs on a wall as a card: in relief, or not at all', () => {
+    for (let seed = 0; seed < 60; seed += 1) {
+      for (const budget of [322, 640, 1_500, REALISTIC_KIT_WRAP_TRIANGLES]) {
+        const wrap = wrapFootprint(input({ seed, budget, awning: seed % 3 === 0 }));
+        if (wrap === undefined) continue;
+        for (const run of runsOf(wrap).filter((each) => each.hung)) {
+          expect(run.relief, `${run.piece} ${String(seed)} ${String(budget)}`).toBe(true);
+        }
+      }
+    }
+    // With the cards alone, nothing hangs.
+    expect(
+      runsOf(wrapped({ seed: PLAIN, budget: 322, awning: true })).some((run) => run.hung),
+    ).toBe(false);
   });
 
   it('lays a flat roof over the whole outline at the eaves, facing up', () => {
@@ -583,13 +997,16 @@ describe('a footprint wrapped — #3334', () => {
     expect(wrapFootprint(input({ frontEdge: -1 }))).toBeUndefined();
     expect(wrapFootprint(input({ ring: [0, 0, 1, 1] }))).toBeUndefined();
     expect(wrapFootprint(input({ storeys: 0 }))).toBeUndefined();
+    // Forty storeys are wrapped where the budget allows, and forty-one never.
+    expect(wrapFootprint(input({ storeys: 40, eaves: 130.4, budget: 100_000 }))).toBeDefined();
+    expect(wrapFootprint(input({ storeys: 41, eaves: 133.4, budget: 100_000 }))).toBeUndefined();
   });
 
   it('draws no plinth where the floor is the foot', () => {
     const wrap = wrapped({ base: 10.4 });
     expect(runsOf(wrap).every((run) => run.y >= 10.4)).toBe(true);
     // Its cards alone are a level fewer: 32 bays on four levels, and the roof.
-    expect(wrapped({ base: 10.4, budget: 258 }).triangles).toBe(258);
-    expect(wrapFootprint(input({ base: 10.4, budget: 257 }))).toBeUndefined();
+    expect(wrapped({ seed: PLAIN, base: 10.4, budget: 258 }).triangles).toBe(258);
+    expect(wrapFootprint(input({ seed: PLAIN, base: 10.4, budget: 257 }))).toBeUndefined();
   });
 });
