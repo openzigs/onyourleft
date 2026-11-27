@@ -75,6 +75,7 @@
  * asserts no `MediaStream` leaves `camera/`.
  */
 
+import { platformCapacitor, shellKind, type ShellKind } from '../support/capacitor';
 import type { CapturedFrame } from './camera-port';
 import type { AnalysisCall, AnalysisFailure, AnalysisQuestion } from '@onyourleft/analysis';
 
@@ -174,3 +175,25 @@ export const ANALYSIS_FAILURE_TEXT: Readonly<Record<AnalysisFailure, string>> = 
     'In this app on Android, your computer’s address has to be its private address written as ' +
     'numbers, such as http://192.168.1.20:8080. A name is not accepted here, and nothing was sent.',
 };
+
+/**
+ * {@link ANALYSIS_FAILURE_TEXT}'s sentence for `failure`, in this shell —
+ * #3239. The numbers-only rule is `analysis-transport.ts`
+ * §`nativeAnalysisPort`'s, which holds in either native shell, so the iOS app
+ * says it of itself rather than of Android. ⚠️ **Draft wording for the owner.**
+ *
+ * @param kind read from the real Capacitor global unless a caller says
+ */
+export function analysisFailureText(
+  failure: AnalysisFailure,
+  kind: ShellKind | undefined = shellKind(platformCapacitor()),
+): string {
+  if (failure === 'address-not-numeric' && kind === 'ios') {
+    return (
+      'In this app on iPhone and iPad, your computer’s address has to be its private address ' +
+      'written as numbers, such as http://192.168.1.20:8080. A name is not accepted here, and ' +
+      'nothing was sent.'
+    );
+  }
+  return ANALYSIS_FAILURE_TEXT[failure];
+}
