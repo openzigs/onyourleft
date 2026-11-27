@@ -3857,9 +3857,10 @@ the 46 MiB ceiling, transcoder included (`realistic-budget.test.ts`).
 > [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)'s amendment of 2026-11-26
 > on the scans. The cost pair can still be taken on the build the table names, #1294's merge,
 > which has both sets and the lever; nothing waits on it. **The build, re-measured on 2026-11-26
-> off the committed files**: 49 051 685 bytes with the transcoder before the scans went, 231 387
-> under the 47 MiB ceiling (49 283 072); **38 435 384** after, 10 847 688 under. The ceiling was
-> not lowered. Everything below this note is as it was written.
+> off the committed files**: 49 051 685 bytes with the transcoder before the scans went;
+> **38 435 384** after, 66 422 216 under the 100 MiB ceiling (104 857 600) the owner ruled on
+> [#3337](https://github.com/openzigs/onyourleft/issues/3337) the same day. Against the 47 MiB
+> (49 283 072) that ruling replaced, the set had been 231 387 under. The ceiling was not lowered. Everything below this note is as it was written.
 
 [#1283](https://github.com/openzigs/onyourleft/issues/1283) is the first adoption under
 [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1: a ride's broadleaf trees

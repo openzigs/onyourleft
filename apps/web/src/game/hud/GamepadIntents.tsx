@@ -37,7 +37,7 @@
  *
  * ⚠️ **In the Android shell it also reads the numbered buttons
  * `MainActivity` forwards** (#1858): the platform port is built with
- * `support/capacitor.ts` §`isNativeShell`, so a generic pad, whose buttons
+ * `support/capacitor.ts` §`isAndroidShell` (#1755), so a generic pad, whose buttons
  * the WebView drops, can throw as well as steer (`gamepad-port.ts`). In a
  * browser nothing changes.
  *
@@ -55,7 +55,7 @@ import { useEffect, useRef } from 'react';
 import { NO_PADS_HELD, readGamepads } from '../delivery/gamepad-input';
 import { THROW_INTENTS, type ThrowIntent } from '../delivery/throw-input';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
-import { isNativeShell, platformCapacitor } from '../../support/capacitor';
+import { isAndroidShell, platformCapacitor } from '../../support/capacitor';
 import { navigatorGamepads, type GamepadPort } from '../gamepad-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
@@ -111,7 +111,7 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
     inUseRef.current = onPadInUse;
   });
   useEffect(() => {
-    const platform = navigatorGamepads(window, isNativeShell(platformCapacitor()));
+    const platform = navigatorGamepads(window, isAndroidShell(platformCapacitor()));
     let frame: number | undefined;
     let inUse = false;
     const poll = (): void => {

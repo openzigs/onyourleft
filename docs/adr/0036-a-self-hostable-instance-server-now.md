@@ -329,3 +329,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that **writes** a write-up is still the rider's computer or a hosted service they chose"* — the
   endpoint is the instance's, an Ollama on the operator's box or a hosted service on a key the
   instance holds. The body above, and that entry, are not edited.
+
+- **2026-11-26** — **D-7's last sentence, *"No issue may take a paid service as a prerequisite"*,
+  does not reach a store fee the publisher pays.**
+  [ADR 0057](0057-store-fees-the-publisher-pays-are-outside-adr-0036-d-7.md) (#1748), on the
+  owner's D-2 ruling of 2026-10-27 on #15, says that Apple's annual Developer Program membership
+  and Google Play's one-off registration, paid by the publisher's organisation account, are outside
+  D-7. It also says that no rider-facing, recording or self-hosting path may take a paid service as
+  a prerequisite, and it lists what that carve-out does not permit. D-7 is not edited, and
+  everything else it says stands. (#1748)

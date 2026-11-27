@@ -284,7 +284,7 @@ describe('the touch lock kept whole in a lap race — ADR 0060 D-13, #1432', () 
   it.each([2, 3, 4])('uses the item on the shell’s forwarded button %i', async (number) => {
     Object.defineProperty(globalThis, 'Capacitor', {
       configurable: true,
-      value: { isNativePlatform: () => true },
+      value: { isNativePlatform: () => true, getPlatform: () => 'android' },
     });
     await ride();
     listed = [{ connected: true, mapping: '', axes: [0, 0, 0, 0], buttons: [] }];

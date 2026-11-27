@@ -768,6 +768,38 @@ export default tseslint.config(
     },
   },
 
+  // --- The group ride reads no clock and rolls no dice -----------------------
+  // #3298, epic #3296. The group plan is solved from the course alone and must
+  // replay byte for byte, and a room could run it later (ADR 0067 D-5.2). As
+  // the lap race's block above, this repeats the domain block's globals.
+  {
+    files: ['packages/domain/src/group-ride/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+        })),
+        {
+          name: 'Date',
+          message:
+            'The group ride is pure (#3298): time arrives as a parameter, so two runs of one course agree.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'The group ride is deterministic (#3298): its plan is the course’s and nothing else.',
+        },
+      ],
+    },
+  },
+
   // --- packages/sensors/src depends on no platform API either ----------------
   // #39 defines the shape every BLE transport implements, and its second
   // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it

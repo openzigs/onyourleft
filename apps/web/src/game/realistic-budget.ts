@@ -255,7 +255,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
  *
  * The owner ruled on 2026-11-26 that the scanned broadleaves go: no default
  * ride had drawn them since #1283, and they were the largest thing in a build
- * 231 387 bytes under its ceiling while three lanes were adding models
+ * 231 387 bytes under the 47 MiB it then had while three lanes were adding models
  * (#3249). ⚠️ **Without the tablet rows ADR 0049 D-1 asks for** — validation
  * 0002's AH-1283 rows were never filled in — which is that ADR's amendment of
  * 2026-11-26 on the scans, and the owner's to have ruled.
@@ -271,12 +271,14 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * | | Before | After |
  * |---|--:|--:|
  * | The realistic set, bytes | 48 466 823 | **37 850 522** |
- * | With the transcoder, of {@link REALISTIC_BUILD_BYTES}' 49 283 072 | 49 051 685 | **38 435 384** |
- * | Under the ceiling | 231 387 | **10 847 688** |
+ * | With the transcoder | 49 051 685 | **38 435 384** |
+ * | Under {@link REALISTIC_BUILD_BYTES}' 104 857 600 | 55 805 915 | **66 422 216** |
  *
- * **No figure in this file moved, the build ceiling included**: the bytes
- * were freed for the models #3249's lanes add, and lowering the ceiling to
- * the new figure would take them back. Every column headed "Scanned
+ * The ceiling is the 100 MiB the owner ruled on #3337 the same day, which
+ * merged first; against the 47 MiB (49 283 072) it replaced, the "before"
+ * was 231 387 under. **No figure in this file was moved by this change, the
+ * build ceiling included**: the bytes were freed for the models #3249's
+ * lanes add, and lowering the ceiling to the new figure would take them back. Every column headed "Scanned
  * broadleaves" or "Every tree a scan" in the two tables above is a
  * measurement of a set that can no longer be loaded: a record of 2026-10-12,
  * not something a gate still holds. What a ride draws did not change — it
@@ -1596,8 +1598,8 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * ## Raised to 47 MiB for the people's models — the owner's request of 2026-11-18
  *
  * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).**
- * ⚠️ **This rise is the pull request's own and waits on the owner's
- * confirmation**: asked for "a real model for the pedestrian", the owner
+ * **Confirmed by the owner on 2026-11-26** (#3337, below). It began as
+ * the pull request's own rise, which waited on that confirmation: asked for "a real model for the pedestrian", the owner
  * named no figure. Measured on the committed files: the set with its
  * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
  * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
@@ -1622,24 +1624,52 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
  * three — which is what keeps the cost to one GLB rather than 1.5 MB.
  *
+ * The ceiling itself was the owner's to rule on, as each rise above was, and
+ * the issue asked for the body and its stated cost, not for a figure; the
+ * owner confirmed the 47 MiB on 2026-11-26 and then raised it (below). As before, the APK carries the same bytes
+ * more, and a browser's first download does not move: the file is outside
+ * the precache, and a ride fetches it only when it draws a female rider.
+ *
+ * ## Raised to 100 MiB for real model files — #3337, the owner's ruling of 2026-11-26
+ *
+ * **Old ceiling 47 MiB (49 283 072 bytes), new 100 MiB (104 857 600).** The
+ * owner ruled on #3337 (2026-11-26) to raise it to make room for real model
+ * files — buildings, cars, scenery — under epic #3249, and in the same ruling
+ * **confirmed the 46 to 47 MiB rise** above (the people's models and the
+ * female rider), which had waited on that. This change adds nothing to the
+ * build: it moved the ceiling and no file, so the set was still the
+ * 49 051 685 bytes the female rider's section measured, and 55 805 915 under
+ * the new ceiling, until #1293 (below) took 10 616 301 of them away.
+ *
+ * What that does to a download: **every megabyte the set grows by ships in the
+ * APK and in the Play download**, since every file in `dist` is copied into
+ * the app (ADR 0026 D-7). The whole Android app is about 49 MB today. Play's
+ * base-module limit is 500 MB and it warns a rider installing on mobile data
+ * above 200 MB, so a full 100 MiB would roughly triple the app yet stay well
+ * under that warning. A **browser's first download** of the app does not move:
+ * the realistic files are outside the service worker's precache by their
+ * location (`realistic-assets.ts` §`REALISTIC_DIRECTORY`), and are fetched
+ * only when a rider picks the realistic world.
+ *
+ * ⚠️ **The ceiling is room, not a reason to stop counting.** ADR 0099 D-4
+ * stands: every new model states what it costs the build, in the pull request
+ * that adds it, and `realistic-budget.test.ts` still reads every committed
+ * file back off disk against this figure.
+ *
  * ## 10 616 301 bytes freed, and the ceiling not lowered — #1293
  *
  * The scanned broadleaves were deleted on the owner's ruling of 2026-11-26
- * ({@link REALISTIC_TRIANGLES}, "The scanned broadleaves, removed"): the set
- * with its transcoder is **38 435 384**, 10 847 688 under 47 MiB. The room is
- * for the models #3249's lanes add, so this figure stays where it was.
- *
- * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
- * and this one has not been ruled on**: the issue asks for the body and its
- * stated cost, not for a figure. As before, the APK carries the same bytes
- * more, and a browser's first download does not move: the file is outside
- * the precache, and a ride fetches it only when it draws a female rider.
+ * ({@link REALISTIC_TRIANGLES}, "The scanned broadleaves, removed"). It
+ * landed after the rise to 100 MiB above, so it is measured against that:
+ * the set with its transcoder is **38 435 384**, 66 422 216 under 100 MiB,
+ * where it was 49 051 685. The room is for the models #3249's lanes add, so
+ * this figure stays where the owner's ruling on #3337 put it.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 100 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.

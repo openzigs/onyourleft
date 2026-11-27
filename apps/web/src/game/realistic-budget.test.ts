@@ -16,7 +16,8 @@
 import { BANNER_CELL_HEIGHT, BANNER_CELL_WIDTH, BANNER_CELLS } from './banner-atlas';
 import { standBoxes } from './gantry';
 import { logoBoxes } from './logo-board';
-import { statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -126,6 +127,18 @@ import { MAXIMUM_DRAWN_RIDERS } from '../net/interest';
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
+
+/** The transcoder's bytes, which count against the build ceiling too — #618. */
+const transcoderBytes = (): number =>
+  TRANSCODER_FILES.reduce((sum, file) => sum + statSync(transcoderSource(WEB, file)).size, 0);
+
+/** What a set of files costs the build, read off disk, with the transcoder. */
+const buildBytesOf = (paths: readonly string[]): number =>
+  paths.reduce((sum, path) => sum + statSync(path).size, 0) + transcoderBytes();
+
+/** Whether a set of files is inside {@link REALISTIC_BUILD_BYTES}. */
+const fitsTheBuildCeiling = (paths: readonly string[]): boolean =>
+  buildBytesOf(paths) <= REALISTIC_BUILD_BYTES;
 
 const riderTriangles = modelFacts(at(REALISTIC_RIDER)).triangles;
 
@@ -1329,6 +1342,60 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(statSync(transcoderSource(WEB, 'basis_transcoder.wasm')).size).toBe(527_333);
     expect(files + transcoder).toBeLessThanOrEqual(REALISTIC_BUILD_BYTES);
     expect(files).toBeGreaterThan(REALISTIC_BUILD_BYTES / 4);
+  });
+
+  it('holds the build ceiling at the owner’s 100 MiB, and the committed set is under it — #3337', () => {
+    // The owner's ruling of 2026-11-26: a figure to read back, not to re-derive.
+    expect(REALISTIC_BUILD_BYTES).toBe(100 * 1024 * 1024);
+    const committed = realisticFiles().map(at);
+    const total = buildBytesOf(committed);
+    console.log(
+      `#3337: the realistic set and its transcoder are ${String(total)} bytes, ` +
+        `${String(REALISTIC_BUILD_BYTES - total)} under the ${String(REALISTIC_BUILD_BYTES)} ceiling`,
+    );
+    expect(fitsTheBuildCeiling(committed)).toBe(true);
+  });
+
+  it('states the build after the scanned broadleaves went against the 100 MiB it landed under — #1293', () => {
+    // #1293 was measured under 47 MiB and merged after #3337 raised the
+    // ceiling, so its two statements are read back: the set then, and the room
+    // under the ceiling it landed under, not under the one it was written for.
+    const after = 38_435_384;
+    const under = 100 * 1024 * 1024 - after;
+    const spaced = (bytes: number): string => String(bytes).replace(/\B(?=(\d{3})+$)/g, ' ');
+    expect(spaced(under)).toBe('66 422 216');
+    for (const file of [
+      join(WEB, 'src/game/realistic-budget.ts'),
+      join(WEB, '../../docs/validation/0002-android-shell-and-game.md'),
+    ]) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, file).toContain(`**${spaced(after)}**`);
+      expect(text, file).toContain(spaced(under));
+      // What it was under 47 MiB, which no ceiling is any longer.
+      expect(text, file).not.toContain(spaced(47 * 1024 * 1024 - after));
+    }
+  });
+
+  it('still refuses a set over the ceiling: a file one byte past it, read off disk, is over — #3337', () => {
+    // Sparse files, so the fixtures cost no disk: `statSync` reads the length
+    // the way it reads every committed file above, which is the point.
+    const directory = mkdtempSync(join(tmpdir(), 'realistic-budget-'));
+    try {
+      const exactly = join(directory, 'exactly.bin');
+      const oneOver = join(directory, 'one-over.bin');
+      writeFileSync(exactly, '');
+      writeFileSync(oneOver, '');
+      truncateSync(exactly, REALISTIC_BUILD_BYTES - transcoderBytes());
+      truncateSync(oneOver, REALISTIC_BUILD_BYTES - transcoderBytes() + 1);
+      expect(fitsTheBuildCeiling([exactly])).toBe(true);
+      expect(fitsTheBuildCeiling([oneOver])).toBe(false);
+      // The committed set plus a file that tips it over.
+      const tipped = realisticFiles().map(at);
+      expect(fitsTheBuildCeiling(tipped)).toBe(true);
+      expect(fitsTheBuildCeiling([...tipped, exactly])).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
