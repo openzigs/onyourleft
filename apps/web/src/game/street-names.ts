@@ -263,6 +263,14 @@ export interface RouteNameLayout {
   readonly centre: number;
 }
 
+/**
+ * The most letters a line of a route ride's name holds, at
+ * {@link ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES} a letter: **6**.
+ */
+const MOST_LETTERS_A_LINE = Math.floor(
+  (ROUTE_STREET_NAME_LINE_WIDTH_METRES + 1e-9) / ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES,
+);
+
 /** `words` split into `count` lines the way that makes the longest line shortest, or `undefined` with too few words. */
 function stacked(words: readonly string[], count: number): string[] | undefined {
   if (count > words.length) return undefined;
@@ -283,6 +291,25 @@ function stacked(words: readonly string[], count: number): string[] | undefined 
 }
 
 /**
+ * `word` as the fewest pieces of no more than {@link MOST_LETTERS_A_LINE}
+ * letters, as near alike in length as they can be: "HOLLENCREST" is
+ * "HOLLEN" and "CREST". A word that fits a line is one piece. Two pieces of
+ * one word never share a line: together they are longer than a line holds.
+ */
+function piecesOf(word: string): string[] {
+  const letters = Array.from(word);
+  const count = Math.ceil(letters.length / MOST_LETTERS_A_LINE);
+  const pieces: string[] = [];
+  let start = 0;
+  for (let piece = 1; piece <= count; piece += 1) {
+    const end = Math.round((letters.length * piece) / count);
+    pieces.push(letters.slice(start, end).join(''));
+    start = end;
+  }
+  return pieces;
+}
+
+/**
  * How a route ride's street name is painted across the rider's lane —
  * #3344, as a road marking is, or `undefined` where it cannot be painted at
  * a size that reads. Spelled by {@link roadMarkingText}; then on the fewest
@@ -290,26 +317,36 @@ function stacked(words: readonly string[], count: number): string[] | undefined 
  * longest fits {@link ROUTE_STREET_NAME_LINE_WIDTH_METRES} at
  * {@link ROUTE_STREET_NAME_GLYPH_WIDTH_METRES} a letter; failing that, on the
  * fewest whose letters need narrowing no further than
- * {@link ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES}. A name that fits neither
- * way, or whose capitals the glyph atlas does not hold, is not painted:
- * never shrunk.
+ * {@link ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES}. Failing both, a word too
+ * long for any line is broken across lines ({@link piecesOf}) and the same
+ * two tries are made again — PR #3346's tablet check: a word of more than six
+ * letters fits no line, and most streets' names have one, so almost none was
+ * painted. A name that fits no way, or whose capitals the glyph atlas does
+ * not hold, is not painted: never shrunk.
  */
 export function routeNameLayout(name: string): RouteNameLayout | undefined {
   const text = roadMarkingText(name);
   if (text.length === 0 || !paintable(text)) return undefined;
   const words = text.split(' ');
-  const options: string[][] = [];
-  for (let count = 1; count <= ROUTE_STREET_NAME_MAX_LINES; count += 1) {
-    const lines = stacked(words, count);
-    if (lines !== undefined) options.push(lines);
-  }
+  const optionsOf = (tokens: readonly string[]): string[][] => {
+    const options: string[][] = [];
+    for (let count = 1; count <= ROUTE_STREET_NAME_MAX_LINES; count += 1) {
+      const lines = stacked(tokens, count);
+      if (lines !== undefined) options.push(lines);
+    }
+    return options;
+  };
+  const whole = optionsOf(words);
+  const broken = optionsOf(words.flatMap(piecesOf));
   const widest = (lines: readonly string[]): number =>
     Math.max(...lines.map((line) => Array.from(line).length));
   const fits = (lines: readonly string[], width: number): boolean =>
     widest(lines) * width <= ROUTE_STREET_NAME_LINE_WIDTH_METRES + 1e-9;
   const lines =
-    options.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_WIDTH_METRES)) ??
-    options.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES));
+    whole.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_WIDTH_METRES)) ??
+    whole.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES)) ??
+    broken.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_WIDTH_METRES)) ??
+    broken.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES));
   if (lines === undefined) return undefined;
   const width = Math.min(
     ROUTE_STREET_NAME_GLYPH_WIDTH_METRES,

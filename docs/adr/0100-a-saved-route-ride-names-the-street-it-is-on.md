@@ -188,4 +188,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   8.65 m, and where a name fits (D-2.4) is measured over its lines times that. The width rules
   (0.6 m a letter, never below 0.45 m), the abbreviations, the three stacked lines, skipping rather
   than shrinking and the place left of the rider's line all stand, as does every rule of the two
-  entries above.
+  entries above. After the owner's tablet ride of the same day painted no name at all, a word of
+  more than six letters, which no line of the lane holds at 0.45 m a letter, is broken across lines
+  into the fewest pieces as near alike in length as they can be ("HOLLEN", "CREST"), and only
+  where the name's whole words fit no way; a name that still does not fit is skipped.

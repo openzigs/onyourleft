@@ -15,7 +15,15 @@
  */
 
 import { ATHLETE_A, resetFixtureIds, routeFor } from '@onyourleft/store/testing';
-import { metres, type RouteProfile } from '@onyourleft/domain';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  type RouteProfile,
+} from '@onyourleft/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { LANE_OFFSETS_METRES } from './lanes';
@@ -59,14 +67,14 @@ const SIDE_METRES = 1_500;
 /**
  * Invented names: one that fits one line at full size, one stacked onto
  * three at full size, one whose last word is abbreviated to fit, one whose
- * first line is narrowed (but not past the floor), and one that only fits
- * a lane at a size too small to read.
+ * first line is narrowed (but not past the floor), and one so long that
+ * even broken across three lines it only fits at a size too small to read.
  */
 const SHORT = 'Elm';
 const STACKS = 'Oak 3rd St.';
 const ABBREVIATED = 'Test Avenue';
 const NARROWED = 'Testa Way';
-const TOO_LONG = 'Testaaaaaaa';
+const TOO_LONG = 'Testaaaaaaaaaaaaaaaa';
 
 /** The rider's lane, metres right of the centreline: the centre line's right edge to the right edge line. */
 const LANE_INNER = CENTRE_LINE_WIDTH_METRES / 2;
@@ -313,7 +321,7 @@ describe('a route ride’s street name reads across the lane, as a road marking 
   });
 
   it('skips a name that does not fit three lines at 0.45 m a letter, rather than paint it smaller', () => {
-    // One word: no stacking helps, and 11 letters at 0.45 m are wider than the lane.
+    // One word of 20 letters: broken across three lines it is still 7 a line, wider than the lane at 0.45 m.
     expect(routeNameLayout(TOO_LONG)).toBeUndefined();
     // Four words that would fit four lines, but not three.
     expect(routeNameLayout('Abcd Efgh Ijkl Mnop')).toBeUndefined();
@@ -334,6 +342,22 @@ describe('a route ride’s street name reads across the lane, as a road marking 
     const view = streetNamesInView([skipped, drawn], { x: 0, z: 0 }, 0, () => 0);
     expect(view.labels.map((label) => label.key)).toStrictEqual(['route:1']);
     expect(view.cells).toHaveLength(3);
+  });
+
+  it('breaks a word too long for any line across lines, only when whole words cannot fit — PR #3346’s tablet check', () => {
+    // Eleven letters fit no line even at 0.45 m: "HOLLEN" nearest, then "CREST", then the suffix.
+    expect(layoutOf('Hollencrest Drive').lines).toStrictEqual(['HOLLEN', 'CREST', 'DR']);
+    // Seven letters, two pieces as near alike as can be, read in order.
+    expect(layoutOf('Ternwick').lines).toStrictEqual(['TERN', 'WICK']);
+    // A name whose words fit whole is never broken, even if broken pieces would be wider.
+    expect(layoutOf(NARROWED).lines).toStrictEqual(['TESTA', 'WAY']);
+    expect(layoutOf(STACKS).lines).toStrictEqual(['OAK', '3RD', 'ST.']);
+    // And every broken line fits the lane at no less than 0.45 m a letter.
+    for (const name of ['Hollencrest Drive', 'Mirrowfield Avenue', 'Pellidor Boulevard']) {
+      const layout = layoutOf(name);
+      expect(layout.lines.length).toBeLessThanOrEqual(ROUTE_STREET_NAME_MAX_LINES);
+      expect(layout.width).toBeGreaterThanOrEqual(ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES);
+    }
   });
 
   it('paints each line in the rider’s lane, inside its lines and left of the rider’s own line', () => {
@@ -448,5 +472,97 @@ describe('the size guard sees each of a letter’s four edges — #3261’s revi
     (near[from] as number[])[axis] = ((near[from] as number[])[axis] as number) - size * 0.2;
     (near[to] as number[])[axis] = ((near[to] as number[])[axis] as number) + size * 0.2;
     expect(paintedSize(flat(near), width, height)).toBe(true);
+  });
+});
+
+/**
+ * PR #3346's tablet check of 2026-11-27: on the owner's realistic saved-route
+ * rides no street name was painted at all. Counted on a city grid's shape
+ * (and on the demo's probe route read with its mapped names, in the PR), the
+ * cause was a name with a word of more than six letters, which fits no line
+ * of the lane at 0.45 m a letter: most were skipped whole. A synthetic city
+ * grid: long and short blocks, a turn at each street's end, every street an
+ * invented name of a realistic length.
+ */
+describe('a route ride on a city grid names the streets it joins — PR #3346’s tablet check', () => {
+  /** Invented names, their longest words 3 to 11 letters as a city's are. */
+  const GRID_NAMES = [
+    'Testa Street',
+    'Quorrin Avenue',
+    'Brelmont Road',
+    'Vask Lane',
+    'Hollencrest Drive',
+    'Ternwick Street',
+    'Osk Place',
+    'Pellidor Boulevard',
+    'Gantry Court',
+    'Mirrowfield Avenue',
+    '12th Street',
+    'Old Quarrel Road',
+    'Faxon Way',
+    'Dellmore Avenue',
+  ];
+  /** Each leg: east and north in blocks of 260 m and 80 m, metres. */
+  const LEGS: readonly [number, number, number][] = [
+    [1, 0, 1_040],
+    [0, 1, 240],
+    [1, 0, 780],
+    [0, -1, 480],
+    [1, 0, 520],
+    [0, 1, 720],
+    [-1, 0, 260],
+    [0, 1, 320],
+    [1, 0, 1_300],
+    [0, -1, 240],
+    [1, 0, 520],
+    [0, 1, 400],
+    [1, 0, 780],
+    [0, -1, 160],
+  ];
+
+  it('paints a name just after each street it joins, at least 1.5 a kilometre', () => {
+    const latitude = 40;
+    const perLatitude = 111_320;
+    const perLongitude = perLatitude * Math.cos((latitude * Math.PI) / 180);
+    const points: [number, number][] = [[0, 0]];
+    const joins: [number, number][] = [];
+    let [east, north, along] = [0, 0, 0];
+    for (const [dx, dz, length] of LEGS) {
+      for (let step = 10; step <= length; step += 10)
+        points.push([east + dx * step, north + dz * step]);
+      [east, north] = [east + dx * length, north + dz * length];
+      joins.push([along, along + length]);
+      along += length;
+    }
+    const grid = routeProfile(
+      points.map(([e, n]) => ({
+        position: geographicPosition(
+          degreesLatitude(latitude + n / perLatitude),
+          degreesLongitude(-74 + e / perLongitude),
+        ),
+        elevation: altitudeMetres(10),
+      })),
+      { loop: false },
+    );
+    const origin = corridorOrigin(grid);
+    const road = drawnRoadPoints(grid, origin);
+    const at = (route: number): [number, number] => {
+      const index = Math.min(road.points.length / 2 - 1, Math.round(route / road.step));
+      return [road.points[index * 2] as number, road.points[index * 2 + 1] as number];
+    };
+    const streets: RouteStreet[] = joins.map(([from, to], index) => {
+      const line: number[] = [];
+      for (let route = from; route < to; route += 20) line.push(...at(route));
+      line.push(...at(to));
+      return { line: Float32Array.from(line), name: GRID_NAMES[index] as string };
+    });
+    const labels = routeStreetNameLabels(streets, grid, origin);
+    // Every street joined is named, its first label within 60 m of the join.
+    for (const [index, [from]] of joins.entries()) {
+      const first = labels.find((label) => label.text === GRID_NAMES[index]);
+      expect(first, GRID_NAMES[index]).toBeDefined();
+      expect((first?.along ?? Number.NaN) - from).toBeLessThan(60);
+    }
+    expect(labels.length / (road.total / 1_000)).toBeGreaterThanOrEqual(1.5);
   });
 });
