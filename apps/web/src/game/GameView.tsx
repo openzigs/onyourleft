@@ -4950,6 +4950,10 @@ function GameScreen({
             deliveryRef.current === undefined &&
             drawn.botDistance === undefined &&
             ghostRef.current === undefined,
+          // #3278: parked cars on the mapped driveways, aprons and side
+          // streets, on every ride but a Delivery round, whose parked cars are
+          // its own obstacles. Scenery only: no simulation or trainer reads one.
+          parkedCars: deliveryRef.current === undefined,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is

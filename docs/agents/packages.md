@@ -92,7 +92,11 @@ packages/             Apache-2.0, without exception
                         that reaches a trainer. Lint refuses `Date` and
                         `Math.random` here. Since #3302 the rider's cue: a
                         kind a window, never a sentence, none that urges more
-                        effort, silent with no power reading
+                        effort, silent with no power reading. Since #3300
+                        `stepGroupRide`: the bots ridden a tick at a time
+                        through a physics the caller passes (physics'
+                        `groupRidePhysics`), one draft call for every rider;
+                        the rider is read and never written
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

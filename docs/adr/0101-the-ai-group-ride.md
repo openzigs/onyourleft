@@ -569,3 +569,23 @@ recorded here when the ADR is accepted.
   row 1 says.** The owner decides again.
 - **Anyone reads D-7 as clearance.** It is a risk decision and a note of search excerpts and
   earlier spikes, written by an engineer on one day.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-27** — **D-3.2's *"Each rider's factor is ADR 0038 D-3's"* is no longer the whole of
+  what a bot rides at.** The physics has no brake: a power is at least zero. Down a steep descent a
+  sheltered bot that coasts is faster than the front that pedals, and it would roll through the
+  wheel ahead. So a group-ride bot that its wheel rule asks for **less than zero watts** pedals
+  nothing and **sits up**: it rides at a drag multiplier above its draft factor, by the share of
+  the open air's extra drag that the missing watts are, and **never past 1**, so never at more
+  drag than riding alone, and never below its factor, so never with more shelter than the model
+  offers. The factor itself is still ADR 0038 D-3's, from the one call for every rider, and it is
+  what the ride reports for each member; the draft model, its inputs and `physicsVersion` are
+  unchanged (D-3.3 holds as written). The rule is the bots' alone: the rider is ridden at the
+  model's factor and nothing here changes their speed (D-4.5). Accepted by the owner, 2026-11-27,
+  on [#3347](https://github.com/openzigs/onyourleft/pull/3347): *"Decision 1 is accepted."* Built
+  in `packages/domain/src/group-ride/step.ts`. (#3300)
