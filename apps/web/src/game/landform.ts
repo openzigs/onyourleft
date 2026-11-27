@@ -139,7 +139,7 @@ import {
 
 import { treeLineHeight } from './ground-blend';
 import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
-import { sceneryAnchor, sceneryGrid, type SceneryAnchor } from './scenery-anchor';
+import { routeOf, sceneryAnchor, sceneryGrid, type SceneryAnchor } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   DRY,
@@ -841,7 +841,8 @@ export function terrainCorridor(
     fieldSpan: fieldSpanMetres(profile),
     fieldCount:
       anchor === undefined
-        ? Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES))
+        ? // #3336: a route drawn past its end has the route's fields, on.
+          Math.max(1, Math.round(routeOf(profile).totalDistance / FIELD_SPAN_METRES))
         : UNWRAPPED_FIELD_COUNT,
     treeLine: treeLineHeight(origin),
     lease: terrainLease,
@@ -2071,10 +2072,12 @@ function heightIn(
  * the skirt's base are still the view's, under the ground in view.
  */
 export function horizonRelief(
-  profile: RouteProfile,
+  drawn: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
 ): HorizonRelief {
+  // #3336: a route drawn past its end stands its horizon on the route's range.
+  const profile = routeOf(drawn);
   const stride = Math.max(1, Math.ceil(profile.elevations.length / HORIZON_SAMPLE_LIMIT));
   let lowest = Number.POSITIVE_INFINITY;
   let highest = Number.NEGATIVE_INFINITY;
@@ -2426,7 +2429,9 @@ export function ridesARoadTwice(profile: RouteProfile): boolean {
   return sceneryAnchor(profile) === undefined && retraceOf(profile) !== undefined;
 }
 
-function retraceOf(profile: RouteProfile): Retrace | undefined {
+function retraceOf(drawn: RouteProfile): Retrace | undefined {
+  // #3336: a route drawn past its end retraces where the route does.
+  const profile = routeOf(drawn);
   const known = retraces.get(profile);
   if (known !== undefined) return known ?? undefined;
   const found = foundRetrace(profile);
@@ -2591,11 +2596,11 @@ function ownReliefFields(
   // #3055: on an open-world view, a node every RELIEF_SPAN_METRES of ride
   // distance, which nothing wraps, so no view change moves a hill.
   const anchor = sceneryAnchor(profile);
-  const nodes = Math.max(2, Math.round(profile.totalDistance / RELIEF_SPAN_METRES));
+  // #3336: a route drawn past its end has the route's nodes, wrapped on past it.
+  const lap: number = routeOf(profile).totalDistance;
+  const nodes = Math.max(2, Math.round(lap / RELIEF_SPAN_METRES));
   const at =
-    anchor === undefined
-      ? (wrapped / profile.totalDistance) * nodes
-      : (wrapped + anchor.origin) / RELIEF_SPAN_METRES;
+    anchor === undefined ? (wrapped / lap) * nodes : (wrapped + anchor.origin) / RELIEF_SPAN_METRES;
   const node = Math.floor(at);
   const ramp = smoothstep01(at - node);
   const wrap = (index: number): number => (anchor === undefined ? index % nodes : index);
