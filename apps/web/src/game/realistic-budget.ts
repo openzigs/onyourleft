@@ -145,9 +145,10 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * D-1) rather than scans cut down to these ceilings: 6 692 and 5 800
  * triangles at full detail against 28 000, and 2 208 and 2 004 at the middle
  * level against 6 000. **No ceiling here moved**: what is spent fell, and the
- * scans — still committed, still loadable on the owner's page — are held to
- * the same figures. Same route position, same camera, pinned Chromium on
- * 2026-10-12, the scans first:
+ * scans — committed and loadable on the owner's page until #1293 deleted
+ * them, see "The scanned broadleaves, removed" below — were held to the same
+ * figures. Same route position, same camera, pinned Chromium on 2026-10-12,
+ * the scans first:
  *
  * | | Scanned broadleaves | Generated broadleaves |
  * |---|--:|--:|
@@ -187,7 +188,8 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * 41 943 040, 2 106 041 under it. The scanned broadleaves are
  * 10 616 301 of those bytes and go when the owner has judged the generated
  * ones on the tablet (ADR 0049 D-1, #1293), at which point the set is smaller
- * than it was before #1283.
+ * than it was before #1283. ⚠️ They went on 2026-11-26, on the owner's ruling
+ * and without those rows: "The scanned broadleaves, removed" below.
  *
  * ## The generated firs, measured — #1294
  *
@@ -248,6 +250,38 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * it**, where it was 2 106 041 under. The scanned firs are 8 681 763 of those
  * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
  * say after the tablet rows (ADR 0049 D-1, #1293).
+ *
+ * ## The scanned broadleaves, removed — #1293
+ *
+ * The owner ruled on 2026-11-26 that the scanned broadleaves go: no default
+ * ride had drawn them since #1283, and they were the largest thing in a build
+ * 231 387 bytes under its ceiling while three lanes were adding models
+ * (#3249). ⚠️ **Without the tablet rows ADR 0049 D-1 asks for** — validation
+ * 0002's AH-1283 rows were never filled in — which is that ADR's amendment of
+ * 2026-11-26 on the scans, and the owner's to have ruled.
+ *
+ * What went: `island_tree_02` and `tree_small_02`, eight files at three
+ * levels each, **10 616 301 bytes**; their `ASSETS.toml` rows, their recipe
+ * (`tools/realistic/sources.ts` §`OUTPUTS`) and their pinned inputs; the
+ * `scanned` set (`realistic-assets.ts` §`RealisticTrees`); the owner's page's
+ * `generated-trees` lever; and the gate's load of them (`game-harness.ts`
+ * §`treeLevelRun`). Read off the committed files by `realistic-budget.test.ts`
+ * on 2026-11-26:
+ *
+ * | | Before | After |
+ * |---|--:|--:|
+ * | The realistic set, bytes | 48 466 823 | **37 850 522** |
+ * | With the transcoder, of {@link REALISTIC_BUILD_BYTES}' 49 283 072 | 49 051 685 | **38 435 384** |
+ * | Under the ceiling | 231 387 | **10 847 688** |
+ *
+ * **No figure in this file moved, the build ceiling included**: the bytes
+ * were freed for the models #3249's lanes add, and lowering the ceiling to
+ * the new figure would take them back. Every column headed "Scanned
+ * broadleaves" or "Every tree a scan" in the two tables above is a
+ * measurement of a set that can no longer be loaded: a record of 2026-10-12,
+ * not something a gate still holds. What a ride draws did not change — it
+ * was already the generated trees, and the scanned FIRS still ship behind
+ * `?levers=-generated-conifers`.
  *
  * Held by `realistic-budget.test.ts`, which reads every committed realistic
  * file back off disk against it. Since #1549 the renderer reads its
@@ -460,8 +494,9 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * a level a SHAPE and there are four shapes where there were two.
  * {@link REALISTIC_TRIANGLES} has the table, and says why it is four shapes
  * and not the six #1283 first made, which put the page AT 35. The scans,
- * loaded on the same views, still make 27 and 31 (32 in one run of seven:
- * the page's count moves by one between runs of the same held frame).
+ * loaded on the same views, made 27 and 31 (32 in one run of seven: the
+ * page's count moves by one between runs of the same held frame) until #1293
+ * deleted them.
  *
  * ⚠️ **#1294 found what moves, and the page's 33 and 31 were a mean, not a
  * frame's count**: the page counted its very first render, which makes about
@@ -750,8 +785,11 @@ export function stylisedSceneDrawCallCeiling(frame: Pick<SceneFrame, 'lapRace'>)
  * as {@link REALISTIC_TREE_LEVELS} ranks them.
  *
  * @test-facing the browser gate's control: `game-harness.ts` draws the same
- * view with it, whose triangles must be at least 60 000 more, and whose
- * hand-over must jump; the product never draws with it
+ * view with it, whose triangles must be at least 9 000 more (60 000 until
+ * #1283, the scans' figure: `game.browser.spec.ts` §`TRIANGLES_FALL_AT_LEAST`),
+ * and whose hand-over must jump; `realistic-budget.test.ts` holds the same
+ * floor off the committed files for every set that ships (#1293); the product
+ * never draws with it
  */
 export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
   near: 6,
@@ -1583,6 +1621,13 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * everything else since, the set with its transcoder is **49 051 685**,
  * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
  * three — which is what keeps the cost to one GLB rather than 1.5 MB.
+ *
+ * ## 10 616 301 bytes freed, and the ceiling not lowered — #1293
+ *
+ * The scanned broadleaves were deleted on the owner's ruling of 2026-11-26
+ * ({@link REALISTIC_TRIANGLES}, "The scanned broadleaves, removed"): the set
+ * with its transcoder is **38 435 384**, 10 847 688 under 47 MiB. The room is
+ * for the models #3249's lanes add, so this figure stays where it was.
  *
  * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
  * and this one has not been ruled on**: the issue asks for the body and its

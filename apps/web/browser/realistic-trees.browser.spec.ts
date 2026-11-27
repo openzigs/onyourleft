@@ -4,13 +4,17 @@
  * The owner's realistic page's tree levers, in the pinned Chromium — #1283,
  * #1294 and #1523; in a file of their own since #1698.
  *
- * `?levers=-generated-trees` loads every tree's scan INSTEAD of the generated
- * ones, and since #1294 `?levers=-generated-conifers` the scanned firs alone —
- * read off the files the page fetches, so a lever that changed a label and
- * loaded the same trees is seen — with each frame's triangles and draw calls
- * printed, which are the figures validation 0002's #1283 and #1294 rows start
- * from. And #1523's `?levers=-fir-prepass` takes the firs' depth pre-passes
- * out of the same held frame, and nothing else.
+ * `?levers=-generated-conifers` loads the scanned firs INSTEAD of the
+ * generated ones (#1294) — read off the files the page fetches, so a lever
+ * that changed a label and loaded the same trees is seen — with each frame's
+ * triangles and draw calls printed, which are the figures validation 0002's
+ * #1294 rows start from. And #1523's `?levers=-fir-prepass` takes the firs'
+ * depth pre-passes out of the same held frame, and nothing else.
+ *
+ * ⚠️ **Until #1293 there was a third load here**, `?levers=-generated-trees`,
+ * every tree's scan (#1283). The scanned broadleaves were deleted on the
+ * owner's ruling of 2026-11-26, the lever with them, and the page refuses the
+ * name (`realistic/config.test.ts`).
  *
  * ⚠️ **Until #1698 this describe was in `realistic.browser.spec.ts`**, which
  * one nightly job ran alone until its loads outgrew the job's 840 s stop. This
@@ -53,10 +57,10 @@ const PAGE_DRAW_CALLS_AT_2550 = 34;
 const FRAME_DRAW_CALLS_WITHOUT_PREPASS = 31;
 
 test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGHTLY }, () => {
-  test('loads the generated trees, or with a lever off the scans it names, and never both', async ({
+  test('loads the generated trees, or with the fir’s lever off the scanned firs, and never both', async ({
     page,
   }) => {
-    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
 
     const fetched: string[] = [];
     page.on('request', (request) => {
@@ -69,16 +73,18 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
           (file): file is string => file !== undefined,
         ),
       );
-    const treesOf = (set: 'generated' | 'scanned'): readonly string[] =>
-      filesOf(REALISTIC_BROADLEAVES[set]);
+    // #1293: the broadleaves have one making, and no load may ask for a file
+    // of the scans that were deleted — by the names they had.
+    const broadleaves = filesOf(REALISTIC_BROADLEAVES.generated);
+    const deleted = (file: string): boolean => /^(island_tree_02|tree_small_02)/.test(file);
     const firsOf = (set: 'generated' | 'scanned'): readonly string[] =>
       filesOf(REALISTIC_CONIFERS[set]);
 
     const generated = await ride(page, HELD);
     const withGenerated = [...fetched];
     // The product's trees: every generated file, and not one of the scans'.
-    for (const file of treesOf('generated')) expect(withGenerated, file).toContain(file);
-    for (const file of treesOf('scanned')) expect(withGenerated, file).not.toContain(file);
+    for (const file of broadleaves) expect(withGenerated, file).toContain(file);
+    expect(withGenerated.filter(deleted)).toEqual([]);
     for (const file of firsOf('generated')) expect(withGenerated, file).toContain(file);
     for (const file of firsOf('scanned')) expect(withGenerated, file).not.toContain(file);
     expect(generated.result.leversOff).toEqual([]);
@@ -89,22 +95,11 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     const withScannedFirs = [...fetched];
     for (const file of firsOf('scanned')) expect(withScannedFirs, file).toContain(file);
     for (const file of firsOf('generated')) expect(withScannedFirs, file).not.toContain(file);
-    for (const file of treesOf('generated')) expect(withScannedFirs, file).toContain(file);
-    for (const file of treesOf('scanned')) expect(withScannedFirs, file).not.toContain(file);
+    for (const file of broadleaves) expect(withScannedFirs, file).toContain(file);
+    expect(withScannedFirs.filter(deleted)).toEqual([]);
     expect(scannedFirs.result.leversOff).toEqual(['generated-conifers']);
-    expect(scannedFirs.result.rung).toBe(generated.result.rung);
-
-    // #1283's lever: every tree's scan, and no generated tree.
-    fetched.length = 0;
-    const scanned = await ride(page, `${HELD}&levers=-generated-trees`);
-    const withScanned = [...fetched];
-    for (const file of treesOf('scanned')) expect(withScanned, file).toContain(file);
-    for (const file of treesOf('generated')) expect(withScanned, file).not.toContain(file);
-    for (const file of firsOf('scanned')) expect(withScanned, file).toContain(file);
-    for (const file of firsOf('generated')) expect(withScanned, file).not.toContain(file);
-    expect(scanned.result.leversOff).toEqual(['generated-trees']);
     // The lever chooses trees and nothing else: the rung does not move.
-    expect(scanned.result.rung).toBe(generated.result.rung);
+    expect(scannedFirs.result.rung).toBe(generated.result.rung);
 
     const calls = (run: typeof generated): string =>
       `${String(run.result.lastFrame.calls)} draw calls a frame (the page's mean ${String(run.result.drawCalls)})`;
@@ -112,21 +107,16 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
       `#1294 at=2550, held: ${String(generated.result.lastFrame.triangles)} triangles in ` +
         `${calls(generated)} with every tree generated; ` +
         `${String(scannedFirs.result.lastFrame.triangles)} in ${calls(scannedFirs)} ` +
-        `with the scanned firs; ${String(scanned.result.lastFrame.triangles)} in ` +
-        `${calls(scanned)} with every tree a scan. Textures held: ` +
-        `${String(generated.page.textures?.bytes)} bytes, ${String(scannedFirs.page.textures?.bytes)} ` +
-        `and ${String(scanned.page.textures?.bytes)}`,
+        `with the scanned firs. Textures held: ` +
+        `${String(generated.page.textures?.bytes)} bytes and ${String(scannedFirs.page.textures?.bytes)}`,
     );
-    // Different trees are different frames — and each step toward generated
-    // is lighter, here where most of the trees in view are conifers.
+    // Different trees are different frames — and the generated firs' is the
+    // lighter, here where most of the trees in view are conifers.
     expect(generated.result.lastFrame.triangles).toBeLessThan(
       scannedFirs.result.lastFrame.triangles,
     );
-    expect(scannedFirs.result.lastFrame.triangles).toBeLessThanOrEqual(
-      scanned.result.lastFrame.triangles,
-    );
-    // All inside #639's ceiling, which did not move; and less texture memory
-    // held at each step. ⚠️ With THREE seeds a species, as #1283 was first
+    // Both inside #639's ceiling, which did not move; and less texture memory
+    // held with the generated firs. ⚠️ With THREE seeds a species, as #1283 was first
     // written, the page's mean was 35 of 35 on a Mac and 34 on the CI runner —
     // which is why there are two (#1289's review).
     //
@@ -143,17 +133,13 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     // frame, and a mean that is not the frame's count has counted something
     // that is not the window: the warm-up, and the first render in it.
     expect(generated.result.drawCalls).toBeLessThanOrEqual(PAGE_DRAW_CALLS_AT_2550);
-    for (const run of [generated, scannedFirs, scanned]) {
+    for (const run of [generated, scannedFirs]) {
       expect(run.result.drawCalls).toBe(run.result.lastFrame.calls);
     }
     expect(scannedFirs.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
-    expect(scanned.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(PAGE_DRAW_CALLS_AT_2550).toBeLessThan(REALISTIC_WOODED_DRAW_CALLS);
     expect(generated.page.textures?.bytes ?? Infinity).toBeLessThan(
       scannedFirs.page.textures?.bytes ?? 0,
-    );
-    expect(scannedFirs.page.textures?.bytes ?? Infinity).toBeLessThan(
-      scanned.page.textures?.bytes ?? 0,
     );
   });
 

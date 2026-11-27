@@ -3848,6 +3848,19 @@ the 46 MiB ceiling, transcoder included (`realistic-budget.test.ts`).
 
 ### #1283's rows — the broadleaf trees, generated to their budget
 
+> ⚠️ **2026-11-26: these rows were not run, and from
+> [#1293](https://github.com/openzigs/onyourleft/issues/1293)'s merge on they cannot be run on a
+> current build.** The owner ruled on 2026-11-26 that the scanned broadleaves go without them: the
+> eight files, their `ASSETS.toml` rows and the `generated-trees` lever are deleted, and
+> `levers=-generated-trees` is refused by the page. That ruling is the answer to the last by-eye
+> question below (keep the generated broadleaves, delete the scans) and is recorded as
+> [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)'s amendment of 2026-11-26
+> on the scans. The cost pair can still be taken on the build the table names, #1294's merge,
+> which has both sets and the lever; nothing waits on it. **The build, re-measured on 2026-11-26
+> off the committed files**: 49 051 685 bytes with the transcoder before the scans went, 231 387
+> under the 47 MiB ceiling (49 283 072); **38 435 384** after, 10 847 688 under. The ceiling was
+> not lowered. Everything below this note is as it was written.
+
 [#1283](https://github.com/openzigs/onyourleft/issues/1283) is the first adoption under
 [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md) D-1: a ride's broadleaf trees
 are no longer two photoscans cut down to a triangle budget but **four trees generated at their
@@ -3929,6 +3942,10 @@ is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)'s amend
 **The scanned firs are still in the build and one lever away**, and as with #1283 **both rows are
 one build**: `levers=-generated-conifers` loads the scanned firs instead, beside the generated
 broadleaves, and only the set asked for is fetched.
+
+⚠️ **Since #1293 `levers=-generated-trees` does not exist** (the note at the head of #1283's rows):
+this section's own pair, `levers=-generated-conifers` against the bare URL, is unaffected, and the
+"every tree a scan" run below can only be made on #1294's merge.
 
 **`levers=-generated-trees` loads EVERY tree's scan, the firs' too**, so #1283's pair above is
 `levers=-generated-trees` against `levers=-generated-conifers`, and this pair is
