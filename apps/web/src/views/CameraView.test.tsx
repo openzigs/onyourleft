@@ -6,7 +6,7 @@
  * that must never be on it.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PRIMARY_BUTTON_SELECTOR } from '../a11y/button-hierarchy';
 import { ANALYSIS_ENDPOINT_STORAGE_KEY, readAnalysisEndpoint } from '../camera/analysis-endpoint';
@@ -1014,6 +1014,46 @@ describe('your own computer — #387', () => {
     await settle();
     expect(document.body.textContent).toContain('could not be reached');
     expect(frameLeaksIn(document.body.textContent ?? '')).toStrictEqual([]);
+  });
+
+  it('says the numbers-only rule of the iOS app in its own words (#3239)', async () => {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'ios' });
+    try {
+      const port: AnalysisPort = {
+        askAboutFrame: () => ({
+          outcome: Promise.resolve({ kind: 'failed', failure: 'address-not-numeric' }),
+          cancel: () => undefined,
+        }),
+      };
+      const camera = scriptedCamera();
+      const controller = new CameraController({
+        secureWindow: browserSecureWindow(),
+        port: camera.port,
+        schedule: manualSchedule().schedule,
+        analysis: () => port,
+      });
+      controller.agree({ acknowledgedBystanders: true, allowLocal: true });
+      await saveStoredOn();
+      mounted = await mount(<CameraView controller={controller} />);
+      await settle();
+      await turnOn();
+      const check = button('check the connection');
+      if (check === undefined) {
+        expect.unreachable('no check control');
+        return;
+      }
+      await activateWithKeyboard(check);
+      await settle();
+      const text = document.body.textContent ?? '';
+      expect(text).toContain(
+        'In this app on iPhone and iPad, your computer’s address has to be its private address',
+      );
+      // Only the failure's sentence: the consent's screenshot sentence, which
+      // also names Android, is #1752's.
+      expect(text).not.toContain('In this app on Android');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   describe('the side camera’s own switch — #553, ADR 0033 D-11', () => {

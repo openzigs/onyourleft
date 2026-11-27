@@ -107,6 +107,7 @@ async function tracesOf(
     corridor.archive.identity,
     corridor.readAt,
     PLACE_SENTINEL,
+    STREET_NAME_SENTINEL,
     base64.slice(16, 56),
     ...featureValues(),
   ];
@@ -207,6 +208,28 @@ async function packedSports(): Promise<Blob> {
   });
 }
 
+/** #3245: an invented street name, which a corridor keeps since ADR 0100 (proposed). */
+const STREET_NAME_SENTINEL = 'Testexport Road';
+
+/** A corridor's features as the product packs them, holding a street's name (#3245). */
+async function packedStreetNames(): Promise<Blob> {
+  return packCorridorFeatures({
+    landUse: [],
+    buildings: [],
+    paths: [],
+    streets: [
+      {
+        kind: 'minor_road',
+        kindDetail: 'residential',
+        grade: 'ground',
+        line: Float32Array.of(0, 0, 100, 0),
+        name: STREET_NAME_SENTINEL,
+      },
+    ],
+    places: [],
+  });
+}
+
 /** The decoded features a case packs into the corridor it exports. */
 const PACKED = {
   'decoded places': packedPlaces,
@@ -215,6 +238,7 @@ const PACKED = {
   'decoded POI classes': packedPois,
   'decoded railway lines': packedRails,
   'decoded sports': packedSports,
+  'decoded street names': packedStreetNames,
 } as const;
 
 describe('the account export carries no world corridor — #1545', () => {
@@ -228,6 +252,7 @@ describe('the account export carries no world corridor — #1545', () => {
     ['fit', 'decoded POI classes'],
     ['gpx', 'decoded railway lines'],
     ['fit', 'decoded sports'],
+    ['tcx', 'decoded street names'],
   ] as const)(
     'finds no trace of one in any file of a %s export, its features the %s',
     async (format, features) => {
@@ -285,7 +310,14 @@ describe('the account export carries no world corridor — #1545', () => {
       mediaType: 'application/octet-stream',
       bytes: new Uint8Array(await corridor.features.arrayBuffer()),
     };
-    const found = await tracesOf(corridor, [planted, raw]);
+    // #3245: a kept street's name is a marker too.
+    const named: DownloadableFile = {
+      fileName: 'names.txt',
+      mediaType: 'text/plain',
+      bytes: new TextEncoder().encode(STREET_NAME_SENTINEL),
+    };
+    const found = await tracesOf(corridor, [planted, raw, named]);
+    expect(found).toContain(`names.txt: ${STREET_NAME_SENTINEL}`);
     expect(found).toContain('manifest.json: worldCorridors');
     expect(found).toContain('manifest.json: 12.4375');
     // #1632: a place's point is a marker too.

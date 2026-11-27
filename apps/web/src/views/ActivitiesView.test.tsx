@@ -1215,6 +1215,32 @@ describe('#1438 — the footer says where the rides are, per platform and per in
     expect(footer()).not.toContain('browser');
   });
 
+  it('in the iOS app: what deletes them there, and nothing of Android (#3239)', async () => {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'ios' });
+    try {
+      mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} nativeShell />);
+      await settle();
+      expect(footer()).toBe(
+        'Rides are stored on this device. Deleting the app deletes them from this device — ' +
+          'export anything you want to keep.',
+      );
+      expect(footer()).not.toMatch(/Android/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('in the Android app, named as such: Android’s sentence unchanged (#3239)', async () => {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'android' });
+    try {
+      mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} nativeShell />);
+      await settle();
+      expect(footer()).toBe(APP_ALONE);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('in the app connected to an instance', async () => {
     const instance = scriptedInstance({ connected: true });
     mounted = await mount(

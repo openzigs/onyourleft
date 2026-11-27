@@ -117,6 +117,7 @@ import {
 import {
   alsoWritten,
   assetRecord,
+  DOWNTOWN_KIT_SCRIPT,
   formatRecord,
   GENERATED_TREE_SCRIPT,
   generatedTreeMaps,
@@ -164,14 +165,15 @@ function blender(script: string, args: readonly string[]): string {
   return output;
 }
 
-/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), or the car pack's (#2847). */
+/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, a texture's (#475), the car pack's (#2847), or the downtown kit's (#3334). */
 function inputFor(output: OutputSpec): string {
   if (output.from.startsWith('makehuman')) return join(RAW, output.from);
   if (
     output.recipe.how === 'blender' &&
     (output.recipe.script === TEXTURE_SCRIPT ||
       output.recipe.script === HOUSE_SCRIPT ||
-      output.recipe.script === VEHICLE_SCRIPT)
+      output.recipe.script === VEHICLE_SCRIPT ||
+      output.recipe.script === DOWNTOWN_KIT_SCRIPT)
   ) {
     return join(RAW, output.from);
   }

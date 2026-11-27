@@ -64,7 +64,12 @@ export function roundHousesOn(corridor: WorldCorridor, profile: RouteProfile): n
   const origin = corridorOrigin(profile);
   const land = landClassMask(corridor);
   const urban = urbanClassMap(corridor, land, profile);
-  const { plans } = footprintPlans(corridor, land, profile, origin, FOOTPRINT_MAX_VERTICES, urban);
+  // #3334: houses are counted here and nothing is drawn, so no footprint is wrapped in the
+  // downtown kit's pieces: a wrap changes no house's count, and planning one is most of
+  // what planning a town street costs.
+  const { plans } = footprintPlans(corridor, land, profile, origin, FOOTPRINT_MAX_VERTICES, urban, {
+    facadeKit: false,
+  });
   return countRoundHouses(mappedBuildingsOf(plans), profile, origin);
 }
 
