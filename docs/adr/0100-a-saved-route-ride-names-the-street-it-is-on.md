@@ -1,8 +1,10 @@
 # ADR 0100: A saved route ride names the street it is on, now and then
 
-- **Status**: **Proposed**, 2026-11-26. In force only once the owner accepts it (D-6 Q1); the pull
-  request for [#3245](https://github.com/openzigs/onyourleft/issues/3245) is not to be merged before
-  that
+- **Status**: **Accepted, 2026-11-26**, by the owner, 2026-11-26: "Accept as proposed". D-6
+  Q1 to Q3 are accepted as recommended: the ADR itself; the spacing (nearest letter 30 m after the
+  route joins a named street, then at most one label each 1 km); and no hide switch for now. The
+  pull request for [#3245](https://github.com/openzigs/onyourleft/issues/3245) merges after the
+  maintainer's tablet check of its bend fix
 - **Date**: 2026-11-26
 - **Deciders**: **the owner**, who asked for this on 2026-11-26. The author drafted the ADR, and every
   bound in it is the author's choice
