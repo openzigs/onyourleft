@@ -59,6 +59,7 @@ import {
   horizonRelief,
   standingOnGround,
   terrainCorridor,
+  terrainHeightAt,
   type TerrainMesh,
 } from './landform';
 import { poolsInView } from './mapped-pools';
@@ -166,6 +167,7 @@ import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { riddenSpanParts, riddenSpans, sideDeckParts } from './mapped-spans';
 import {
+  NEARBY_STREET_LIFT_METRES,
   nearbyStreets,
   nearbyStreetsAt,
   routeGround,
@@ -1057,6 +1059,17 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
             (riders[0] as PlacedRider).marker,
             riderDistance,
             streetSurfaceAt(input, seed),
+            // #3261's tablet check: a route ride's labels on the road's own
+            // height at their route distance, as a nearby street stands.
+            (metres) =>
+              terrainHeightAt(
+                input.profile,
+                input.origin,
+                seed,
+                metres,
+                0,
+                input.landClass ?? NO_LAND_CLASS,
+              ) + NEARBY_STREET_LIFT_METRES,
           ),
         }),
     // #2972: the corridor's mapped footways drawn as surfaces round the camera,

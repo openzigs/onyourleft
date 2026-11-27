@@ -36,11 +36,16 @@
  * world's are (`street-names.ts` §`streetNamesInView`, one draw call for all
  * of them). **Only where the whole name fits**: inside its street's stretch,
  * and where the road runs straight under it, within
- * {@link STRAIGHT_METRES} of the name's line along its whole length. Where it
- * does not fit, the label moves on along the street until it does, or the
+ * {@link STRAIGHT_METRES} of the name's line along its whole length and
+ * turning no more than {@link STRAIGHT_DEGREES} from it there and
+ * {@link STRAIGHT_MARGIN_METRES} past each end; and never within
+ * {@link ROUTE_STREET_NAME_TURN_CLEAR_METRES} of a turn where the road comes
+ * back along itself (#3261's tablet check). Where it does not fit, the label moves on along the street until it does, or the
  * street ends first and it is not painted. An unnamed street gets nothing, a
  * name the glyph atlas cannot paint whole gets nothing, and nothing invents
- * a name.
+ * a name. Each label carries its route distance, so the scene lays every
+ * letter rigid on the road's own height there, the same on every frame
+ * (`street-names.ts` §`streetNamesInView`).
  *
  * ⚠️ **A street name is map data, not the rider's place** (ADR 0096 D-4, ADR
  * 0100): drawn, never logged, stored by this module, or sent. Nothing here
@@ -87,6 +92,35 @@ const GAP_METRES = 50;
 
 /** How far the drawn road may stray from a label's straight line under it, in metres. */
 const STRAIGHT_METRES = 1;
+
+/**
+ * How far the drawn road's heading may turn from a label's line, in degrees:
+ * **5**, anywhere under the label and {@link STRAIGHT_MARGIN_METRES} either
+ * side of it — the tablet check of 2026-11-26 on PR #3261: a label laid on a
+ * sharp bend was drawn as smeared streaks across both lanes.
+ */
+const STRAIGHT_DEGREES = 5;
+
+const STRAIGHT_COSINE = Math.cos((STRAIGHT_DEGREES * Math.PI) / 180);
+
+/** How far past each end of a label the road must still run straight, in metres. */
+const STRAIGHT_MARGIN_METRES = 10;
+
+/**
+ * How far from a turn where the road comes back along itself no letter of a
+ * label goes, in route metres: **100**. Round such a turn the drawn road is
+ * laid toward the rider's own pass (`terrain.ts` §`retracedRows`), so it is
+ * not where a label placed on the route's line would lie.
+ */
+export const ROUTE_STREET_NAME_TURN_CLEAR_METRES = 100;
+
+/** How much the road must turn to come back along itself, in radians: `terrain.ts`'s 120°. */
+const TURN_RADIANS = (2 * Math.PI) / 3;
+
+/** The chord either side of a point its turn is measured over, in metres. */
+const TURN_WINDOW_METRES = 30;
+
+const TURN_COSINE = Math.cos(TURN_RADIANS);
 
 /** The side of a cell of the named streets' index, in metres. */
 const CELL_METRES = 32;
@@ -239,6 +273,38 @@ function stretchesOf(cells: Map<number, NamedSegment[]>, road: DrawnRoadPoints):
   return stretches;
 }
 
+/**
+ * Where the drawn road turns back along itself, in route metres — a
+ * turnaround, or a hairpin: the road's heading over the
+ * {@link TURN_WINDOW_METRES} before a point and over the same after it are
+ * more than {@link TURN_RADIANS} apart. One distance a turn.
+ */
+function turnsOf(road: DrawnRoadPoints): number[] {
+  const turns: number[] = [];
+  const window = Math.max(1, Math.round(TURN_WINDOW_METRES / road.step));
+  const every = Math.max(1, Math.round(SAMPLE_METRES / road.step));
+  const points = road.points;
+  const last = points.length / 2 - 1;
+  // The run of points turned that far, and the most turned of them: the tip.
+  let tip: { at: number; cosine: number } | undefined;
+  for (let index = window; index + window <= last; index += every) {
+    const bx = (points[index * 2] as number) - (points[(index - window) * 2] as number);
+    const bz = (points[index * 2 + 1] as number) - (points[(index - window) * 2 + 1] as number);
+    const ax = (points[(index + window) * 2] as number) - (points[index * 2] as number);
+    const az = (points[(index + window) * 2 + 1] as number) - (points[index * 2 + 1] as number);
+    const lengths = Math.hypot(bx, bz) * Math.hypot(ax, az);
+    const cosine = lengths > 0 ? (bx * ax + bz * az) / lengths : 1;
+    if (cosine < TURN_COSINE) {
+      if (tip === undefined || cosine < tip.cosine) tip = { at: index * road.step, cosine };
+    } else if (tip !== undefined) {
+      turns.push(tip.at);
+      tip = undefined;
+    }
+  }
+  if (tip !== undefined) turns.push(tip.at);
+  return turns;
+}
+
 /** The drawn road's point `metres` along it. */
 function pointAt(road: DrawnRoadPoints, metres: number): { x: number; z: number } {
   const last = road.points.length / 2 - 1;
@@ -273,6 +339,16 @@ function straightPlace(
     const off = Math.abs((point.x - start.x) * alongZ - (point.z - start.z) * alongX);
     if (off > STRAIGHT_METRES) return undefined;
   }
+  // And no turn of the road's heading under it or just past either end.
+  const reach = half + STRAIGHT_MARGIN_METRES;
+  for (let metres = at - reach; metres < at + reach; metres += road.step) {
+    const from = pointAt(road, metres);
+    const to = pointAt(road, Math.min(at + reach, metres + SAMPLE_METRES));
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const length = Math.hypot(dx, dz);
+    if (length > 0 && (dx * alongX + dz * alongZ) / length < STRAIGHT_COSINE) return undefined;
+  }
   const middle = pointAt(road, at);
   return { x: middle.x, z: middle.z, alongX, alongZ };
 }
@@ -293,16 +369,26 @@ export function routeStreetNameLabels(
   const road = drawnRoadPoints(profile, origin);
   if (road.points.length < 4) return [];
   const labels: StreetNameLabel[] = [];
+  const turns = turnsOf(road);
+  const nearATurn = (at: number, half: number): boolean =>
+    turns.some((turn) => Math.abs(turn - at) < half + ROUTE_STREET_NAME_TURN_CLEAR_METRES);
   for (const stretch of stretchesOf(cells, road)) {
     const half = paintedLength(stretch.name) / 2;
     let at = stretch.from + ROUTE_STREET_NAME_JOIN_METRES + half;
     while (at + half <= stretch.to) {
-      const place = straightPlace(road, at, half);
+      const place = nearATurn(at, half) ? undefined : straightPlace(road, at, half);
       if (place === undefined) {
         at += SAMPLE_METRES;
         continue;
       }
-      labels.push({ key: `route:${String(labels.length)}`, text: stretch.name, ...place });
+      // #3261's tablet check: and where on the route it is, so its letters
+      // are laid on the road's own height there on every frame (`scene.ts`).
+      labels.push({
+        key: `route:${String(labels.length)}`,
+        text: stretch.name,
+        ...place,
+        along: at,
+      });
       at += ROUTE_STREET_NAME_REPEAT_METRES;
     }
   }

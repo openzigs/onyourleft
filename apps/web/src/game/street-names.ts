@@ -128,6 +128,14 @@ export interface StreetNameLabel {
   /** The street's direction at the label, a unit vector in the ground plane. */
   readonly alongX: number;
   readonly alongZ: number;
+  /**
+   * A route ride's label only (#3245, `route-street-names.ts`): the route
+   * distance of its middle, metres, `alongX, alongZ` pointing the way the
+   * route runs. With it each letter is laid rigid on the road's own height
+   * ({@link streetNamesInView}'s `heightAlong`), not on the ground under its
+   * corners.
+   */
+  readonly along?: number | undefined;
 }
 
 /** How long `text` is painted, metres. */
@@ -243,6 +251,14 @@ export function streetNamesInView(
   rider: { readonly x: number; readonly z: number },
   riderMetres: number,
   heightAt: (x: number, z: number) => number | undefined,
+  /**
+   * The road's height at a route distance — #3261's tablet check. A label
+   * with {@link StreetNameLabel.along} is laid on it: every letter a rigid
+   * rectangle, level across the road and tilted only with its grade, at the
+   * same place on every frame. Without it, or for a label with no `along`
+   * (an open-world street's), each corner stands on `heightAt`.
+   */
+  heightAlong?: (metres: number) => number,
 ): StreetNamesInView {
   if (labels.length === 0) return NO_STREET_NAMES;
   const at = Math.floor(riderMetres / STREET_NAME_REFRESH_METRES);
@@ -265,9 +281,14 @@ export function streetNamesInView(
     if (y === undefined) continue;
     // The letters' tops away from the rider: `up` across the street, the
     // reading direction a quarter turn from it (`x` is WEST: east is −x).
+    // #3261's tablet check: a route ride's label always away from a rider
+    // keeping right on the way the route runs, so it is never turned over
+    // as the rider passes it or moves across the road.
     let upX = -label.alongZ;
     let upZ = label.alongX;
-    if (upX * (label.x - rider.x) + upZ * (label.z - rider.z) < 0) {
+    if (
+      label.along === undefined ? upX * (label.x - rider.x) + upZ * (label.z - rider.z) < 0 : true
+    ) {
       upX = -upX;
       upZ = -upZ;
     }
@@ -276,9 +297,31 @@ export function streetNamesInView(
     const width = STREET_NAME_GLYPH_ADVANCE_METRES;
     const height = STREET_NAME_GLYPH_HEIGHT_METRES;
     const start = -paintedLength(label.text) / 2;
+    // Which way the name reads along the route: +1 the way the route runs.
+    const reads = readX * label.alongX + readZ * label.alongZ < 0 ? -1 : 1;
+    const along = label.along;
     for (const [index, letter] of letters.entries()) {
       const cell = glyphCell(letter) as number;
       const from = start + index * width;
+      if (along !== undefined && heightAlong !== undefined) {
+        // Rigid: each edge across the road at one height, the road's there.
+        const back = heightAlong(along + reads * from) + STREET_NAME_LIFT_METRES;
+        const front = heightAlong(along + reads * (from + width)) + STREET_NAME_LIFT_METRES;
+        for (const [offset, up, level] of [
+          [from, -height / 2, back],
+          [from + width, -height / 2, front],
+          [from + width, height / 2, front],
+          [from, height / 2, back],
+        ] as const) {
+          corners.push(
+            label.x + readX * offset + upX * up,
+            level,
+            label.z + readZ * offset + upZ * up,
+          );
+        }
+        cells.push(cell);
+        continue;
+      }
       const base = (offset: number, up: number): [number, number] => [
         label.x + readX * offset + upX * up,
         label.z + readZ * offset + upZ * up,
