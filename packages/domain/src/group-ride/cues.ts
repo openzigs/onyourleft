@@ -474,7 +474,9 @@ export function stepCues(state: CueState, view: CueView): CueStep {
     role,
     phase,
     climbing,
-    lastWheelSaid: role === 'drifting-back' ? state.lastWheelSaid : false,
+    // A detected last-wheel is said or queued: either way it is not detected again this drift.
+    lastWheelSaid:
+      role === 'drifting-back' ? state.lastWheelSaid || detected.includes('last-wheel') : false,
     pullWatts,
     shorterPullDue,
     outSinceMs,
@@ -486,11 +488,7 @@ export function stepCues(state: CueState, view: CueView): CueStep {
   const [first, ...rest] = fresh;
   if (first !== undefined) {
     return {
-      state: {
-        ...base,
-        pending: rest,
-        lastWheelSaid: base.lastWheelSaid || first.kind === 'last-wheel',
-      },
+      state: { ...base, pending: rest },
       cue: { family: 'event', kind: first.kind },
       mark: null,
     };

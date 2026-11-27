@@ -132,6 +132,23 @@ describe('one scripted rotation with a clean rider: each event once, in order', 
   });
 });
 
+describe('each event once, on a clean rotation of any short line', () => {
+  it.each([2, 3, 4])('a line of %i members: no event kind is said twice in a row', (size) => {
+    const others = [bot('b1'), bot('b2'), bot('b3')].slice(0, size - 1);
+    const line: readonly LineMember[] = [others[0] as LineMember, RIDER, ...others.slice(1)];
+    const { said } = cuesOver(ride({ line, rider: CLEAN }));
+    const spoken = kinds(said);
+    expect(spoken).toContain('last-wheel');
+    spoken.forEach((kind, at) => {
+      if (kind !== 'ease' && kind !== 'last-wheel') return;
+      expect(spoken[at + 1]).not.toBe(kind);
+    });
+    expect(spoken.filter((kind) => kind === 'last-wheel').length).toBe(
+      spoken.filter((kind) => kind === 'ease').length,
+    );
+  });
+});
+
 describe('the next rotation cues the same events again', () => {
   it('each event once more, in the same order, on the rider’s second pull', () => {
     const { said } = cuesOver(ride({ rider: CLEAN, seconds: 450 }));
