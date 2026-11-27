@@ -101,7 +101,7 @@ import {
   type ParkLook,
 } from './land-class';
 import { terrainHeightAt } from './landform';
-import { sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
+import { routeOf, sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
 import { distanceToDrawnRoad } from './road-grid';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import { inWater, waterways } from './waterways';
@@ -901,9 +901,12 @@ const SEED_COORDINATE_SCALE = 1e5;
  * ⚠️ **An open-world view's is the ride's** (#3055, `scenery-anchor.ts`): a
  * view is a new profile, of a new length, after every change, and seeding
  * from it regenerated the world on each.
+ *
+ * #3336: and a route drawn past its end seeds as the route, or its scenery
+ * would all be placed afresh as the frame began to draw the extension.
  */
 export function scatterSeed(profile: RouteProfile): number {
-  return sceneryAnchor(profile)?.seed ?? routeSeed(profile);
+  return sceneryAnchor(profile)?.seed ?? routeSeed(routeOf(profile));
 }
 
 /**
