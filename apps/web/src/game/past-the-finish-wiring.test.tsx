@@ -38,6 +38,7 @@ import type { GameRenderer, SceneFrame } from './port';
 import { circuitRoute } from './route-fixtures-testing';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import type { CorridorPoint } from './terrain';
+import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 
 /** 400 m north from 0° 0°, level: short, so a ride at 1× reaches its end in a test. */
 function shortRoute(): RidableRoute {
@@ -161,11 +162,12 @@ async function pumpUntil(until: () => boolean, most: number): Promise<void> {
   await settle();
 }
 
-async function open(hash: string, port: GamePort): Promise<void> {
+async function open(hash: string, port: GamePort, trainer?: GameTrainerPort): Promise<void> {
   globalThis.location.hash = hash;
   mounted = await mount(
     <GameView
       port={port}
+      trainer={trainer}
       renderer={() => Promise.resolve(capturingRenderer(drawn))}
       now={() => nowMs}
     />,
@@ -174,8 +176,12 @@ async function open(hash: string, port: GamePort): Promise<void> {
 }
 
 /** An ordinary ride, or the address switch's simulated one, from Ride. */
-async function rideFromRide(hash: string, port: GamePort): Promise<void> {
-  await open(hash, port);
+async function rideFromRide(
+  hash: string,
+  port: GamePort,
+  trainer?: GameTrainerPort,
+): Promise<void> {
+  await open(hash, port, trainer);
   await clickThrough(buttonStarting('Ride '));
 }
 
@@ -192,6 +198,27 @@ async function rideAPreview(speedup: 1 | 2 | 4 | 8): Promise<void> {
   await clickThrough(choice);
   await clickThrough(buttonStarting('Preview '));
   for (let index = 0; index < 5; index += 1) await settle();
+}
+
+/** What the HUD's one live region says. */
+function hudRegion(): string {
+  return document.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+}
+
+/** A trainer port with a savable recording under the ride, so the question can discard. */
+function recordingTrainer(): GameTrainerPort {
+  return {
+    readTrainer: () => NO_GAME_TRAINER,
+    askForControlOnRide: () => Promise.resolve(),
+    workoutRescue: () => undefined,
+    recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
+    rideRecording: () => ({ savable: true }),
+    saveRideRecording: () => Promise.resolve(),
+    discardRideRecording: () => Promise.resolve(true),
+  };
 }
 
 /** The end-of-ride question on screen, or `null`. */
@@ -241,6 +268,8 @@ async function expectTheFinish(): Promise<void> {
   expect(answersOffered()).toEqual([END_RIDE_TEXT.keep, END_RIDE_TEXT.end]);
   // Opened by the line, not a press: focus was not moved into it.
   expect(question()?.contains(document.activeElement)).toBe(false);
+  // …so the HUD's one live region is the only thing that says it appeared.
+  expect(hudRegion()).toBe(`${END_RIDE_TEXT.finishLabel} ${END_RIDE_TEXT.askNotRecorded}`);
   // …and the ride rode on into a world.
   expectAWorldPastTheEnd(50);
 }
@@ -295,5 +324,20 @@ describe('a ride past a point-to-point route’s end — #3336', () => {
     await pumpUntil(() => furthest() >= lap + 60, 400);
     expect(furthest()).toBeGreaterThanOrEqual(lap + 60);
     expect(question()).toBeNull();
+  });
+
+  it('never resets a question the rider already has open: the Discard step stays when the line is crossed', async () => {
+    await rideFromRide('#/game', gamePort(PEDALLING), recordingTrainer());
+    await pumpUntil(() => furthest() >= END - 60, 400);
+    expect(furthest()).toBeLessThan(END);
+    // Short of the line, the rider opens End ride, and goes on to Discard.
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(mounted?.container ?? document, 'Discard ride'));
+    expect(question()?.getAttribute('data-oyl-end-ride')).toBe('discard');
+    // …and the ride, which asking changed nothing of, crosses the line.
+    await pumpUntil(() => furthest() >= END + 60, 400);
+    expect(furthest()).toBeGreaterThanOrEqual(END + 60);
+    expect(question()?.getAttribute('data-oyl-end-ride')).toBe('discard');
+    expect(question()?.getAttribute('aria-label')).toBe(END_RIDE_TEXT.discardLabel);
   });
 });
