@@ -436,6 +436,8 @@ describe('people on both verges, where a ride asks — #2969, through `sceneFram
   it('lays both verges the whole road long, at the verge’s density, and none with the rule broken', () => {
     const lines = vergeWalks(FARMLAND, ORIGIN, road);
     expect(vergeWalks(FARMLAND, ORIGIN, road)).toBe(lines);
+    // GameView asks with a fresh, equal origin every frame: still a hit.
+    expect(vergeWalks(FARMLAND, corridorOrigin(FARMLAND), road)).toBe(lines);
     const length = lines.reduce((sum, line) => sum + line.length, 0);
     // Two verges of a 6 km road, less what the rule breaks off at a bend.
     expect(length).toBeGreaterThan(2 * 0.9 * FARMLAND.totalDistance);

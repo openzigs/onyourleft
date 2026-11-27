@@ -583,7 +583,12 @@ export function vergeWalks(
   rule = true,
 ): readonly WalkLine[] {
   const cached = vergeLines.get(profile) ?? [];
-  const found = cached.find((entry) => entry.origin === origin && entry.rule === rule);
+  const found = cached.find(
+    (entry) =>
+      entry.origin.latitude === origin.latitude &&
+      entry.origin.longitude === origin.longitude &&
+      entry.rule === rule,
+  );
   if (found !== undefined) return found.lines;
   const { points } = drawnRoadPoints(profile, origin);
   const count = points.length / 2;
