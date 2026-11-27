@@ -65,6 +65,7 @@ import {
 import type { PrivacyZoneRecord, WorldCorridorTileState } from '@onyourleft/store';
 
 import { TRIM_JITTER_FRACTION } from '../../detail/privacy';
+import { paintable } from '../street-names';
 import type { CorridorOrigin } from '../terrain';
 import { withoutTileCopies } from './tile-copies';
 
@@ -107,8 +108,11 @@ export const READ_TIMEOUT_MS = 120_000;
  * #2974's, #2975's and #2688's, and there is no Dexie schema change. #2974
  * changed no packed field, so the packed version stayed 6 at reader 7; #2975
  * adds one, so it is 7 at reader 8; #2688 adds another, so it is 8 at reader 9.
+ * **10** since #3245 (ADR 0100, proposed), which keeps a street's name a
+ * version-9 record never decoded, so a route kept before it gains its names on
+ * its next read; the packed version is 9 at reader 10.
  */
-export const CORRIDOR_READER_VERSION = 9;
+export const CORRIDOR_READER_VERSION = 10;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -119,6 +123,17 @@ export type CorridorState =
   | { readonly kind: 'reading'; readonly done: number; readonly of: number }
   | { readonly kind: 'ready'; readonly corridor: WorldCorridor }
   | { readonly kind: 'unavailable'; readonly why: 'offline' | 'outside-coverage' | 'refused' };
+
+/**
+ * A corridor's street — #3245, ADR 0100 (proposed): a {@link StreetFeature}
+ * and, where the tile named it and the glyph atlas can paint it
+ * (`street-names.ts` §`paintable`), its mapped `name`. What a route ride
+ * paints along the street the route is on (`route-street-names.ts`). Absent
+ * otherwise, never `''`. Never logged, sent or exported (ADR 0054 D-3.5).
+ */
+export interface CorridorStreet extends StreetFeature {
+  readonly name?: string;
+}
 
 /** One route's map features, in the corridor frame the world is drawn in. */
 export interface WorldCorridor {
@@ -137,8 +152,11 @@ export interface WorldCorridor {
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
-  /** #1565: the streets the cross streets are found from (`cross-streets.ts`). */
-  readonly streets: readonly StreetFeature[];
+  /**
+   * #1565: the streets the cross streets are found from (`cross-streets.ts`).
+   * #3245: and the names a route ride paints, where a street carries one.
+   */
+  readonly streets: readonly CorridorStreet[];
   /**
    * #1632: the place points, read only by `urban-class.ts` as a prior
    * (ADR 0055 D-5). Never shown, and never named: a point holds a kind, a
@@ -373,7 +391,7 @@ export interface CorridorFeatures {
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
-  readonly streets: readonly StreetFeature[];
+  readonly streets: readonly CorridorStreet[];
   readonly places: readonly PlaceFeature[];
   /**
    * #2659: the rivers, streams and canals. Optional, so that features built by
@@ -445,7 +463,9 @@ export interface CorridorReadOptions {
   readonly mustStop?: (() => boolean) | undefined;
   /**
    * #3052, ADR 0096: decode each street's mapped name onto it. The open
-   * world's area reader asks for it; nothing else does (ADR 0054 D-2.2).
+   * world's area reader asks for it, and since #3245 (ADR 0100, proposed) a
+   * route's corridor read (`world-data/corridor-port.ts`). The demo's bake
+   * does not, so the published bundle carries no name.
    */
   readonly streetNames?: boolean | undefined;
   /** Test seams for the two timeouts. */
@@ -575,7 +595,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     const landUse: LandUseFeature[] = [];
     const buildings: BuildingFeature[] = [];
     const paths: PathFeature[] = [];
-    const streets: StreetFeature[] = [];
+    const streets: CorridorStreet[] = [];
     const places: PlaceFeature[] = [];
     const waterLines: WaterLineFeature[] = [];
     const rails: RailFeature[] = [];
@@ -618,9 +638,10 @@ const PACK_SCALE = 100;
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
  * added the water lines, 6 since #2660 added the railway lines, 7 since #2975
- * added a footprint's POI class, 8 since #2688 added a pitch's sport.
+ * added a footprint's POI class, 8 since #2688 added a pitch's sport, 9 since
+ * #3245 added a street's name.
  */
-const PACKED_VERSION = 8;
+const PACKED_VERSION = 9;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -684,6 +705,30 @@ function buildingFieldsOfPacked(
 }
 
 /**
+ * The most characters of a street's name that are kept: **48**, the decoder's
+ * own bound (`@onyourleft/map-features` §`STREET_NAME_MAX_CHARS`).
+ */
+const STREET_NAME_KEPT_CHARS = 48;
+
+/**
+ * #3245, ADR 0100: a street's name as packed and as read back — a string the
+ * glyph atlas can paint whole (`street-names.ts` §`paintable`, which holds no
+ * control, bidirectional or zero-width character) of 1 to
+ * {@link STREET_NAME_KEPT_CHARS} characters, trimmed — or nothing. A name the
+ * atlas cannot paint is never drawn on a route ride, so it is not kept.
+ */
+function keptStreetName<Key extends 'n' | 'name'>(
+  key: Key,
+  name: unknown,
+): Partial<Record<Key, string>> {
+  if (typeof name !== 'string') return {};
+  const text = name.trim();
+  const length = Array.from(text).length;
+  if (length === 0 || length > STREET_NAME_KEPT_CHARS || !paintable(text)) return {};
+  return { [key]: text } as Partial<Record<Key, string>>;
+}
+
+/**
  * #2975: a footprint's POI class from its packed `p`, as the decoder's own
  * constant, or nothing — so a blob edited on the device cannot put another
  * string into the plan.
@@ -716,8 +761,19 @@ interface PackedFeatures {
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
-  /** `g` is the street's grade (#1565); a record without one is read as at grade. */
-  readonly streets: readonly { kind: string; detail: string; g?: StreetGrade; line: number[] }[];
+  /**
+   * `g` is the street's grade (#1565); a record without one is read as at grade.
+   * `n` is its name (#3245, ADR 0100), absent where it has none the atlas can
+   * paint, so a corridor read with no names packs as it did at version 8 but
+   * for its `v`.
+   */
+  readonly streets: readonly {
+    kind: string;
+    detail: string;
+    g?: StreetGrade;
+    n?: string;
+    line: number[];
+  }[];
   /** #1632: a place's kind, detail, rank and point (`x`, `z` in centimetres). */
   readonly places: readonly {
     kind: PlaceFeature['kind'];
@@ -831,6 +887,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
       kind: f.kind,
       detail: f.kindDetail,
       g: f.grade,
+      ...keptStreetName('n', f.name),
       line: toInts(f.line),
     })),
     places: features.places.map((f) => ({
@@ -906,6 +963,9 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       kind: f.kind,
       kindDetail: f.detail,
       grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
+      // #3245: held to the packing rule again, so a blob edited on the device
+      // cannot put another string on the road.
+      ...keptStreetName('name', f.n),
       line: fromInts(f.line),
     })),
     places: packed.places.map((f) => ({

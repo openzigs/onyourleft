@@ -26,6 +26,9 @@ import {
   type PlaceFeature,
 } from '@onyourleft/map-features';
 import {
+  EARTH,
+  encodeTile,
+  line,
   BUILDING_FIELDS_DECODED,
   BUILDING_PART_FIELDS_DECODED,
   buildingFieldsTile,
@@ -302,7 +305,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(9);
+    expect(CORRIDOR_READER_VERSION).toBe(10);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
@@ -417,7 +420,7 @@ describe('#2975 POI classes: through the real store and back, with no name or po
     expect(state.corridor.buildings.map((building) => building.poi)).toContain('fuel');
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(kept?.readerVersion).toBe(9);
+    expect(kept?.readerVersion).toBe(10);
   });
 });
 
@@ -455,7 +458,100 @@ describe('#2688 pitches’ sports: a row kept before them read again', () => {
     );
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(kept?.readerVersion).toBe(9);
+    expect(kept?.readerVersion).toBe(10);
+  });
+});
+
+/** An invented name, on a synthetic tile. */
+const STREET_NAME = 'Testname Road';
+
+/**
+ * #3245: a tile of three streets across it — one named, one unnamed, and one
+ * footway named, which no street name is read from.
+ */
+function namedStreetsTile(): Uint8Array {
+  const across = (row: number): number[] =>
+    line([
+      [
+        [100, row],
+        [4000, row],
+      ],
+    ]);
+  return encodeTile([
+    EARTH,
+    {
+      name: 'roads',
+      features: [
+        { type: 2, tags: { kind: 'minor_road', name: STREET_NAME }, geometry: across(600) },
+        { type: 2, tags: { kind: 'minor_road' }, geometry: across(1800) },
+        {
+          type: 2,
+          tags: { kind: 'path', kind_detail: 'footway', name: 'Testpath Walk' },
+          geometry: across(3000),
+        },
+      ],
+    },
+  ]);
+}
+
+describe('#3245 street names: kept on this device with the corridor, and a row from before them read again', () => {
+  const namesOf = (state: CorridorState): (string | undefined)[] => {
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    return state.corridor.streets.map((street) => street.name);
+  };
+
+  it('reads each street’s name, keeps it, and a fresh connection hands the ride the same names', async () => {
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: namedStreetsTile() })),
+      }),
+    );
+    const first = namesOf(await load(portOver(freshStore(), source, on()), route));
+    expect(new Set(first)).toStrictEqual(new Set([STREET_NAME, undefined]));
+    const calls = source.calls.length;
+
+    for (const store of stores) store.close();
+    const second = namesOf(await load(portOver(freshStore(), source, on()), route));
+    // From the store, not the archive: the name was kept.
+    expect(source.calls.length).toBe(calls);
+    expect(second).toStrictEqual(first);
+
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    if (kept === undefined) throw new Error('nothing kept');
+    const text = await new Response(
+      kept.features.stream().pipeThrough(new DecompressionStream('gzip')),
+    ).text();
+    expect(text).toContain(`"n":"${STREET_NAME}"`);
+    // A footway's name is never read.
+    expect(text).not.toContain('Testpath');
+  });
+
+  it('reads again a row kept at reader version 9, whose streets have no names, rather than trusting it', async () => {
+    const route = await savedRoute();
+    const source = countingSource(
+      await buildArchive({
+        tiles: corridorTiles(route.profile).map((tile) => ({ ...tile, bytes: namedStreetsTile() })),
+      }),
+    );
+    await keepRow(
+      route,
+      9,
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    expect(namesOf(state)).toContain(STREET_NAME);
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+    expect(kept?.readerVersion).toBe(10);
   });
 });
 
@@ -541,8 +637,9 @@ describe('#1789 building fields: through the real store and back, and a row with
       route,
       CORRIDOR_READER_VERSION,
       // #2659: 6, since 5 was this reader's own; #2660: 7, since 6 then was;
-      // #2975: 8, since 7 then was; #2688: 9, since 8 now is.
-      await gzipJson({ v: 9, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      // #2975: 8, since 7 then was; #2688: 9, since 8 then was; #3245: 10,
+      // since 9 now is.
+      await gzipJson({ v: 10, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
     );
     const state = await load(portOver(freshStore(), source, on()), route);
     expect(state.kind).toBe('ready');

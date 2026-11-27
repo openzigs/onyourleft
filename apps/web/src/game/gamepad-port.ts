@@ -129,7 +129,7 @@ function isButtonNumber(button: unknown): button is number {
 
 /**
  * The platform's pads, through `host` — `window` in production — and, when
- * `shell` is set (`support/capacitor.ts` §`isNativeShell`), the numbered
+ * `shell` is set (`support/capacitor.ts` §`isAndroidShell`), the numbered
  * buttons the Android shell forwards, in slot 0.
  */
 export function navigatorGamepads(host: GamepadHost, shell = false): GamepadPort {

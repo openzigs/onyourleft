@@ -1599,6 +1599,32 @@ mkdir -p "${fixture_root}/apps/mobile"
 printf 'binary\n' > "${fixture_root}/apps/mobile/service-account.p12"
 assert_violation "a committed .p12 is rejected" REL001 "service-account.p12"
 
+# iOS signing material (#1761). A provisioning profile and the distribution
+# certificate are both binary DER with no banner, so only the name half can see
+# them; #1778 keeps both in repository secrets.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios/App"
+printf 'binary\n' > "${fixture_root}/apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision"
+assert_violation "a committed .mobileprovision is rejected" REL001 \
+  "apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios"
+printf 'binary\n' > "${fixture_root}/apps/mobile/ios/distribution.cer"
+assert_violation "a committed .cer is rejected" REL001 "apps/mobile/ios/distribution.cer"
+
+# An App Store Connect key is a `.p8`, which the name half deliberately does not
+# list: it is a PKCS#8 PEM, and its banner names no algorithm, so it is the
+# content half's `[A-Z ]*` matching nothing that catches it. The banner is
+# assembled at run time from two pieces, so this file gains no PRIVATE KEY block
+# of its own for the content half's self-exemption to have to cover.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/ios"
+printf -- '-----BEGIN %s-----\nAAAA\n-----END %s-----\n' 'PRIVATE KEY' 'PRIVATE KEY' \
+  > "${fixture_root}/apps/mobile/ios/AuthKey_TESTKEY000.p8"
+assert_violation "a committed App Store Connect .p8 key is caught by its content" REL001 \
+  "apps/mobile/ios/AuthKey_TESTKEY000.p8: contains a PRIVATE KEY block"
+
 # The case a name rule cannot catch: a private key pasted into a file whose name
 # says nothing. This is why REL001 has a content half as well as a name half.
 new_fixture
@@ -1657,6 +1683,34 @@ printf 'binary\n' > "${fixture_root}/coverage/tmp/release.jks"
 printf -- '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n' \
   > "${fixture_root}/coverage/tmp/report.json"
 assert_clean "key material inside generated coverage output is pruned"
+
+# --- .gitignore keeps the same names out of `git add` (#1761) ----------------
+#
+# REL001 reports a key that is already in the tree; the ignore rule is what stops
+# `git add -A` staging one in the first place. It is read back through git
+# itself, against this repository's real `.gitignore`, because git is the
+# consumer: a pattern that looks right and that git reads differently is the
+# defect. `--no-index` so a path is judged by the ignore rules alone. The names
+# are REL001's name half, one per alternative.
+repo_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
+for ignored in \
+  apps/mobile/android/app/release.jks \
+  apps/mobile/android/upload.keystore \
+  apps/mobile/android/service-account.p12 \
+  apps/mobile/android/signing.pfx \
+  apps/mobile/android/signing.key \
+  apps/mobile/android/keystore.properties \
+  apps/mobile/android/release-key.jks.base64 \
+  apps/mobile/ios/App/OnYourLeft_AppStore.mobileprovision \
+  apps/mobile/ios/distribution.cer; do
+  if git -C "${repo_root}" check-ignore -q --no-index -- "${ignored}"; then
+    pass=$((pass + 1))
+    printf 'ok   %s\n' ".gitignore ignores ${ignored}"
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n     git check-ignore does not ignore it\n' ".gitignore ignores ${ignored}"
+  fi
+done
 
 # --- REL002: the Android build targets a current API level (#95) -------------
 #
