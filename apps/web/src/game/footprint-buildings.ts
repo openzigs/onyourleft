@@ -5776,6 +5776,8 @@ export function footprintPlans(
           terrace: true,
         },
         { split: options.splitRoofs ?? true, flat: false },
+        // #3334: wrapped in the downtown kit's pieces as a mapped shop is, unless the lever is off.
+        options.facadeKit ?? true,
       ),
     );
   }
@@ -6051,6 +6053,7 @@ function terracePlans(
   kept: readonly FootprintPlan[],
   others: PlanNeighbours,
   roofing: RoofSplitting,
+  facadeKit: boolean,
 ): FootprintPlan[] {
   if (land.bytes === 0) return [];
   const index = footprintIndexOf(kept.flatMap(groundRingsOf));
@@ -6156,6 +6159,9 @@ function terracePlans(
       others,
       party.get(block) ?? NO_PARTY_WALLS,
       roofing,
+      // #3334, the maintainer's ruling on PR #3343: a city centre's own street front is
+      // wrapped too, by the mapped footprints' rule and nothing else of their choices.
+      { ...NO_ARCHETYPE, facadeKit },
     ),
   );
 }

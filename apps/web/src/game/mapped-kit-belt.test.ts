@@ -329,14 +329,50 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
       expect(nearWrapped, String(along)).toBeGreaterThan(MAPPED_KIT_NEAR_MAX);
       expect(selection.kitCount, String(along)).toBe(MAPPED_KIT_NEAR_MAX);
       expect(selection.kitTriangles, String(along)).toBeLessThanOrEqual(MAPPED_KIT_TRIANGLES);
-      // The nearest: no wrapped plan is an extrusion before the last wrap in the walk.
-      expect(firstExtruded, String(along)).toBeGreaterThan(lastWrap);
+      // The nearest of each side: `firstExtruded` may come before the far side's last wrap.
+      expect(lastWrap, String(along)).toBeGreaterThanOrEqual(0);
+      expect(firstExtruded, String(along)).toBeLessThan(selection.count);
       // And every building the frame drew without the kit, it draws with it.
       expect(selection.count, String(along)).toBe(without.count);
       expect(selection.count, String(along)).toBe(MAPPED_BUILDING_MAX);
       expect([...selection.plans.subarray(0, selection.count)]).toEqual([
         ...without.plans.subarray(0, without.count),
       ]);
+    }
+  });
+
+  it('shares the six between the street’s two sides, the nearest of each in turn, though the rider rides on one', () => {
+    // The street's frame at 1 250 m, and the rider 4 m off its middle: every building of the
+    // near side is nearer than the one facing it.
+    const frame = drawnRoadFrame(street.profile, street.origin, 1_250);
+    const next = drawnRoadFrame(street.profile, street.origin, 1_251);
+    if (frame === undefined || next === undefined) throw new Error('no road there');
+    const [dx, dz] = [next.x - frame.x, next.z - frame.z];
+    for (const off of [4, -4]) {
+      const rider = { x: frame.x - dz * off, z: frame.z + dx * off };
+      const selection = select(true, MAPPED_BUILDING_DRAW_CALLS, rider);
+      expect(selection.kitCount).toBe(MAPPED_KIT_NEAR_MAX);
+      const sides = new Map<string, number[]>();
+      const nearest = new Map<string, number>();
+      for (let at = 0; at < selection.count; at += 1) {
+        const plan = plans[selection.plans[at] as number] as FootprintPlan;
+        if (selection.far[at] === 1 || plan.kit === undefined) continue;
+        // Which side of the road it stands on: the sign of its offset across it.
+        const across = (plan.centroid.x - frame.x) * -dz + (plan.centroid.z - frame.z) * dx;
+        const side = across > 0 ? 'one' : 'other';
+        const apart = Math.hypot(plan.centroid.x - rider.x, plan.centroid.z - rider.z);
+        if (selection.kitted[at] === 1) sides.set(side, [...(sides.get(side) ?? []), apart]);
+        // The nearest of its side that is NOT a wrap.
+        else nearest.set(side, Math.min(nearest.get(side) ?? Infinity, apart));
+      }
+      // Three and three, and on each side they are that side's nearest.
+      expect(sides.get('one')?.length, String(off)).toBe(3);
+      expect(sides.get('other')?.length, String(off)).toBe(3);
+      for (const [side, wraps] of sides) {
+        expect(Math.max(...wraps), `${side} ${String(off)}`).toBeLessThanOrEqual(
+          nearest.get(side) ?? Infinity,
+        );
+      }
     }
   });
 

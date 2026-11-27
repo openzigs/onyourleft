@@ -199,10 +199,24 @@ describe('a street planned for each urban class — #3334', () => {
       );
       // Beside any other stretch no plan at all is wrapped.
       if (!modern) expect(plans.every((plan) => plan.kit === undefined)).toBe(true);
-      // ⚠️ A city centre's own lots (#1637), which no footprint was mapped for, are planned
-      // after the mapped ones and are not wrapped: the wrap is a mapped footprint's.
-      expect(plans.length > WRAPPED.length).toBe(urban === 'city-centre');
-      for (const lot of plans.slice(WRAPPED.length)) expect(lot.kit).toBeUndefined();
+      // A city centre's own lots (#1637), which no footprint was mapped for, are planned
+      // after the mapped ones, and since the maintainer's ruling on PR #3343 are wrapped as
+      // a mapped shop is: three storeys a shop, four an office.
+      const lots = plans.slice(WRAPPED.length);
+      expect(lots.length > 0).toBe(urban === 'city-centre');
+      for (const lot of lots) {
+        expect(lot.kit?.kind, String(lot.storeys)).toBe(lot.storeys <= 3 ? 'shop' : 'office');
+        expect(lot.kit?.triangles).toBeLessThanOrEqual(REALISTIC_KIT_WRAP_TRIANGLES);
+      }
+      if (lots.length > 0) {
+        // Each its own: more than one look between them, and none with the lever off.
+        expect(
+          new Set(lots.map((lot) => `${lot.kit?.window ?? ''} ${lot.kit?.cornice ?? ''}`)).size,
+        ).toBeGreaterThan(1);
+        const off = plansOf(urban, { facadeKit: false }).plans.slice(WRAPPED.length);
+        expect(off.length).toBe(lots.length);
+        for (const lot of off) expect(lot.kit).toBeUndefined();
+      }
       // Its storeys are the map's, whatever it is drawn as.
       expect(plans.slice(TERRACE.length, WRAPPED.length).map((plan) => plan.storeys)).toEqual([
         1, 3, 6,

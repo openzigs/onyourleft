@@ -618,6 +618,33 @@ function walkMappedBuildings(
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const landmarks = landmarksAhead(plans, order, inReach);
+  // #3334: which plans may be wraps — the nearest `wraps` near wrapped plans of the walk,
+  // taken from the street's two sides in turn (the maintainer's ruling on PR #3343: nearest
+  // first alone put all six on the rider's side). A side is which way a building's door
+  // faces: with the nearest's, or against it.
+  const kitted: number[] = [];
+  if (wraps > 0) {
+    const sides: [number[], number[]] = [[], []];
+    let facing: readonly [number, number] | undefined;
+    for (let at = 0; at < inReach; at += 1) {
+      const index = order[at] as number;
+      const plan = plans[index] as FootprintPlan;
+      if (plan.kit === undefined) continue;
+      if (Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES) {
+        continue;
+      }
+      facing ??= plan.kit.facing;
+      const alike = plan.kit.facing[0] * facing[0] + plan.kit.facing[1] * facing[1] >= 0;
+      const side = sides[alike ? 0 : 1];
+      if (side.length < wraps) side.push(index);
+    }
+    for (let turn = 0; kitted.length < wraps && turn < wraps; turn += 1) {
+      for (const side of sides) {
+        const index = side[turn];
+        if (index !== undefined && kitted.length < wraps) kitted.push(index);
+      }
+    }
+  }
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   // #1638: past MAPPED_BUILDING_MAX only where a city centre's far-level cap is on.
   const most = Math.min(mappedBuildingCap(buildings), into.plans.length);
@@ -661,8 +688,9 @@ function walkMappedBuildings(
       far ||
       plan.kit === undefined ||
       modelTriangles !== undefined ||
-      // The nearest few only: `wraps` of them, so never more than `MAPPED_KIT_TRIANGLES`.
-      into.kitCount >= wraps ||
+      // The nearest few only, a side of the street in turn: `wraps` of them, so never more
+      // than `MAPPED_KIT_TRIANGLES`.
+      !kitted.includes(index) ||
       (into.kitCount === 0 && into.surfaces.length + (into.modelCount > 0 ? 1 : 0) + 1 > slots)
         ? undefined
         : plan.kit.triangles;

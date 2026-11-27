@@ -30,6 +30,10 @@
  * Every other footprint keeps its extrusion (or its house model): a detached
  * house, a block of flats, a civic or industrial building, a part.
  *
+ * A city centre's own street front (#1637's terraced blocks, which no
+ * footprint was mapped for) is wrapped by the same table since the
+ * maintainer's ruling on PR #3343: they are commercial, three or four storeys.
+ *
  * ## What a building looks like is its own — the look check on PR #3343
  *
  * The first wrap was one brick, one window and flat cards, and read worse
@@ -110,9 +114,9 @@
  *
  * ⚠️ **How many are wraps at once is capped**, since a wrap is some thirty
  * times its extrusion: `mapped-buildings.ts` §`selectMappedBuildings` draws
- * the nearest wrapped plans as wraps up to `MAPPED_KIT_NEAR_MAX` of them and
- * `MAPPED_KIT_TRIANGLES` between them, and every wrapped plan past either as
- * its extrusion. The worst frame is `realistic-budget.ts`' to state.
+ * the nearest wrapped plans as wraps up to `MAPPED_KIT_NEAR_MAX` of them, a
+ * side of the street in turn ({@link KitWrap.facing}), and every wrapped plan
+ * past them as its extrusion. The worst frame is `realistic-budget.ts`' to state.
  *
  * ## A gap, from PR #3343's review, not closed here
  *
@@ -1112,6 +1116,12 @@ export interface KitWrap {
   readonly relief: number;
   /** How many of its street front's bays are, and how many of those are in relief. */
   readonly front: { readonly bays: number; readonly relief: number };
+  /**
+   * Which way its door's wall faces, a unit vector in `x, z`: two buildings
+   * across a street from each other face opposite ways, which is how
+   * `mapped-buildings.ts` shares the frame's wraps between a street's sides.
+   */
+  readonly facing: readonly [number, number];
 }
 
 /** What {@link wrapFootprint} reads of a plan. */
@@ -1567,6 +1577,8 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
     triangles: taken.attempt.triangles - roofTriangles + indices.length / 3,
     relief,
     front: { bays: frontBays, relief: frontRelief },
+    // The wall's outward normal: its piece's +Z, (-az, ax).
+    facing: [-door.az, door.ax],
   };
 }
 

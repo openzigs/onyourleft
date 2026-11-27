@@ -2236,7 +2236,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         some thirty times its extrusion (2 785 against 78 on
                         the terrace fixture), so `selectMappedBuildings`
                         draws only the nearest `MAPPED_KIT_NEAR_MAX` (6) as
-                        wraps, `MAPPED_KIT_TRIANGLES` (18 000) between them,
+                        wraps, a side of the street in turn (by which way
+                        each door faces), `MAPPED_KIT_TRIANGLES` (18 000),
                         out of the pooled 23 040 which is NOT raised, and one
                         wrap fewer wherever a wrap would cost the frame a
                         building or a procedural structure. What they take
@@ -2245,9 +2246,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Drawn at the near level only, as a model is
                         (`FootprintPlan.kit`; its extrusion is its far level
                         and the same height); never where a house model fits
-                        (the brick shop stays), on a part, under a pitched
-                        roof, or on a city centre's own lots (#1637), which
-                        are not mapped footprints. One more draw call for
+                        (the brick shop stays), on a part, or under a pitched
+                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        as a mapped shop is. One more draw call for
                         every wrap in view, counted INSIDE
                         `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
                         the belt writes the wraps after the models in the
@@ -2257,8 +2258,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `realistic-budget.ts` §`REALISTIC_DOWNTOWN_KIT_SURFACES`.
                         The look pair is `town=terrace` against
                         `levers=-facade-kit` (houses to 1 200 m, shops and
-                        offices beyond); `town=city` shows none, its street
-                        front being #1637's lots.
+                        offices beyond), or `town=city-street`, whose street
+                        front is #1637's lots (NOT `town=city`: its front is
+                        procedural house lots, which no wrap reaches).
                         ⚠️ No tablet has drawn it: the frame check and the
                         owner's look are owed
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
