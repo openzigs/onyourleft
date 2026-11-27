@@ -156,6 +156,24 @@ export function readMusicAndMaster(
 }
 
 /**
+ * The effects bus and the master mute as they are stored — #3012: whether the
+ * games' sounds can be heard, asked at the *Ride* press. ⚠️ Reads only, as
+ * {@link readMusicAndMaster} does: an effects bus not stored yet is taken
+ * from `legacy` (its old key) and NOT kept, so starting a ride writes nothing
+ * to the device.
+ */
+export function readEffectsAndMaster(
+  storage: PreferenceStorage | undefined,
+  legacy: () => BusSetting,
+): Pick<AudioMix, 'effects' | 'masterMuted'> {
+  const row = stored(storage);
+  return {
+    effects: storedBus(row['effects']) ?? legacy(),
+    masterMuted: row['masterMuted'] === true,
+  };
+}
+
+/**
  * Keep one bus, leaving the rest as they are stored: a bus not stored yet
  * stays unstored, so the next {@link readAudioMix} still takes it from its old
  * key. `false` when the device refused, so a screen can say so.

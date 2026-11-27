@@ -95,7 +95,7 @@
 
 import { effectsBus, readMenuSoundPreference } from '../shell/menu-sound-preference';
 
-import { readAudioMix, type AudioMix, type BusSetting } from './audio-mix';
+import { readAudioMix, readEffectsAndMaster, type AudioMix, type BusSetting } from './audio-mix';
 import type { CueName, CueOutput } from './audio-port';
 import { cueBus, readCuePreference } from './cue-preference';
 import { deviceStorage, type PreferenceStorage } from './hud/announce-preference';
@@ -505,6 +505,21 @@ export function deviceAudioMix(storage: () => PreferenceStorage | undefined): ()
       effects: effectsBus(readMenuSoundPreference(store)),
       cues: cueBus(readCuePreference(store)),
     }));
+  };
+}
+
+/**
+ * The effects bus and the master mute as this device holds them, read and
+ * never kept — #3012: what `game-effects.ts` asks at the *Ride* press, with
+ * the effects bus taken from its old key (`oyl.menuSounds.v1`) where the mix
+ * has none yet, as {@link deviceAudioMix} takes it.
+ */
+export function deviceEffectsAndMaster(
+  storage: () => PreferenceStorage | undefined,
+): () => Pick<AudioMix, 'effects' | 'masterMuted'> {
+  return () => {
+    const store = storage();
+    return readEffectsAndMaster(store, () => effectsBus(readMenuSoundPreference(store)));
   };
 }
 

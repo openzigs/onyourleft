@@ -239,7 +239,7 @@ import {
   type RecordingOffer,
   type RidableRoute,
 } from './StageChooser';
-import { deviceAudioMix, sharedCueOutput } from './web-audio';
+import { deviceEffectsAndMaster, sharedCueOutput } from './web-audio';
 import { deliverySounds } from './delivery/delivery-sounds';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import {
@@ -3013,7 +3013,7 @@ function GameScreen({
       effectsRef.current?.end();
       effectsRef.current = new GameEffects(
         soundsOut ?? sharedCueOutput(),
-        deviceAudioMix(deviceStorage),
+        deviceEffectsAndMaster(deviceStorage),
       );
       if (deliveryWanted) effectsRef.current.begin();
       ghostRiderRef.current = undefined;

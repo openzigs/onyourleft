@@ -15,7 +15,9 @@
  *
  * The context is made and resumed only inside a press (`web-audio.ts`
  * §"Where the context is created"), so {@link GameEffects.begin} is called
- * from the *Ride* press of a ride that runs a round. It resumes nothing where
+ * from the *Ride* press of a ride that runs a round, and reads the mix there
+ * without keeping it (`web-audio.ts` §`deviceEffectsAndMaster`), so a press
+ * writes nothing to the device. It resumes nothing where
  * the effects bus or the master is muted then: a rider who hears none of
  * these is not made to pay for a running audio thread (#447's reason), and a
  * sound asked for afterwards is dropped rather than scheduled on a suspended
@@ -38,10 +40,10 @@ export const GAME_EFFECT_LEVEL = RIDE_CUE_LEVEL;
 /** One ride's game sounds. */
 export class GameEffects {
   readonly #output: CueOutput;
-  readonly #mix: () => AudioMix;
+  readonly #mix: () => Pick<AudioMix, 'effects' | 'masterMuted'>;
   #begun = false;
 
-  constructor(output: CueOutput, mix: () => AudioMix) {
+  constructor(output: CueOutput, mix: () => Pick<AudioMix, 'effects' | 'masterMuted'>) {
     this.#output = output;
     this.#mix = mix;
   }
