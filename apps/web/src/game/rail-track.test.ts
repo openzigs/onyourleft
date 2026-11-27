@@ -1331,6 +1331,43 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     );
   });
 
+  it.each([
+    [5, 200],
+    [4, 200],
+  ])(
+    'on a %i degree bridge %i m long, the hold keeps the girder over the road past the open span',
+    (degrees, length) => {
+      // Only the hold's share of the lift does this: the lift by distance alone lets a bridge
+      // that crosses at under about 6 degrees sag to 0.6 to 1.3 m under its clearance here.
+      const slope = Math.tan((degrees * Math.PI) / 180);
+      const end = length / 2;
+      const quads = frame(
+        corridorOf([
+          rail(
+            [
+              [site - end, -end * slope],
+              [site + end, end * slope],
+            ],
+            'bridge',
+          ),
+          rail([
+            [site + end, end * slope],
+            [site + end + 200, (end + 200) * slope],
+          ]),
+          rail([
+            [site - end - 200, -(end + 200) * slope],
+            [site - end, -end * slope],
+          ]),
+        ]),
+      );
+      const found = clearancesUnder(quads);
+      expect(found.length).toBeGreaterThan(8);
+      expect(Math.min(...found)).toBeGreaterThan(
+        DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
+      );
+    },
+  );
+
   it('where the line runs beside the road before it crosses on a skew bridge', () => {
     const quads = frame(
       corridorOf([
@@ -1356,41 +1393,51 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
   });
 
   it.each([
-    ['square to the road and ending in it', [-3, 3], 0],
-    ['square to the road and ending at its edge', [-4, 4], 0],
-    ['at an angle, its ends half a metre off the road’s edge', [-4, 4], 16],
-    ['square to the road, its ends a metre off the road’s edge', [-4.5, 4.5], 0],
-    ['at 20 degrees, its ends clear of the road but its abutments’ faces not', [-5.4, 5.4], 15],
-  ] as const)('on a bridge mapped to end by the road, %s: no concrete on it', (_, ends, lean) => {
-    const quads = frame(
-      corridorOf([
-        rail([
-          [site - lean * 10, -200],
-          [site - lean, ends[0]],
-        ]),
-        rail(
-          [
+    ['square to the road and ending in it', [-3, 3], 0, 6],
+    ['square to the road and ending at its edge', [-4, 4], 0, 6],
+    ['at an angle, its ends half a metre off the road’s edge', [-4, 4], 16, 6],
+    ['square to the road, its ends a metre off the road’s edge', [-4.5, 4.5], 0, 6],
+    // Both faces would stand in the road, so neither is drawn: the span ends at the bank's own wall.
+    ['at 20 degrees, its ends clear of the road but its abutments’ faces not', [-5.4, 5.4], 15, 0],
+  ] as const)(
+    'on a bridge mapped to end by the road, %s: no concrete on it',
+    (_, ends, lean, count) => {
+      const quads = frame(
+        corridorOf([
+          rail([
+            [site - lean * 10, -200],
             [site - lean, ends[0]],
+          ]),
+          rail(
+            [
+              [site - lean, ends[0]],
+              [site + lean, ends[1]],
+            ],
+            'bridge',
+          ),
+          rail([
             [site + lean, ends[1]],
-          ],
-          'bridge',
-        ),
-        rail([
-          [site + lean, ends[1]],
-          [site + lean * 10, 200],
+            [site + lean * 10, 200],
+          ]),
         ]),
-      ]),
-    );
-    // Non-vacuity: the bridge is there, over the road.
-    expect(quads.filter(is(DECK_GIRDER)).length).toBeGreaterThan(0);
-    expect(clearancesUnder(quads).length).toBeGreaterThan(0);
-    expect(inTheRoad(quads.filter(is(ABUTMENT)))).toBe(0);
-    // And never two abutments at one end: a face and two wings an end at the most.
-    expect(quads.filter(is(ABUTMENT)).length).toBeLessThanOrEqual(6);
-    for (const tone of [EMBANKMENT_GRASS, PIER_FOOT, PIER_CAP, PIER_CONCRETE]) {
-      expect([tone, inTheRoad(quads.filter(is(tone)))]).toEqual([tone, 0]);
-    }
-  });
+      );
+      // Non-vacuity: the bridge is there, over the road.
+      expect(quads.filter(is(DECK_GIRDER)).length).toBeGreaterThan(0);
+      expect(clearancesUnder(quads).length).toBeGreaterThan(0);
+      expect(inTheRoad(quads.filter(is(ABUTMENT)))).toBe(0);
+      // An abutment is drawn at each end, moved to where the bank starts: a face and two wings an
+      // end, never two abutments at one end. (Not merely "at most": none at all would pass that.)
+      const concrete = quads.filter(is(ABUTMENT));
+      expect(concrete).toHaveLength(count);
+      if (count > 0) {
+        expect(concrete.some((quad) => centre(quad).lateral < 0)).toBe(true);
+        expect(concrete.some((quad) => centre(quad).lateral > 0)).toBe(true);
+      }
+      for (const tone of [EMBANKMENT_GRASS, PIER_FOOT, PIER_CAP, PIER_CONCRETE]) {
+        expect([tone, inTheRoad(quads.filter(is(tone)))]).toEqual([tone, 0]);
+      }
+    },
+  );
 
   it.each([12, 24, 48])(
     'on a %i m bridge, shorter than the open span: an abutment each end',

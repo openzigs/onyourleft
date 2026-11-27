@@ -657,6 +657,12 @@ interface Lifting {
  * corridor: that share of the nearest crossing's whole amplitude, however far
  * along the line it is, so a bridge that crosses at a shallow angle keeps its
  * clearance as far as the road runs under it.
+ *
+ * Known limit: the deck is a straight line between the ground at its span's ends,
+ * lifted by an amount found at the crossing, so the road's own rise under a long
+ * bridge is not followed. At 4 to 5 degrees and about 200 m it holds the clearance;
+ * under about 5 degrees on a bridge of 500 m or more it can sag to 1.7 to 4.6 m
+ * over the road, and at 1 degree it can run under it (measured on the test fixture).
  */
 export function overLift(overs: readonly Lifting[], x: number, z: number, hold = 0): number {
   let lift = 0;
