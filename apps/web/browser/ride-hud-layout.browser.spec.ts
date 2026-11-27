@@ -52,7 +52,13 @@ import {
   type Viewport,
 } from './ride-stage';
 import type { StageMeasurement } from './ride-harness';
-import { applyInsets, PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED, resolvedInsets } from './insets';
+import {
+  applyInsets,
+  NO_INSETS,
+  PIXEL_TABLET_LANDSCAPE_INSETS,
+  PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  resolvedInsets,
+} from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 test.afterAll(releaseSharedPage);
@@ -355,7 +361,7 @@ const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '
 const STRIP_DRAWN = new Set(
   OVERLAY_VIEWPORTS.filter(
     (each) =>
-      (each.width >= 960 && each.height >= 640) ||
+      (each.width >= 960 && each.height >= 768) ||
       (each.width >= 736 && each.width < 816 && each.height >= 1088),
   ).map((each) => each.name),
 );
@@ -747,6 +753,61 @@ test('#2387 a shorter upright tablet, 768×1024, gives the totals strip way', as
   expect(stripPanel(seen)).toBeUndefined();
   expect(seen.givenWay).toContain('the totals strip');
 });
+
+/**
+ * #2417 — a short tablet on its side. 1024×640 is a common 16:10 Android
+ * tablet, and 960×640 the narrowest the landscape rule takes. Under the first
+ * cut of `theme.css` §"THE TOTALS STRIP" (60 rem wide and 40 rem tall) both
+ * drew the strip in two rows 17 px under the leaning rider with no insets, so
+ * a 24 px gesture bar left 1 px and the Pixel Tablet's 32 px put it 7 px over
+ * the rider. Held with no insets and with that tablet's, which lift the
+ * bottom row towards the rider: the strip is either not drawn, and said so,
+ * or drawn at least {@link STRIP_RIDER_CLEARANCE_PIXELS} under the rider: 1024×704
+ * (44 rem) measured 6 px with the inset, so the rule's edge is 48 rem. Just
+ * under that edge, 1024×752, it is not drawn; at it, 1024×768, it is.
+ */
+const STRIP_RIDER_CLEARANCE_PIXELS = 8;
+
+for (const viewport of [
+  { name: 'a short tablet on its side — 1024×640', width: 1024, height: 640, unstagedFails: true },
+  { name: 'a short tablet on its side — 960×640', width: 960, height: 640, unstagedFails: true },
+  {
+    name: 'just under the strip’s height — 1024×752',
+    width: 1024,
+    height: 752,
+    unstagedFails: true,
+  },
+  { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
+] satisfies Viewport[]) {
+  for (const [how, insets] of [
+    ['no insets', NO_INSETS],
+    ['the Pixel Tablet’s insets', PIXEL_TABLET_LANDSCAPE_INSETS],
+  ] as const) {
+    test(`#2417 ${viewport.name}, ${how}: the totals strip clears the rider or is not drawn`, async ({
+      page,
+    }) => {
+      // Its own page: the insets are the engine's, told before any layout.
+      await applyInsets(page, insets);
+      await openRide(page, viewport, '?totals=strip');
+      expect(await resolvedInsets(page)).toEqual(insets);
+      const seen = await measure(page);
+      const strip = stripPanel(seen);
+      const rider = riderBox(viewport);
+      console.log(
+        `#2417 ${viewport.name} ${how}: strip ${strip === undefined ? 'not drawn' : `${String(Math.round(strip.box.top - rider.bottom))} px under the rider`}; faults ${sizeFaults(seen, viewport).faults.join(' | ')}`,
+      );
+      if (viewport.height < 768) {
+        expect(strip).toBeUndefined();
+        expect(seen.givenWay).toContain('the totals strip');
+        return;
+      }
+      expect(strip).toBeDefined();
+      if (strip === undefined) return;
+      expect(strip.box.top - rider.bottom).toBeGreaterThanOrEqual(STRIP_RIDER_CLEARANCE_PIXELS);
+      expect(await stripCellFaults(page)).toEqual([]);
+    });
+  }
+}
 
 for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
   test(`#2387 ${mode} draws no totals strip with the strip chosen`, async ({ browser }) => {
