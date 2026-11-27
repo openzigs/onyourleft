@@ -48,7 +48,7 @@ import { Gamepad2 } from 'lucide-react';
 import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { navigatorGamepads, type GamepadPort } from '../game/gamepad-port';
-import { isNativeShell, platformCapacitor } from '../support/capacitor';
+import { isAndroidShell, platformCapacitor } from '../support/capacitor';
 
 import {
   connectionChange,
@@ -99,7 +99,7 @@ export function GamepadControllers({ pads }: GamepadControllersProps): JSX.Eleme
     padsRef.current = pads;
   });
   useEffect(() => {
-    const platform = navigatorGamepads(window, isNativeShell(platformCapacitor()));
+    const platform = navigatorGamepads(window, isAndroidShell(platformCapacitor()));
     let frame: number | undefined;
     let held = NOTHING_HELD;
     let shown: readonly ListedPad[] | undefined;

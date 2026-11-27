@@ -25,13 +25,20 @@ It has the same authority as the root file. Where the text below says "this file
   #3245's street names on a saved-route ride; the 0099 paragraph below said 0100 was free, and
   that was stale. 0098 is still claimed by the open pull request #2966. The next free number is
   **0102**.
+  ⚠️ **0057 is [ADR 0057](../adr/0057-store-fees-the-publisher-pays-are-outside-adr-0036-d-7.md)**,
+  taken by [#1748](https://github.com/openzigs/onyourleft/issues/1748) on 2026-11-26. It says that
+  store fees the publisher pays are outside ADR 0036 D-7. It was **Proposed**, and the owner
+  **accepted** it as written the same day on #3330, its D-3 list and the `CLAUDE.md` §1 qualifier. It took the number reserved for
+  it on #15 on 2026-10-27, which every entry below kept as claimed. **0058 stays claimed** by
+  [#1752](https://github.com/openzigs/onyourleft/issues/1752). ADR 0036 gained one dated
+  `## Amendments` pointer. The next free number is still the one the 0101 entry above states.
   ⚠️ **0058 is [ADR 0058](../adr/0058-on-ios-the-camera-screens-detect-screen-capture-and-blank-the-picture.md)**,
   taken by [#1752](https://github.com/openzigs/onyourleft/issues/1752) on 2026-11-26 for the iOS
   counterpart of ADR 0044 D-12: the camera screens detect screen capture and blank the picture. It
   was **Proposed**, and the owner **accepted** it the same day on #3316, with its rider wording and
   every recommendation (the app-switcher cover included). It took the number
-  reserved for it on #15 on 2026-10-27, which every entry below kept as claimed. **0057 stays
-  claimed** by [#1748](https://github.com/openzigs/onyourleft/issues/1748). ADR 0044 gained one
+  reserved for it on #15 on 2026-10-27, which every entry below kept as claimed. 0057 is ADR 0057
+  ([#1748](https://github.com/openzigs/onyourleft/issues/1748), the entry above). ADR 0044 gained one
   dated `## Amendments` pointer. The next free number is still the one the 0101 entry above states.
   ⚠️ **0099 is [ADR 0099](../adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)**,
   taken by [#3250](https://github.com/openzigs/onyourleft/issues/3250) on 2026-11-26 for the model
@@ -41,7 +48,14 @@ It has the same authority as the root file. Where the text below says "this file
   0022 was not amended, because its D-1 was already superseded on 2026-09-21. It took 0099 because **0098 is claimed** by the open pull request
   [#2966](https://github.com/openzigs/onyourleft/pull/2966), which adds an ADR numbered 0098 on
   the ridden-block cache for #2891; the 0097 paragraph below said 0098 was free, and that was
-  stale. The next free number is **0100**.
+  stale. The next free number was **0100**, which ADR 0100 below took.
+  ⚠️ **0100 is [ADR 0100](../adr/0100-a-saved-route-ride-names-the-street-it-is-on.md)**,
+  taken by [#3245](https://github.com/openzigs/onyourleft/issues/3245) on 2026-11-26 for a saved
+  route ride naming the street it is on, now and then. **Proposed**, pending the owner. It
+  supersedes in part ADR 0096 D-1.2 and ADR 0054 D-2.2, D-3.3 and D-5.7, for the saved route ride
+  only; ADR 0054 and ADR 0096 each gained one dated `## Amendments` pointer. 0098 is claimed by the
+  open pull request #2966, and 0099 is ADR 0099 (#3250). 0101 is ADR 0101, above, so the next
+  free number is **0102**.
   ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,
   taken by [#2734](https://github.com/openzigs/onyourleft/issues/2734) on 2026-11-24 for in-browser
   Valhalla as a routing tier when no instance routes a leg, **Accepted** the same day on the owner's
