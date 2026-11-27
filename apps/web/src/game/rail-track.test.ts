@@ -1527,6 +1527,36 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     },
   );
 
+  it.each([
+    ['x', 0.8, 0],
+    ['z', 0, 0.8],
+  ] as const)(
+    'joins two deck lines whose ends are 0.8 m apart across a 2 m cell boundary in %s',
+    (_, gapX, gapZ) => {
+      // In local metres, about a point on a cell's corner 10 m beside the road at the site.
+      const beside = ringBeside(ROLLING, ORIGIN, [[site, 10]]);
+      const x = Math.round((beside[0] as number) / 2) * 2;
+      const z = Math.round((beside[1] as number) / 2) * 2;
+      const first = Float32Array.from([x - 70, z - 0.4, x - 0.4, z - 0.4]);
+      const second = Float32Array.from([x - 0.4 + gapX, z - 0.4 + gapZ, x + 50, z - 0.4 + gapZ]);
+      // Non-vacuity: the two ends are in different cells along that axis, and the same on the other.
+      const cell = (value: number) => Math.floor(value / 2);
+      expect(cell(first[2] as number) !== cell(second[0] as number)).toBe(gapX > 0);
+      expect(cell(first[3] as number) !== cell(second[1] as number)).toBe(gapZ > 0);
+      const pieces = railTrack(
+        corridorOf([
+          { kindDetail: 'rail', grade: 'bridge', line: first },
+          { kindDetail: 'rail', grade: 'bridge', line: second },
+        ]),
+        ROLLING,
+        ORIGIN,
+      ).pieces;
+      const joins = pieces.map((piece) => piece.deckJoins);
+      expect(joins.some((each) => each?.end === true)).toBe(true);
+      expect(joins.some((each) => each?.start === true)).toBe(true);
+    },
+  );
+
   it('closes the bank’s end in grass where no abutment can stand clear of the road', () => {
     // 30 degrees from the road, 24 m long: its wings would reach the carriageway.
     const lean = 12 * Math.cos(Math.PI / 6);
