@@ -572,20 +572,38 @@ export function railTrack(
         oversOf.set(group, overs);
       }
     }
-    const decks = rails.filter((rail) => rail.grade === 'bridge');
-    const meetsDeck = (own: Float32Array, at: number): boolean =>
-      decks.some(
-        (other) =>
-          other.line !== own &&
-          other.line.length >= 4 &&
-          [0, other.line.length - 2].some(
-            (end) =>
-              Math.hypot(
-                (other.line[end] as number) - (own[at] as number),
-                (other.line[end + 1] as number) - (own[at + 1] as number),
-              ) <= JOINED_METRES,
-          ),
-      );
+    // Each deck's two end points in a grid of JOINED_METRES cells, so a line asks its own cell
+    // and the eight about it and not every deck there is.
+    const deckEnds = new Map<string, { line: Float32Array; x: number; z: number }[]>();
+    for (const other of rails) {
+      if (other.grade !== 'bridge' || other.line.length < 4) continue;
+      for (const end of [0, other.line.length - 2]) {
+        const x = other.line[end] as number;
+        const z = other.line[end + 1] as number;
+        const key = `${Math.floor(x / JOINED_METRES)},${Math.floor(z / JOINED_METRES)}`;
+        const here = deckEnds.get(key);
+        if (here === undefined) deckEnds.set(key, [{ line: other.line, x, z }]);
+        else here.push({ line: other.line, x, z });
+      }
+    }
+    const meetsDeck = (own: Float32Array, at: number): boolean => {
+      const x = own[at] as number;
+      const z = own[at + 1] as number;
+      const cx = Math.floor(x / JOINED_METRES);
+      const cz = Math.floor(z / JOINED_METRES);
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dz = -1; dz <= 1; dz += 1) {
+          const ends = deckEnds.get(`${cx + dx},${cz + dz}`);
+          if (
+            ends?.some(
+              (end) => end.line !== own && Math.hypot(end.x - x, end.z - z) <= JOINED_METRES,
+            )
+          )
+            return true;
+        }
+      }
+      return false;
+    };
     const deckJoins = (line: Float32Array): { start: boolean; end: boolean } => ({
       start: meetsDeck(line, 0),
       end: meetsDeck(line, line.length - 2),

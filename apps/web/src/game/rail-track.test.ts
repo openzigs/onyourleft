@@ -10,7 +10,7 @@
  * track. Every corridor here is arithmetic beside a synthetic road: no place.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { elevationAt, metres, seconds } from '@onyourleft/domain';
 import type { RailFeature, StreetFeature, StreetGrade } from '@onyourleft/map-features';
@@ -1371,42 +1371,49 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     },
   );
 
-  it.each([
-    [7, 500],
-    [5, 900],
-    [3, 900],
-    [2, 900],
-    [1, 900],
-  ])(
-    'on a %i degree bridge %i m long: clear of the road’s highest point under it, at six sites',
-    (degrees, length) => {
+  // One case a site, not one case of six sites: a 900 m bridge costs about 0.4 s a site, and six
+  // in a case took 2.2 to 3.1 s on the faster runner, which the coverage run's 2x would carry past
+  // Vitest's 5 s (docs/agents/ci.md section 4c).
+  it.each(
+    (
+      [
+        [7, 500],
+        [5, 900],
+        [3, 900],
+        [2, 900],
+        [1, 900],
+      ] as const
+    ).flatMap(([degrees, length]) =>
+      [1_200, 1_900, 2_600, 3_300, 4_000, 4_700].map((at) => [degrees, length, at] as const),
+    ),
+  )(
+    'on a %i degree bridge %i m long, at %i m: clear of the road’s highest point under it',
+    (degrees, length, at) => {
       // The lift is found from the road at every station over the carriageway, not at the
       // crossing alone: found there alone, the girder was 1.7 to 4.6 m over the road at 2 to 7
       // degrees on this fixture, and under it at 1 degree.
       const slope = Math.tan((degrees * Math.PI) / 180);
       const end = length / 2;
-      for (const at of [1_200, 1_900, 2_600, 3_300, 4_000, 4_700]) {
-        const quads = quadsOf(
-          trackOf(
-            frameAt(
-              at - 30,
-              corridorOf([
-                rail(
-                  [
-                    [at - end, -end * slope],
-                    [at + end, end * slope],
-                  ],
-                  'bridge',
-                ),
-              ]),
-            ),
+      const quads = quadsOf(
+        trackOf(
+          frameAt(
+            at - 30,
+            corridorOf([
+              rail(
+                [
+                  [at - end, -end * slope],
+                  [at + end, end * slope],
+                ],
+                'bridge',
+              ),
+            ]),
           ),
-        );
-        const found = clearancesUnder(quads);
-        expect(found.length).toBeGreaterThan(8);
-        expect([at, Math.min(...found) > clearUnder - 0.1]).toEqual([at, true]);
-        expect(inTheRoad(solids(quads))).toBe(0);
-      }
+        ),
+      );
+      const found = clearancesUnder(quads);
+      expect(found.length).toBeGreaterThan(8);
+      expect([at, Math.min(...found) > clearUnder - 0.1]).toEqual([at, true]);
+      expect(inTheRoad(solids(quads))).toBe(0);
     },
   );
 
@@ -1756,6 +1763,67 @@ describe('what the track costs — #3253', () => {
     // The last whole step before the bad coordinate, and not the line's far end.
     expect(Math.max(...zs) - Math.min(...zs)).toBeLessThanOrEqual(101.5);
     expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(96);
+  });
+
+  it.each([0, 0.5, 1, 1.5, 1.9])(
+    'finds a deck joined to another 1.5 m off, with the join %f m into a 2 m cell',
+    (shift) => {
+      // The ends straddle a cell edge for some of these shifts: a join is found across one.
+      const first = rail(
+        [
+          [1_000, 40],
+          [1_100, 40],
+        ],
+        'bridge',
+      );
+      const second = rail(
+        [
+          [1_101.5, 40],
+          [1_200, 40],
+        ],
+        'bridge',
+      );
+      const moved = (feature: RailFeature): RailFeature => ({
+        ...feature,
+        line: feature.line.map((value, at) => (at % 2 === 0 ? value + shift : value)),
+      });
+      const joins = (feature: RailFeature, other: RailFeature) =>
+        railTrack(corridorOf([moved(feature), moved(other)]), ROLLING, ORIGIN).pieces.map(
+          (piece) => piece.deckJoins,
+        );
+      const found = joins(first, second);
+      expect(found.some((join) => join?.end === true)).toBe(true);
+      expect(found.some((join) => join?.start === true)).toBe(true);
+      // Non-vacuity: a gap past JOINED_METRES is no join.
+      const apart: RailFeature = {
+        ...second,
+        line: second.line.map((value, at) => (at % 2 === 0 ? value + 1.5 : value)),
+      };
+      expect(joins(first, apart).some((join) => join?.start === true || join?.end === true)).toBe(
+        false,
+      );
+    },
+  );
+
+  it('asks each deck end about its own neighbourhood, not about every deck mapped', () => {
+    // 1 500 short decks 3 m apart: a scan of all of them for each is millions of
+    // distances, and the grid is a few a deck.
+    const lines = Array.from({ length: 1_500 }, (_, at) =>
+      rail(
+        [
+          [1_000 + at * 3, 40],
+          [1_000 + at * 3 + 2, 40],
+        ],
+        'bridge',
+      ),
+    );
+    const spy = vi.spyOn(Math, 'hypot');
+    try {
+      railTrack(corridorOf(lines), ROLLING, ORIGIN);
+      expect(spy.mock.calls.length).toBeLessThan(lines.length * 100);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('stops reading at RAIL_MAX_METRES, so a hostile tile cannot exhaust memory', () => {
