@@ -939,7 +939,9 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
  * another or over the leaning rider. In a room the pacer, the ghost and the
  * wind give way first under 45 rem tall, and stay in a 1280×720 window; and under 40 rem tall (1024×600), while
  * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
- * FAR AT ARM'S LENGTH").
+ * FAR AT ARM'S LENGTH"). Since #2284 a room with *Report*'s reasons open,
+ * sounds on and a side camera is held at 1024×600 too, where the trainer line
+ * gives way and every control stays on the stage, uncovered.
  */
 /** A room with *Report*'s reasons open, sounds on and a side camera filming. */
 const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
@@ -963,9 +965,10 @@ for (const viewport of LAPTOP_VIEWPORTS) {
     '',
     '?room=following',
     TWO_NOTICES,
-    // A room at its fullest with a side camera's row: `main` itself runs it
-    // off a 1024×600 stage, so it is held where `main` holds it.
-    ...(viewport.height >= 640 ? [SIDE_CAMERA_ROOM] : []),
+    // A room at its fullest with a side camera's row. At 1024×600 the
+    // trainer line gives way to it (#2284, `theme.css` §"A ROOM WITH SOUNDS
+    // ON AND A SIDE CAMERA, IN A WINDOW UNDER 40 REM TALL").
+    SIDE_CAMERA_ROOM,
   ]) {
     const state =
       query === ''
@@ -1012,9 +1015,13 @@ for (const viewport of LAPTOP_VIEWPORTS) {
         const givesWay =
           (query === '?room=following' && roomGivesWay(viewport)) ||
           (query === SIDE_CAMERA_ROOM && viewport.height < 720);
-        expect(clipped, how).toEqual(
-          givesWay ? ['reading: Pacer', 'reading: Your best', 'reading: Wind'] : [],
-        );
+        // #2284: and under 40 rem tall, with a side camera's row and the
+        // sound row in a room, the trainer line too.
+        const trainerLineGivesWay = query === SIDE_CAMERA_ROOM && viewport.height < 640;
+        expect(clipped, how).toEqual([
+          ...(givesWay ? ['reading: Pacer', 'reading: Your best', 'reading: Wind'] : []),
+          ...(trainerLineGivesWay ? ['the trainer line'] : []),
+        ]);
         const lost = seen.items
           .filter((each) => !clipped.includes(each.name))
           .filter((each) => !inside(each.box, viewport) || !each.onTop)
@@ -1034,6 +1041,46 @@ for (const viewport of LAPTOP_VIEWPORTS) {
     });
   }
 }
+
+/**
+ * #2284 — the control for the trainer line's give-way at 1024×600: put back,
+ * in a room with *Report*'s reasons open, sounds on and a side camera, the
+ * actions panel runs off the stage again, as it did on `main`. And with no
+ * side camera, the rule does not apply and the line is drawn.
+ */
+test('#2284 the control — the trainer line put back runs the actions panel off a 1024×600 stage', async ({
+  page,
+}) => {
+  const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
+  await openRide(page, viewport, SIDE_CAMERA_ROOM);
+  await page.addStyleTag({
+    content: `
+      .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer {
+        position: static !important; width: auto !important; height: auto !important;
+        margin: 0 !important; overflow: visible !important; clip-path: none !important;
+        white-space: normal !important;
+      }`,
+  });
+  const seen = await measure(page);
+  expect(named(seen.items, 'the trainer line').box.height, 'the line put back').toBeGreaterThan(10);
+  const notWhole = seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem);
+  console.log(`#2284 — the trainer line back, 1024×600: ${notWhole.join('; ')}`);
+  expect(notWhole.some((each) => each.includes('oyl-hud__actions'))).toBe(true);
+});
+
+test('#2284 with no side camera the trainer line is drawn — 1024×600', async ({ browser }) => {
+  const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
+  const page = await sharedRide(browser, viewport, '?room=report&sounds=on');
+  for (const [how, seen] of await bothWays(page)) {
+    const line = named(seen.items, 'the trainer line');
+    expect(inside(line.box, viewport) && line.onTop, `${how}: ${describeItem(line)}`).toBe(true);
+    expect(line.box.height, how).toBeGreaterThan(10);
+    expect(
+      seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+      how,
+    ).toEqual([]);
+  }
+});
 
 /**
  * PR #2220's review: the 1024×600 rule counts only DRAWN notices. Folding the
