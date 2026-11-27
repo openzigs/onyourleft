@@ -109,6 +109,33 @@ export const STREET_NAME_REFRESH_METRES = 20;
 /** How far above the street's surface a name stands, metres: **0.03**, over the side roads' own lift. */
 export const STREET_NAME_LIFT_METRES = 0.03;
 
+/**
+ * How much longer than its painted size a letter's drawn edge may be before
+ * the letter is not drawn at all: **1.5** times — #3261's second tablet
+ * check, a last guard, so no placement can ever paint a glyph many times its
+ * size across the road.
+ */
+export const STREET_NAME_MAX_STRETCH = 1.5;
+
+/**
+ * How much further along the route than in a straight line a route ride's
+ * label may be from the rider and still be on the rider's own pass, metres:
+ * **30**. #3261's second tablet check: on an out-and-back the way back's
+ * label lies beside the way out, at the way back's recorded height, where
+ * only the way out's road is drawn (`landform.ts` §"A road ridden twice"); so
+ * it floated over the rider, many times its size on the screen. It is drawn
+ * when the rider is on its pass.
+ */
+export const STREET_NAME_PASS_SLACK_METRES = 30;
+
+/** A route ride's road, as its labels are laid on it (@see streetNamesInView). */
+export interface RouteLabelRoad {
+  /** The road's height at a route distance, metres. */
+  readonly heightAt: (metres: number) => number;
+  /** How far apart two route distances are along the route, metres: round a loop's line the short way. */
+  readonly gap: (from: number, to: number) => number;
+}
+
 /** A street as the labels read it: its line in local metres and its mapped name, if any. */
 export interface NamedStreetLine {
   /** Unique per street: a label's key is made from it. */
@@ -234,6 +261,19 @@ export const NO_STREET_NAMES: StreetNamesInView = Object.freeze({
   cells: new Uint16Array(0),
 });
 
+/** Whether a letter's four corners make edges no longer than {@link STREET_NAME_MAX_STRETCH} times its painted size. */
+function paintedSize(quad: readonly number[]): boolean {
+  const edge = (a: number, b: number): number =>
+    Math.hypot(
+      (quad[b * 3] as number) - (quad[a * 3] as number),
+      (quad[b * 3 + 1] as number) - (quad[a * 3 + 1] as number),
+      (quad[b * 3 + 2] as number) - (quad[a * 3 + 2] as number),
+    );
+  const along = STREET_NAME_GLYPH_ADVANCE_METRES * STREET_NAME_MAX_STRETCH;
+  const across = STREET_NAME_GLYPH_HEIGHT_METRES * STREET_NAME_MAX_STRETCH;
+  return edge(0, 1) <= along && edge(3, 2) <= along && edge(0, 3) <= across && edge(1, 2) <= across;
+}
+
 /** The last choice, by labels: reused until the rider moves on. */
 const chosen = new WeakMap<
   readonly StreetNameLabel[],
@@ -252,13 +292,15 @@ export function streetNamesInView(
   riderMetres: number,
   heightAt: (x: number, z: number) => number | undefined,
   /**
-   * The road's height at a route distance — #3261's tablet check. A label
-   * with {@link StreetNameLabel.along} is laid on it: every letter a rigid
-   * rectangle, level across the road and tilted only with its grade, at the
-   * same place on every frame. Without it, or for a label with no `along`
-   * (an open-world street's), each corner stands on `heightAt`.
+   * A route ride's road — #3261's tablet checks. A label with
+   * {@link StreetNameLabel.along} is drawn only while the rider is on its
+   * pass ({@link STREET_NAME_PASS_SLACK_METRES}), and laid on the road's
+   * height there: every letter a rigid rectangle, level across the road and
+   * tilted only with its grade, at the same place on every frame. Without
+   * it, or for a label with no `along` (an open-world street's), each corner
+   * stands on `heightAt`.
    */
-  heightAlong?: (metres: number) => number,
+  route?: RouteLabelRoad,
 ): StreetNamesInView {
   if (labels.length === 0) return NO_STREET_NAMES;
   const at = Math.floor(riderMetres / STREET_NAME_REFRESH_METRES);
@@ -267,7 +309,16 @@ export function streetNamesInView(
   const near: { label: StreetNameLabel; gap: number }[] = [];
   for (const label of labels) {
     const gap = Math.hypot(label.x - rider.x, label.z - rider.z);
-    if (gap <= STREET_NAME_VIEW_METRES) near.push({ label, gap });
+    if (gap > STREET_NAME_VIEW_METRES) continue;
+    // A route label on another pass of the road than the rider's is not drawn.
+    if (
+      label.along !== undefined &&
+      route !== undefined &&
+      route.gap(riderMetres, label.along) > gap + STREET_NAME_PASS_SLACK_METRES
+    ) {
+      continue;
+    }
+    near.push({ label, gap });
   }
   near.sort((a, b) => a.gap - b.gap || (a.label.key < b.label.key ? -1 : 1));
   const drawn: StreetNameLabel[] = [];
@@ -300,44 +351,35 @@ export function streetNamesInView(
     // Which way the name reads along the route: +1 the way the route runs.
     const reads = readX * label.alongX + readZ * label.alongZ < 0 ? -1 : 1;
     const along = label.along;
+    const quad: number[] = [];
+    let any = false;
     for (const [index, letter] of letters.entries()) {
       const cell = glyphCell(letter) as number;
       const from = start + index * width;
-      if (along !== undefined && heightAlong !== undefined) {
-        // Rigid: each edge across the road at one height, the road's there.
-        const back = heightAlong(along + reads * from) + STREET_NAME_LIFT_METRES;
-        const front = heightAlong(along + reads * (from + width)) + STREET_NAME_LIFT_METRES;
-        for (const [offset, up, level] of [
-          [from, -height / 2, back],
-          [from + width, -height / 2, front],
-          [from + width, height / 2, front],
-          [from, height / 2, back],
-        ] as const) {
-          corners.push(
-            label.x + readX * offset + upX * up,
-            level,
-            label.z + readZ * offset + upZ * up,
-          );
-        }
-        cells.push(cell);
-        continue;
-      }
-      const base = (offset: number, up: number): [number, number] => [
-        label.x + readX * offset + upX * up,
-        label.z + readZ * offset + upZ * up,
-      ];
+      quad.length = 0;
       for (const [offset, up] of [
         [from, -height / 2],
         [from + width, -height / 2],
         [from + width, height / 2],
         [from, height / 2],
       ] as const) {
-        const [x, z] = base(offset, up);
-        corners.push(x, (heightAt(x, z) ?? y) + STREET_NAME_LIFT_METRES, z);
+        const x = label.x + readX * offset + upX * up;
+        const z = label.z + readZ * offset + upZ * up;
+        // Rigid on a route ride: each edge across the road at one height,
+        // the road's own there. Otherwise each corner on the ground under it.
+        const level =
+          along !== undefined && route !== undefined
+            ? route.heightAt(along + reads * offset)
+            : (heightAt(x, z) ?? y);
+        quad.push(x, level + STREET_NAME_LIFT_METRES, z);
       }
+      // The last guard: a letter drawn much larger than it is painted is not drawn.
+      if (!paintedSize(quad)) continue;
+      corners.push(...quad);
       cells.push(cell);
+      any = true;
     }
-    drawn.push(label);
+    if (any) drawn.push(label);
   }
   const view: StreetNamesInView =
     drawn.length === 0

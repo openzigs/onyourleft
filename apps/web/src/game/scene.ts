@@ -175,7 +175,7 @@ import {
 } from './nearby-streets';
 import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
 import { junctionSurfacesAt, type JunctionSurface, type TurnedJunction } from './junction-surface';
-import { streetNamesInView, type StreetNameLabel } from './street-names';
+import { streetNamesInView, type RouteLabelRoad, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
@@ -1059,17 +1059,10 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
             (riders[0] as PlacedRider).marker,
             riderDistance,
             streetSurfaceAt(input, seed),
-            // #3261's tablet check: a route ride's labels on the road's own
-            // height at their route distance, as a nearby street stands.
-            (metres) =>
-              terrainHeightAt(
-                input.profile,
-                input.origin,
-                seed,
-                metres,
-                0,
-                input.landClass ?? NO_LAND_CLASS,
-              ) + NEARBY_STREET_LIFT_METRES,
+            // #3261's tablet checks: a route ride's labels drawn on the
+            // rider's own pass only, on the road's own height at their route
+            // distance, as a nearby street stands.
+            routeLabelRoad(input, seed),
           ),
         }),
     // #2972: the corridor's mapped footways drawn as surfaces round the camera,
@@ -2760,6 +2753,22 @@ function drawnRider(input: SceneInput): EasedPlace {
  * (`nearby-streets.ts` §`routeGround`) — #3052's names are painted on it —
  * or `undefined` off the drawn ground.
  */
+/** A route ride's road as its street names are laid on it — #3261. @see RouteLabelRoad */
+function routeLabelRoad(input: SceneInput, seed: number): RouteLabelRoad {
+  const profile = input.profile;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  return {
+    heightAt: (metres) =>
+      terrainHeightAt(profile, input.origin, seed, metres, 0, land) + NEARBY_STREET_LIFT_METRES,
+    // The rider's distance is an odometer, so on a loop it is read round the lap.
+    gap: (from, to) => {
+      if (!profile.loop || !(profile.totalDistance > 0)) return Math.abs(to - from);
+      const apart = Math.abs(to - from) % profile.totalDistance;
+      return Math.min(apart, profile.totalDistance - apart);
+    },
+  };
+}
+
 function streetSurfaceAt(
   input: SceneInput,
   seed: number,
