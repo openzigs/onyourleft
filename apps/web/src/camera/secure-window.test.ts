@@ -6,9 +6,15 @@
  * never cleared on the way to the background.
  */
 
+import { setCapacitorSecureWindow, type SecureWindowPlugin } from '@onyourleft/mobile';
 import { describe, expect, it } from 'vitest';
 
-import { SecureWindow, type Foreground } from './secure-window';
+import {
+  SecureWindow,
+  shellSecureWindowPort,
+  type Foreground,
+  type ShellSecureWindowModule,
+} from './secure-window';
 import { NO_SECURE_WINDOW } from './secure-window-port';
 
 async function flush(): Promise<void> {
@@ -138,5 +144,83 @@ describe('the secure window flag — #1061, ADR 0044 D-12', () => {
 
   it('asks nothing of a browser, which has no flag', async () => {
     await expect(NO_SECURE_WINDOW.setSecureWindow(true)).resolves.toBeUndefined();
+  });
+});
+
+describe('which port the flag is set through — #1755', () => {
+  /** The mobile module as `main.tsx` loads it, with only the plugin scripted. */
+  function shell() {
+    const calls: string[] = [];
+    let loads = 0;
+    let made = 0;
+    const plugin: SecureWindowPlugin = {
+      secure: async () => {
+        calls.push('secure');
+        return Promise.resolve();
+      },
+      clear: async () => {
+        calls.push('clear');
+        return Promise.resolve();
+      },
+    };
+    const mobile: ShellSecureWindowModule = {
+      capacitorSecureWindowPlugin: () => {
+        made += 1;
+        return plugin;
+      },
+      setCapacitorSecureWindow,
+    };
+    return {
+      calls,
+      loads: () => loads,
+      made: () => made,
+      load: async () => {
+        loads += 1;
+        return Promise.resolve(mobile);
+      },
+    };
+  }
+  const always: Foreground = { inForeground: () => true, onForeground: () => () => undefined };
+
+  it('loads nothing and makes no plugin in the iOS app, and a picture sets no flag', async () => {
+    const mobile = shell();
+    const port = await shellSecureWindowPort(
+      { isNativePlatform: () => true, getPlatform: () => 'ios' },
+      mobile.load,
+    );
+    expect(port).toBe(NO_SECURE_WINDOW);
+    // Read back through the flag's owner, as the camera and a ride's snapshots hold it.
+    const owner = new SecureWindow(port, always);
+    const giveBack = owner.hold();
+    await flush();
+    giveBack();
+    await flush();
+    expect(mobile.calls).toEqual([]);
+    expect(mobile.loads()).toBe(0);
+    expect(mobile.made()).toBe(0);
+  });
+
+  it.each([
+    ['a browser', undefined],
+    ['a native shell naming no known platform', { isNativePlatform: () => true }],
+  ])('loads nothing in %s', async (_name, capacitor) => {
+    const mobile = shell();
+    expect(await shellSecureWindowPort(capacitor, mobile.load)).toBe(NO_SECURE_WINDOW);
+    expect(mobile.loads()).toBe(0);
+  });
+
+  it('sets and clears FLAG_SECURE through the plugin in the Android shell', async () => {
+    const mobile = shell();
+    const port = await shellSecureWindowPort(
+      { isNativePlatform: () => true, getPlatform: () => 'android' },
+      mobile.load,
+    );
+    const owner = new SecureWindow(port, always);
+    const giveBack = owner.hold();
+    await flush();
+    giveBack();
+    await flush();
+    expect(mobile.calls).toEqual(['secure', 'clear']);
+    expect(mobile.made()).toBe(1);
   });
 });

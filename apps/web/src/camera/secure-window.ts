@@ -27,7 +27,10 @@
  * [#733](https://github.com/openzigs/onyourleft/issues/733).
  */
 
-import type { SecureWindowPort } from './secure-window-port';
+import type * as Mobile from '@onyourleft/mobile';
+
+import { isAndroidShell, type CapacitorGlobal } from '../support/capacitor';
+import { NO_SECURE_WINDOW, type SecureWindowPort } from './secure-window-port';
 
 /** Whether the app is in the foreground, and when it next comes back to it. */
 export interface Foreground {
@@ -51,6 +54,40 @@ export function documentForeground(): Foreground {
         document.removeEventListener('visibilitychange', heard);
       };
     },
+  };
+}
+
+/**
+ * The two things the flag needs from `@onyourleft/mobile`. The TYPE is named,
+ * which the compiler erases; the functions arrive through `load`, an
+ * `import()`, so a browser downloads no line of Capacitor.
+ */
+export type ShellSecureWindowModule = Pick<
+  typeof Mobile,
+  'capacitorSecureWindowPlugin' | 'setCapacitorSecureWindow'
+>;
+
+/**
+ * The port the tab's one {@link SecureWindow} sets the flag through — #1755.
+ *
+ * `FLAG_SECURE` through `SecureWindowPlugin.java`, registered in
+ * `MainActivity`, in the Android shell only. Everywhere else
+ * {@link NO_SECURE_WINDOW}, with nothing loaded and no plugin made: a browser
+ * cannot stop a screenshot, and the iOS app has no `SecureWindow` plugin, so
+ * its first call would fail inside the bridge. A native shell that names no
+ * known platform is not Android either (`support/capacitor.ts` §`shellKind`).
+ */
+export async function shellSecureWindowPort(
+  capacitor: CapacitorGlobal | undefined,
+  load: () => Promise<ShellSecureWindowModule>,
+): Promise<SecureWindowPort> {
+  if (!isAndroidShell(capacitor)) {
+    return NO_SECURE_WINDOW;
+  }
+  const mobile = await load();
+  const plugin = mobile.capacitorSecureWindowPlugin();
+  return {
+    setSecureWindow: async (secure) => mobile.setCapacitorSecureWindow(plugin, secure),
   };
 }
 
