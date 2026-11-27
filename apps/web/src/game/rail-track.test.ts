@@ -39,8 +39,20 @@ import {
   CROSSBUCK_WHITE,
   CROSSING_PANEL,
   DECK_CLEARANCE_METRES,
+  BALLAST_OVERGROWN,
+  DECK_FLANGE,
   DECK_GIRDER,
   DECK_GIRDER_METRES,
+  DECK_KERB_METRES,
+  DECK_PIER_BATTER,
+  DECK_PIER_CAP_METRES,
+  DECK_PIER_METRES,
+  DECK_PIERS_FROM_CROSSING_METRES,
+  DECK_RAILING,
+  DECK_RAILING_METRES,
+  DECK_SPAN_HALF_METRES,
+  PIER_CAP,
+  PIER_FOOT,
   GATE_RED,
   RAIL_HEAD_WIDTH_METRES,
   RAIL_HEIGHT_METRES,
@@ -89,8 +101,9 @@ const WAYS = waterways(ROLLING, SEED, NO_LAND_CLASS);
 function rail(
   pairs: readonly (readonly [number, number])[],
   grade: StreetGrade = 'ground',
+  kindDetail: RailFeature['kindDetail'] = 'rail',
 ): RailFeature {
-  return { kindDetail: 'rail', grade, line: ringBeside(ROLLING, ORIGIN, pairs) };
+  return { kindDetail, grade, line: ringBeside(ROLLING, ORIGIN, pairs) };
 }
 
 function corridorOf(
@@ -139,6 +152,8 @@ interface Corner {
 
 interface Quad {
   readonly colour: readonly [number, number, number];
+  /** Its last corner's colour: the first's, but on a face shaded from one edge to the other. */
+  readonly shade: readonly [number, number, number];
   readonly corners: readonly Corner[];
 }
 
@@ -168,6 +183,11 @@ function quadsOf(roads: readonly SideRoad[]): Quad[] {
           mesh.colours[first * 3] as number,
           mesh.colours[first * 3 + 1] as number,
           mesh.colours[first * 3 + 2] as number,
+        ],
+        shade: [
+          mesh.colours[first * 3 + 9] as number,
+          mesh.colours[first * 3 + 10] as number,
+          mesh.colours[first * 3 + 11] as number,
         ],
         corners,
       });
@@ -606,78 +626,191 @@ describe('a rail bridge — #3253', () => {
       [at, 200],
     ]),
   ]);
-  const quads = quadsOf(trackOf(frameAt(at - 30, over)));
+  const roads = trackOf(frameAt(at - 30, over));
+  const quads = quadsOf(roads);
   const half = ROAD_WIDTH_METRES / 2;
-
-  it('is a deck over the route carrying the same track, clear of the road, and no level crossing', () => {
-    const girders = quads.filter(is(DECK_GIRDER));
-    expect(girders.length).toBeGreaterThan(0);
-    for (const quad of girders) {
-      expect(Math.max(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeLessThanOrEqual(60.01);
-      expect(span(quad, (c) => c.y)).toBeGreaterThan(DECK_GIRDER_METRES - 0.2);
+  /** A face of the deck's side: upright, along the track, so thin along the road here. */
+  const upright = (quad: Quad): boolean => span(quad, (c) => c.along) < 0.2;
+  const webs = quads.filter(is(DECK_GIRDER));
+  /** How tall an upright face is where it stands: the most two of its corners over one spot differ. */
+  const tall = (quad: Quad): number =>
+    Math.max(
+      ...quad.corners.flatMap((a) =>
+        quad.corners
+          .filter((b) => Math.hypot(a.x - b.x, a.z - b.z) < 0.3)
+          .map((b) => Math.abs(a.y - b.y)),
+      ),
+    );
+  /** The girder's foot at `lateral`: along the lower edge of the web that passes it. */
+  const girderFootAt = (lateral: number): number => {
+    for (const quad of webs) {
+      const low = [...quad.corners].sort((a, b) => a.y - b.y).slice(0, 2) as [Corner, Corner];
+      const [from, to] = low[0].lateral <= low[1].lateral ? low : [low[1], low[0]];
+      if (lateral < from.lateral - 0.01 || lateral > to.lateral + 0.01) continue;
+      const t = (lateral - from.lateral) / (to.lateral - from.lateral);
+      return from.y + (to.y - from.y) * Math.min(1, Math.max(0, t));
     }
+    throw new Error(`no girder at ${String(lateral)}`);
+  };
+
+  it('is an open span over the route carrying the same track, clear of the road, and no level crossing', () => {
     // The same track on it: bed, sleepers and rails over the carriageway.
     const overRoad = (quad: Quad): boolean =>
       quad.corners.some((corner) => Math.abs(corner.lateral) < half);
-    expect(quads.filter((quad) => is(BALLAST)(quad) && overRoad(quad)).length).toBeGreaterThan(0);
+    expect(
+      quads.filter((quad) => is(BALLAST)(quad) && !upright(quad) && overRoad(quad)).length,
+    ).toBeGreaterThan(0);
     expect(quads.filter((quad) => is(SLEEPER)(quad) && overRoad(quad)).length).toBeGreaterThan(5);
-    expect(quads.filter((quad) => is(RAIL_STEEL)(quad) && overRoad(quad)).length).toBe(4);
-    // Nothing of it within the clearance of the road under it.
+    expect(quads.filter((quad) => is(RAIL_STEEL)(quad) && overRoad(quad)).length).toBeGreaterThan(
+      0,
+    );
+    // Nothing of it within the clearance of the road under it: 5.25 m.
+    const clear = DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES;
+    expect(clear).toBeCloseTo(5.25, 6);
     for (const corner of quads.flatMap((quad) => quad.corners)) {
       if (Math.abs(corner.lateral) > half + 2) continue;
-      expect(corner.y - roadAt(corner.along)).toBeGreaterThan(
-        DECK_CLEARANCE_METRES - DECK_GIRDER_METRES - 0.01,
-      );
+      expect(corner.y - roadAt(corner.along)).toBeGreaterThan(clear - 0.01);
     }
     // No crossing: the road's surface is not carried over it and no sign stands.
     expect(quads.filter(is(CROSSING_PANEL))).toEqual([]);
     expect(quads.filter(is(CROSSBUCK_WHITE))).toEqual([]);
   });
 
-  it('stands on piers wherever it is high over the ground, and none in the road', () => {
-    // A pier is under the deck: the walls' concrete, inside the deck's span.
-    const piers = quads.filter(
-      (quad) =>
-        is(TRACK_WALL)(quad) && Math.max(...quad.corners.map((c) => Math.abs(c.lateral))) < 59,
-    );
-    // Two crossed faces a pier, several piers each side of the road.
-    expect(piers.length % 2).toBe(0);
-    expect(piers.length).toBeGreaterThanOrEqual(8);
-    const sides = new Set(piers.map((quad) => Math.sign(centre(quad).lateral)));
-    expect([...sides].sort()).toEqual([-1, 1]);
-    for (const quad of piers) {
-      for (const corner of quad.corners) {
-        expect(Math.abs(corner.lateral)).toBeGreaterThan(half + 1);
-      }
-      const ys = quad.corners.map((corner) => corner.y);
-      const here = centre(quad);
-      // From the ground it stands in…
-      const ground = groundAt(here.along, here.lateral);
-      expect(Math.min(...ys)).toBeLessThan(ground);
-      expect(Math.min(...ys)).toBeGreaterThan(ground - 0.3);
-      // …to the girder it carries: under the deck's crown by the girder's depth.
-      const crown = quads
-        .filter(is(BALLAST))
-        .flatMap((each) => each.corners)
-        .filter((corner) => Math.abs(corner.lateral - here.lateral) < 0.5)
-        .reduce((low, corner) => Math.min(low, corner.y), Infinity);
-      expect(Math.max(...ys)).toBeCloseTo(crown - DECK_GIRDER_METRES, 1);
+  it('is a plate girder with depth: a web each side, a flange under it and stiffeners along it', () => {
+    expect(webs.length).toBeGreaterThan(20);
+    for (const quad of webs) {
+      expect(upright(quad)).toBe(true);
+      // The girder's depth, and only beside the road: the open span.
+      expect(tall(quad)).toBeCloseTo(DECK_GIRDER_METRES, 3);
+      expect(Math.max(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeLessThanOrEqual(
+        DECK_SPAN_HALF_METRES + 0.01,
+      );
+    }
+    // Both sides of the deck.
+    expect(new Set(webs.map((quad) => Math.sign(centre(quad).along - at))).size).toBe(2);
+    const dark = quads.filter(is(DECK_FLANGE));
+    const flanges = dark.filter((quad) => tall(quad) < 0.3);
+    const stiffeners = dark.filter((quad) => tall(quad) >= 0.3);
+    // A flange and a stiffener for every step of web.
+    expect(flanges).toHaveLength(webs.length);
+    expect(stiffeners).toHaveLength(webs.length);
+    for (const quad of flanges) {
+      // Along the girder's foot.
+      const low = [...quad.corners].sort((a, b) => a.y - b.y)[0] as Corner;
+      expect(low.y).toBeCloseTo(girderFootAt(low.lateral), 2);
+      expect(span(quad, (c) => c.lateral)).toBeGreaterThan(3);
+    }
+    for (const quad of stiffeners) {
+      // Narrow, and from the girder's foot up past the deck: the railing's post too.
+      expect(span(quad, (c) => c.lateral)).toBeLessThan(0.2);
+      expect(tall(quad)).toBeCloseTo(
+        DECK_GIRDER_METRES + DECK_KERB_METRES + DECK_RAILING_METRES,
+        1,
+      );
     }
   });
 
-  it('is met by the track joined to it, which climbs to it between walls from the ground', () => {
-    const walls = quads.filter(
-      (quad) =>
-        is(TRACK_WALL)(quad) && Math.max(...quad.corners.map((c) => Math.abs(c.lateral))) >= 59,
-    );
+  it('shows its ballast’s edge over the girder, and a railing over that', () => {
+    const kerbs = quads.filter((quad) => is(BALLAST)(quad) && upright(quad));
+    expect(kerbs).toHaveLength(webs.length);
+    for (const quad of kerbs) {
+      expect(tall(quad)).toBeCloseTo(DECK_KERB_METRES, 3);
+      // It sits on the girder: its foot is the web's top.
+      const foot = [...quad.corners].sort((a, b) => a.y - b.y)[0] as Corner;
+      expect(foot.y - girderFootAt(foot.lateral)).toBeCloseTo(DECK_GIRDER_METRES, 2);
+    }
+    const rails = quads.filter(is(DECK_RAILING));
+    expect(rails).toHaveLength(webs.length);
+    for (const quad of rails) {
+      expect(upright(quad)).toBe(true);
+      const top = [...quad.corners].sort((a, b) => b.y - a.y)[0] as Corner;
+      const over = top.y - girderFootAt(top.lateral) - DECK_GIRDER_METRES - DECK_KERB_METRES;
+      expect(over).toBeGreaterThan(DECK_RAILING_METRES - 0.1);
+      expect(over).toBeLessThan(DECK_RAILING_METRES + 0.1);
+    }
+  });
+
+  it('stands on two capped, battered piers each side of the road, and none in it', () => {
+    const shafts = quads.filter(is(PIER_FOOT));
+    const caps = quads.filter(is(PIER_CAP));
+    // Two crossed faces a shaft and a cap, four piers.
+    expect(shafts).toHaveLength(8);
+    expect(caps).toHaveLength(8);
+    const places = [...new Set(shafts.map((quad) => Math.round(centre(quad).lateral)))];
+    expect(places.sort((a, b) => a - b)).toEqual([
+      -DECK_PIERS_FROM_CROSSING_METRES[1],
+      -DECK_PIERS_FROM_CROSSING_METRES[0],
+      DECK_PIERS_FROM_CROSSING_METRES[0],
+      DECK_PIERS_FROM_CROSSING_METRES[1],
+    ]);
+    /** A face's width at its lower edge and at its upper. */
+    const widths = (quad: Quad): { low: number; high: number; foot: number; top: number } => {
+      const sorted = [...quad.corners].sort((a, b) => a.y - b.y);
+      const wide = (a: Corner, b: Corner) => Math.hypot(a.x - b.x, a.z - b.z);
+      return {
+        low: wide(sorted[0] as Corner, sorted[1] as Corner),
+        high: wide(sorted[2] as Corner, sorted[3] as Corner),
+        foot: (sorted[0] as Corner).y,
+        top: (sorted[3] as Corner).y,
+      };
+    };
+    for (const quad of shafts) {
+      const here = centre(quad);
+      const face = widths(quad);
+      // Battered: wider at its foot than under its cap.
+      expect(face.low / face.high).toBeCloseTo(DECK_PIER_BATTER, 2);
+      expect(DECK_PIER_METRES).toContain(Number(face.high.toFixed(2)));
+      // And stained there: its foot's colour is not its top's.
+      expect(quad.shade).not.toEqual(quad.colour);
+      // In the ground it stands on, and clear of the carriageway.
+      const ground = groundAt(here.along, here.lateral);
+      expect(face.foot).toBeLessThan(ground);
+      expect(face.foot).toBeGreaterThan(ground - 0.3);
+      for (const corner of quad.corners) {
+        expect(Math.abs(corner.lateral)).toBeGreaterThan(half + 2);
+      }
+      // Under a cap that carries the girder.
+      const cap = caps
+        .filter((each) => Math.abs(centre(each).lateral - here.lateral) < 1)
+        .map(widths);
+      expect(cap).toHaveLength(2);
+      for (const each of cap) {
+        expect(each.foot).toBeCloseTo(face.top, 3);
+        expect(each.top - each.foot).toBeCloseTo(DECK_PIER_CAP_METRES[2], 3);
+        expect(each.top).toBeCloseTo(girderFootAt(here.lateral), 1);
+      }
+      // Wider than the shaft under it, both ways.
+      expect(cap.map((each) => Number(each.high.toFixed(2))).sort()).toEqual([
+        DECK_PIER_CAP_METRES[1],
+        DECK_PIER_CAP_METRES[0],
+      ]);
+      expect(DECK_PIER_CAP_METRES[0]).toBeGreaterThan(DECK_PIER_METRES[0]);
+      expect(DECK_PIER_CAP_METRES[1]).toBeGreaterThan(DECK_PIER_METRES[1]);
+    }
+  });
+
+  it('is an abutment past its span, and is met by track that climbs to it between walls', () => {
+    const walls = quads.filter(is(TRACK_WALL));
     expect(walls.length).toBeGreaterThan(0);
     for (const quad of walls) {
-      expect(Math.min(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeGreaterThan(55);
+      expect(Math.min(...quad.corners.map((c) => Math.abs(c.lateral)))).toBeGreaterThan(
+        DECK_SPAN_HALF_METRES - 0.01,
+      );
     }
-    // Where the deck ends the track beside it is at its height: no step.
+    // The abutment: where the girder ends a wall stands from the deck down into the ground.
+    for (const side of [-1, 1]) {
+      const face = walls
+        .flatMap((quad) => quad.corners)
+        .filter((corner) => Math.abs(corner.lateral - side * DECK_SPAN_HALF_METRES) < 0.01);
+      expect(face.length).toBeGreaterThan(0);
+      const ys = face.map((corner) => corner.y);
+      expect(Math.min(...ys)).toBeLessThan(groundAt(at, side * DECK_SPAN_HALF_METRES));
+      expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(DECK_CLEARANCE_METRES - 1);
+    }
+    // Where the mapped bridge ends the track beside it is at its height: no step.
     const crownAt = (lateral: number, deck: boolean): number => {
       const found = quads
-        .filter(is(BALLAST))
+        .filter((quad) => is(BALLAST)(quad) && !upright(quad))
         .filter((quad) => {
           const laterals = quad.corners.map((corner) => Math.abs(corner.lateral));
           return deck ? Math.max(...laterals) <= 60.01 : Math.min(...laterals) >= 59.99;
@@ -691,14 +824,101 @@ describe('a rail bridge — #3253', () => {
     for (const lateral of [-60, 60]) {
       expect(Math.abs(crownAt(lateral, true) - crownAt(lateral, false))).toBeLessThan(0.2);
     }
-    // And 186 m from the crossing it is back on the ground.
+    // And far from the crossing it is back on the ground.
     for (const quad of quads.filter(is(BALLAST))) {
-      for (const corner of quad.corners.filter((c) => Math.abs(c.lateral) > 190)) {
+      for (const corner of quad.corners.filter((c) => Math.abs(c.lateral) > 197)) {
         expect(corner.y).toBeCloseTo(
           groundAt(corner.along, corner.lateral) + BALLAST_DEPTH_METRES + SIDE_ROAD_LIFT_METRES,
           3,
         );
       }
+    }
+  });
+
+  it('far off is its girder, its railing and its piers’ shafts, inside a piece’s bound either way', () => {
+    const far = trackOf(frameAt(at - 300, over));
+    const seen = quadsOf(far);
+    expect(seen.filter(is(DECK_GIRDER)).length).toBe(webs.length);
+    expect(seen.filter(is(DECK_RAILING)).length).toBe(webs.length);
+    expect(seen.filter(is(PIER_FOOT))).toHaveLength(8);
+    // With no cap its shaft runs up to the girder: as high as the cap's top is, near.
+    const topOf = (each: readonly Quad[], lateral: number): number =>
+      each
+        .filter((quad) => Math.abs(centre(quad).lateral - lateral) < 1)
+        .flatMap((quad) => quad.corners)
+        .reduce((high, corner) => Math.max(high, corner.y), -Infinity);
+    for (const lateral of [-24, -8, 8, 24]) {
+      expect(topOf(seen.filter(is(PIER_FOOT)), lateral)).toBeCloseTo(
+        topOf(quads.filter(is(PIER_CAP)), lateral),
+        3,
+      );
+    }
+    expect(seen.filter(is(DECK_FLANGE))).toEqual([]);
+    expect(seen.filter(is(PIER_CAP))).toEqual([]);
+    expect(seen.filter(is(SLEEPER))).toEqual([]);
+    const spans = (each: readonly SideRoad[]) =>
+      each.filter((road) => quadsOf([road]).some(is(DECK_GIRDER))).map((road) => triangles([road]));
+    const nearSpans = spans(roads);
+    const farSpans = spans(far);
+    expect(nearSpans.length).toBeGreaterThan(0);
+    expect(Math.max(...nearSpans)).toBeLessThanOrEqual(RAIL_TRACK_NEAR_PIECE_TRIANGLES);
+    expect(Math.max(...farSpans)).toBeLessThanOrEqual(RAIL_TRACK_FAR_PIECE_TRIANGLES);
+    // Non-vacuity: a span is the heaviest piece there is, and these are near their bounds.
+    expect(Math.max(...nearSpans)).toBeGreaterThan(350);
+    expect(Math.max(...farSpans)).toBeGreaterThan(120);
+  });
+
+  it('keeps its piers out of the road where it crosses it at a shallow angle', () => {
+    // 17° from the road: 8 m along the track from the crossing is 2.3 m off the centreline.
+    const skew = quadsOf(
+      trackOf(
+        frameAt(
+          at - 30,
+          corridorOf([
+            rail(
+              [
+                [at - 100, -30],
+                [at + 100, 30],
+              ],
+              'bridge',
+            ),
+          ]),
+        ),
+      ),
+    ).filter(is(PIER_FOOT));
+    // The two at 24 m stand; the two at 8 m would be in the carriageway and do not.
+    expect(skew).toHaveLength(4);
+    for (const quad of skew) {
+      expect(Math.abs(centre(quad).lateral)).toBeGreaterThan(half + 2);
+    }
+  });
+
+  it('stands a deck that crosses no route on a pier every 24 m where it is high over the ground', () => {
+    // 400 m across the fixture's lowest ground, whose road dips most at 1 131 m.
+    const piers = quadsOf(
+      trackOf(
+        frameAt(
+          1_131,
+          corridorOf([
+            rail(
+              [
+                [931, BESIDE],
+                [1_331, BESIDE],
+              ],
+              'bridge',
+            ),
+          ]),
+        ),
+      ),
+    ).filter(is(PIER_FOOT));
+    const alongs = [...new Set(piers.map((quad) => Math.round(centre(quad).along)))].sort(
+      (a, b) => a - b,
+    );
+    expect(alongs.length).toBeGreaterThan(3);
+    for (let index = 1; index < alongs.length; index += 1) {
+      const gap = (alongs[index] as number) - (alongs[index - 1] as number);
+      expect(Math.abs(gap / 24 - Math.round(gap / 24))).toBeLessThan(0.05);
+      expect(gap).toBeGreaterThan(20);
     }
   });
 
@@ -720,7 +940,9 @@ describe('a rail bridge — #3253', () => {
         ),
       ),
     );
-    const crown = deck.filter(is(BALLAST)).flatMap((quad) => quad.corners);
+    const crown = deck
+      .filter((quad) => is(BALLAST)(quad) && span(quad, (c) => c.lateral) > 1)
+      .flatMap((quad) => quad.corners);
     expect(crown.length).toBeGreaterThan(100);
     const endAt = (along: number): number =>
       groundAt(along, BESIDE) + BALLAST_DEPTH_METRES + SIDE_ROAD_LIFT_METRES;
@@ -779,6 +1001,44 @@ describe('a rail bridge — #3253', () => {
   });
 });
 
+describe('a disused line — #3253', () => {
+  const at = dryStretch(80, 200, 1_500) + 40;
+  const across = (offset: number, kindDetail: RailFeature['kindDetail']) =>
+    rail(
+      [
+        [at + offset, -201.5],
+        [at + offset, 200],
+      ],
+      'ground',
+      kindDetail,
+    );
+  const framed = (rails: readonly RailFeature[]) =>
+    quadsOf(trackOf(frameAt(at - 30, corridorOf(rails))));
+
+  it('keeps its track, rusted and grown over', () => {
+    const quads = framed([across(0, 'disused')]);
+    expect(quads.filter(is(BALLAST_OVERGROWN)).length).toBeGreaterThan(20);
+    expect(quads.filter(is(BALLAST))).toEqual([]);
+    // No bright running surface: its rails are rust all over.
+    expect(quads.filter(is(RAIL_STEEL))).toEqual([]);
+    expect(quads.filter(is(RAIL_WEB)).length).toBeGreaterThan(100);
+    expect(quads.filter(is(SLEEPER)).length).toBeGreaterThan(100);
+    // The control: a line in use is neither.
+    const live = framed([across(0, 'rail')]);
+    expect(live.filter(is(BALLAST_OVERGROWN))).toEqual([]);
+    expect(live.filter(is(RAIL_STEEL)).length).toBeGreaterThan(0);
+  });
+
+  it('stands no sign where it crosses the road, though its rails are still in it', () => {
+    const quads = framed([across(0, 'disused')]);
+    expect(quads.filter(is(CROSSBUCK_WHITE))).toEqual([]);
+    expect(quads.filter(is(CROSSING_PANEL)).length).toBeGreaterThan(0);
+    // A line in use beside it, through the same crossing, is still signed.
+    const beside = framed([across(0, 'disused'), across(5, 'rail')]);
+    expect(beside.filter(is(CROSSBUCK_WHITE)).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
 describe('what the track costs — #3253', () => {
   /** More railway than a frame may draw: sixteen lines beside 2.6 km of road, and a tagged crossing every 100 m. */
   const rails: RailFeature[] = [];
@@ -812,7 +1072,7 @@ describe('what the track costs — #3253', () => {
   const far = pieces.filter((road) => !near.includes(road));
 
   it('is bounded a frame: the stated pieces, the nearest of them with sleepers, the nearest crossings’ signs', () => {
-    expect(REALISTIC_RAIL_TRACK_TRIANGLES).toBe(6_736);
+    expect(REALISTIC_RAIL_TRACK_TRIANGLES).toBe(6_728);
     expect(pieces).toHaveLength(RAIL_TRACK_PIECES_PER_FRAME);
     expect(near).toHaveLength(RAIL_TRACK_NEAR_PIECES);
     expect(signs).toHaveLength(RAIL_CROSSINGS_PER_FRAME);
@@ -831,7 +1091,7 @@ describe('what the track costs — #3253', () => {
     expect(Math.max(...near.map((road) => triangles([road])))).toBeGreaterThanOrEqual(314);
     expect(Math.max(...far.map((road) => triangles([road])))).toBeGreaterThanOrEqual(120);
     expect(Math.max(...signs.map((road) => triangles([road])))).toBe(64);
-    expect(triangles(track)).toBeGreaterThan(REALISTIC_RAIL_TRACK_TRIANGLES * 0.75);
+    expect(triangles(track)).toBeGreaterThan(REALISTIC_RAIL_TRACK_TRIANGLES * 0.7);
     console.log(
       `#3253 a frame of more railway than fits: ${String(triangles(track))} triangles in ` +
         `${String(near.length)} near pieces, ${String(far.length)} far and ${String(signs.length)} crossings' signs`,

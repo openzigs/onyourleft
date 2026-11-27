@@ -1131,10 +1131,13 @@ export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
  * The most pieces of railway track a frame draws — #3253 (`rail-track.ts`):
- * **32**, nearest the rider first, each at most 40 m of one mapped line, so
- * 1 280 m of track in view.
+ * **27**, nearest the rider first, each at most 40 m of one mapped line, so
+ * 1 080 m of track in view. It was 32 until a bridge's girder, railing and
+ * capped piers were drawn (the owner's ruling of 2026-11-26 on #3270): the
+ * heaviest piece grew, and the pieces a frame draws fell so that
+ * {@link REALISTIC_RAIL_TRACK_TRIANGLES} did not rise.
  */
-export const RAIL_TRACK_PIECES_PER_FRAME = 32;
+export const RAIL_TRACK_PIECES_PER_FRAME = 27;
 
 /**
  * How many of those may carry their sleepers and their rails' three faces:
@@ -1145,20 +1148,26 @@ export const RAIL_TRACK_PIECES_PER_FRAME = 32;
 export const RAIL_TRACK_NEAR_PIECES = 8;
 
 /**
- * The most triangles a piece with its sleepers is: **350**. Ten steps of bed
- * (a shoulder, the crown and a shoulder: 6) and of two rails of three faces
- * (12) are 180, 40 m holds at most 67 sleepers of one quad (134), and a level
- * crossing cuts at most two steps in two at the carriageway's edges
- * (`rail-track.ts` §`CROSSING_CUTS_PER_PIECE`: 36 more). A deck is cut by no
- * crossing and stands on at most four piers of two faces (16) instead.
+ * The most triangles a piece with its sleepers is: **420**, a bridge's open
+ * span. Ten steps of crown (2), of a fascia each side — the ballast's edge,
+ * the girder's web, its flange, the railing and a stiffener, five quads a
+ * side (20) — and of two rails of one face (4) are 260; 40 m holds at most 67
+ * sleepers of one quad (134); and at most three piers of a shaft and a cap
+ * (8 each: 24): 418. A piece on the ground is at most 350: ten steps of bed
+ * (6) and of two rails of three faces (12), the sleepers, and a level
+ * crossing's two cuts at the carriageway's edges (`rail-track.ts`
+ * §`CROSSING_CUTS_PER_PIECE`: 36).
  */
-export const RAIL_TRACK_NEAR_PIECE_TRIANGLES = 350;
+export const RAIL_TRACK_NEAR_PIECE_TRIANGLES = 420;
 
 /**
- * The most a piece without is: **144**. Ten steps of bed (6), a strip (2) and
- * two rails of one face (4), and the same two cuts (24).
+ * The most a piece without is: **152**, a bridge's open span. Ten steps of
+ * crown (2) and of a fascia of three quads a side (12), and three piers of a
+ * shaft alone (4 each). A piece on the ground is at most 144: ten steps of
+ * bed (6), a strip (2) and two rails of one face (4), and the same two cuts
+ * (24).
  */
-export const RAIL_TRACK_FAR_PIECE_TRIANGLES = 144;
+export const RAIL_TRACK_FAR_PIECE_TRIANGLES = 152;
 
 /** The most level crossings a frame stands signs at: the nearest **4**. */
 export const RAIL_CROSSINGS_PER_FRAME = 4;
@@ -1171,7 +1180,7 @@ export const RAIL_CROSSINGS_PER_FRAME = 4;
 export const RAIL_CROSSING_FURNITURE_TRIANGLES = 120;
 
 /**
- * The most triangles a frame's railway may add — #3253: **6 736**, the pieces
+ * The most triangles a frame's railway may add — #3253: **6 728**, the pieces
  * above at their heaviest and every crossing's signs. A class of its own, as
  * [ADR 0099](../../../../docs/adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)
  * D-4.1 asks of a thing no existing class fits: the track is built in code

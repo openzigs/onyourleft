@@ -31,14 +31,18 @@
  *   is ridden ({@link crossingFurniture}); **lights** and **gates** only at a
  *   crossing the map tags (`WorldCorridor.railCrossings`).
  * - **A rail bridge**: a line mapped on a bridge is a deck carrying the same
- *   track — the same bed, sleepers and rails on a girder
- *   {@link DECK_GIRDER_METRES} deep, on a pier every
- *   {@link DECK_PIER_EVERY_STATIONS} stations wherever it is high over the
- *   ground — level from one end of the mapped span to the other, so it
- *   crosses water and low ground instead of following them.
+ *   track — the same bed, sleepers and rails on a plate girder
+ *   {@link DECK_GIRDER_METRES} deep with a flange and stiffeners, the edge of
+ *   its ballast showing over the girder and a railing over that, on capped,
+ *   battered piers wherever it is high over the ground — level from one end
+ *   of the mapped span to the other, so it crosses water and low ground
+ *   instead of following them.
  *   Where it crosses the route it clears the road by
- *   {@link DECK_CLEARANCE_METRES} ({@link overLift}), and the track joined to
- *   it climbs to it between walls.
+ *   {@link DECK_CLEARANCE_METRES} ({@link overLift}) as an open span
+ *   {@link DECK_SPAN_HALF_METRES} each side, on two piers a side; past that
+ *   it is an abutment, and the track climbs to it between walls.
+ * - **A disused line** keeps its track, rusted and grown over
+ *   ({@link BALLAST_OVERGROWN}), and stands no sign at a crossing.
  *
  * A line in a tunnel is under the ground and is not drawn.
  *
@@ -157,15 +161,30 @@ export const RAIL_HEIGHT_METRES = 0.16;
 /** A rail's running surface, in metres across: **0.07**. */
 export const RAIL_HEAD_WIDTH_METRES = 0.07;
 
-/** A deck's girder under its track, in metres deep: **1.2**. */
+/** A deck's plate girder under its track, in metres deep: **1.2**. */
 export const DECK_GIRDER_METRES = 1.2;
 
 /**
- * How far over the road a rail bridge's track is where it crosses the route,
- * in metres: **6.4** — its {@link DECK_GIRDER_METRES} girder and 5.2 m clear
- * under it.
+ * The edge of the deck's ballast, seen from beside and below, in metres deep:
+ * **0.35** — a band of ballast along each side, over the girder.
  */
-export const DECK_CLEARANCE_METRES = 6.4;
+export const DECK_KERB_METRES = 0.35;
+
+/** How high over the deck's ballast its railing's top rail is, in metres: **1.1**. */
+export const DECK_RAILING_METRES = 1.1;
+
+/** How far each side of the route's crossing a rail bridge is an open span, in metres: **32**. Past it, an abutment and walls. */
+export const DECK_SPAN_HALF_METRES = 32;
+
+/** How far from the route's crossing a bridge's piers stand, each side, in metres: **8** and **24**, so spans of 16 m. */
+export const DECK_PIERS_FROM_CROSSING_METRES = [8, 24] as const;
+
+/**
+ * How far over the road a rail bridge's track is where it crosses the route,
+ * in metres: **6.8** — its {@link DECK_KERB_METRES} of ballast, its
+ * {@link DECK_GIRDER_METRES} girder and 5.25 m clear under it.
+ */
+export const DECK_CLEARANCE_METRES = 6.8;
 
 /** How far each side of the route's crossing a rail bridge holds its full height, in metres: **14**. */
 export const DECK_LEVEL_METRES = 14;
@@ -173,11 +192,17 @@ export const DECK_LEVEL_METRES = 14;
 /** Over how many metres past that the track comes down to the ground: **150**. */
 export const DECK_RAMP_METRES = 150;
 
-/** A deck stands on a pier every this many stations: **3**, so every 12 m. */
-export const DECK_PIER_EVERY_STATIONS = 3;
+/** A deck that crosses no route stands on a pier every this many stations: **6**, so every 24 m. */
+export const DECK_PIER_EVERY_STATIONS = 6;
 
-/** A pier, in metres across the track and along it: **1.8** by **0.9**. */
-export const DECK_PIER_METRES = [1.8, 0.9] as const;
+/** A pier under its cap, in metres across the track and along it: **1.6** by **0.9**. */
+export const DECK_PIER_METRES = [1.6, 0.9] as const;
+
+/** How much wider a pier is at its foot than under its cap: **1.4** times, a batter both ways. */
+export const DECK_PIER_BATTER = 1.4;
+
+/** A pier's cap, in metres across the track, along it and deep: **2.8** by **1.3** by **0.45**. */
+export const DECK_PIER_CAP_METRES = [2.8, 1.3, 0.45] as const;
 
 /** A deck's girder must be this far over the ground for a pier to stand under it, in metres: **1**. */
 export const DECK_PIER_OVER_METRES = 1;
@@ -224,6 +249,16 @@ export const RAIL_WEB = linearColour(0x5a4538);
 export const CROSSING_PANEL = TARMAC;
 /** A deck's painted steel girder. */
 export const DECK_GIRDER = linearColour(0x3c4743);
+/** A girder's bottom flange and its stiffeners, and the railing's posts over them: the same paint in shadow. */
+export const DECK_FLANGE = linearColour(0x26302d);
+/** A deck's railing: galvanised steel. */
+export const DECK_RAILING = linearColour(0x9da3a4);
+/** A pier's cap: newer, paler concrete than the pier under it. */
+export const PIER_CAP = linearColour(0xa3a097);
+/** A pier's foot: its concrete stained by the ground. */
+export const PIER_FOOT = linearColour(0x5f5d55);
+/** A disused line's ballast: grown over. */
+export const BALLAST_OVERGROWN = linearColour(0x56613f);
 /** The concrete wall under track that climbs to a bridge. */
 export const TRACK_WALL = linearColour(0x86837b);
 /** A crossbuck's boards and a gate's white bands. */
@@ -247,6 +282,8 @@ export interface RailTrackPiece {
   readonly fromMetres: number;
   /** A line mapped on a bridge: a deck, level between {@link span}'s ends. */
   readonly deck: boolean;
+  /** A line mapped as disused: rusted rails, ballast grown over. */
+  readonly disused: boolean;
   /** A deck's whole mapped span in view: its two ends and its length. */
   readonly span?: {
     readonly from: readonly [number, number];
@@ -267,7 +304,27 @@ export interface RailTrack {
   readonly pieces: readonly RailTrackPiece[];
   /** The corridor it was read from: its level crossings and their tags. */
   readonly corridor: WorldCorridor;
+  /** Whether the only line at grade through `(x, z)` is disused: a crossing nobody signs. */
+  readonly disusedAt: (x: number, z: number) => boolean;
 }
+
+/** How far a point is from a polyline, in metres. */
+function distanceToLine(line: Float32Array, x: number, z: number): number {
+  let least = Infinity;
+  for (let at = 0; at + 3 < line.length; at += 2) {
+    const ax = line[at] as number;
+    const az = line[at + 1] as number;
+    const dx = (line[at + 2] as number) - ax;
+    const dz = (line[at + 3] as number) - az;
+    const span = dx * dx + dz * dz;
+    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+    least = Math.min(least, Math.hypot(x - ax - dx * t, z - az - dz * t));
+  }
+  return least;
+}
+
+/** How near a crossing's point a line must pass to be the crossing's own, in metres: **10**. */
+const CROSSING_LINE_METRES = 10;
 
 const found = new WeakMap<WorldCorridor, { profile: RouteProfile; track: RailTrack }>();
 
@@ -444,6 +501,7 @@ export function railTrack(
             line,
             fromMetres: run.fromMetres + first * RAIL_TRACK_STEP_METRES,
             deck,
+            disused: rail.kindDetail === 'disused',
             ...(span === undefined ? {} : { span }),
             overs: overs.filter(
               ([x, z]) =>
@@ -459,7 +517,18 @@ export function railTrack(
       }
     }
   }
-  const track: RailTrack = { pieces, corridor };
+  const atGrade = rails.filter((rail) => rail.grade === 'ground');
+  const through = (disused: boolean, x: number, z: number): boolean =>
+    atGrade.some(
+      (rail) =>
+        (rail.kindDetail === 'disused') === disused &&
+        distanceToLine(rail.line, x, z) <= CROSSING_LINE_METRES,
+    );
+  const track: RailTrack = {
+    pieces,
+    corridor,
+    disusedAt: (x, z) => through(true, x, z) && !through(false, x, z),
+  };
   found.set(corridor, { profile, track });
   return track;
 }
@@ -548,11 +617,14 @@ class Builder {
     b: readonly [number, number, number],
     c: readonly [number, number, number],
     d: readonly [number, number, number],
+    /** The colour of `c` and `d`, where the face shades from one edge to the other. */
+    far: readonly number[] = colour,
   ): void {
     const first = this.positions.length / 3;
-    for (const corner of [a, b, c, d]) {
+    for (const [index, corner] of [a, b, c, d].entries()) {
+      const tone = index < 2 ? colour : far;
       this.positions.push(corner[0], corner[1], corner[2]);
-      this.colours.push(colour[0] as number, colour[1] as number, colour[2] as number);
+      this.colours.push(tone[0] as number, tone[1] as number, tone[2] as number);
     }
     this.indices.push(first, first + 1, first + 2, first, first + 2, first + 3);
   }
@@ -590,6 +662,10 @@ interface Row {
   readonly distance: number;
   /** What its centre stands over: the road on the carriageway, the ground past the ramp. */
   readonly under: number;
+  /** A deck's row in its open span: a girder on piers. A deck's other rows are an abutment's walls. */
+  readonly open: boolean;
+  /** How far from where its track's bridge crosses the route; `Infinity` where it crosses none. */
+  readonly over: number;
 }
 
 /** A point of a row's crown, `offset` metres across it. */
@@ -649,6 +725,10 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     lastDistance = centre?.near.distance;
     if (centre === undefined) return undefined;
     const lift = overLift(piece.overs, x, z);
+    let over = Infinity;
+    for (const [ox, oz] of piece.overs) over = Math.min(over, Math.hypot(x - ox, z - oz));
+    // A bridge over the route is an open span beside the road and an abutment past it.
+    const open = piece.deck && (piece.overs.length === 0 || over <= DECK_SPAN_HALF_METRES);
     const lifted = lift > LIFTED_METRES;
     // A line at grade stops at water, as a street does; a deck, and a track on its way up to one, crosses it.
     if (
@@ -664,7 +744,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       const stood = standingAt(ground, px, pz, centre.near.distance + Math.abs(offset) + 1);
       return stood === undefined ? undefined : { x: px, z: pz, stood };
     };
-    const foot = piece.deck || lifted ? half : half + BALLAST_SHOULDER_METRES;
+    const foot = lifted || piece.deck ? half : half + BALLAST_SHOULDER_METRES;
     const points = [at(-foot), at(-half), at(half), at(foot)];
     const [fl, l, r, fr] = points;
     if (fl === undefined || l === undefined || r === undefined || fr === undefined)
@@ -682,21 +762,23 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       lift +
       SIDE_ROAD_LIFT_METRES;
     const top = { left: crown(l.stood), right: crown(r.stood) };
-    const footOf = (stood: Standing, crownHere: number): number =>
-      piece.deck ? crownHere - DECK_GIRDER_METRES : stood.ground - FOOT_METRES;
+    // A wall's foot or a shoulder's is in the ground; an open span's side is drawn from its crown.
+    const footOf = (stood: Standing): number => stood.ground - FOOT_METRES;
     return {
       x,
       z,
       ax,
       az,
-      footLeft: [fl.x, footOf(fl.stood, top.left), fl.z],
+      footLeft: [fl.x, footOf(fl.stood), fl.z],
       left: [l.x, top.left, l.z],
       right: [r.x, top.right, r.z],
-      footRight: [fr.x, footOf(fr.stood, top.right), fr.z],
+      footRight: [fr.x, footOf(fr.stood), fr.z],
       onRoad: !piece.deck && !lifted && centre.near.distance <= ON_CARRIAGEWAY_METRES,
       lifted,
       distance: centre.near.distance,
       under: centre.y,
+      open,
+      over,
     };
   };
   const rowAt = (index: number): Row | undefined => {
@@ -710,14 +792,65 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       index * RAIL_TRACK_STEP_METRES,
     );
   };
+  const crownColour = piece.disused ? BALLAST_OVERGROWN : BALLAST;
+  // A disused line's running surface is as rusted as the rest of its rail.
+  const steel = piece.disused ? RAIL_WEB : RAIL_STEEL;
+  /**
+   * One side of an open span between two rows — #3253: the edge of the deck's
+   * ballast, the plate girder's web under it with its bottom flange, and the
+   * railing's top rail over it; near the rider a stiffener on the web run up
+   * as the railing's post too. `sign` is the side, `−1` the left.
+   */
+  const fascia = (a: Row, b: Row, sign: 1 | -1): void => {
+    const edge = (row: Row, drop: number, out = 0): Point => {
+      const from = sign < 0 ? row.left : row.right;
+      return [from[0] + row.ax * sign * out, from[1] - drop, from[2] + row.az * sign * out];
+    };
+    const band = (colour: readonly number[], top: number, bottom: number, out = 0): void => {
+      mesh.quad(
+        colour,
+        edge(a, bottom, out),
+        edge(b, bottom, out),
+        edge(b, top, out),
+        edge(a, top, out),
+      );
+    };
+    const webFoot = DECK_KERB_METRES + DECK_GIRDER_METRES;
+    band(crownColour, 0, DECK_KERB_METRES);
+    band(DECK_GIRDER, DECK_KERB_METRES, webFoot);
+    band(DECK_RAILING, -DECK_RAILING_METRES, -DECK_RAILING_METRES + 0.08, 0.02);
+    if (!near) return;
+    band(DECK_FLANGE, webFoot - 0.14, webFoot, 0.06);
+    // A stiffener at the step's first row, and the post over it: one upright strip.
+    const t = Math.min(1, 0.12 / Math.hypot(b.x - a.x, b.z - a.z));
+    const along = (drop: number): Point => mix(edge(a, drop, 0.05), edge(b, drop, 0.05), t);
+    mesh.quad(
+      DECK_FLANGE,
+      edge(a, webFoot, 0.05),
+      along(webFoot),
+      along(-DECK_RAILING_METRES),
+      edge(a, -DECK_RAILING_METRES, 0.05),
+    );
+  };
   /** The track from row `a` to row `b`: `metres` of it, starting `from` along the mapped line. */
   const stretch = (a: Row, b: Row, from: number, metres: number): void => {
     const paved = a.onRoad && b.onRoad;
-    const side = piece.deck ? DECK_GIRDER : a.lifted || b.lifted ? TRACK_WALL : BALLAST_SHOULDER;
-    // The bed: a shoulder, a wall or a girder each side, and the crown.
-    mesh.quad(side, a.footLeft, b.footLeft, b.left, a.left);
-    mesh.quad(paved ? CROSSING_PANEL : BALLAST, a.left, b.left, b.right, a.right);
-    mesh.quad(side, a.right, b.right, b.footRight, a.footRight);
+    const span = a.open && b.open;
+    // The bed: a shoulder or a wall each side, or an open span's girder, and the crown.
+    if (span) {
+      fascia(a, b, -1);
+      fascia(a, b, 1);
+    } else {
+      const wall = a.lifted || b.lifted;
+      const side = wall ? TRACK_WALL : BALLAST_SHOULDER;
+      // A wall is stained toward its foot, as a pier is; a shoulder is one tone.
+      const foot = wall ? PIER_FOOT : side;
+      mesh.quad(side, a.left, b.left, b.footLeft, a.footLeft, foot);
+      mesh.quad(side, a.right, b.right, b.footRight, a.footRight, foot);
+    }
+    mesh.quad(paved ? CROSSING_PANEL : crownColour, a.left, b.left, b.right, a.right);
+    // Far off, an open span is its girder and its railing: what is on its deck is over the rider's eye.
+    if (span && !near) return;
     const sleepers = SLEEPER_LENGTH_METRES / 2;
     const al = onCrown(a, -sleepers, SLEEPER_PROUD_METRES);
     const ar = onCrown(a, sleepers, SLEEPER_PROUD_METRES);
@@ -751,7 +884,8 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     for (const centre of [-RAIL_HALF_GAUGE_METRES, RAIL_HALF_GAUGE_METRES]) {
       const outer = centre - RAIL_HEAD_WIDTH_METRES / 2;
       const inner = centre + RAIL_HEAD_WIDTH_METRES / 2;
-      if (near) {
+      // An open span's rails are over the rider's eye: one face each, as far off.
+      if (near && !span) {
         mesh.quad(
           RAIL_WEB,
           onCrown(a, outer, footLift(a)),
@@ -760,7 +894,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
           onCrown(a, outer, headOf(a)),
         );
         mesh.quad(
-          RAIL_STEEL,
+          steel,
           onCrown(a, outer, headOf(a)),
           onCrown(b, outer, headOf(b)),
           onCrown(b, inner, headOf(b)),
@@ -776,7 +910,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       } else {
         // #2660's reason: far off, a rail's top is under a pixel and its upright face is not.
         mesh.quad(
-          RAIL_STEEL,
+          steel,
           onCrown(a, centre, footLift(a)),
           onCrown(b, centre, footLift(b)),
           onCrown(b, centre, headOf(b)),
@@ -791,41 +925,83 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
     }
   };
   /**
-   * A pier under a deck's row: two faces crossed, from the girder to the
-   * ground, where the deck is {@link DECK_PIER_OVER_METRES} over it and clear
-   * of the carriageway — so a deck stands on something and never hangs.
+   * A pier under an open span, `t` of the way from row `a` to row `b`: a
+   * battered shaft, wider and stained at its foot, under a paler cap that
+   * carries the girder — two faces crossed for each, so it has width from
+   * every side. None where the girder is under {@link DECK_PIER_OVER_METRES}
+   * over the ground, nor within {@link DECK_PIER_CLEAR_METRES} of the
+   * carriageway. Far off it is its shaft alone, up to the girder.
    */
-  const pier = (row: Row): void => {
-    const top = Math.min(row.left[1], row.right[1]) - DECK_GIRDER_METRES;
-    const foot = row.under - FOOT_METRES;
-    if (top - foot < DECK_PIER_OVER_METRES) return;
-    if (row.distance < ROAD_WIDTH_METRES / 2 + DECK_PIER_CLEAR_METRES) return;
-    const across = DECK_PIER_METRES[0] / 2;
-    const along = DECK_PIER_METRES[1] / 2;
-    mesh.quad(
-      TRACK_WALL,
-      [row.x - row.ax * across, foot, row.z - row.az * across],
-      [row.x + row.ax * across, foot, row.z + row.az * across],
-      [row.x + row.ax * across, top, row.z + row.az * across],
-      [row.x - row.ax * across, top, row.z - row.az * across],
-    );
-    // Along the track: its direction is the across direction turned back a quarter.
-    mesh.quad(
-      TRACK_WALL,
-      [row.x + row.az * along, foot, row.z - row.ax * along],
-      [row.x - row.az * along, foot, row.z + row.ax * along],
-      [row.x - row.az * along, top, row.z + row.ax * along],
-      [row.x + row.az * along, top, row.z - row.ax * along],
-    );
+  const pier = (a: Row, b: Row, t: number): void => {
+    const x = a.x + (b.x - a.x) * t;
+    const z = a.z + (b.z - a.z) * t;
+    const crown = Math.min(a.left[1], a.right[1]) * (1 - t) + Math.min(b.left[1], b.right[1]) * t;
+    const girder = crown - DECK_KERB_METRES - DECK_GIRDER_METRES;
+    const foot = a.under + (b.under - a.under) * t - FOOT_METRES;
+    if (girder - foot < DECK_PIER_OVER_METRES) return;
+    const distance = a.distance + (b.distance - a.distance) * t;
+    if (distance < ROAD_WIDTH_METRES / 2 + DECK_PIER_CLEAR_METRES) return;
+    const { ax, az } = a;
+    /** Two faces crossed, `across` by `along` at `low` and at `high`. */
+    const crossed = (
+      low: number,
+      high: number,
+      widths: readonly [number, number],
+      spread: number,
+      lowColour: readonly number[],
+      highColour: readonly number[],
+    ): void => {
+      const [across, along] = [widths[0] / 2, widths[1] / 2];
+      // Across the track, then along it: its direction is the across direction turned back a quarter.
+      for (const [ux, uz, halfWidth] of [
+        [ax, az, across],
+        [az, -ax, along],
+      ] as const) {
+        const wide = halfWidth * spread;
+        mesh.quad(
+          lowColour,
+          [x - ux * wide, low, z - uz * wide],
+          [x + ux * wide, low, z + uz * wide],
+          [x + ux * halfWidth, high, z + uz * halfWidth],
+          [x - ux * halfWidth, high, z - uz * halfWidth],
+          highColour,
+        );
+      }
+    };
+    const shaftTop = near ? girder - DECK_PIER_CAP_METRES[2] : girder;
+    crossed(foot, shaftTop, DECK_PIER_METRES, DECK_PIER_BATTER, PIER_FOOT, TRACK_WALL);
+    if (near) {
+      crossed(
+        shaftTop,
+        girder,
+        [DECK_PIER_CAP_METRES[0], DECK_PIER_CAP_METRES[1]],
+        1,
+        PIER_CAP,
+        PIER_CAP,
+      );
+    }
+  };
+  /** The piers under the open span from row `a` to row `b`, the `station`th of the mapped line. */
+  const piers = (a: Row, b: Row, station: number): void => {
+    if (!a.open || !b.open) return;
+    if (piece.overs.length === 0) {
+      // A deck that crosses no route: at every sixth station of its line.
+      if (station % DECK_PIER_EVERY_STATIONS === 0) pier(a, b, 0);
+      return;
+    }
+    // A bridge over the route: at its stated distances from the crossing, each side.
+    for (const out of DECK_PIERS_FROM_CROSSING_METRES) {
+      if ((a.over <= out && out < b.over) || (b.over <= out && out < a.over)) {
+        pier(a, b, (out - a.over) / (b.over - a.over));
+      }
+    }
   };
   let cuts = 0;
   let a = rowAt(0);
   for (let index = 1; index < count; index += 1) {
-    // Every third station of the mapped line, and never a piece's last, which is the next one's first.
-    const station = Math.round(piece.fromMetres / RAIL_TRACK_STEP_METRES) + index - 1;
-    if (piece.deck && a !== undefined && station % DECK_PIER_EVERY_STATIONS === 0) pier(a);
     const b = rowAt(index);
     if (a !== undefined && b !== undefined) {
+      piers(a, b, Math.round(piece.fromMetres / RAIL_TRACK_STEP_METRES) + index - 1);
       const from = piece.fromMetres + (index - 1) * RAIL_TRACK_STEP_METRES;
       // Where a step leaves or enters the carriageway it is cut there, so the
       // road's surface stops at the road's edge and not a step past it.
@@ -1148,15 +1324,19 @@ export function railTrackAt(
   for (const { junction } of crossings) {
     let signs = byJunction.get(junction);
     if (signs === undefined) {
+      const here = drawnRoadPosition(profile, origin, junction.along);
       signs =
-        crossingFurniture(
-          junction,
-          track.corridor.railCrossings ?? [],
-          profile,
-          origin,
-          seed,
-          land,
-        ) ?? null;
+        // A disused line's crossing keeps its rails in the road and stands no sign.
+        track.disusedAt(here.x, here.z)
+          ? null
+          : (crossingFurniture(
+              junction,
+              track.corridor.railCrossings ?? [],
+              profile,
+              origin,
+              seed,
+              land,
+            ) ?? null);
       byJunction.set(junction, signs);
     }
     if (signs !== null) roads.push(signs);

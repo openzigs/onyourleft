@@ -1403,6 +1403,8 @@ export const NEIGHBOURHOOD_TO = 2_100;
  * - the crossing at 1 200 m is **tagged** with lights and gates
  *   (`WorldCorridor.railCrossings`), and the one at 1 700 m is not, so it is
  *   a crossbuck alone;
+ * - **1 450 m**: a `disused` line square across the road: rusted and grown
+ *   over, and no sign at its crossing;
  * - **2 250 m to 2 850 m**: a line beside the road, 14 m off its left, that
  *   never crosses it.
  */
@@ -1445,6 +1447,7 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
         { kindDetail: 'rail', grade: 'ground', line: across(1_200, 0) },
         { kindDetail: 'rail', grade: 'ground', line: across(1_700, 30) },
         { kindDetail: 'rail', grade: 'bridge', line: across(2_000, 0) },
+        { kindDetail: 'disused', grade: 'ground', line: across(1_450, 0) },
         {
           kindDetail: 'rail',
           grade: 'ground',
