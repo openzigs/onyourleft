@@ -135,3 +135,15 @@ chosen again every 20 m.
 
 - #3052 (the owner's request of 2026-11-22), #3051 (the ruling of 2026-11-23).
 - ADR 0054 D-2.2 and D-5.7; ADR 0091 D-2; ADR 0088 D-3; ADR 0004 D.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-26** — **Superseded in part, for the saved route ride only, by
+  [ADR 0100](0100-a-saved-route-ride-names-the-street-it-is-on.md)**
+  ([#3245](https://github.com/openzigs/onyourleft/issues/3245)). D-1.2's *"A route ride's corridor
+  read, the store and the export never carry a name"* no longer holds for the corridor read and the
+  store: a route's corridor read asks for names, and the store keeps the ones the atlas can paint.
+  The export still carries none. The open world is unchanged. **Status: proposed**, in force only
+  once the owner accepts ADR 0100.

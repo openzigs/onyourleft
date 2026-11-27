@@ -33,7 +33,14 @@ It has the same authority as the root file. Where the text below says "this file
   0022 was not amended, because its D-1 was already superseded on 2026-09-21. It took 0099 because **0098 is claimed** by the open pull request
   [#2966](https://github.com/openzigs/onyourleft/pull/2966), which adds an ADR numbered 0098 on
   the ridden-block cache for #2891; the 0097 paragraph below said 0098 was free, and that was
-  stale. The next free number is **0100**.
+  stale. The next free number was **0100**, which ADR 0100 below took.
+  ⚠️ **0100 is [ADR 0100](../adr/0100-a-saved-route-ride-names-the-street-it-is-on.md)**,
+  taken by [#3245](https://github.com/openzigs/onyourleft/issues/3245) on 2026-11-26 for a saved
+  route ride naming the street it is on, now and then. **Proposed**, pending the owner. It
+  supersedes in part ADR 0096 D-1.2 and ADR 0054 D-2.2, D-3.3 and D-5.7, for the saved route ride
+  only; ADR 0054 and ADR 0096 each gained one dated `## Amendments` pointer. 0098 is claimed by the
+  open pull request #2966, and 0099 is ADR 0099 (#3250). 0101 is ADR 0101, above, so the next
+  free number is **0102**.
   ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,
   taken by [#2734](https://github.com/openzigs/onyourleft/issues/2734) on 2026-11-24 for in-browser
   Valhalla as a routing tier when no instance routes a leg, **Accepted** the same day on the owner's

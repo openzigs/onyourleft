@@ -161,6 +161,8 @@ import {
 } from './room-ride';
 import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
+import { routeStreetNameLabels } from './route-street-names';
+import type { StreetNameLabel } from './street-names';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { CaptureRecording } from './capture-recording';
@@ -1378,6 +1380,15 @@ interface PreviewAsked {
   readonly rider: SimulatedRider;
   readonly routeId: string;
   readonly position: RidingPosition;
+  /**
+   * The corridor the picker had ready for the route at the press — the
+   * tablet check on PR #3261. The preview's screen is a new one, which reads
+   * the corridor again, and it starts as soon as its routes are read: long
+   * before that read ends, so with nothing handed over a preview rode with no
+   * map data at all (no mapped buildings, no street names). As an ordinary
+   * press does (ADR 0054 D-2.4), it rides what was ready when it was pressed.
+   */
+  readonly corridor?: CorridorState | undefined;
 }
 
 /**
@@ -2573,6 +2584,12 @@ function GameScreen({
   const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
   /** #1550, #1583: the lots' town, built from the same plans as {@link mappedBuildingsRef}, at the press. */
   const mappedTownRef = useRef<MappedTown | undefined>(undefined);
+  /**
+   * #3245: where a saved route ride paints the name of the street it is on,
+   * placed once at the press from {@link worldCorridorRef}'s named streets.
+   * `undefined` with no corridor, or none of the route's streets named.
+   */
+  const routeStreetNamesRef = useRef<readonly StreetNameLabel[] | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -3448,7 +3465,12 @@ function GameScreen({
       // from what was ready for this route — and never changed during it
       // (ADR 0054 D-2.4). Leaving `choosing` below abandons a read still
       // running; one that ends anyway changes nothing this ride draws.
-      const ready = corridorStateRef.current;
+      // A preview rides the corridor its picker had ready (@see PreviewAsked.corridor)
+      // where its own screen's read has not ended.
+      const ready =
+        corridorStateRef.current?.kind === 'ready'
+          ? corridorStateRef.current
+          : (preview?.corridor ?? corridorStateRef.current);
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
@@ -3473,6 +3495,18 @@ function GameScreen({
         worldCorridorRef.current === undefined || landClassRef.current === undefined
           ? NO_URBAN_CLASS
           : urbanClassMap(worldCorridorRef.current, landClassRef.current, route.profile);
+      // #3245: and the names of the streets a saved route is on, placed ONCE,
+      // here, from the same corridor. None where the world is not drawn from
+      // it, and none on a built-in circuit or level, whose line is ours.
+      const routeLabels =
+        worldCorridorRef.current === undefined || onCircuit || onLevel
+          ? []
+          : routeStreetNameLabels(
+              worldCorridorRef.current.streets,
+              route.profile,
+              corridorOrigin(route.profile),
+            );
+      routeStreetNamesRef.current = routeLabels.length === 0 ? undefined : routeLabels;
       if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
         mappedBuildingsRef.current = undefined;
         mappedTownRef.current = undefined;
@@ -3674,6 +3708,7 @@ function GameScreen({
       captureSensors,
       inventedSensors,
       level,
+      preview,
     ],
   );
 
@@ -4947,6 +4982,11 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #3245: a saved route's street names, on every frame of a ride that
+          // names one (#3107: so the belt is made ready on its first frame).
+          ...(routeStreetNamesRef.current === undefined
+            ? {}
+            : { streetNames: routeStreetNamesRef.current }),
           // #2902: an open-world ride's mapped buildings, planned round the
           // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
           // and ranked by the ways on from the next junction too.
@@ -5619,7 +5659,14 @@ function GameScreen({
                   // control, and the preview's new screen would leave a
                   // control granted to this one with nothing to release it.
                   if (startingRef.current) return;
-                  onPreview({ rider, routeId: route.id, position: sitting });
+                  // The tablet check on PR #3261: and what the picker had
+                  // read, which the press holds to this route's own.
+                  onPreview({
+                    rider,
+                    routeId: route.id,
+                    position: sitting,
+                    corridor: corridorStateRef.current,
+                  });
                 }
           }
           // #1221: whether this ride will be saved, said under Ride. The
