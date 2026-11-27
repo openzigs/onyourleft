@@ -4897,6 +4897,54 @@ describe('the downtown kit, loaded by the product’s own loader — #3334', () 
       drawing.dispose();
     }
   });
+  it('frees the kit’s atlas, as the house models’, when another world replaces the loaded one', async () => {
+    // ⚠️ Last in this describe: it replaces the world the cases above share.
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    let atlas: { dispose: () => void } | undefined;
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const street = terraceStreetFixture();
+      const land = landClassMask(street.corridor);
+      const { plans } = footprintPlans(
+        street.corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        { classAt: () => 'town' },
+      );
+      const start = atStartLine(street.profile);
+      const frame = sceneFrame({
+        profile: street.profile,
+        origin: street.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_150) } },
+        worldCorridor: street.corridor,
+        landClass: land,
+        mappedBuildings: mappedBuildingsOf(plans),
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      atlas = (mapped.kitMesh.material as unknown as { readonly map: { dispose: () => void } }).map;
+    } finally {
+      drawing.dispose();
+    }
+    const freed = vi.spyOn(atlas, 'dispose');
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const at = (url: string): string => `${ORIGIN}${url}`;
+    const outcome = await renderer.loadRealisticWorld({
+      model: (url) => inner.model(at(url)),
+      texture: (url) => inner.texture(at(url)),
+      sky: (url) => inner.sky(at(url)),
+      dispose: inner.dispose,
+    });
+    expect(outcome).toEqual({ loaded: true });
+    expect(freed).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('the roadside models, loaded by the product’s own loader — #1274', () => {

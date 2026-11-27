@@ -8623,6 +8623,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.wordmark.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
   world.houses?.atlas.dispose();
+  // #3334: and the downtown kit's, a 2048 px picture the GPU holds as long as the world does.
+  world.houses?.kit?.atlas.dispose();
   // #1274: the chain-link's wire; its piece's triangles are plain arrays.
   world.chainLink?.wire.dispose();
   // #2847: the cars' atlas; their triangles are plain arrays.

@@ -33,6 +33,7 @@ import {
   roleTriangles,
   selectMappedBuildings,
   type MappedBuildings,
+  type RivalStructures,
 } from './mapped-buildings';
 import { nearPyramid } from './near-field';
 import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
@@ -445,6 +446,70 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
   });
 });
 
+describe('a wrap never costs a building, a structure or a surface — #3334', () => {
+  // The Richmond street, classed a town and a city centre: house models beside wrapped shops,
+  // and rivals (the procedural structures) ranked in at 20 m apart from 30 m out.
+  const richmond = richmondStreetFixture();
+  const classes: readonly UrbanClass[] = ['town', 'city-centre'];
+  const richmondBuildings = classes.map((urban) =>
+    mappedBuildingsOf(
+      footprintPlans(
+        richmond.corridor,
+        landClassMask(richmond.corridor),
+        richmond.profile,
+        richmond.origin,
+        undefined,
+        everywhere(urban),
+      ).plans,
+    ),
+  );
+  const prices = HOUSE_MODELS.map((model) => model.triangles);
+  const rivalsOf = (count: number): RivalStructures => ({
+    distances: Float64Array.from({ length: count }, (_, at) => 30 + at * 20),
+    count,
+    triangles: REALISTIC_TRIANGLES.structure,
+  });
+
+  it('draws as many buildings, ranks in as many structures and passes over no more, than the same refill with no wrap', () => {
+    let kitted = 0;
+    let refills = 0;
+    for (let along = 1_000; along <= 1_400; along += 10) {
+      const rider = roadAt(along, richmond);
+      for (const rivals of [0, 3, 6, 12].map(rivalsOf)) {
+        for (const [urban, of] of richmondBuildings.entries()) {
+          const pick = (kit: boolean): MappedSelection => {
+            const into = new MappedSelection();
+            selectMappedBuildings(
+              of,
+              rider.x,
+              rider.z,
+              MAPPED_BUILDING_TRIANGLES,
+              into,
+              MAPPED_BUILDING_DRAW_CALLS,
+              rivals,
+              prices,
+              undefined,
+              kit,
+            );
+            return into;
+          };
+          const bare = pick(false);
+          const wrapped = pick(true);
+          const where = `${String(along)} m, ${String(rivals.count)} rivals, ${String(classes[urban])}`;
+          expect(wrapped.count, where).toBeGreaterThanOrEqual(bare.count);
+          expect(wrapped.rivals, where).toBeGreaterThanOrEqual(bare.rivals);
+          expect(wrapped.passed, where).toBeLessThanOrEqual(bare.passed);
+          kitted += wrapped.kitCount;
+          refills += 1;
+        }
+      }
+    }
+    // The sweep is not vacuous: wraps are drawn along it, and it is many frames.
+    expect(kitted).toBeGreaterThan(0);
+    expect(refills).toBeGreaterThan(100);
+  });
+});
+
 describe('the kit a loaded scene is read as — #3334', () => {
   /**
    * A scene as the loader leaves one: a node for each piece that has a mesh of its own,
@@ -619,6 +684,58 @@ describe('the belt, with the committed kit — #3334', () => {
     expect(stats.kitted).toBe(MAPPED_KIT_NEAR_MAX);
     expect(shades.size).toBeGreaterThan(2);
     expect(looks.size).toBeGreaterThan(2);
+  });
+
+  it('writes a wrapped shop’s paved apron into the extrusions’ buffer, vertex for vertex, inside the draw range', () => {
+    // ⚠️ Read back from the mesh's own position buffer: the draw range is summed from the
+    // selection before anything is written, so it cannot tell a lost write.
+    const belt = aBelt(buildings, withKit);
+    const rider = roadAt(1_250);
+    belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const position = belt.mesh.geometry.getAttribute('position').array;
+    const drawn = belt.mesh.geometry.drawRange.count;
+    /** Where the apron's vertices run, as a whole, in the buffer's drawn range; -1 if nowhere. */
+    const findRun = (plan: FootprintPlan): number => {
+      const floats = plan.triangles.apron;
+      const vertices = floats.length / FOOTPRINT_VERTEX_FLOATS;
+      for (let at = 0; at + vertices <= drawn; at += 1) {
+        let same = true;
+        for (let vertex = 0; same && vertex < vertices; vertex += 1) {
+          for (let axis = 0; axis < 3; axis += 1) {
+            if (
+              position[(at + vertex) * 3 + axis] !== floats[vertex * FOOTPRINT_VERTEX_FLOATS + axis]
+            ) {
+              same = false;
+              break;
+            }
+          }
+        }
+        if (same) return at;
+      }
+      return -1;
+    };
+    // The same refill's selection, the same places: which wraps it paved.
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      buildings,
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    let aprons = 0;
+    for (let place = 0; place < selection.count; place += 1) {
+      if (selection.kitted[place] !== 1 || selection.paved[place] !== 1) continue;
+      const plan = plans[belt.drawnAt(place)?.plan as number] as FootprintPlan;
+      expect(findRun(plan) >= 0, String(place)).toBe(true);
+      aprons += 1;
+    }
+    expect(aprons).toBeGreaterThan(0);
   });
 
   it('draws real pieces: the wraps’ triangles are more than their cards alone, and each piece is the committed one', () => {

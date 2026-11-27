@@ -509,8 +509,8 @@ function landmarksAhead(
  * wraps — `MAPPED_KIT_TRIANGLES` between them at the most — and every
  * wrapped plan past them is its extrusion, and still drawn.
  * ⚠️ **And never at a building's cost**: where the wraps would leave the
- * frame fewer buildings, or fewer procedural structures ranked in, than the
- * same refill draws with no wrap, the walk is run again with one wrap fewer
+ * frame fewer buildings, fewer procedural structures ranked in, or more plans
+ * passed over for want of a surface, than the same refill draws with no wrap, the walk is run again with one wrap fewer
  * until it does not — at most eight walks a refill, and a refill is a chunk's,
  * not a frame's. What the wraps do take is what `refillMappedBuildings` would
  * have left the field boundaries (walls, hedges, fences).
@@ -554,22 +554,27 @@ export function selectMappedBuildings(
     );
   };
   walk(kit ? MAPPED_KIT_NEAR_MAX : 0);
-  if (into.kitCount === 0) return;
-  // #3334: never fewer buildings, nor fewer structures ranked in, than the same refill draws
-  // with no wrap at all. Where the wraps took triangles a farther building or a structure
-  // was drawn in, one wrap fewer, until none is.
-  const { count, rivals: ranked } = into;
+  if (!kit) return;
+  // #3334: never fewer buildings, nor fewer structures ranked in, nor more passed over, than
+  // the same refill draws with no wrap at all. Where the wraps took triangles or a surface slot
+  // a farther building or a structure was drawn in, one wrap fewer, until none is. ⚠️ Not
+  // skipped where the first walk took no wrap: a wrap tried and not fitting stops that walk
+  // short, and the bare walk is what it must not be shorter than.
+  const first = { count: into.count, rivals: into.rivals, passed: into.passed };
   let wraps = into.kitCount;
   walk(0);
-  const bare = { count: into.count, rivals: into.rivals };
-  if (count >= bare.count && ranked >= bare.rivals) {
+  const bare = { count: into.count, rivals: into.rivals, passed: into.passed };
+  const holds = (): boolean =>
+    into.count >= bare.count && into.rivals >= bare.rivals && into.passed <= bare.passed;
+  if (wraps === 0) return;
+  if (first.count >= bare.count && first.rivals >= bare.rivals && first.passed <= bare.passed) {
     walk(wraps);
     return;
   }
   while (wraps > 0) {
     wraps -= 1;
     walk(wraps);
-    if (into.count >= bare.count && into.rivals >= bare.rivals) return;
+    if (holds()) return;
   }
 }
 
