@@ -213,7 +213,7 @@ describe('demo:bake draws what a ride would get — #1651', () => {
   });
 });
 
-describe('demo:bake names no street — #3245, ADR 0100 (proposed)', () => {
+describe('demo:bake names no street — #3245, ADR 0100', () => {
   it('reads no street’s name, so the published bundle names none though its tiles do', async () => {
     const named = (): Uint8Array =>
       encodeTile([

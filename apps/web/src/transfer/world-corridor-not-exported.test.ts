@@ -208,7 +208,7 @@ async function packedSports(): Promise<Blob> {
   });
 }
 
-/** #3245: an invented street name, which a corridor keeps since ADR 0100 (proposed). */
+/** #3245: an invented street name, which a corridor keeps since ADR 0100. */
 const STREET_NAME_SENTINEL = 'Testexport Road';
 
 /** A corridor's features as the product packs them, holding a street's name (#3245). */

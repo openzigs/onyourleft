@@ -147,3 +147,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   store: a route's corridor read asks for names, and the store keeps the ones the atlas can paint.
   The export still carries none. The open world is unchanged. **Status: proposed**, in force only
   once the owner accepts ADR 0100.
+- **2026-11-26** — **The entry above for ADR 0100 is in force.** The owner accepted
+  [ADR 0100](0100-a-saved-route-ride-names-the-street-it-is-on.md) on 2026-11-26 (*"Accept as
+  proposed"*), and its pull request [#3261](https://github.com/openzigs/onyourleft/pull/3261)
+  merged, so that entry's *"Status: proposed"* no longer holds. Recorded for
+  [#3344](https://github.com/openzigs/onyourleft/issues/3344). The open world's labels keep D-2's
+  painting: #3344 lays only a saved route ride's name across the lane (ADR 0100's amendments).

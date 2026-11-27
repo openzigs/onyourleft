@@ -24,7 +24,7 @@ import type { GameRenderer, SceneFrame } from './port';
 import { drawnRoadPoints, nearestOnDrawnRoad } from './road-grid';
 import { circuitRoute } from './route-fixtures-testing';
 import type { SceneInput } from './scene';
-import { corridorOrigin } from './terrain';
+import { corridorOrigin, EDGE_LINE_WIDTH_METRES, ROAD_WIDTH_METRES } from './terrain';
 import { StreetNameBelt } from './three-renderer';
 import type { CorridorStreet, WorldCorridor } from './world-data/corridor';
 
@@ -248,7 +248,7 @@ describe('a saved route ride names the street it is on, through the press — #3
  * its centreline {@link OFFSET_METRES} to the side of the drawn road, and each
  * name carries digits and a full stop. Every name is invented.
  */
-const REAL_NAMES = ['Testford 3rd St.', 'Testa 12th Ave.', 'Testb St. 40', 'Testc Rd. 7'] as const;
+const REAL_NAMES = ['Testf 3rd St.', 'Testa 12th Ave.', 'Testb St. 40', 'Testc Rd. 7'] as const;
 
 /** How far a mapped centreline is from the drawn road, metres: a lane's width, as OSM's often is. */
 const OFFSET_METRES = 4;
@@ -382,7 +382,8 @@ describe('a preview without a trainer names the street it is on — the tablet c
       const x = corners[corner] as number;
       const z = corners[corner + 2] as number;
       const near = nearestOnDrawnRoad(route.profile, origin, x, z, 50);
-      expect(near?.distance).toBeLessThan(3);
+      // #3344: across the rider's lane, inside the road's edge line.
+      expect(near?.distance).toBeLessThan(ROAD_WIDTH_METRES / 2 - EDGE_LINE_WIDTH_METRES);
       const road = elevationAt(route.profile, near?.along ?? 0) - origin.elevation;
       expect(corners[corner + 1]).toBeGreaterThan(road);
     }

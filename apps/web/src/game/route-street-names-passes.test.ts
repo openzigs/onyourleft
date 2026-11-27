@@ -41,13 +41,23 @@ import { circuitRoute, FIXTURE_LATITUDE } from './route-fixtures-testing';
 import { routeStreetNameLabels } from './route-street-names';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
+import { NEARBY_STREET_LIFT_METRES } from './nearby-streets';
 import {
-  STREET_NAME_GLYPH_ADVANCE_METRES,
-  STREET_NAME_GLYPH_HEIGHT_METRES,
+  NO_STREET_NAMES,
+  routeNameLayout,
+  STREET_NAME_LIFT_METRES,
+  type RouteNameLayout,
   streetNamesInView,
   type StreetNameLabel,
 } from './street-names';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
+
+/** `name`'s layout across the lane (#3344), which every name here has. */
+function layoutOf(name: string): RouteNameLayout {
+  const layout = routeNameLayout(name);
+  expect(layout).toBeDefined();
+  return layout as RouteNameLayout;
+}
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
@@ -137,17 +147,44 @@ const FRAME_METRES = 10 / 60;
 /** The ride, cut in pieces so each case is short. */
 const PIECES = 32;
 
-/** What a painted letter is: its edges along and across the road, metres. */
-const EDGES = [
-  STREET_NAME_GLYPH_ADVANCE_METRES,
-  STREET_NAME_GLYPH_HEIGHT_METRES,
-  STREET_NAME_GLYPH_ADVANCE_METRES,
-  STREET_NAME_GLYPH_HEIGHT_METRES,
-] as const;
+/**
+ * What a painted letter is: its edges across the lane and along the road,
+ * metres — #3344, the name painted across the rider's lane.
+ */
+const LAYOUT = layoutOf('Testo Loop 10');
+const EDGES = [LAYOUT.width, LAYOUT.length, LAYOUT.width, LAYOUT.length] as const;
 
-/** How high a letter stands over the road drawn under it, metres: the lift, and its tolerance. */
-const OVER_ROAD_METRES = 0.08;
-const OVER_ROAD_TOLERANCE_METRES = 0.15;
+/**
+ * How high a letter stands over the road drawn under it, metres: a nearby
+ * street's lift and the name's own over it, and a tolerance that sees either
+ * one gone (#3261's review).
+ */
+const OVER_ROAD_METRES = NEARBY_STREET_LIFT_METRES + STREET_NAME_LIFT_METRES;
+const OVER_ROAD_TOLERANCE_METRES = 0.02;
+
+/** The height of `road`'s centreline across from `(x, z)`, between its two points either side. */
+function roadHeightAcross(
+  road: readonly { readonly x: number; readonly y: number; readonly z: number }[],
+  under: number,
+  x: number,
+  z: number,
+): number {
+  let best = { gap: Infinity, y: Number.NaN };
+  for (const from of [under - 1, under]) {
+    const a = road[from];
+    const b = road[from + 1];
+    if (a === undefined || b === undefined) continue;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const span = dx * dx + dz * dz;
+    if (!(span > 0)) continue;
+    const share = ((x - a.x) * dx + (z - a.z) * dz) / span;
+    if (share < 0 || share > 1) continue;
+    const gap = Math.abs((x - a.x) * dz - (z - a.z) * dx) / Math.sqrt(span);
+    if (gap < best.gap) best = { gap, y: a.y + (b.y - a.y) * share };
+  }
+  return best.y;
+}
 
 describe('a real-shaped out-and-back: every letter drawn at its painted size, on the road drawn — #3261', () => {
   it('names both passes, so the way back has labels of its own', () => {
@@ -199,9 +236,9 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
           // On the road drawn, a lane at most from its centreline…
           expect(least).toBeLessThan(LANE_METRES + 2);
           // …and standing on it, not in the air over it.
-          expect(Math.abs(y - (road[under]?.y ?? Number.NaN) - OVER_ROAD_METRES)).toBeLessThan(
-            OVER_ROAD_TOLERANCE_METRES,
-          );
+          const surface = roadHeightAcross(road, under, x, z);
+          if (Number.isNaN(surface)) continue;
+          expect(Math.abs(y - surface - OVER_ROAD_METRES)).toBeLessThan(OVER_ROAD_TOLERANCE_METRES);
         }
       }
     }
@@ -209,9 +246,11 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
 });
 
 describe('a letter drawn much larger than it is painted is not drawn at all — #3261', () => {
+  // #3344: two lines across the lane, 'Testo' nearest and 'Testa' beyond it:
+  // the first spans about 98.0 to 99.6 m along the route, the second 100.4 to 102.0 m.
   const label: StreetNameLabel = {
     key: 'route:0',
-    text: 'Testo',
+    text: 'Testo Testa',
     x: 0,
     z: 100,
     alongX: 0,
@@ -219,20 +258,43 @@ describe('a letter drawn much larger than it is painted is not drawn at all — 
     along: 100,
   };
   const flat = (): number => 0;
+  const gap = (from: number, to: number): number => Math.abs(to - from);
 
-  it('on a route ride: the one letter across a 20 m step of the road is left out, the rest drawn', () => {
-    // The step is inside the middle letter, which spans 99.25 to 100.75 m along the route.
+  it('on a route ride: the line across a 20 m step of the road is left out, the rest drawn', () => {
+    expect(layoutOf(label.text).lines).toStrictEqual(['TESTO', 'TESTA']);
+    // The step is inside the second line's letters.
     const view = streetNamesInView([label], { x: 0, z: 0 }, 0, flat, {
-      heightAt: (metres) => (metres < 100.5 ? 0 : 20),
-      gap: (from, to) => Math.abs(to - from),
+      heightAt: (metres) => (metres < 101 ? 0 : 20),
+      gap,
     });
     expect(view.labels).toHaveLength(1);
-    expect(view.cells).toHaveLength(4);
+    expect(view.cells).toHaveLength(5);
     const level = streetNamesInView([{ ...label, key: 'route:1' }], { x: 0, z: 0 }, 0, flat, {
       heightAt: flat,
-      gap: (from, to) => Math.abs(to - from),
+      gap,
     });
-    expect(level.cells).toHaveLength(5);
+    expect(level.cells).toHaveLength(10);
+  });
+
+  it('on a route ride: a label every letter of which is refused is not drawn, and the next one is', () => {
+    // A step inside each line: no letter of it is drawn.
+    const stepped = (metres: number): number => (metres < 99 ? 0 : metres < 101 ? 20 : 40);
+    const alone = streetNamesInView([{ ...label, key: 'route:2' }], { x: 0, z: 0 }, 0, flat, {
+      heightAt: stepped,
+      gap,
+    });
+    expect(alone).toBe(NO_STREET_NAMES);
+    // Beside a label on flat road, only that one is drawn.
+    const beyond: StreetNameLabel = { ...label, key: 'route:3', text: 'Testa', z: 200, along: 200 };
+    const both = streetNamesInView(
+      [{ ...label, key: 'route:4' }, beyond],
+      { x: 0, z: 150 },
+      150,
+      flat,
+      { heightAt: (metres) => (metres > 150 ? 0 : stepped(metres)), gap },
+    );
+    expect(both.labels.map((each) => each.key)).toStrictEqual(['route:3']);
+    expect(both.cells).toHaveLength(5);
   });
 
   it('on an open-world street: a letter whose corners stand on a cliff is left out', () => {

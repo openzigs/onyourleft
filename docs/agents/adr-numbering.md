@@ -51,9 +51,11 @@ It has the same authority as the root file. Where the text below says "this file
   stale. The next free number was **0100**, which ADR 0100 below took.
   ⚠️ **0100 is [ADR 0100](../adr/0100-a-saved-route-ride-names-the-street-it-is-on.md)**,
   taken by [#3245](https://github.com/openzigs/onyourleft/issues/3245) on 2026-11-26 for a saved
-  route ride naming the street it is on, now and then. **Proposed**, pending the owner. It
+  route ride naming the street it is on, now and then. **Accepted** the same day by the owner
+  ("Accept as proposed"), and its pull request #3261 merged. It
   supersedes in part ADR 0096 D-1.2 and ADR 0054 D-2.2, D-3.3 and D-5.7, for the saved route ride
-  only; ADR 0054 and ADR 0096 each gained one dated `## Amendments` pointer. 0098 is claimed by the
+  only; ADR 0054 and ADR 0096 each gained one dated `## Amendments` pointer, and a second, for
+  #3344, recording that it was accepted. ADR 0100 gained its own `## Amendments` for #3344. 0098 is claimed by the
   open pull request #2966, and 0099 is ADR 0099 (#3250). 0101 is ADR 0101, above, so the next
   free number is **0102**.
   ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,

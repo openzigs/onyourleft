@@ -2047,7 +2047,7 @@ export type WorldCorridorTileState =
  * drain (#2974, proposed); footway lines
  * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail`,
  * whether each is a bridge or a tunnel and, where the glyph atlas can paint
- * it, the street's mapped name (#3245, ADR 0100, proposed); railway lines
+ * it, the street's mapped name (#3245, ADR 0100); railway lines
  * with `kind_detail` and whether each is a bridge or a tunnel (#2660,
  * proposed); place points with
  * `kind`, `kind_detail` and `population_rank` (ADR 0055 D-6.1, #1632); and
