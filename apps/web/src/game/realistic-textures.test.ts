@@ -4777,12 +4777,26 @@ describe('the village-square tree, in the realistic world: no depth pre-pass —
 });
 
 describe('the downtown kit, loaded by the product’s own loader — #3334', () => {
-  it('draws a town’s wrapped footprints from the committed GLB and atlas, in the drawing a view builds', async () => {
+  /**
+   * The world, loaded once for the case below: the load is nearly all of its
+   * cost, and a per-case timeout is banned (#1688). Served as every case's
+   * `beforeEach` serves the files: a `beforeAll` runs before it.
+   */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const whileServed = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of whileServed.reverse()) each();
+    }
+  });
+
+  it('draws a town’s wrapped footprints from the committed GLB and atlas, in the drawing a view builds', () => {
     // The whole road a rider's frame takes: the committed GLB through
     // `GLTFLoader` and the atlas through `KTX2Loader`, into the loaded world;
     // a street planned as a ride plans it; and `RealisticDrawing.updateMapped`
     // itself, read back off the belt's own mesh, which is what the GPU is handed.
-    const renderer = await loadedOn(TABLET);
     const drawing = renderer.realisticDrawingOfLoadedWorld();
     if (drawing === undefined) throw new Error('no realistic world is loaded');
     try {
@@ -4869,7 +4883,7 @@ describe('the downtown kit, loaded by the product’s own loader — #3334', () 
     } finally {
       drawing.dispose();
     }
-  }, 120_000);
+  });
 });
 
 describe('the roadside models, loaded by the product’s own loader — #1274', () => {
