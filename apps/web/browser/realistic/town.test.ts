@@ -746,8 +746,10 @@ describe('which parked cars of the page’s commercial street have their wheels 
     };
     /** How many frames carried more cars in the near band than may have wheels: the cap at work. */
     let capped = 0;
-    // The page's own street, 900 m to 2 700 m, as its ride takes it: 2 m a frame.
-    for (let distance = 900; distance <= 2_700; distance += 2) {
+    // The stretch of the page's street that has cars in the near band, 4 m a
+    // frame: four frames to each cell the cars are planned for. Not the whole
+    // 1 800 m at 2 m: that is 901 frames, and 8 s under the nightly's coverage.
+    for (let distance = 1_000; distance <= 1_460; distance += 4) {
       const cars =
         rideFrame({
           profile: street.profile,
