@@ -258,8 +258,13 @@ export function shapeNameFor(
 
 /** The species a shape is of, or `undefined` for a shape this file does not name. */
 export function speciesOfShape(shape: string): ScenerySpecies | undefined {
-  return SCENERY_SPECIES.find((species) => species.shapes.includes(shape));
+  return SPECIES_OF_SHAPE.get(shape);
 }
+
+/** Each shape's species, looked up and not searched for: a frame asks for every item. */
+const SPECIES_OF_SHAPE: ReadonlyMap<string, ScenerySpecies> = new Map(
+  SCENERY_SPECIES.flatMap((species) => species.shapes.map((shape) => [shape, species] as const)),
+);
 
 /**
  * The species a setting grows of one kind, each once, in slot order.
