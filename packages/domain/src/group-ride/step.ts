@@ -55,8 +55,9 @@
  * rises from its draft factor toward 1, by the share of the open air's extra
  * drag that the missing watts are. Never above 1, and never below its factor:
  * a bot may take less shelter than the model offers and never more.
- * {@link GroupBot.dragFactor} is what it rode at. *The author's rule*, for
- * the harness (#3309) and the owner's ride to judge.
+ * {@link GroupBot.dragFactor} is what it rode at. Accepted by the owner on
+ * 2026-11-27 and recorded in ADR 0101's Amendments (its entry of that date,
+ * on D-3.2); how it feels is for the harness (#3309) and the owner's ride.
  *
  * ## The rider is read and never written
  *
