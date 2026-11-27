@@ -11,7 +11,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isNativeShell, shellPlatform } from './capacitor';
+import {
+  isAndroidShell,
+  isNativeShell,
+  shellKind,
+  shellPlatform,
+  type CapacitorGlobal,
+  type ShellKind,
+} from './capacitor';
 
 describe('detecting the Android shell', () => {
   it('says yes inside a native shell', () => {
@@ -79,5 +86,35 @@ describe('what the shell says it is', () => {
         },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('which native shell this is — #1755', () => {
+  const shell = (platform: string): CapacitorGlobal => ({
+    isNativePlatform: () => true,
+    getPlatform: () => platform,
+  });
+
+  it.each<[string, CapacitorGlobal | undefined, ShellKind | undefined, boolean]>([
+    ['the Android shell', shell('android'), 'android', true],
+    ['the iOS app', shell('ios'), 'ios', false],
+    // An unknown platform gets no Android plugin: a missing plugin degrades to
+    // the browser's fallback, where a wrongly assumed one throws in the bridge.
+    ['a native shell naming another platform', shell('electron'), undefined, false],
+    ['a native shell naming no platform', { isNativePlatform: () => true }, undefined, false],
+    [
+      'a browser with the web build of Capacitor',
+      { isNativePlatform: () => false, getPlatform: () => 'android' },
+      undefined,
+      false,
+    ],
+    ['a plain browser', undefined, undefined, false],
+  ])('%s', (_name, capacitor, kind, android) => {
+    expect(shellKind(capacitor)).toBe(kind);
+    expect(isAndroidShell(capacitor)).toBe(android);
+  });
+
+  it('keeps the iOS app native, for the BLE transport and the sealed offer', () => {
+    expect(isNativeShell(shell('ios'))).toBe(true);
   });
 });

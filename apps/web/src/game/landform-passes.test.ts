@@ -51,16 +51,25 @@ function frameAt(profile: RouteProfile, odometer: number) {
   );
 }
 
+/** Every half metre from 40 m before an out-and-back's turn to 30 m after it — #3254. */
+const NEAR_THE_TURN = Array.from({ length: 141 }, (_, step) => -40 + step / 2);
+
 const flaggedIn = (flags: Uint8Array): number[] =>
   [...flags].flatMap((flag, row) => (flag === 1 ? [row] : []));
 
 describe('fannedPairs flags a fan, and nothing at a turning point — #2205', () => {
-  it.each([0, 1, 2])(
+  it.each([0, 2])(
     'flags no pair on an out-and-back turning back %d m over, where no bend is sharp enough to fan',
     (lane) => {
       const route = outAndBackRoute({ offset: lane });
       const turn = route.totalDistance / 2;
-      for (const offset of [-200, -60, -12, -4, 4, 12, 30]) {
+      // ⚠️ #3254: on every frame from 40 m before the turn to 30 m after it,
+      // half a metre apart, not at seven odometers. Until the corridor's
+      // points near a turn were placed from its tip (`terrain.ts`
+      // §`steadiedAtTurns`) they slid with the rider, and the way back 2 m
+      // over closed a fan at its tip on 31 of these 141 frames, one or two at
+      // a time, and on none of the seven odometers this read before.
+      for (const offset of [-200, -60, ...NEAR_THE_TURN]) {
         // Before #2205: nine rows a frame, the turning point's cap and the
         // sunk rows beside it.
         expect(
@@ -70,6 +79,37 @@ describe('fannedPairs flags a fan, and nothing at a turning point — #2205', ()
       }
     },
   );
+
+  it('flags a fan turning back 1 m over only where it holds one, and holds it still — #3254', () => {
+    // The way back 1 m over closes a fan at its tip (@see closeFan) while
+    // the frame lays it onto the way out (`terrain.ts`
+    // §`towardTheRidersPass`), from the change of pass to about 10 m before
+    // the turn. Until #3254 it did on 9 of the 141 half-metre frames from
+    // 40 m before the turn to 30 m after, one at a time, so the flags changed
+    // 18 times, and -12 m, read here before, was between two of them. Placed
+    // from the tip, 36 frames in a row hold it, 27 m to 9.5 m before the
+    // turn, and the flags change twice: on, and off.
+    const route = outAndBackRoute({ offset: 1 });
+    const turn = route.totalDistance / 2;
+    for (const offset of [-200, -60, -4, 4, 12, 30]) {
+      expect(flaggedIn(fannedPairs(frameAt(route, turn + offset))), `${String(offset)} m`).toEqual(
+        [],
+      );
+    }
+    let changes = 0;
+    let flagged = 0;
+    let previous: string | undefined;
+    for (const offset of NEAR_THE_TURN) {
+      const flags = flaggedIn(fannedPairs(frameAt(route, turn + offset)));
+      if (flags.length > 0) flagged += 1;
+      const now = String(flags.length > 0);
+      if (previous !== undefined && now !== previous) changes += 1;
+      previous = now;
+    }
+    expect(changes).toBeLessThanOrEqual(2);
+    // Non-vacuity: the fan is there, so a reading that never flagged would not pass.
+    expect(flagged).toBeGreaterThan(0);
+  });
 
   it('still flags a fan: the apex of a 145° bend sampled every 10 m (#2149)', () => {
     // The control: a test that only ever saw no fans would pass with every

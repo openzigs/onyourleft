@@ -108,6 +108,16 @@ export const ROTATION_TIRED_WBAL_SHARE = 0.25;
 /** A bot aside eases by this share of the group's speed so the line passes: **12 %**. */
 export const ROTATION_EASE_SHARE = 0.12;
 
+/** A bot latching on rides this share above the line's speed to close the gap: **12 %**, the ease it gave up. */
+export const ROTATION_CATCH_UP_SHARE = 0.12;
+
+/**
+ * A rider latching on has this gap or less to the last wheel, odometer metres,
+ * to be on it: **5 m**. A bot can be asked to close up and the rider cannot, so
+ * their band is wider (ADR 0101 draft, #3326: up to 5 m is ordinary latching).
+ */
+export const ROTATION_RIDER_WHEEL_BAND_METRES = 5;
+
 /** The rider's pull's target, ms: **30 s**. */
 export const ROTATION_RIDER_PULL_MS = 30_000;
 
@@ -530,7 +540,11 @@ function decide(state: RotationState, view: RotationView, signal: boolean): Deci
     case 'latching': {
       const aside = state.aside as string;
       const last = order[order.length - 1] as string;
-      if (distanceOf(view, last) - distanceOf(view, aside) > ROTATION_WHEEL_BAND_METRES) {
+      const band =
+        aside === riderIdOf(state.line)
+          ? ROTATION_RIDER_WHEEL_BAND_METRES
+          : ROTATION_WHEEL_BAND_METRES;
+      if (distanceOf(view, last) - distanceOf(view, aside) > band) {
         return same('latching');
       }
       return { ...same('steady'), order: [...order, aside], aside: null };
@@ -578,8 +592,13 @@ export function stepRotation(state: RotationState, view: RotationView): Rotation
   const demands: Record<string, number> = {};
   for (const member of state.line) {
     if (member.kind !== 'bot') continue;
+    const role = roles[member.id];
     demands[member.id] =
-      roles[member.id] === 'drifting-back' ? lineSpeed * (1 - ROTATION_EASE_SHARE) : lineSpeed;
+      role === 'drifting-back'
+        ? lineSpeed * (1 - ROTATION_EASE_SHARE)
+        : role === 'latching'
+          ? lineSpeed * (1 + ROTATION_CATCH_UP_SHARE)
+          : lineSpeed;
   }
   const following = state.nextWindowAtMs + ROTATION_WINDOW_MS;
   const next: RotationState = {

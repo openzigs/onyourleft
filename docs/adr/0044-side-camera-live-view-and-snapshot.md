@@ -700,3 +700,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   this ADR's Status from there. D-2 stays conditional on spike 0021, as the Status says. ADR 0052
   D-1 also adds the phone's tilt message to ADR 0033 D-3's list, which this ADR left to the capture
   work; #1064 still builds it. (#1122)
+
+- **2026-11-26** — **D-12 names Android only, and the iOS app has no equivalent flag.**
+  [ADR 0058](0058-on-ios-the-camera-screens-detect-screen-capture-and-blank-the-picture.md) (#1752),
+  on the owner's D-11 ruling of 2026-10-27 on #15, decides the iOS counterpart: the same camera
+  screens blank the picture while the scene is recorded or mirrored, and a screenshot cannot be
+  prevented. D-12 is unchanged and still binds the Android shell. ADR 0058 also says that D-12's
+  consent sentence must not name Android in the iOS app. (#1752)

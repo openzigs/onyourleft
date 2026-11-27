@@ -385,6 +385,19 @@ describe('with no power reading, no cue at all', () => {
     // The reading back, the rest of the pull is cued as before.
     expect(kinds(said)).toContain('pull-off');
   });
+
+  it('a one-window dropout where last-wheel is detected does not lose it: said once, a window later (6 members)', () => {
+    const windows = ride({ rider: CLEAN });
+    const lastWheel = cuesOver(windows).said.find((each) => each.cue?.kind === 'last-wheel')
+      ?.atMs as number;
+    const { said } = cuesOver(windows, { power: (atMs) => (atMs === lastWheel ? null : 200) });
+    const spoken = said.filter(
+      (each) => each.cue?.kind === 'last-wheel' && each.atMs < lastWheel + 30_000,
+    );
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]?.atMs).toBeGreaterThan(lastWheel);
+    expect(spoken[0]?.atMs).toBeLessThanOrEqual(lastWheel + 3 * ROTATION_WINDOW_MS);
+  });
 });
 
 describe('shorter-pull: after the pull, from the rider’s own threshold, never guessed', () => {

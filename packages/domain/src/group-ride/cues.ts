@@ -475,8 +475,11 @@ export function stepCues(state: CueState, view: CueView): CueStep {
     phase,
     climbing,
     // A detected last-wheel is said or queued: either way it is not detected again this drift.
+    // With no power reading it is neither (the window drops it), so it stays to be detected.
     lastWheelSaid:
-      role === 'drifting-back' ? state.lastWheelSaid || detected.includes('last-wheel') : false,
+      role === 'drifting-back'
+        ? state.lastWheelSaid || (view.powerWatts !== null && detected.includes('last-wheel'))
+        : false,
     pullWatts,
     shorterPullDue,
     outSinceMs,

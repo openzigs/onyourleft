@@ -151,10 +151,11 @@ describe('a GLB with its maps encoded as KTX2 — #618', () => {
         expect(texture.extensions?.[BASISU_EXTENSION], file).toBeDefined();
       }
     }
-    // Four scanned trees, two shrubs and the rock — and since #1283 the four
+    // Two scanned firs, two shrubs and the rock — and since #1283 the four
     // generated broadleaves' full levels, and since #1294 the two generated
-    // firs'. A middle level and the rider embed none.
-    expect(withMaps).toBe(13);
+    // firs'. A middle level and the rider embed none. It was 13 until #1293
+    // deleted the two scanned broadleaves.
+    expect(withMaps).toBe(11);
   });
 });
 

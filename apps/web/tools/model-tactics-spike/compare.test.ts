@@ -188,6 +188,23 @@ describe('the comparison’s numbers (#2616)', () => {
     expect(fieldNumbers({ ...run, ticks: still }, 'rider').mostMovingAtOnce).toBe(0);
   });
 
+  it('leaves out a chase begun in the lead, which has no gap to cross (#2715)', () => {
+    const run = field();
+    const ticks = run.ticks.map((tick, at) => {
+      // `b` leads 35 m up the road from tick 400. `a` chases it on ticks 400
+      // to 449; `b`, with nobody ahead, "chases" on ticks 500 to 509.
+      return {
+        ...tick,
+        at: new Map([...tick.at].map(([id, place]) => [id, id === 'b' && at >= 400 ? 45 : place])),
+        tactic: new Map<string, BotTactic>([
+          ['a', at >= 400 && at < 450 ? 'chase' : 'sit-in'],
+          ['b', at >= 500 && at < 510 ? 'chase' : 'sit-in'],
+        ]),
+      };
+    });
+    expect(fieldNumbers({ ...run, ticks }, 'rider').chaseStartGapsM).toEqual([35]);
+  });
+
   it('does not count a move that never got 5 m clear', () => {
     const run = field();
     const near = run.ticks.map((tick) => ({

@@ -1041,3 +1041,31 @@ export * from './lap-race';
 // and speeds out. Nothing here imports a trainer, and nothing writes to one.
 
 export * from './group-ride';
+
+// --- The group ride's plan (#3298, epic #3296) --------------------------------
+//
+// The rider's chosen average becomes the front's power along the route, solved
+// once from the course so the whole ride averages the target, with a time
+// ledger that does not chase back time spent waiting. Never a trainer target.
+
+export type {
+  GroupLedger,
+  GroupPlan,
+  GroupPlanInput,
+  GroupPlanRefusal,
+  GroupSpeedModel,
+} from './group-ride/plan';
+export {
+  GROUP_LEDGER_BAND,
+  GROUP_LEDGER_FULL_BAND_SECONDS,
+  GROUP_LEDGER_START,
+  GROUP_PLAN_DEFAULT_CAPACITY_WATTS,
+  GROUP_PLAN_EASE_BEFORE_CLIMB,
+  GROUP_PLAN_FACTOR_CEILING,
+  GROUP_PLAN_LEAST_BASE_WATTS,
+  GROUP_PLAN_MAXIMUM_UPLIFT,
+  GROUP_PLAN_SOLVE_STEPS,
+  groupGradeFactor,
+  planGroupRide,
+  stepGroupLedger,
+} from './group-ride/plan';

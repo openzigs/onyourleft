@@ -479,3 +479,32 @@ The two positions are the exception, and are the reason this ADR can say "perman
 "no roadmap". A support percentage is a measurement of the present. A published standards position
 with a stated rationale is a statement about the future, from the only two parties who could change
 it.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-26** — **Footnote 11's state restoration does not come with the Bluetooth plugin this
+  repository ships, so it is not "for free".** `apps/mobile/package.json` pins
+  `@capacitor-community/bluetooth-le` **8.3.0**. In that release (tag `v8.3.0`, commit
+  `13f2bac3ac0c89a7fe8f8f74afdf69279b408e17`), `ios/Sources/BluetoothLe/DeviceManager.swift` line 40
+  creates its central manager as `CBCentralManager(delegate: self, queue: DispatchQueue.main)`, with
+  no options: there is no `CBCentralManagerOptionRestoreIdentifierKey`, and no file under the
+  plugin's `ios/` implements `centralManager(_:willRestoreState:)`. **8.4.0** (tag `v8.4.0`, commit
+  `666166021526a2251a62427b9a84961902d9b128`, published 2026-11-18) is the same, at line 41 of the
+  same file. Both were read on 2026-11-26 from the plugin's GitHub repository, and a search of every
+  file under `ios/` at each tag for "restore" found nothing. Restoration needs a central manager
+  created with a restore identifier and a delegate that handles `willRestoreState`, in code this
+  repository would have to write or patch in ([#1763](https://github.com/openzigs/onyourleft/issues/1763)).
+  Apple's *Core Bluetooth Programming Guide* (*Core Bluetooth Background Processing for iOS
+  Apps*) gives those steps: a manager created with that option, re-created at relaunch, and a
+  delegate that implements `centralManager:willRestoreState:`. Even with all of them, restoration
+  does not survive a user force-quit. Apple's technote *TN3115: Bluetooth State Restoration app
+  relaunch rules* (revised 2025-09-15, read 2026-11-26) answers **No** for *"App Force Quit by the
+  user"*. Its note 5 says that from iOS and iPadOS 26 only apps that use AccessorySetupKit to set up
+  Bluetooth accessories are relaunched, and nothing in this repository uses it. D-3 is
+  unchanged: iOS is still committed as a hybrid client. Which bridge carries background BLE is
+  spike S1's to measure ([#1753](https://github.com/openzigs/onyourleft/issues/1753)), and this
+  entry records only the fact that S1's design starts from. (#1751)
