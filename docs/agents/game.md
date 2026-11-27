@@ -2406,12 +2406,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         crossbucks alone); on a bridge a deck carrying the
                         same track on a plate girder with its ballast's edge
                         and a railing, on capped piers, level across its span;
-                        where it crosses the route its track is 6.8 m over
-                        the ROAD's own height (5.25 m clear under the girder),
-                        an open span for at most 32 m each side — to the
-                        mapped bridge's end if that is nearer, and for as far
-                        as the road runs under it — ending at a short abutment
-                        in a grass embankment that falls at 1 in 2, none of
+                        where it crosses the route its track is lifted so its
+                        girder is at least 5.25 m over the ROAD's own height
+                        at the road's highest point under it, at any angle
+                        (6.8 m to the track square to a level road; more
+                        elsewhere under a long skew bridge, whose deck is
+                        straight and does not follow the road); an open span
+                        32 m each side, less where the mapped bridge ends
+                        sooner and more for as far as the road runs under it,
+                        ending in a grass embankment that falls at 1 in 2 —
+                        at a short abutment where one stands clear of the
+                        road, else at a grass end, or open — none of
                         it on the carriageway; a
                         `disused` line rusted and grown over, with no sign at
                         its crossing. ⚠️ **Grounded on

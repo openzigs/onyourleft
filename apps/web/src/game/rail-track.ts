@@ -344,6 +344,11 @@ export interface RailTrackPiece {
   readonly deck: boolean;
   /** A line mapped as disused: rusted rails, ballast grown over. */
   readonly disused: boolean;
+  /**
+   * A deck whose line's first or last point is another bridge line's end: one
+   * bridge mapped as two lines, which has no abutment where they meet.
+   */
+  readonly deckJoins?: { readonly start: boolean; readonly end: boolean };
   /** A deck's whole mapped span in view: its two ends and its length. */
   readonly span?: {
     readonly from: readonly [number, number];
@@ -368,6 +373,8 @@ export interface RailOver {
   readonly to: readonly [number, number];
   /** How far from `from` to `to` the crossing is, `0` to `1`. */
   readonly share: number;
+  /** The mapped span's stations, `x, z` pairs: what the deck's lift is found over. */
+  readonly stations: readonly number[];
 }
 
 /** A corridor's railway, read once. */
@@ -560,10 +567,29 @@ export function railTrack(
           from: [run.points[0] as number, run.points[1] as number],
           to: [run.points[last] as number, run.points[last + 1] as number],
           share: last > 0 ? (best.station * 2) / last : 0,
+          stations: run.points,
         });
         oversOf.set(group, overs);
       }
     }
+    const decks = rails.filter((rail) => rail.grade === 'bridge');
+    const meetsDeck = (own: Float32Array, at: number): boolean =>
+      decks.some(
+        (other) =>
+          other.line !== own &&
+          other.line.length >= 4 &&
+          [0, other.line.length - 2].some(
+            (end) =>
+              Math.hypot(
+                (other.line[end] as number) - (own[at] as number),
+                (other.line[end + 1] as number) - (own[at + 1] as number),
+              ) <= JOINED_METRES,
+          ),
+      );
+    const deckJoins = (line: Float32Array): { start: boolean; end: boolean } => ({
+      start: meetsDeck(line, 0),
+      end: meetsDeck(line, line.length - 2),
+    });
     for (const [index, rail] of rails.entries()) {
       const deck = rail.grade === 'bridge';
       const overs = oversOf.get(groups[index] as number) ?? [];
@@ -602,11 +628,15 @@ export function railTrack(
             ...(run.tail !== undefined && last === stations - 1 ? { tail: run.tail } : {}),
             deck,
             disused: rail.kindDetail === 'disused',
+            ...(deck ? { deckJoins: deckJoins(rail.line) } : {}),
             ...(span === undefined ? {} : { span }),
+            // Its own span's crossing however far along it is: a long bridge at a shallow angle
+            // is over the road, and holds its lift, far past the reach of the climb to it.
             overs: overs.filter(
-              ({ x, z }) =>
+              ({ x, z, stations: own }) =>
+                (deck && own === run.points) ||
                 Math.hypot(Math.max(minX - x, x - maxX, 0), Math.max(minZ - z, z - maxZ, 0)) <
-                reach,
+                  reach,
             ),
             minX,
             maxX,
@@ -657,12 +687,6 @@ interface Lifting {
  * corridor: that share of the nearest crossing's whole amplitude, however far
  * along the line it is, so a bridge that crosses at a shallow angle keeps its
  * clearance as far as the road runs under it.
- *
- * Known limit: the deck is a straight line between the ground at its span's ends,
- * lifted by an amount found at the crossing, so the road's own rise under a long
- * bridge is not followed. At 4 to 5 degrees and about 200 m it holds the clearance;
- * under about 5 degrees on a bridge of 500 m or more it can sag to 1.7 to 4.6 m
- * over the road, and at 1 degree it can run under it (measured on the test fixture).
  */
 export function overLift(overs: readonly Lifting[], x: number, z: number, hold = 0): number {
   let lift = 0;
@@ -726,39 +750,83 @@ function standingAt(ground: Ground, x: number, z: number, within?: number): Stan
 
 /**
  * How far over the deck's own level a bridge's track is lifted where it
- * crosses the route, in metres, so that it is {@link DECK_CLEARANCE_METRES}
- * over the ROAD there — #3270: the deck is level between the ground at its
- * mapped span's two ends, which is not the road's height at the crossing, and a
- * lift that ignored the road left the girder 1 to 12 m over it. Never under
- * `0`: a road in a cutting is under more than the clearance, not a deck sunk
- * into the ground.
+ * crosses the route, in metres, so that its girder is clear of the ROAD
+ * wherever the road is under it — #3270. The deck is level between the ground
+ * at its mapped span's two ends, which is not the road's height, so the lift
+ * is found from the road: at every station of the span whose bed is over the
+ * carriageway — the centre and both edges of the bed — the road's own height
+ * there and {@link DECK_CLEARANCE_METRES}, less the deck's level there; and
+ * the most of those. So a bridge square to the road is lifted for the road at
+ * its crossing, and a long one that crosses at a shallow angle for the
+ * road's highest point under it, at any angle. Never under `0`: a road in a
+ * cutting is under more than the clearance, not a deck sunk into the ground.
+ * Found once a crossing and land mask.
  */
 function overAmplitude(ground: Ground, over: RailOver): number {
-  const here = standingAt(ground, over.x, over.z);
+  let byLand = amplitudes.get(over);
+  if (byLand === undefined) {
+    byLand = new WeakMap();
+    amplitudes.set(over, byLand);
+  }
+  const known = byLand.get(ground.land);
+  if (known !== undefined) return known;
+  const { profile, origin } = ground;
   const from = standingAt(ground, over.from[0], over.from[1]);
   const to = standingAt(ground, over.to[0], over.to[1]);
   const end = from?.y ?? to?.y;
-  if (here === undefined || end === undefined) return DECK_CLEARANCE_METRES;
-  // The deck slopes with the ground at its ends: its lowest level over the carriageway, a
-  // half road and a half bed either side of the crossing along the line, is what clears.
-  const metres = Math.hypot(over.to[0] - over.from[0], over.to[1] - over.from[1]);
-  const reach = metres > 0 ? (ROAD_WIDTH_METRES / 2 + BALLAST_CROWN_METRES / 2) / metres : 0;
-  const slope = (to?.y ?? end) - end;
-  const level = end + slope * Math.min(1, Math.max(0, over.share + (slope < 0 ? reach : -reach)));
-  // The road's own height at the crossing, whichever side of its edge the point is on.
-  const road = standingBesideRoad(
-    ground.profile,
-    ground.origin,
-    ground.seed,
-    { ...here.near, lateral: 0 },
-    ground.land,
-  ).standing;
-  return Math.max(
-    0,
-    road + DECK_CLEARANCE_METRES - level - BALLAST_DEPTH_METRES - SIDE_ROAD_LIFT_METRES,
-  );
+  let amplitude = DECK_CLEARANCE_METRES;
+  if (end !== undefined) {
+    const slope = (to?.y ?? end) - end;
+    const count = over.stations.length / 2;
+    const half = BALLAST_CROWN_METRES / 2;
+    amplitude = 0;
+    let found = false;
+    for (let index = 0; index < count; index += 1) {
+      const x = over.stations[index * 2] as number;
+      const z = over.stations[index * 2 + 1] as number;
+      if (nearestOnDrawnRoad(profile, origin, x, z, OVER_CARRIAGEWAY_METRES + 1) === undefined) {
+        continue;
+      }
+      const before = Math.max(0, index - 1);
+      const after = Math.min(count - 1, index + 1);
+      const dx = (over.stations[after * 2] as number) - (over.stations[before * 2] as number);
+      const dz =
+        (over.stations[after * 2 + 1] as number) - (over.stations[before * 2 + 1] as number);
+      const length = Math.hypot(dx, dz);
+      if (!(length > 0)) continue;
+      const level = end + (count > 1 ? (slope * index) / (count - 1) : 0);
+      for (const offset of [-half, 0, half]) {
+        const on = nearestOnDrawnRoad(
+          profile,
+          origin,
+          x + (dz / length) * offset,
+          z - (dx / length) * offset,
+          ROAD_WIDTH_METRES / 2 + 1,
+        );
+        if (on === undefined) continue;
+        // The road's own height there, whichever side of its edge the point is on.
+        const road = standingBesideRoad(
+          profile,
+          origin,
+          ground.seed,
+          { ...on, lateral: 0 },
+          ground.land,
+        ).standing;
+        found = true;
+        amplitude = Math.max(
+          amplitude,
+          road + DECK_CLEARANCE_METRES - level - BALLAST_DEPTH_METRES - SIDE_ROAD_LIFT_METRES,
+        );
+      }
+    }
+    if (!found) amplitude = DECK_CLEARANCE_METRES;
+  }
+  byLand.set(ground.land, amplitude);
+  return amplitude;
 }
 
+/** Each crossing's lift on a land mask, found once. */
+const amplitudes = new WeakMap<RailOver, WeakMap<LandClassMask, number>>();
 /** Triangles, growing: every quad its own four vertices, so each face has its own colour. */
 class Builder {
   readonly positions: number[] = [];
@@ -1274,7 +1342,25 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       const stood = standingAt(ground, point[0], point[2], end.distance + cheek + 1);
       return stood !== undefined && stood.near.distance >= ON_CARRIAGEWAY_METRES;
     });
-    if (!faceClear || !standsClear(shoulder) || !standsClear(-shoulder)) return;
+    // (On a straight road the wings' checks fail before the face's does at every angle but
+    // about 49 to 57 degrees: the face's is for those, and for a road that bends.)
+    if (!faceClear || !standsClear(shoulder) || !standsClear(-shoulder)) {
+      // No concrete, but the bank is not left open under the girder: its end is closed in grass
+      // between the feet and the bed's edges it already has — where that, too, is clear of the
+      // carriageway, which on a skew its feet either side of the road's edge may not be.
+      const closes = [0, 0.25, 0.5, 0.75, 1].every((t) => {
+        const x = end.footLeft[0] + (end.footRight[0] - end.footLeft[0]) * t;
+        const z = end.footLeft[2] + (end.footRight[2] - end.footLeft[2]) * t;
+        const stood = standingAt(ground, x, z, end.distance + end.reach + 1);
+        return (
+          stood !== undefined &&
+          stood.near.distance >= ON_CARRIAGEWAY_METRES &&
+          Math.sign(stood.near.lateral) === side
+        );
+      });
+      if (closes) mesh.quad(EMBANKMENT_GRASS, end.footLeft, end.left, end.right, end.footRight);
+      return;
+    }
     if (near) {
       mesh.quad(
         ABUTMENT,
@@ -1357,6 +1443,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       if (
         index === 1 &&
         startsSpan &&
+        piece.deckJoins?.start !== true &&
         a.open &&
         a.over <= DECK_SPAN_HALF_METRES &&
         a.distance >= OVER_CARRIAGEWAY_METRES
@@ -1366,6 +1453,7 @@ function pieceMesh(piece: RailTrackPiece, ground: Ground, near: boolean): PieceM
       if (
         index === count - 1 &&
         endsSpan &&
+        piece.deckJoins?.end !== true &&
         b.open &&
         b.over <= DECK_SPAN_HALF_METRES &&
         b.distance >= OVER_CARRIAGEWAY_METRES

@@ -1209,6 +1209,8 @@ describe('a rail bridge clears the road it crosses, wherever the ground is — #
       expect(found.length).toBeGreaterThan(3);
       // Never less than the clearance over the road under it…
       expect(Math.min(...found)).toBeGreaterThan(clear - 0.1);
+      // …and never sunk to it where the road is in a cutting under the deck's own level.
+      if (neededAt(site, length) < -0.5) expect(Math.min(...found)).toBeGreaterThan(clear + 0.2);
       // …and, where the road is not in a cutting under the ground at its ends, no more: the lift
       // is the road's height and the clearance, from the deck's own level.
       if (neededAt(site, length) > 0.3) {
@@ -1267,6 +1269,7 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
       [EMBANKMENT_GRASS, ABUTMENT, PIER_FOOT, PIER_CAP, PIER_CONCRETE].some((c) => is(c)(quad)),
     );
   const frame = (corridor: WorldCorridor) => quadsOf(trackOf(frameAt(site - 30, corridor)));
+  const clearUnder = DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES;
 
   it('on a bridge that crosses at a shallow angle', () => {
     const quads = frame(
@@ -1368,6 +1371,45 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
     },
   );
 
+  it.each([
+    [7, 500],
+    [5, 900],
+    [3, 900],
+    [2, 900],
+    [1, 900],
+  ])(
+    'on a %i degree bridge %i m long: clear of the road’s highest point under it, at six sites',
+    (degrees, length) => {
+      // The lift is found from the road at every station over the carriageway, not at the
+      // crossing alone: found there alone, the girder was 1.7 to 4.6 m over the road at 2 to 7
+      // degrees on this fixture, and under it at 1 degree.
+      const slope = Math.tan((degrees * Math.PI) / 180);
+      const end = length / 2;
+      for (const at of [1_200, 1_900, 2_600, 3_300, 4_000, 4_700]) {
+        const quads = quadsOf(
+          trackOf(
+            frameAt(
+              at - 30,
+              corridorOf([
+                rail(
+                  [
+                    [at - end, -end * slope],
+                    [at + end, end * slope],
+                  ],
+                  'bridge',
+                ),
+              ]),
+            ),
+          ),
+        );
+        const found = clearancesUnder(quads);
+        expect(found.length).toBeGreaterThan(8);
+        expect([at, Math.min(...found) > clearUnder - 0.1]).toEqual([at, true]);
+        expect(inTheRoad(solids(quads))).toBe(0);
+      }
+    },
+  );
+
   it('where the line runs beside the road before it crosses on a skew bridge', () => {
     const quads = frame(
       corridorOf([
@@ -1438,6 +1480,84 @@ describe('a rail bridge’s bank and abutments are kept out of the road — #325
       }
     },
   );
+
+  it.each([6, 10, 20, 40])(
+    'on a bridge mapped as two lines that meet %i m off the road: no abutment where they meet',
+    (meet) => {
+      const quads = frame(
+        corridorOf([
+          rail([
+            [site, -200],
+            [site, -60],
+          ]),
+          rail(
+            [
+              [site, -60],
+              [site, meet],
+            ],
+            'bridge',
+          ),
+          rail(
+            [
+              [site, meet],
+              [site, 60],
+            ],
+            'bridge',
+          ),
+          rail([
+            [site, 60],
+            [site, 200],
+          ]),
+        ]),
+      );
+      // One at each end of the open span, as a bridge mapped as one line has, and none between.
+      const concrete = quads.filter(is(ABUTMENT));
+      expect(concrete).toHaveLength(6);
+      for (const quad of concrete) {
+        expect(Math.abs(centre(quad).lateral)).toBeGreaterThan(DECK_SPAN_HALF_METRES - 3);
+      }
+      expect(inTheRoad(solids(quads))).toBe(0);
+    },
+  );
+
+  it('closes the bank’s end in grass where no abutment can stand clear of the road', () => {
+    // 30 degrees from the road, 24 m long: its wings would reach the carriageway.
+    const lean = 12 * Math.cos(Math.PI / 6);
+    const out = 12 * Math.sin(Math.PI / 6);
+    const quads = frame(
+      corridorOf([
+        rail([
+          [site - lean * 12, -out * 12],
+          [site - lean, -out],
+        ]),
+        rail(
+          [
+            [site - lean, -out],
+            [site + lean, out],
+          ],
+          'bridge',
+        ),
+        rail([
+          [site + lean, out],
+          [site + lean * 12, out * 12],
+        ]),
+      ]),
+    );
+    expect(quads.filter(is(ABUTMENT))).toEqual([]);
+    // The closing face: grass square across the track, from one foot of the bank to the other.
+    const alongTrack = (c: Corner): number =>
+      (c.along - site) * Math.cos(Math.PI / 6) + c.lateral * Math.sin(Math.PI / 6);
+    const acrossTrack = (c: Corner): number =>
+      (c.along - site) * Math.sin(Math.PI / 6) - c.lateral * Math.cos(Math.PI / 6);
+    const ends = quads.filter(
+      (quad) =>
+        is(EMBANKMENT_GRASS)(quad) &&
+        span(quad, alongTrack) < 0.3 &&
+        span(quad, acrossTrack) > BALLAST_CROWN_METRES + 4,
+    );
+    expect(ends.length).toBeGreaterThanOrEqual(2);
+    expect(inTheRoad(solids(quads))).toBe(0);
+  });
 
   it.each([12, 24, 48])(
     'on a %i m bridge, shorter than the open span: an abutment each end',
@@ -1614,6 +1734,28 @@ describe('what the track costs — #3253', () => {
     expect(moved.some((road) => !track.includes(road))).toBe(true);
     // And a piece still in view then is the piece it was: built once, kept.
     expect(moved.some((road) => pieces.includes(road))).toBe(true);
+  });
+
+  it('stops a line at a coordinate that is no number, and draws nothing past it', () => {
+    const good = ringBeside(ROLLING, ORIGIN, [
+      [1_000, BESIDE],
+      [1_101.5, BESIDE],
+      [1_400, BESIDE],
+    ]);
+    const bad = Float32Array.from([good[0], good[1], good[2], good[3], NaN, NaN, good[4], good[5]]);
+    const pieces = railTrack(
+      corridorOf([{ kindDetail: 'rail', grade: 'ground', line: bad }]),
+      ROLLING,
+      ORIGIN,
+    ).pieces;
+    expect(pieces.length).toBeGreaterThan(0);
+    const zs = pieces.flatMap((piece) => Array.from(piece.line).filter((_, at) => at % 2 === 1));
+    for (const value of pieces.flatMap((piece) => Array.from(piece.line))) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    // The last whole step before the bad coordinate, and not the line's far end.
+    expect(Math.max(...zs) - Math.min(...zs)).toBeLessThanOrEqual(101.5);
+    expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(96);
   });
 
   it('stops reading at RAIL_MAX_METRES, so a hostile tile cannot exhaust memory', () => {
