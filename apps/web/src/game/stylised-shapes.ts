@@ -10,7 +10,7 @@
  *
  * - **buildings by setting**: {@link buildingSettingOf} reads the urban class
  *   the realistic world reads (`urban-class.ts`), `settlements.ts` §`lotsAt`
- *   writes it on a lot (`scatter.ts` §`ScatterItem.setting`), and a suburban
+ *   writes it on a lot (`scatter.ts` §`ScatterItem.lotSetting`), and a suburban
  *   lot is drawn as one of City Kit (Suburban)'s modern houses, a commercial
  *   one as a City Kit (Commercial) building, a rural one as the building it
  *   always was;
@@ -130,12 +130,12 @@ function placeKey(x: number, z: number): number {
  * - A mesh with one shape draws it.
  */
 export function stylisedFoldOf(
-  item: Pick<ScatterItem, 'kind' | 'x' | 'z' | 'setting'>,
+  item: Pick<ScatterItem, 'kind' | 'x' | 'z' | 'lotSetting'>,
   folds: number,
 ): number {
   if (!(folds > 1)) return 0;
   if (item.kind === 'building') {
-    return Math.min(folds - 1, SETTING_FOLD[item.setting ?? 'rural']);
+    return Math.min(folds - 1, SETTING_FOLD[item.lotSetting ?? 'rural']);
   }
   return Math.min(
     folds - 1,

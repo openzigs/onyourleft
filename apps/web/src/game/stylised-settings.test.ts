@@ -64,7 +64,7 @@ function housesOf(items: readonly ScatterItem[], stretch: { from: number; to: nu
 /** An item as the plan held it before #3287: everything but its setting. */
 function withoutSetting(item: ScatterItem): ScatterItem {
   const copy: { -readonly [Key in keyof ScatterItem]: ScatterItem[Key] } = { ...item };
-  delete copy.setting;
+  delete copy.lotSetting;
   return copy;
 }
 
@@ -124,14 +124,14 @@ describe('#3287 a building is drawn by its setting', () => {
   });
 
   it('writes the setting on the item, and on a house alone', () => {
-    for (const house of housesOf(plan, RURAL)) expect(house.setting).toBeUndefined();
-    for (const house of housesOf(plan, SUBURBAN)) expect(house.setting).toBe('suburban');
-    for (const house of housesOf(plan, COMMERCIAL)) expect(house.setting).toBe('commercial');
+    for (const house of housesOf(plan, RURAL)) expect(house.lotSetting).toBeUndefined();
+    for (const house of housesOf(plan, SUBURBAN)) expect(house.lotSetting).toBe('suburban');
+    for (const house of housesOf(plan, COMMERCIAL)) expect(house.lotSetting).toBe('commercial');
     // A row of shops stands on the commercial land, and is no house.
     const shops = plan.filter((item) => item.kind === 'shop-row');
     expect(shops.length).toBeGreaterThan(0);
     for (const item of plan) {
-      if (item.kind !== 'building') expect(item.setting, item.kind).toBeUndefined();
+      if (item.kind !== 'building') expect(item.lotSetting, item.kind).toBeUndefined();
     }
   });
 
@@ -151,7 +151,7 @@ describe('#3287 a building is drawn by its setting', () => {
       before.town,
     );
     expect(unclassed).toStrictEqual(plan.map(withoutSetting));
-    expect(unclassed.some((item) => item.setting !== undefined)).toBe(false);
+    expect(unclassed.some((item) => item.lotSetting !== undefined)).toBe(false);
     const names = new Set(BUILDINGS.map((model) => model.name));
     for (const stretch of [SUBURBAN, COMMERCIAL]) {
       for (const shape of shapesOf(housesOf(unclassed, stretch))) {
@@ -186,8 +186,8 @@ describe('#3287 a building is drawn by its setting', () => {
     );
     expect(asked).toContain(town.profile);
     expect(housesOf(found, SUBURBAN).length).toBeGreaterThan(10);
-    for (const house of housesOf(found, SUBURBAN)) expect(house.setting).toBe('suburban');
-    for (const house of housesOf(found, COMMERCIAL)) expect(house.setting).toBe('commercial');
+    for (const house of housesOf(found, SUBURBAN)) expect(house.lotSetting).toBe('suburban');
+    for (const house of housesOf(found, COMMERCIAL)) expect(house.lotSetting).toBe('commercial');
   });
 
   it('reaches the frame a ride draws', () => {
@@ -206,7 +206,7 @@ describe('#3287 a building is drawn by its setting', () => {
     const commercial = frameAt(1_750).filter((item) => within(item, COMMERCIAL));
     expect(suburban.length).toBeGreaterThan(3);
     expect(commercial.length).toBeGreaterThan(3);
-    for (const house of suburban) expect(house.setting).toBe('suburban');
-    for (const house of commercial) expect(house.setting).toBe('commercial');
+    for (const house of suburban) expect(house.lotSetting).toBe('suburban');
+    for (const house of commercial) expect(house.lotSetting).toBe('commercial');
   });
 });

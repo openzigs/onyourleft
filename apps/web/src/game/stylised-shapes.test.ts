@@ -130,7 +130,12 @@ describe('#3287 what the shapes a kind is drawn as cost', () => {
 
 describe('#3287 which of its mesh’s shapes an item is', () => {
   const house = (setting?: BuildingSetting) =>
-    ({ kind: 'building', x: 12, z: 340, ...(setting === undefined ? {} : { setting }) }) as const;
+    ({
+      kind: 'building',
+      x: 12,
+      z: 340,
+      ...(setting === undefined ? {} : { lotSetting: setting }),
+    }) as const;
 
   it('draws a building as its setting’s', () => {
     expect(stylisedFoldOf(house(), 3)).toBe(0);
@@ -183,7 +188,7 @@ describe('#3287 which of its mesh’s shapes an item is', () => {
 
   it('ignores a setting on anything but a building', () => {
     const at = { x: 40, z: 900 } as const;
-    expect(stylisedFoldOf({ kind: 'rock', ...at, setting: 'commercial' }, 2)).toBe(
+    expect(stylisedFoldOf({ kind: 'rock', ...at, lotSetting: 'commercial' }, 2)).toBe(
       stylisedFoldOf({ kind: 'rock', ...at }, 2),
     );
   });

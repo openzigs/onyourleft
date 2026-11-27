@@ -275,7 +275,7 @@ describe('#3287 the files a load keeps beside each model', () => {
     expect(belt.batchesOf('building')).toHaveLength(2);
     expect(belt.batchesOf('rock')).toHaveLength(2);
     // And a commercial lot on that mesh is drawn, as the one shape it has.
-    belt.update([item({ kind: 'building', setting: 'commercial', variant: 0 })], POSE);
+    belt.update([item({ kind: 'building', lotSetting: 'commercial', variant: 0 })], POSE);
     expect(meshFor(belt, 'building').count).toBe(1);
     expect(belt.drawnItems).toBe(1);
     belt.dispose();
@@ -347,9 +347,9 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
     const belt = batchedBelt();
     const houses = [
       item({ kind: 'building', x: -6 }),
-      item({ kind: 'building', x: -2, setting: 'suburban' }),
-      item({ kind: 'building', x: 2, setting: 'commercial' }),
-      item({ kind: 'building', x: 6, setting: 'rural' }),
+      item({ kind: 'building', x: -2, lotSetting: 'suburban' }),
+      item({ kind: 'building', x: 2, lotSetting: 'commercial' }),
+      item({ kind: 'building', x: 6, lotSetting: 'rural' }),
     ];
     belt.update(houses, POSE);
 
@@ -374,14 +374,14 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
 
     belt.update([item({ kind: 'building', x: -6 })], POSE);
     expect(submittedBy(belt, batch)).toBe(rural);
-    belt.update([item({ kind: 'building', x: -6, setting: 'commercial' })], POSE);
+    belt.update([item({ kind: 'building', x: -6, lotSetting: 'commercial' })], POSE);
     expect(submittedBy(belt, batch)).toBe(commercial);
     belt.update(
       [
         item({ kind: 'building', x: -6 }),
-        item({ kind: 'building', x: -2, setting: 'suburban' }),
-        item({ kind: 'building', x: 2, setting: 'suburban' }),
-        item({ kind: 'building', x: 6, setting: 'commercial' }),
+        item({ kind: 'building', x: -2, lotSetting: 'suburban' }),
+        item({ kind: 'building', x: 2, lotSetting: 'suburban' }),
+        item({ kind: 'building', x: 6, lotSetting: 'commercial' }),
       ],
       POSE,
     );
@@ -532,7 +532,7 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
 
     const batch = batchFor(second, 'building', 2);
     expect([0, 1, 2].map((shape) => shapeTriangles(batch, shape))).toEqual(SHAPE_TRIANGLES);
-    second.update([item({ kind: 'building', variant: 2, setting: 'suburban' })], POSE);
+    second.update([item({ kind: 'building', variant: 2, lotSetting: 'suburban' })], POSE);
     expect(submittedBy(second, batch)).toBe(SHAPE_TRIANGLES[1]);
     second.dispose();
   });
@@ -554,8 +554,8 @@ describe('#3287 the belt a view builds where the driver has NO multi-draw', () =
       }
       belt.update(
         [
-          item({ kind: 'building', x: -4, setting: 'commercial' }),
-          item({ kind: 'building', x: 4, setting: 'suburban' }),
+          item({ kind: 'building', x: -4, lotSetting: 'commercial' }),
+          item({ kind: 'building', x: 4, lotSetting: 'suburban' }),
           item({ kind: 'tree-broadleaf', x: -3 }),
         ],
         POSE,
@@ -624,7 +624,10 @@ describe('#3287 a kind of one shape', () => {
   it('draws a kind’s primitive when no model loaded, whatever the setting', () => {
     const belt = batchedBelt();
     belt.update(
-      [item({ kind: 'building', setting: 'commercial' }), item({ kind: 'tree-broadleaf', x: -3 })],
+      [
+        item({ kind: 'building', lotSetting: 'commercial' }),
+        item({ kind: 'tree-broadleaf', x: -3 }),
+      ],
       POSE,
     );
     expect(belt.batchesOf('building')).toHaveLength(0);

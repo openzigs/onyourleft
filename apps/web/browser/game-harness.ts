@@ -2564,7 +2564,7 @@ function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasuremen
       alone({
         ...placedAhead(pose, 'building', 0, 14, 0),
         scale: 1.4,
-        ...(setting === 'rural' ? {} : { setting }),
+        ...(setting === 'rural' ? {} : { lotSetting: setting }),
       }),
     );
     const drawn = whole();
@@ -2625,7 +2625,7 @@ function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasuremen
       // Stepped on by one a round, so no mesh's houses are all of one setting.
       const setting = lots[(houses + Math.floor(houses / lots.length)) % lots.length];
       houses += 1;
-      return setting === undefined ? item : { ...item, setting };
+      return setting === undefined ? item : { ...item, lotSetting: setting };
     }),
   };
   const bare: SceneFrame = { ...settled, scatter: [] };

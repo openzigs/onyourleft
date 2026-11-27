@@ -310,7 +310,7 @@ export const STYLISED_FOLD_MODELS: Partial<
  * no name
  */
 export function stylisedShapeNameOf(
-  item: Pick<ScatterItem, 'kind' | 'x' | 'z' | 'setting' | 'variant'>,
+  item: Pick<ScatterItem, 'kind' | 'x' | 'z' | 'lotSetting' | 'variant'>,
   meshes: number = MAXIMUM_SCENERY_VARIANTS,
 ): string | undefined {
   const models = SCENERY_MODELS[item.kind] ?? [];

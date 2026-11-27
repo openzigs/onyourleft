@@ -1394,7 +1394,7 @@ export function lotSpacing(profile: RouteProfile): SceneryGrid & { readonly plot
  *    the press as a footprint is (`footprint-buildings.ts` §`terracePlans`),
  *    and drawn with the mapped buildings. Every other class is today's.
  * 8. Since #3287 a house carries **the setting its stretch is**
- *    (`ScatterItem.setting`, `stylised-shapes.ts` §`buildingSettingOf`), by
+ *    (`ScatterItem.lotSetting`, `stylised-shapes.ts` §`buildingSettingOf`), by
  *    which the stylised world chooses its shape. It moves no lot and builds
  *    none: a ride with no urban class has no setting on anything.
  *
@@ -1496,7 +1496,7 @@ export function lotsAt(
           footprintClearance(profile, origin, item, LOT_PORCH_FOOTPRINT) >= ROAD_CLEARANCE_METRES &&
           lotStands(mask, mapped, placeLot(lotScratch, x, z, LOT_PORCH_FOOTPRINT, rotation));
         // #3287: the setting the stylised world draws a house by.
-        const setting =
+        const lotSetting =
           kind === 'building' && urban !== undefined
             ? buildingSettingOf(urban.classAt(distanceOnRoute(profile, along)))
             : 'rural';
@@ -1504,7 +1504,7 @@ export function lotsAt(
           ...item,
           // #1588: a house is clad, a shop never.
           paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building', porch),
-          ...(setting === 'rural' ? {} : { setting }),
+          ...(lotSetting === 'rural' ? {} : { lotSetting }),
         });
       }
     }

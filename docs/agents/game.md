@@ -734,7 +734,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         building is turned half a turn to face the road
                         (`loadSceneryModels`). The setting is written on
                         a mapped town's lot by `settlements.ts` §`lotsAt`
-                        (`ScatterItem.setting`); a ride with no urban class has
+                        (`ScatterItem.lotSetting`); a ride with no urban class has
                         none, and draws the three Kenney buildings as before
     src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
                         one ASSETS.toml row each (ADR 0022 D-5). ⚠️ **"Kenney

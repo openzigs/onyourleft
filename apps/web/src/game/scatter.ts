@@ -265,7 +265,7 @@ export interface ScatterItem {
    * §`stylisedFoldOf`); the realistic world does not read it. Like the
    * variant it changes what stands somewhere, never where.
    */
-  readonly setting?: BuildingSetting;
+  readonly lotSetting?: BuildingSetting;
 }
 
 /**

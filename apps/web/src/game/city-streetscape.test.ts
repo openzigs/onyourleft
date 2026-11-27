@@ -739,11 +739,11 @@ describe('a city centre’s lots — #1637', () => {
     const noneFrame = frameAt(none, 1_500);
     const painted = frame.scatter.filter((item) => item.paint !== undefined);
     const paintedNone = noneFrame.scatter.filter((item) => item.paint !== undefined);
-    expect(paintedNone.some((item) => item.setting !== undefined)).toBe(false);
-    expect(painted.map((item) => ({ ...item, setting: undefined }))).toEqual(
-      paintedNone.map((item) => ({ ...item, setting: undefined })),
+    expect(paintedNone.some((item) => item.lotSetting !== undefined)).toBe(false);
+    expect(painted.map((item) => ({ ...item, lotSetting: undefined }))).toEqual(
+      paintedNone.map((item) => ({ ...item, lotSetting: undefined })),
     );
-    for (const house of houses) expect(house.setting).toBe('commercial');
+    for (const house of houses) expect(house.lotSetting).toBe('commercial');
   });
 });
 
