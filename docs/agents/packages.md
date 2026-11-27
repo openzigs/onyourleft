@@ -103,7 +103,10 @@ packages/             Apache-2.0, without exception
                         line paced to the rider's remembered pace (ADR
                         0101's amendment of 2026-11-27); the ledger books
                         none of the eased pace as riding. It hands the
-                        rider a standing and nothing else
+                        rider a standing and nothing else. Since #3303
+                        `GROUP_RIDE_CODE_VERSION` (`version.ts`), kept with
+                        a ride's `RideFacts.groupRide`: raise it with any
+                        change to what the line decides or how a bot rides
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

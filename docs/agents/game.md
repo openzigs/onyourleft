@@ -1022,6 +1022,61 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `lap-race/bot-weave.test.ts` is the gate, read at
                         60 fps through `lapRaceDrawing` and the scene's
                         markers
+    src/game/group-ride/choice.ts, ride-group.ts
+                        the AI group ride inside a game ride (#3303, epic
+                        #3296, ADR 0101): `GameView` holds one per ride,
+                        asked for by the chooser (`StageChooser.tsx`
+                        §`GroupRideControl`, *Ride with a group* in *Your
+                        ride* beside the pacer: an average speed in the
+                        rider's units and 3 to 7 bots, kept on the device by
+                        `choice.ts`; one mode a ride, so it and the pacer,
+                        the race and the round switch each other off). Not
+                        offered on a circuit, a level or the open world, and
+                        **unavailable, with the reason as the switch's
+                        description**, while a workout holds the trainer or
+                        the draft is switched off. A target the plan refuses
+                        on the chosen route blocks *Ride* with the most (or
+                        least) the group can average there. Solo only, never
+                        beside a race or a round. Started at the press (the
+                        bots formed up ahead of the rider, the rider on the
+                        last wheel, ONE seed kept with the ride), then
+                        stepped one tick a simulation step that ran through
+                        domain `stepGroupRide` on physics'
+                        `groupRidePhysics`, AFTER the grade is sampled. Out
+                        of each tick: the rider's draft, handed to
+                        `GameSimulation.draftWith` as a race's is (and the
+                        simulation keeps the in-draft state, so the Draft
+                        field and the saved ride's "drafted" are the solo
+                        draft's own); `groupSpeedMps`, which is the paced
+                        speed while the line is paced to the rider; and the
+                        phase and the rider's role, for the log. **The
+                        rider has stopped** (`riderStopped`) while the
+                        recording under the ride is paused, the recorder's
+                        auto-pause included, or the power reading is not
+                        live. The bots are drawn through the lap race's
+                        pack layout (a pack, up to three abreast; single
+                        file is #3304) and the rider is never moved. What
+                        the ride keeps goes through the port's
+                        `groupRideStepped` to the controller's
+                        `noteGroupRide` and is saved as
+                        `RideFacts.groupRide` (seed, average, size, rules'
+                        version, a log of phase and role changes).
+                        `group-ride-wiring.test.tsx` drives the real picker
+                        and reads the simulation's own draft factor, the
+                        frame's bots and what the recording is handed. ⚠️
+                        **A constant-power rider has no brake**: in the
+                        line's shelter the same watts are faster than the
+                        line, so a simulated rider drifts through the bots
+                        and off the front, then back
+    src/game/group-ride/group-ride-cannot-reach-trainer.test.tsx
+                        ADR 0101 D-6.6, the owner's ruling 4: **its first
+                        case** (#3303). In simulation mode a ride with the
+                        group sends the trainer, write for write and the
+                        release included, what the same ride sends without
+                        the group at the same draft factors (kept from the
+                        first ride and handed to the second by a wrapped
+                        `GameSimulation`). #3307 adds the presses and #3308
+                        completes it (ERG, the worst case)
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says

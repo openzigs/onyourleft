@@ -86,7 +86,7 @@ import type {
   Watts,
   WorkoutRescue,
 } from '@onyourleft/domain';
-import type { RoomRaceFact } from '@onyourleft/store';
+import type { GroupRideFact, RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
@@ -459,6 +459,19 @@ export interface GameTrainerPort {
    */
   lapRaceEnded?(race: LapRaceModelRecord): void;
   /**
+   * A group ride stepped, and this is what the ride keeps of it — #3303, ADR
+   * 0101: the line's seed, the average chosen, the size, the rules' version
+   * and the line's log so far, told on every frame the group stepped so a
+   * recording begun part-way through has it, and kept by the ride controller
+   * (`noteGroupRide`) for the saved ride (`RideFacts.groupRide`), on this
+   * device only. ⚠️ Not about the trainer, which a group ride never writes to
+   * (ADR 0101 D-6.1): data only, on this port for {@link gameRideEnded}'s
+   * reason, and named so nothing else in production calls a method of that
+   * name. Optional, as {@link soloDraftStepped} is; `gameTrainerPortOver`
+   * always supplies it.
+   */
+  groupRideStepped?(fact: GroupRideFact): void;
+  /**
    * This frame was ridden in the open world — #3088, the owner's ruling of
    * 2026-11-25: told on every frame of an open-world ride, so the recording
    * under it is marked (the ride controller's `noteOpenWorld`) and the saved
@@ -736,6 +749,8 @@ interface GameTrainerSource {
   noteLapRace?(race: LapRaceModelRecord): void;
   /** #3088. @see GameTrainerPort.rodeOpenWorld. Optional for a source with no recording. */
   noteOpenWorld?(): void;
+  /** #3303. @see GameTrainerPort.groupRideStepped. Optional for a source with no recording. */
+  noteGroupRide?(fact: GroupRideFact): void;
   /**
    * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
    * Optional for {@link recordForRoom}'s reason; the ride controller has both.
@@ -917,6 +932,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     rodeOpenWorld: () => {
       controller?.noteOpenWorld?.();
+    },
+    groupRideStepped: (fact) => {
+      controller?.noteGroupRide?.(fact);
     },
     lapRaceEnded: (race) => {
       controller?.noteLapRace?.(race);

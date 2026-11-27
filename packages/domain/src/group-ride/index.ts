@@ -5,6 +5,9 @@
 export type { GroupRideErrorCode } from './errors';
 export { GroupRideError } from './errors';
 
+// The version of these rules a ride was ridden under (#3303), kept with the ride.
+export { GROUP_RIDE_CODE_VERSION } from './version';
+
 // The line's phases and each member's role (#3299): closed lists, exhaustive switches.
 export type { LinePhase, LineSeats, RiderRole } from './roles';
 export { asideRole, isLineRole, LINE_PHASES, lineRoles, RIDER_ROLES } from './roles';

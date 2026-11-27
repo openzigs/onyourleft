@@ -1,0 +1,572 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// @vitest-environment jsdom
+
+/**
+ * **A group ride chosen on the picker is a group in the ride** — #3303, epic
+ * #3296, ADR 0101. The named failure is state a control writes and nothing
+ * reads: a switch, a speed and a size on *Your ride* that start an ordinary
+ * ride.
+ *
+ * Every case drives the real `GameView` through the real picker, presses the
+ * real *Ride*, and rides the real simulation on frames this file hands out.
+ * What it reads back is what a consumer reads:
+ *
+ * - **the simulation's own draft factor** (`GameSimulation.draftFactor`, the
+ *   multiplier the rider's next step is ridden at), kept by wrapping the real
+ *   class and calling nothing on it;
+ * - **the frame's scene input** (`sceneFrame`'s argument): the bots the pack
+ *   layout drew, and the rider's own drawn place;
+ * - **what the ride is handed for the recording** through the game's port:
+ *   the group's fact, and the draft that marks the ride as drafted;
+ * - **the picker itself** after a remount, for what the device remembers.
+ *
+ * `check:wiring` covers the seam between the modules
+ * (`group-ride/choice.ts`, `group-ride/ride-group.ts` and the port's
+ * `groupRideStepped`); it cannot see a call deleted from the tick, and these
+ * cases can.
+ */
+
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { watts } from '@onyourleft/domain';
+import type { GroupRideFact } from '@onyourleft/store';
+
+import { chooseOption, mount, queryAll, settle, typeInto, type Mounted } from '../../testing/mount';
+import { GameView, type GamePort, type RidableRoute } from '../GameView';
+import { ANNOUNCEMENTS_STORAGE_KEY } from '../hud/announce-preference';
+import type { GameRenderer } from '../port';
+import { DEFAULT_LAP_RACE_CHOICE } from '../lap-race/choice';
+import { circuitRoute, northRoute } from '../route-fixtures-testing';
+import type { SceneInput } from '../scene';
+import type { GameSensors } from '../sensors';
+import type { GameSimulation } from '../simulation';
+import { SOLO_DRAFT_STORAGE_KEY } from '../solo-draft-preference';
+import type { SoloDraftState } from '../solo-draft';
+import { NO_GAME_TRAINER, type GameTrainerPort } from '../trainer-port';
+import { REALISTIC_WORLD_STORAGE_KEY } from '../world-preference';
+
+import { GROUP_RIDE_STORAGE_KEY, GROUP_RIDE_UNAVAILABLE_TEXT } from './choice';
+
+/** What the wrapped seams saw, for one case. Reset before each. */
+const seen = vi.hoisted(() => ({
+  /** Every `GameSimulation` built, newest last: read, never called. */
+  simulations: [] as Pick<GameSimulation, 'draftFactor' | 'state'>[],
+  /** Every frame's scene input, in order. */
+  frames: [] as Pick<SceneInput, 'raceBots' | 'steeredLateral' | 'botDistance' | 'state'>[],
+}));
+
+vi.mock('../simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../simulation')>();
+  class WatchedSimulation extends actual.GameSimulation {
+    constructor(...args: ConstructorParameters<typeof actual.GameSimulation>) {
+      super(...args);
+      seen.simulations.push(this);
+    }
+  }
+  return { ...actual, GameSimulation: WatchedSimulation };
+});
+
+vi.mock('../scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../scene')>();
+  return {
+    ...actual,
+    sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
+      seen.frames.push(args[0]);
+      return actual.sceneFrame(...args);
+    },
+  };
+});
+
+/** Five level kilometres of the rider's own: a road a group's plan is solved on. */
+const ROUTE: RidableRoute = {
+  id: 'route-level',
+  name: 'Level',
+  profile: northRoute(5_000, () => 0),
+  attempts: 0,
+};
+
+/** A loop of about 250 m of the rider's own, where a lap race is offered too. */
+const LOOP: RidableRoute = {
+  id: 'route-loop',
+  name: 'Loop',
+  profile: circuitRoute(40, () => 0),
+  attempts: 0,
+};
+
+/** The power the rider holds: under the group's, so they sit on a wheel and do not ride off the front. */
+const RIDER_WATTS = 120;
+
+function sensors(live = true): GameSensors {
+  return {
+    rider: { power: watts(live ? RIDER_WATTS : 0), live, paired: true },
+    cadence: { value: 90, live: true, paired: true },
+    heartRate: { value: 140, live: true, paired: true },
+  };
+}
+
+const renderer: GameRenderer = {
+  loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+  create: () => ({
+    hasContext: true,
+    prepare: () => Promise.resolve(),
+    render: () => undefined,
+    setQuality: () => undefined,
+    setRiderKit: () => undefined,
+    setSeason: () => undefined,
+    resize: () => undefined,
+    destroy: () => undefined,
+  }),
+};
+
+const FRAME_MS = 250;
+let pending: FrameRequestCallback[] = [];
+let nowMs = 0;
+let mounted: Mounted | undefined;
+/** Every group fact the game handed the recording, frame by frame. */
+let facts: GroupRideFact[];
+/** Every solo draft the game handed the recording, frame by frame. */
+let drafts: SoloDraftState[];
+
+/** The game's port to the ride, keeping what it is handed. */
+function ridePort(
+  options: { readonly workout?: boolean; readonly autoPaused?: () => boolean } = {},
+): GameTrainerPort {
+  return {
+    readTrainer: () =>
+      options.workout === true ? { kind: 'workout', control: undefined } : NO_GAME_TRAINER,
+    askForControlOnRide: () => Promise.resolve(),
+    workoutRescue: () => undefined,
+    recordingMayStop: () => false,
+    gameRideEnded: () => undefined,
+    soloDraftStepped: (draft) => {
+      drafts.push(draft);
+    },
+    groupRideStepped: (fact) => {
+      facts.push(fact);
+    },
+    ...(options.autoPaused === undefined ? {} : { recordingPaused: options.autoPaused }),
+    rideMovingSeconds: () => undefined,
+    watchRide: () => () => undefined,
+  };
+}
+
+beforeEach(() => {
+  seen.simulations.length = 0;
+  seen.frames.length = 0;
+  pending = [];
+  nowMs = 1_000_000;
+  facts = [];
+  drafts = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    pending.push(callback);
+    return pending.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', () => undefined);
+  // Announcements silenced, so no reading speaks over a case.
+  localStorage.setItem(
+    ANNOUNCEMENTS_STORAGE_KEY,
+    JSON.stringify({
+      enabled: false,
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      intervalLeadSeconds: 'never',
+      climbLeadMetres: 'never',
+    }),
+  );
+});
+
+afterEach(() => {
+  mounted?.unmount();
+  mounted = undefined;
+  localStorage.clear();
+  globalThis.location.hash = '';
+  vi.unstubAllGlobals();
+});
+
+async function clickThrough(element: HTMLElement | undefined): Promise<void> {
+  expect(element).toBeDefined();
+  await act(async () => {
+    element?.click();
+    await Promise.resolve();
+  });
+  await settle();
+}
+
+const root = (): ParentNode => mounted?.container ?? document;
+
+const toggle = (text: string): HTMLInputElement | undefined =>
+  queryAll<HTMLInputElement>(root(), 'input[type="checkbox"]').find((input) =>
+    (input.closest('label')?.textContent ?? '').includes(text),
+  );
+
+const groupSwitch = (): HTMLInputElement | undefined => toggle('Ride with a group');
+
+const labelled = <T extends HTMLElement>(text: string): T | undefined => {
+  const label = queryAll<HTMLLabelElement>(root(), 'label').find((each) =>
+    (each.textContent ?? '').startsWith(text),
+  );
+  return label?.htmlFor === undefined || label.htmlFor === ''
+    ? undefined
+    : ((document.getElementById(label.htmlFor) as T | null) ?? undefined);
+};
+
+const speedBox = (): HTMLInputElement | undefined => labelled('Group average speed');
+const sizeSelect = (): HTMLSelectElement | undefined => labelled('Riders in the group');
+
+const rideButton = (): HTMLButtonElement | undefined =>
+  queryAll<HTMLButtonElement>(root(), 'button').find((button) =>
+    (button.textContent ?? '').startsWith('Ride '),
+  );
+
+/** The value a HUD field shows, by its label; `undefined` when the field is absent. */
+function field(label: string): string | undefined {
+  const term = queryAll(root(), 'dt').find((dt) => dt.textContent === label);
+  return term === undefined ? undefined : (term.nextElementSibling?.textContent ?? '');
+}
+
+interface Setup {
+  /** Switch the group ride on at the picker. Off leaves the switch as the device kept it. */
+  readonly group?: boolean;
+  readonly speed?: string;
+  readonly size?: string;
+  readonly port?: GameTrainerPort | undefined;
+  /** The rider's readings on each frame; live at {@link RIDER_WATTS} unless said. */
+  readonly read?: () => GameSensors;
+  /** The route on the picker; {@link ROUTE} unless said. */
+  readonly route?: RidableRoute;
+  /** Props the shell or a test hands the screen, beside the picker. */
+  readonly shell?: Pick<Parameters<typeof GameView>[0], 'roomId' | 'delivery' | 'lapRace'>;
+}
+
+async function open(setup: Setup = {}): Promise<void> {
+  const port: GamePort = {
+    listRoutes: () => Promise.resolve([setup.route ?? ROUTE]),
+    loadGhost: () => Promise.resolve(undefined),
+    readSensors: setup.read ?? (() => sensors()),
+  };
+  mounted = await mount(
+    <GameView
+      port={port}
+      renderer={() => Promise.resolve(renderer)}
+      {...(setup.port === undefined ? {} : { trainer: setup.port })}
+      {...setup.shell}
+      now={() => nowMs}
+    />,
+  );
+  await settle();
+  if (setup.group === true) await clickThrough(groupSwitch());
+  if (setup.speed !== undefined) {
+    await typeInto(speedBox() as HTMLInputElement, setup.speed);
+    await settle();
+  }
+  if (setup.size !== undefined) {
+    await chooseOption(sizeSelect() as HTMLSelectElement, setup.size);
+    await settle();
+  }
+}
+
+/** Run `frames` quarter-second frames of the ride in progress; the draft factor after each. */
+async function frames(count: number): Promise<number[]> {
+  const factors: number[] = [];
+  for (let frame = 0; frame < count; frame += 1) {
+    const next = pending.shift();
+    if (next === undefined) break;
+    nowMs += FRAME_MS;
+    await act(async () => {
+      next(nowMs);
+      await Promise.resolve();
+    });
+    factors.push(seen.simulations.at(-1)?.draftFactor ?? Number.NaN);
+  }
+  return factors;
+}
+
+/** Open the picker, press *Ride*, and ride. */
+async function ride(setup: Setup, count: number): Promise<number[]> {
+  await open(setup);
+  await clickThrough(rideButton());
+  return frames(count);
+}
+
+const lastFrame = () => seen.frames.at(-1);
+
+describe('a group ride started from Your ride puts the group in the ride — #3303', () => {
+  it('drafts the rider on a wheel, draws the bots, and hands the ride its group and its draft', async () => {
+    const factors = await ride({ group: true, port: ridePort() }, 80);
+    // The simulation's own factor: alone at the press, sheltered once on a wheel.
+    expect(factors).toHaveLength(80);
+    expect(factors[0]).toBe(1);
+    expect(Math.min(...factors)).toBeLessThan(0.7);
+    expect(factors.at(-1)).toBeLessThan(1);
+    // The HUD's Draft field reads the same draft, as on any drafted solo ride.
+    expect(field('Draft')).toMatch(/^[1-9]\d? ?%/);
+    // The frame draws the default five bots through the pack layout, and the
+    // rider at their own odometer, in the line's lane.
+    const frame = lastFrame();
+    expect(frame?.raceBots).toHaveLength(5);
+    expect(frame?.raceBots?.every((bot) => bot.laidOut === true)).toBe(true);
+    expect(frame?.steeredLateral).toBe(0);
+    // No pacer rides beside a group.
+    expect(frame?.botDistance).toBeUndefined();
+    const odometer = frame?.state.ride.distance ?? 0;
+    for (const bot of frame?.raceBots ?? []) {
+      expect(Math.abs(bot.distanceMetres - odometer)).toBeLessThan(60);
+    }
+    // The recording is handed the group: the default average and size, and a log.
+    const fact = facts.at(-1);
+    expect(fact?.bots).toBe(5);
+    expect(fact?.targetSpeed).toBeCloseTo(30 / 3.6, 9);
+    expect(Number.isSafeInteger(fact?.seed)).toBe(true);
+    expect(fact?.log[0]).toMatchObject({ at: 0, phase: 'forming' });
+    expect(fact?.log.some((entry) => entry.phase === 'steady')).toBe(true);
+    // And the draft that marks the saved ride as drafted (ADR 0101 Q14).
+    const draft = drafts.at(-1);
+    expect(draft?.inDraft).toBe(true);
+    expect(draft?.inDraftMetres ?? 0).toBeGreaterThan(0.1 * (draft?.riddenMetres ?? Infinity));
+  });
+
+  it('rides the same press without the switch alone: no draft, no bots, no group kept', async () => {
+    const factors = await ride({ port: ridePort() }, 40);
+    expect(new Set(factors)).toStrictEqual(new Set([1]));
+    expect(seen.frames.length).toBeGreaterThan(0);
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+    expect(lastFrame()?.steeredLateral).toBeUndefined();
+    expect(facts).toStrictEqual([]);
+    expect(field('Draft')).toBeUndefined();
+  });
+
+  it('rides the average speed and the size the rider chose', async () => {
+    await ride({ group: true, speed: '26', size: '3', port: ridePort() }, 12);
+    expect(lastFrame()?.raceBots).toHaveLength(3);
+    const fact = facts.at(-1);
+    expect(fact?.bots).toBe(3);
+    expect(fact?.targetSpeed).toBeCloseTo(26 / 3.6, 9);
+  });
+
+  it('is reached by a simulated ride, which has no trainer and records nothing', async () => {
+    globalThis.location.hash = '#/game?simulate=120';
+    const factors = await ride({ group: true, port: ridePort() }, 80);
+    expect(Math.min(...factors)).toBeLessThan(0.7);
+    expect(lastFrame()?.raceBots).toHaveLength(5);
+    // A simulated ride is handed no port (`useSimulatedRide`), so nothing is kept of it.
+    expect(facts).toStrictEqual([]);
+    expect(drafts).toStrictEqual([]);
+  });
+});
+
+describe('the line waits for a rider who has stopped — ADR 0101 D-4.4, D-6.11', () => {
+  const phaseNow = (): string | undefined => facts.at(-1)?.log.at(-1)?.phase;
+
+  it('rides on while the rider pedals with a live power reading', async () => {
+    await ride({ group: true, port: ridePort({ autoPaused: () => false }) }, 40);
+    expect(facts.at(-1)?.log.some((entry) => entry.phase === 'waiting')).toBe(false);
+  });
+
+  it('waits while the recording under the ride is paused: the recorder’s auto-pause', async () => {
+    let paused = false;
+    await ride({ group: true, port: ridePort({ autoPaused: () => paused }) }, 20);
+    expect(phaseNow()).not.toBe('waiting');
+    paused = true;
+    await frames(12);
+    expect(phaseNow()).toBe('waiting');
+    // And rides again when it resumes.
+    paused = false;
+    await frames(12);
+    expect(phaseNow()).not.toBe('waiting');
+  });
+
+  it('waits while the power reading is not live: sensor loss', async () => {
+    let live = true;
+    await ride({ group: true, port: ridePort(), read: () => sensors(live) }, 20);
+    expect(phaseNow()).not.toBe('waiting');
+    live = false;
+    await frames(12);
+    expect(phaseNow()).toBe('waiting');
+  });
+});
+
+describe('the setup is remembered on the device — #3303', () => {
+  it('reads back the switch, the speed and the size after a reload, on the picker and in the ride', async () => {
+    await open({ group: true, speed: '27', size: '4' });
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).not.toBeNull();
+    mounted?.unmount();
+    mounted = undefined;
+
+    // A reload: a new screen over the same device, which nobody has touched.
+    await open({ port: ridePort() });
+    expect(groupSwitch()?.checked).toBe(true);
+    expect(speedBox()?.value).toBe('27');
+    expect(sizeSelect()?.value).toBe('4');
+    // And *Ride*, pressed as it stands, rides what was remembered.
+    await clickThrough(rideButton());
+    await frames(8);
+    expect(lastFrame()?.raceBots).toHaveLength(4);
+    expect(facts.at(-1)?.targetSpeed).toBeCloseTo(27 / 3.6, 9);
+  });
+
+  it('remembers the switch turned off again', async () => {
+    await open({ group: true });
+    await clickThrough(groupSwitch());
+    mounted?.unmount();
+    mounted = undefined;
+    await open();
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(speedBox()).toBeUndefined();
+  });
+
+  it('touches nothing on the device until the rider changes the setup', async () => {
+    await open();
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe('one mode a ride', () => {
+  /** Each switch turns the group off as it goes on, and is turned off as the group goes on. */
+  async function expectEitherOr(other: string): Promise<void> {
+    await clickThrough(toggle(other));
+    expect(toggle(other)?.checked).toBe(true);
+    await clickThrough(groupSwitch());
+    expect(groupSwitch()?.checked).toBe(true);
+    expect(toggle(other)?.checked).toBe(false);
+    await clickThrough(toggle(other));
+    expect(toggle(other)?.checked).toBe(true);
+    expect(groupSwitch()?.checked).toBe(false);
+    // And the device remembers the group switched off by it.
+    expect(JSON.parse(localStorage.getItem(GROUP_RIDE_STORAGE_KEY) ?? '{}')).toMatchObject({
+      on: false,
+    });
+  }
+
+  it('the pacer or the group', async () => {
+    await open();
+    await expectEitherOr('Ride against a pacer');
+  });
+
+  it('a lap race or the group, on a loop', async () => {
+    await open({ route: LOOP });
+    await expectEitherOr('Ride a lap race');
+  });
+
+  it('a Delivery round or the group, in the realistic world', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await open();
+    await expectEitherOr('Ride a Delivery round');
+  });
+
+  it('a course opened for a game starts with the group off, and forgets nothing', async () => {
+    const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
+    localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
+    globalThis.location.hash = '#/game?play=lap-race';
+    await open({ route: LOOP });
+    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
+  });
+
+  it('rides no group in a room, whose road and draft are the room’s', async () => {
+    await ride({ group: true, port: ridePort(), shell: { roomId: 'room-one' } }, 20);
+    expect(seen.simulations).toHaveLength(1);
+    expect(facts).toStrictEqual([]);
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+  });
+
+  it('rides no group beside a Delivery round', async () => {
+    await ride({ group: true, port: ridePort(), shell: { delivery: true } }, 20);
+    expect(seen.simulations).toHaveLength(1);
+    expect(facts).toStrictEqual([]);
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+  });
+
+  it('rides no group beside a lap race', async () => {
+    await ride(
+      {
+        group: true,
+        route: LOOP,
+        port: ridePort(),
+        shell: { lapRace: { ...DEFAULT_LAP_RACE_CHOICE, bots: 2, itemsOn: false } },
+      },
+      // Past the race's 10 s countdown, during which nothing steps.
+      60,
+    );
+    expect(seen.simulations).toHaveLength(1);
+    expect(seen.simulations[0]?.state.ride.distance ?? 0).toBeGreaterThan(5);
+    expect(facts).toStrictEqual([]);
+    // The bots drawn are the race's two, not a group's five.
+    expect(lastFrame()?.raceBots).toHaveLength(2);
+  });
+});
+
+describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
+  it('a workout holding the trainer: the switch is off and disabled, and Ride rides no group', async () => {
+    // The device remembers the switch on, from a ride before the workout began.
+    localStorage.setItem(
+      GROUP_RIDE_STORAGE_KEY,
+      JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
+    );
+    await open({ port: ridePort({ workout: true }) });
+    expect(groupSwitch()?.disabled).toBe(true);
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(speedBox()).toBeUndefined();
+    expect(root().textContent).toContain(GROUP_RIDE_UNAVAILABLE_TEXT.workout);
+    await clickThrough(rideButton());
+    const factors = await frames(40);
+    expect(factors.length).toBeGreaterThan(0);
+    expect(new Set(factors)).toStrictEqual(new Set([1]));
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+    expect(facts).toStrictEqual([]);
+  });
+
+  it('the draft switched off on this device: the same, with its own sentence', async () => {
+    localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
+    localStorage.setItem(
+      GROUP_RIDE_STORAGE_KEY,
+      JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
+    );
+    await open({ port: ridePort() });
+    expect(groupSwitch()?.disabled).toBe(true);
+    expect(root().textContent).toContain(GROUP_RIDE_UNAVAILABLE_TEXT['draft-off']);
+    await clickThrough(rideButton());
+    await frames(20);
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+    expect(facts).toStrictEqual([]);
+  });
+});
+
+describe('a group the setup cannot make blocks the ride', () => {
+  it('says the most the group can average on the route, and starts nothing', async () => {
+    await open({ group: true, speed: '90', port: ridePort() });
+    const problem = queryAll(root(), '[role="alert"]').find((alert) =>
+      (alert.textContent ?? '').startsWith('The group cannot average 90 km/h on this route.'),
+    );
+    expect(problem).toBeDefined();
+    expect(rideButton()?.getAttribute('aria-describedby')).toContain(problem?.id);
+    await clickThrough(rideButton());
+    expect(seen.simulations).toHaveLength(0);
+    expect(rideButton()).toBeDefined();
+    // Corrected, the same press rides.
+    await typeInto(speedBox() as HTMLInputElement, '30');
+    await settle();
+    await clickThrough(rideButton());
+    await frames(8);
+    expect(lastFrame()?.raceBots).toHaveLength(5);
+  });
+});
+
+describe('a whole group ride with no network — ADR 0101 D-1.2', () => {
+  it('rides in the line’s draft with every network primitive refused and no instance port', async () => {
+    const refuse = (name: string) =>
+      function refused(): never {
+        throw new Error(`a group ride reached for ${name}`);
+      };
+    vi.stubGlobal('fetch', refuse('fetch'));
+    vi.stubGlobal('XMLHttpRequest', refuse('XMLHttpRequest'));
+    vi.stubGlobal('WebSocket', refuse('WebSocket'));
+    vi.stubGlobal('EventSource', refuse('EventSource'));
+    // No `tactics`, `aiPacer`, `room` or `rooms` port is handed: there is no instance.
+    const factors = await ride({ group: true, port: ridePort() }, 80);
+    expect(Math.min(...factors)).toBeLessThan(0.7);
+    expect(lastFrame()?.raceBots).toHaveLength(5);
+    expect(facts.at(-1)?.log.length ?? 0).toBeGreaterThan(1);
+  });
+});

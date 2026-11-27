@@ -114,6 +114,7 @@ import type {
   ActivityId,
   AthleteId,
   LapId,
+  GroupRideFact,
   PacerModelFact,
   RecordedCourseLap,
   RecordingSessionId,
@@ -1406,6 +1407,13 @@ export interface RideController {
    */
   noteOpenWorld(): void;
   /**
+   * The game stepped a group ride, and this is what the ride keeps of it —
+   * #3303, ADR 0101: the newest replaces the last, and the saved ride carries
+   * it as `RideFacts.groupRide`. Ignored unless a ride is recording or paused.
+   * Decides no write to the trainer.
+   */
+  noteGroupRide(fact: GroupRideFact): void;
+  /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
    * marked here on the recorder's own clock, kept by the recorder (and so in
@@ -1713,6 +1721,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let gameOutcomeDrafted = false;
   /** The draft of the ride being recorded — #2451. @see RideController.noteSoloDraft */
   let soloDraft = NO_SOLO_DRAFT;
+  /** The group ride of the ride being recorded — #3303. @see RideController.noteGroupRide */
+  let groupRide: GroupRideFact | undefined;
   /** The AI pacer's log of the ride being recorded — #2712. @see RideController.notePacerDecision */
   let pacerDecisions: PacerDecisionRecord[] = [];
   /**
@@ -3491,6 +3501,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     rider: CalorieRider,
     draft?: Pick<RideFacts, 'drafted' | 'draftSpans'>,
     pacerModel?: PacerModelFact,
+    group?: GroupRideFact,
   ): FinishedRide | undefined => {
     const series = current.session.series();
     return rideToSave({
@@ -3530,6 +3541,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       ...(draft === undefined ? {} : { draft }),
       // #2712: and of its AI pacer. A recovered ride passes none.
       ...(pacerModel === undefined ? {} : { pacerModel }),
+      // #3303: and of its group ride. A recovered ride passes none.
+      ...(group === undefined ? {} : { groupRide: group }),
       // #3088: the recorder's own, so a recovered ride keeps it by this path.
       ...(current.openWorld ? { openWorld: true } : {}),
     });
@@ -3622,6 +3635,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       await savedRider(port, current),
       soloDraftFacts(soloDraft, current.session.timeline),
       pacerModelToSave(pacerDecisions, pacerRide),
+      groupRide,
     );
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -4660,6 +4674,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       recorder?.noteOpenWorld();
     },
 
+    noteGroupRide(fact: GroupRideFact): void {
+      // #3303. A phase check, as `noteOpenWorld` has: a stopped ride is saved
+      // or being saved, and idle there is no ride for it to be kept with.
+      if (phase !== 'recording' && phase !== 'paused') return;
+      groupRide = fact;
+    },
+
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
       // #1318: whether a course is under the ride, followed with or without a
       // recording: the game ride has left the line and not yet ended or
@@ -4985,6 +5006,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       workoutFinishedInRide = false;
       // #2451: and the draft ridden on that ride.
       soloDraft = NO_SOLO_DRAFT;
+      // #3303: and the group ride of that ride.
+      groupRide = undefined;
       // #2712: and the AI pacer's log of that ride.
       pacerDecisions = [];
       pacerRide = undefined;
