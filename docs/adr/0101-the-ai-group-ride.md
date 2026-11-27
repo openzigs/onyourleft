@@ -589,3 +589,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   model's factor and nothing here changes their speed (D-4.5). Accepted by the owner, 2026-11-27,
   on [#3347](https://github.com/openzigs/onyourleft/pull/3347): *"Decision 1 is accepted."* Built
   in `packages/domain/src/group-ride/step.ts`. (#3300)
+- **2026-11-27** — **D-4.1's *"The rest of the line does not ease yet"* and D-4.2's waiting are no
+  longer the whole of no-drop, and D-2.6 covers more than waiting.** Built as D-4 states it, a
+  line released from a wait rode away at the plan's pace and waited again: a scripted rider at a
+  quarter of the group's power spent the ride in a cycle of about a minute and was beyond the
+  draft's reach each time. The owner ruled on
+  [#3359](https://github.com/openzigs/onyourleft/pull/3359#issuecomment-7228951594): *"after the
+  first wait, the group slows to the rider's sustained pace (a memory of what the rider can
+  hold), so the rider stays on a wheel. This replaces the repeating ride-away-and-wait cycle …
+  The wait and regroup still apply to a one-off gap. The group's plan speed recovers if the
+  rider's pace rises."* So:
+  1. **The rider's pace is remembered from the first wait or regroup**: their speed as a share of
+     the plan's speed, a running mean over about 20 s, never above the plan's. A rider who has
+     stopped does not move it.
+  2. **From then on the line is asked a 5 % margin over that pace**, never above the plan's
+     speed, and **gives the speed back as the rider comes off the wheel**, all of it at 2 s of the
+     rider's own speed (and never nearer than 5 m). So after the first wait the line does ease
+     for a rider who is merely off the wheel, which D-4.1 said it did not. Before the first wait
+     D-4.1 holds as written.
+  3. **It recovers**: the margin keeps the line a touch ahead of a rider who holds the wheel, the
+     remembered pace follows them up, and the line rides the plan again once they hold it.
+  4. **A one-off gap still ends in a wait or a regroup** (D-4.2, D-4.3), with no floor in either.
+  5. **D-2.6 reaches the paced line too: the eased pace is the rider's ride.** A tick in which the
+     line is held or paced is not booked as riding time, nor is one after it until the front is
+     back at 98 % of the plan's speed, nor is a rider's own pull under that speed. The ledger is
+     then exactly as late when the group rides the plan again as it was before, so a dropped
+     rider is never chased by the ledger's 5 % band. The ride page still shows the stated average
+     beside the average ridden.
+
+  Every figure is a feel parameter for the harness (#3309) and the owner's ride. The rule is the
+  bots' alone: it hands the rider a standing and nothing else, and nothing here changes their
+  speed (D-4.5); nothing reaches a trainer (D-6.1). Built in
+  `packages/domain/src/group-ride/no-drop.ts` and `step.ts`. (#3301)

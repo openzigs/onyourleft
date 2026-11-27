@@ -99,8 +99,11 @@ packages/             Apache-2.0, without exception
                         the rider is read and never written. Since #3301
                         no-drop (`no-drop.ts`): a sweep bot for a gapped
                         rider, a line that waits or regroups at a speed
-                        with no lower limit, and a ledger paused while it
-                        does; it hands the rider a standing and nothing else
+                        with no lower limit, and after the first wait a
+                        line paced to the rider's remembered pace (ADR
+                        0101's amendment of 2026-11-27); the ledger books
+                        none of the eased pace as riding. It hands the
+                        rider a standing and nothing else
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

@@ -57,6 +57,12 @@ const at = (frame: Frame, id: string): MemberView => frame.at[id] as MemberView;
 const hold = (frame: Frame) => frame.tick.state.noDrop.hold;
 const sweepOf = (frame: Frame) => frame.tick.state.noDrop.sweep;
 const standing = (frame: Frame) => frame.tick.state.noDrop.standing;
+/** Whether the line is asked for less than the plan's speed: held for the rider, or paced to them. */
+const eased = (frame: Frame): boolean => frame.tick.state.noDrop.easedSpeedMps !== null;
+/** How many times the line began to hold for the rider. */
+const holdsBegun = (frames: readonly Frame[]): number =>
+  frames.filter((frame, index) => hold(frame) !== null && hold(frames[index - 1] as Frame) === null)
+    .length;
 
 /** The bots of the line ahead of the rider's seat, front first; the whole line for a rider aside. */
 function aheadOf(frame: Frame): readonly string[] {
@@ -106,13 +112,29 @@ const quarter = ridden(() =>
   rideGroup({ course: RISE, targetKmh: TARGET_KMH, rider: { share: 0.25 } }),
 );
 
+/**
+ * A one-off gap, read by two criteria: at the back of the line, 8 km/h under
+ * their speed from 5 s to 50 s, then holding a wheel again. No pull change (a
+ * tight bend holds every one), so b1 is on the front throughout.
+ */
+const oneGap = ridden(() =>
+  rideGroup({
+    course: FLAT,
+    targetKmh: TARGET_KMH,
+    line: RIDER_LAST,
+    seconds: 300,
+    bendRadiusM: 20,
+    rider: { slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 } },
+  }),
+);
+
 it("measures the reach the draft model's own", () => {
   expect(NO_DROP_REACH_METRES).toBe(DRAFT_REACH_METRES);
 });
 
 describe('a rider at 60 % of the group’s power, over the hilly fixture (criterion 1)', () => {
   /** The stated recovery time, seconds: the longest the rider is ever beyond the reach. */
-  const RECOVERY_SECONDS = 40;
+  const RECOVERY_SECONDS = 20;
   const ride = ridden(() =>
     rideGroup({ course: HILLY, targetKmh: TARGET_KMH, rider: { share: 0.6 } }),
   );
@@ -120,44 +142,67 @@ describe('a rider at 60 % of the group’s power, over the hilly fixture (criter
   it('is never beyond the draft reach behind the line for longer than the recovery time, start to finish', () => {
     expect(ride().finishSeconds).not.toBeNull();
     expect(longestBeyondReach(ride().frames)).toBeLessThanOrEqual(RECOVERY_SECONDS);
-    // And they were dropped: the line waited, more than once.
-    const waits = ride().frames.filter(
-      (frame, index, frames) =>
-        hold(frame) === 'waiting' && hold(frames[index - 1] as Frame) === null,
-    );
-    expect(waits.length).toBeGreaterThan(3);
+    // And they were dropped: the line waited once, and paced them from then on.
+    expect(holdsBegun(ride().frames)).toBeGreaterThanOrEqual(1);
+    expect(holdsBegun(ride().frames)).toBeLessThanOrEqual(2);
   });
 
   it('has the group ride under four fifths of the plan’s speed for them on the climb: the pacer’s floor is not the group’s', () => {
     // The climb is 3 000 to 4 500 m at 8 %, where the rider's speed is 60 % of the group's.
     const climbing = windowsOf(ride().frames).filter(
       (frame) =>
-        hold(frame) !== null &&
+        eased(frame) &&
         at(frame, frame.order[0] as string).distanceM > 3_100 &&
         at(frame, frame.order[0] as string).distanceM < 4_400,
     );
-    expect(climbing.length).toBeGreaterThan(60);
-    const slowest = Math.min(
-      ...climbing.map((frame) => {
-        const front = at(frame, frame.order[0] as string);
-        return front.speedMps / ride().plan.speedNowAt(front.distanceM);
-      }),
+    expect(climbing.length).toBeGreaterThan(300);
+    const shares = climbing.map((frame) => {
+      const front = at(frame, frame.order[0] as string);
+      return front.speedMps / ride().plan.speedNowAt(front.distanceM);
+    });
+    const mean = shares.reduce((sum, share) => sum + share, 0) / shares.length;
+    expect(mean).toBeLessThan(0.7);
+    // With them all the way up it: on a wheel, not waited for again and again.
+    expect(climbing.filter((frame) => standing(frame) === 'with').length).toBeGreaterThan(
+      0.9 * climbing.length,
     );
-    expect(slowest).toBeLessThan(0.5);
   });
 });
 
-describe('a rider at 25 % of the group’s power is still with the group at the finish (criterion 2)', () => {
+describe('a rider at 25 % of the group’s power ends on a wheel (criterion 2, and the owner’s ruling of 2026-11-27)', () => {
   const ride = quarter;
+  /** The first frame after the first wait is over. */
+  const afterFirstWait = (): number => {
+    const { frames } = ride();
+    const began = frames.findIndex((frame) => hold(frame) !== null);
+    return frames.findIndex((frame, index) => index > began && hold(frame) === null);
+  };
 
-  it('finishes with the rider inside the reach, or with the line holding for them', () => {
+  it('finishes on a wheel: with the line, inside 2 m of the wheel ahead, and nobody waiting', () => {
     const { frames, finishSeconds } = ride();
     expect(finishSeconds).not.toBeNull();
     const last = frames[frames.length - 1] as Frame;
-    expect(behindLine(last) <= DRAFT_REACH_METRES || hold(last) !== null).toBe(true);
-    // Never left: three reaches is the furthest they are ever behind, and never for long.
-    expect(Math.max(...frames.map(behindLine))).toBeLessThan(3 * DRAFT_REACH_METRES);
-    expect(longestBeyondReach(frames)).toBeLessThanOrEqual(75);
+    expect(standing(last)).toBe('with');
+    expect(hold(last)).toBeNull();
+    expect(behindLine(last)).toBeLessThan(2);
+    expect(last.roles[YOU]).not.toBe('gapped');
+  });
+
+  it('has no repeating ride-away-and-wait cycle: one wait, then the line rides the rider’s pace', () => {
+    const { frames } = ride();
+    expect(holdsBegun(frames)).toBe(1);
+    const after = frames.slice(afterFirstWait());
+    expect(after.length * TICK_SECONDS).toBeGreaterThan(500);
+    // Never beyond the reach again, and never held again.
+    expect(longestBeyondReach(after)).toBe(0);
+    expect(after.every((frame) => hold(frame) === null)).toBe(true);
+    // On a wheel for the ride: with the line in more than 85 % of it, a minute after the wait.
+    const settled = after.slice(60 / TICK_SECONDS);
+    expect(settled.filter((frame) => standing(frame) === 'with').length).toBeGreaterThan(
+      0.85 * settled.length,
+    );
+    // Paced, not at the plan's speed: the line is asked for less than the plan nearly all of it.
+    expect(settled.filter(eased).length).toBeGreaterThan(0.85 * settled.length);
   });
 
   it('has a group whose speed fell to the rider’s: the two covered the same road in the same time', () => {
@@ -166,22 +211,57 @@ describe('a rider at 25 % of the group’s power is still with the group at the 
     const last = frames[frames.length - 1] as Frame;
     const riderRode = at(last, YOU).distanceM - at(first, YOU).distanceM;
     const lineRode = at(last, 'b3').distanceM - at(first, 'b3').distanceM;
-    expect(lineRode / riderRode).toBeGreaterThan(0.97);
-    expect(lineRode / riderRode).toBeLessThan(1.03);
+    expect(lineRode / riderRode).toBeGreaterThan(0.99);
+    expect(lineRode / riderRode).toBeLessThan(1.01);
     // Half the plan's average or less: far under any 20 % limit.
     const seconds = frames.length * TICK_SECONDS;
     expect(lineRode / seconds).toBeLessThan(0.55 * (TARGET_KMH / 3.6));
   });
 
-  it('has no lower limit: on the rise the whole line stands still while the rider comes up', () => {
-    const stopped = windowsOf(ride().frames).filter(
-      (frame) =>
-        hold(frame) !== null &&
-        frame.groupSpeedMps === 0 &&
-        aheadOf(frame).every((id) => id === sweepOf(frame) || at(frame, id).speedMps === 0),
+  it('has no lower limit: up the rise the line crawls at the rider’s pace, under a third of the plan’s', () => {
+    // The rise is 1 500 to 1 800 m at 5 %, where a quarter of the power is a quarter of the speed.
+    const rising = windowsOf(ride().frames).filter((frame) => {
+      const front = at(frame, frame.order[0] as string).distanceM;
+      return front > 1_560 && front < 1_780;
+    });
+    expect(rising.length).toBeGreaterThan(150);
+    const { plan } = ride();
+    const slow = rising.filter((frame) => {
+      const front = at(frame, frame.order[0] as string);
+      return front.speedMps < 0.33 * plan.speedNowAt(front.distanceM);
+    });
+    expect(slow.length).toBeGreaterThan(0.9 * rising.length);
+    expect(rising.filter((frame) => standing(frame) === 'with').length).toBeGreaterThan(
+      0.9 * rising.length,
     );
-    expect(stopped.length).toBeGreaterThan(20);
-    for (const frame of stopped) expect(at(frame, YOU).speedMps).toBeGreaterThan(0.5);
+  });
+});
+
+describe('a paced line recovers toward the plan as the rider’s pace rises (the owner’s ruling of 2026-11-27)', () => {
+  // A one-off gap: 8 km/h under their speed from 5 s to 50 s, then holding a
+  // wheel again. No pull change (a tight bend holds every one).
+  const ride = oneGap;
+
+  it('waits once, paces the rider under the plan when they are back, and is at the plan’s speed again by the end', () => {
+    const { frames, plan } = ride();
+    expect(holdsBegun(frames)).toBe(1);
+    const began = frames.findIndex((frame) => hold(frame) !== null);
+    const released = frames.findIndex((frame, index) => index > began && hold(frame) === null);
+    const paced = frames.slice(released).filter(eased);
+    // Paced for a while after the wait, on what the rider was riding: well under the plan.
+    expect(paced.length * TICK_SECONDS).toBeGreaterThan(20);
+    expect((frames[released] as Frame).groupSpeedMps).toBeLessThan(0.9 * plan.speedNowAt(0));
+    // The asked speed rises from there as the rider holds the wheel: half a minute on, well up.
+    const asked = windowsOf(frames.slice(released)).map((frame) => frame.groupSpeedMps);
+    expect(asked[30] as number).toBeGreaterThan((asked[0] as number) + 0.5);
+    // And it is the plan's again, with the rider on the wheel, for the last half minute.
+    const end = frames.slice(-30 / TICK_SECONDS);
+    for (const frame of end) {
+      expect(eased(frame)).toBe(false);
+      expect(frame.groupSpeedMps).toBe(plan.speedNowAt(at(frame, 'b1').distanceM));
+      expect(standing(frame)).toBe('with');
+      expect(at(frame, 'b1').speedMps).toBeGreaterThan(0.98 * frame.groupSpeedMps);
+    }
   });
 });
 
@@ -361,7 +441,15 @@ describe('over the crest with the rider 15 s behind, the line regroups and settl
     const after = windows()[inside() + settle] as Frame;
     expect(after.phase).toBe('steady');
     expect(hold(after)).toBeNull();
-    expect(after.groupSpeedMps).toBe(ride().plan.speedNowAt(at(after, 'b1').distanceM));
+    // Released to the rider's pace, which the regroup seeded, and no further wait.
+    expect(after.groupSpeedMps).toBeLessThanOrEqual(
+      ride().plan.speedNowAt(at(after, 'b1').distanceM),
+    );
+    expect(
+      windows()
+        .slice(inside() + settle)
+        .every((frame) => hold(frame) === null),
+    ).toBe(true);
   });
 });
 
@@ -490,85 +578,75 @@ describe('the rider’s simulated speed is unchanged by the rule (criterion 7)',
   });
 });
 
-describe('time spent waiting or regrouping is not chased back (criterion 8)', () => {
-  const ride = quarter;
+describe('the eased pace is the rider’s ride: none of it is chased back (criterion 8)', () => {
+  /** How late the ledger has the group as `frames[index]` ends, seconds. */
+  const lateAfter = (ride: GroupRide, index: number): number => {
+    const frame = ride.frames[index] as Frame;
+    const next = ride.frames[index + 1] as Frame;
+    return (
+      frame.tick.state.ledger.ridingSeconds -
+      ride.plan.plannedSecondsAt(at(next, frame.order[0] as string).distanceM)
+    );
+  };
 
-  /** Each unbroken run of held ticks: its first index and the first index after it. */
-  function holds(frames: readonly Frame[]): readonly (readonly [from: number, to: number])[] {
-    const runs: [number, number][] = [];
-    frames.forEach((frame, index) => {
-      if (hold(frame) === null) return;
-      const open = runs[runs.length - 1];
-      if (open !== undefined && open[1] === index) open[1] = index + 1;
-      else runs.push([index, index + 1]);
-    });
-    return runs;
-  }
-
-  it('books a hold as the plan’s own time for the road covered in it, however long it took', () => {
-    const { frames, plan } = ride();
-    const runs = holds(frames).filter(([, to]) => to < frames.length);
-    expect(runs.length).toBeGreaterThan(5);
-    let waited = 0;
-    for (const [from, to] of runs) {
-      // Booked by the end of the first tick after the hold, which is itself ridden and booked whole.
-      const before = from === 0 ? 0 : (frames[from - 1] as Frame).tick.state.ledger.ridingSeconds;
-      const after = (frames[to] as Frame).tick.state.ledger.ridingSeconds;
-      const front = frontAt(frames, to);
-      expect(frontAt(frames, from)).toBe(front);
-      const planned =
-        plan.plannedSecondsAt(at(frames[to] as Frame, front).distanceM) -
-        plan.plannedSecondsAt(at(frames[from] as Frame, front).distanceM);
-      expect(after - before).toBeCloseTo(planned + TICK_SECONDS, 6);
-      waited += (to - from) * TICK_SECONDS - planned;
+  it('never has the ledger late for a dropped rider: minutes at the rider’s pace, and under 2 s of them booked', () => {
+    const ride = quarter();
+    const { frames } = ride;
+    let latest = -Infinity;
+    for (let index = 0; index + 1 < frames.length; index += 1) {
+      latest = Math.max(latest, lateAfter(ride, index));
     }
-    // Minutes of waiting, none of it in the ledger.
-    expect(waited).toBeGreaterThan(200);
-    expect(ride().state.ledger.ridingSeconds).toBeLessThan(frames.length * TICK_SECONDS - 200);
+    // 20 s late is the ledger's whole 5 % band.
+    expect(latest).toBeLessThan(2);
+    // The ride took minutes longer than the plan's time for that road, and none of that is riding time.
+    const elapsed = frames.length * TICK_SECONDS;
+    const planned = ride.plan.plannedSecondsAt(
+      at(frames[frames.length - 1] as Frame, 'b3').distanceM,
+    );
+    expect(elapsed - planned).toBeGreaterThan(250);
+    expect(ride.state.ledger.ridingSeconds).toBeLessThan(planned + 2);
+    expect(ride.state.ledger.ridingSeconds).toBeGreaterThan(planned - 5);
   });
 
   // One wait and no pull change (a tight bend holds every change), so b1 is
   // on the front before the wait and after it with nobody ahead to shelter it.
-  const oneWait = ridden(() =>
-    rideGroup({
-      course: FLAT,
-      targetKmh: TARGET_KMH,
-      line: RIDER_LAST,
-      seconds: 130,
-      bendRadiusM: 20,
-      rider: { slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 } },
-    }),
-  );
+  const oneWait = oneGap;
 
-  it('rides the plan’s un-chased power after a wait: what #3298’s plan asks of a group as late as it was before', () => {
-    const { frames, plan } = oneWait();
-    const runs = holds(frames);
-    expect(runs.length).toBe(1);
-    const [from, to] = runs[0] as readonly [number, number];
-    expect((to - from) * TICK_SECONDS).toBeGreaterThan(30);
+  it('rides the plan’s un-chased power once it rides the plan again: what #3298’s plan asks of a group as late as it was before', () => {
+    const ride = oneWait();
+    const { frames, plan } = ride;
     expect(frames.every((frame) => frame.order[0] === 'b1' && frame.aside === null)).toBe(true);
-    const lateBefore =
-      (frames[from - 1] as Frame).tick.state.ledger.ridingSeconds -
-      plan.plannedSecondsAt(at(frames[from] as Frame, 'b1').distanceM);
-    // Every ridden tick after the hold but its first, which books the hold's last road.
-    let late = lateBefore;
-    for (let index = to + 1; index < frames.length; index += 1) {
-      const frame = frames[index] as Frame;
-      const lead = at(frame, 'b1').distanceM;
-      // The ridden tick before this one: its own time, less the plan's for its road.
-      late +=
-        TICK_SECONDS -
-        (plan.plannedSecondsAt(lead) -
-          plan.plannedSecondsAt(at(frames[index - 1] as Frame, 'b1').distanceM));
-      const unchased: number = plan.powerAt(lead, {
-        ridingSeconds: plan.plannedSecondsAt(lead) + late,
-      });
-      expect(frame.rode.b1?.powerWatts).toBeCloseTo(unchased, 6);
-      // Chased, it would be the plan's power for a group late by the whole wait as well.
-      const chased: number = plan.powerAt(lead, {
-        ridingSeconds: plan.plannedSecondsAt(lead) + late + (to - from) * TICK_SECONDS,
-      });
-      if (index === to + 1) expect(chased).toBeGreaterThan(unchased + 5);
+    const began = frames.findIndex(eased);
+    const lateBefore = lateAfter(ride, began - 1);
+    // The first tick booked as riding again, after the wait and the pacing.
+    const resumed = frames.findIndex(
+      (frame, index) => index > began && frame.tick.state.heldFromM === null,
+    );
+    expect((resumed - began) * TICK_SECONDS).toBeGreaterThan(60);
+    // Exactly as late as before the rider was dropped, more than a minute on. The
+    // last eased tick's road is booked as the next tick begins, so read it there.
+    const lateResumed =
+      (frames[resumed - 1] as Frame).tick.state.ledger.ridingSeconds -
+      plan.plannedSecondsAt(at(frames[resumed - 1] as Frame, 'b1').distanceM);
+    expect(lateResumed).toBeCloseTo(lateBefore, 6);
+    const lead = at(frames[resumed] as Frame, 'b1').distanceM;
+    const unchased: number = plan.powerAt(lead, {
+      ridingSeconds: plan.plannedSecondsAt(lead) + lateBefore,
+    });
+    expect(frames[resumed]?.rode.b1?.powerWatts).toBeCloseTo(unchased, 6);
+    // Chased, it would be the plan's power for a group late by all of that time.
+    const lost =
+      (resumed - began) * TICK_SECONDS -
+      (plan.plannedSecondsAt(lead) -
+        plan.plannedSecondsAt(at(frames[began] as Frame, 'b1').distanceM));
+    expect(lost).toBeGreaterThan(20);
+    const chased: number = plan.powerAt(lead, {
+      ridingSeconds: plan.plannedSecondsAt(lead) + lateBefore + lost,
+    });
+    expect(chased).toBeGreaterThan(unchased + 5);
+    // And it stays within a second of that for the rest of the ride.
+    for (let index = resumed; index + 1 < frames.length; index += 1) {
+      expect(Math.abs(lateAfter(ride, index) - lateBefore)).toBeLessThan(1);
     }
   });
 });

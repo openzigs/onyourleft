@@ -626,9 +626,14 @@ describe('no-drop (#3301)', () => {
     // The rider is back on b2's wheel at the next window: the line is released.
     const b2 = second.state.bots.b2 as NonNullable<typeof second.state.bots.b2>;
     const frontAfter = second.state.bots.b1?.distanceM as number;
-    const third = tick({ distanceM: b2.distanceM - 0.65, speedMps: b2.speedMps }, second.state);
+    // The pace the wait seeded is set aside, so the line is asked the plan's speed at once
+    // and what is read is the ledger alone.
+    const third = tick(
+      { distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS },
+      { ...second.state, noDrop: { ...second.state.noDrop, paceShare: null } },
+    );
     expect(third.answer.state.noDrop.hold).toBeNull();
-    expect(third.answer.state.heldFromM).toBeNull();
+    expect(third.answer.groupSpeedMps).toBe(GROUP_MPS);
     // #3298's plan, read back: 150 W and a watt for each second late. A second of
     // waiting changed nothing: it is as late as on the start line, −FRONT_M / 8 s.
     expect(third.answer.state.bots.b1?.powerWatts).toBeCloseTo(150 - FRONT_M / GROUP_MPS, 9);
@@ -636,11 +641,65 @@ describe('no-drop (#3301)', () => {
     // it took, less the plan's time for the road the line rolled over in it.
     const chased = 150 + (1 - frontAfter / GROUP_MPS);
     expect(chased - (150 - FRONT_M / GROUP_MPS)).toBeGreaterThan(0.5);
-    // The ridden tick is booked whole, on top of the hold's road.
+    // Still getting back up to speed, at 2 m/s of the plan's 8: that is not riding time either.
     expect(third.answer.state.ledger.ridingSeconds).toBeCloseTo(
-      (frontAfter - FRONT_M) / GROUP_MPS + 0.5,
+      (frontAfter - FRONT_M) / GROUP_MPS,
       12,
     );
+    expect(third.answer.state.heldFromM).toBe(frontAfter);
+    // Back at 98 % of the plan's speed, the tick is booked whole on top of the road so far.
+    const upToSpeed = withBot(third.answer.state, 'b1', { speedMps: 0.98 * GROUP_MPS });
+    const frontNow = upToSpeed.bots.b1?.distanceM as number;
+    const fourth = tick({ distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS }, upToSpeed);
+    expect(fourth.answer.state.heldFromM).toBeNull();
+    expect(fourth.answer.state.ledger.ridingSeconds).toBeCloseTo(
+      (frontNow - FRONT_M) / GROUP_MPS + 0.5,
+      12,
+    );
+    // A touch under it, not yet.
+    const nearly = withBot(third.answer.state, 'b1', { speedMps: 0.979 * GROUP_MPS });
+    expect(
+      tick({ distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS }, nearly).answer.state.heldFromM,
+    ).toBe(frontNow);
+  });
+
+  it('paces the line to the rider once their pace is remembered: asked a margin over it, ridden as an eased speed, and not booked', () => {
+    // Half the plan's speed remembered, and the rider on b2's wheel at 4 m/s.
+    const paced: NoDropState = { ...startNoDrop(0), paceShare: 0.5 };
+    const { answer } = tick({ distanceM: 100, speedMps: 4 }, { ...start(), noDrop: paced });
+    expect(answer.state.noDrop.hold).toBeNull();
+    expect(answer.state.rotation.phase).toBe('steady');
+    expect(answer.groupSpeedMps).toBeCloseTo(GROUP_MPS * 0.5 * 1.05, 9);
+    expect(answer.rotation.demands.b1).toBe(answer.groupSpeedMps);
+    // At the plan's 8 m/s the front is over that: it pedals nothing.
+    expect(answer.state.bots.b1?.powerWatts).toBe(0);
+    // The eased pace is the rider's ride: not riding time for the plan.
+    expect(answer.state.ledger).toEqual({ ridingSeconds: 0 });
+    expect(answer.state.heldFromM).toBe(FRONT_M);
+  });
+
+  it('does not book a rider’s own pull under the group’s speed, and books one at it', () => {
+    const riderFirst = [RIDER, bot('b1'), bot('b2'), bot('b3')];
+    const under = tick(
+      { distanceM: 100, speedMps: 0.979 * GROUP_MPS },
+      start(riderFirst, { distanceM: 100, speedMps: 0.979 * GROUP_MPS }),
+    ).answer;
+    expect(under.rotation.roles.you).toBe('on-front');
+    expect(under.state.ledger).toEqual({ ridingSeconds: 0 });
+    expect(under.state.heldFromM).toBe(100);
+    const at = tick(
+      { distanceM: 100, speedMps: 0.98 * GROUP_MPS },
+      start(riderFirst, { distanceM: 100, speedMps: 0.98 * GROUP_MPS }),
+    ).answer;
+    expect(at.state.ledger).toEqual({ ridingSeconds: 0.5 });
+    expect(at.state.heldFromM).toBeNull();
+    // With the rule left out every tick is booked, as before #3301.
+    const left = tick(
+      { distanceM: 100, speedMps: 4 },
+      start(riderFirst, { distanceM: 100, speedMps: 4 }),
+      { noDrop: false },
+    ).answer;
+    expect(left.state.ledger).toEqual({ ridingSeconds: 0.5 });
   });
 
   it('names a rider off the front, moves them out of the line, and has the bot that was behind them hold a bot’s wheel', () => {

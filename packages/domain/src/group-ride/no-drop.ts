@@ -23,7 +23,7 @@
  * |---|---|
  * | `gapped` | more than {@link NO_DROP_GAPPED_METRES} behind it, inside the draft's reach |
  * | `off-the-back` | more than {@link NO_DROP_REACH_METRES} behind it |
- * | `off-the-front` | in the line, not on the front, and ahead of the front |
+ * | `off-the-front` | in the line, not on the front, and ahead of every bot of it |
  * | `with` | anything else, a rider on the front included |
  *
  * A rider at the back of the line, the usual place to lose a wheel, is
@@ -76,6 +76,30 @@
  * pacer's 20 % (`pacer/device-rule.ts`, ADR 0083 D-1.3), which is unchanged
  * for the pacer.
  *
+ * ## 5. The rider's pace, remembered: no ride-away-and-wait cycle
+ *
+ * The owner's ruling of 2026-11-27 (ADR 0101's Amendments): *after the first
+ * wait, the group slows to the rider's sustained pace, so the rider stays on
+ * a wheel.* Without it a line released from a wait rode away at the plan's
+ * pace and waited again, for the whole ride.
+ *
+ * {@link NoDropState.paceShare} is the rider's speed as a share of the plan's
+ * speed, a running mean over about {@link NO_DROP_PACE_SECONDS}. It is
+ * **seeded by the first wait** (or regroup) for a rider who is riding, and
+ * from then on the line is asked for
+ * `plan's speed × pace × (1 + margin) × (1 − give)`, never above the plan's:
+ *
+ * - the margin ({@link NO_DROP_PACE_MARGIN}) keeps the line a touch ahead of
+ *   the rider's pace, so **it recovers toward the plan as the rider's pace
+ *   rises** and rides the plan again once they hold it;
+ * - the give grows with how far off the wheel the rider is, whole at
+ *   {@link NO_DROP_PACE_GAP_SECONDS} of their own speed (and never nearer
+ *   than {@link NO_DROP_GAPPED_METRES}), so the line comes back to a rider
+ *   who is slipping off long before the reach.
+ *
+ * A rider who has stopped does not move the mean: a stop is not a pace. A
+ * one-off gap still ends in a wait or a regroup, as above.
+ *
  * ## What it never does
  *
  * It returns nothing for the rider but a standing: no speed, no power, no
@@ -93,6 +117,7 @@
  * the owner's ride.
  */
 
+import { BOT_TACTIC_WHEEL_GAP_METRES } from '../lap-race/tactics';
 import { pacerTerrainAt } from '../pacer/terrain-rule';
 import type { RouteProfile } from '../route/profile';
 import { GroupRideError } from './errors';
@@ -127,6 +152,22 @@ export const NO_DROP_FULL_EASE_SECONDS = 10;
 /** How long a regrouping line stays eased once the rider is inside the reach, ms: **10 s**. */
 export const NO_DROP_SETTLE_MS = 10_000;
 
+/**
+ * The time constant of the rider's remembered pace, seconds: **20 s**. Each
+ * 1 s decision moves the mean a twentieth of the way to the rider's pace now.
+ */
+export const NO_DROP_PACE_SECONDS = 20;
+
+/** A paced line rides this share above the rider's remembered pace: **5 %**. */
+export const NO_DROP_PACE_MARGIN = 0.05;
+
+/**
+ * A paced line gives all of its speed back to a rider this far off the wheel,
+ * in seconds of the rider's own speed: **2 s**, and at least
+ * {@link NO_DROP_GAPPED_METRES}. Under it, in proportion.
+ */
+export const NO_DROP_PACE_GAP_SECONDS = 2;
+
 /** Where the rider stands to the line. */
 export const RIDER_STANDINGS = ['with', 'gapped', 'off-the-back', 'off-the-front'] as const;
 
@@ -145,8 +186,17 @@ export interface NoDropState {
   readonly standing: RiderStanding;
   /** The bot that is back with the rider, or `null`. */
   readonly sweep: string | null;
-  /** The speed a held line is asked to ride, m/s; `null` when it is not held. No floor. */
+  /**
+   * The speed the line is asked to ride where that is not the plan's, m/s:
+   * a held line's, or a line paced to the rider. `null` at the plan's speed.
+   * No floor.
+   */
   readonly easedSpeedMps: number | null;
+  /**
+   * The rider's remembered pace, as a share of the plan's speed, at most 1.
+   * `null` until the first wait.
+   */
+  readonly paceShare: number | null;
   /** Since when a regrouping line's rider has been inside the reach, or `null`. */
   readonly insideSinceMs: number | null;
   /** Whether the front was over the top of a climb at the last window. */
@@ -184,6 +234,7 @@ export function startNoDrop(atMs: number): NoDropState {
     standing: 'with',
     sweep: null,
     easedSpeedMps: null,
+    paceShare: null,
     insideSinceMs: null,
     overTheTop: false,
   };
@@ -238,10 +289,18 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
   const frontId = rotation.order[0] as string;
   const frontM = at(frontId).distanceM;
 
+  // The furthest any bot of the line is up the road: the front, unless the
+  // line has bunched at a crawl. Ahead of that, the rider is off the front.
+  let leadM = frontM;
+  for (const id of rotation.order) {
+    if (id !== riderId) leadM = Math.max(leadM, at(id).distanceM);
+  }
+  if (frontId === riderId) leadM = rider.distanceM;
+
   // A rider who goes off the front gives up their seat.
   let order = rotation.order;
   const seat = order.indexOf(riderId);
-  if (seat > 0 && seat < order.length - 1 && rider.distanceM > frontM) {
+  if (seat > 0 && seat < order.length - 1 && rider.distanceM > leadM) {
     order = [...order.filter((id) => id !== riderId), riderId];
   }
 
@@ -254,7 +313,7 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
   let standing: RiderStanding = 'with';
   let behindM = 0;
   if (last !== undefined) {
-    if (seatNow > 0 && rider.distanceM > frontM) {
+    if (seatNow > 0 && rider.distanceM > leadM) {
       standing = 'off-the-front';
     } else {
       const tail =
@@ -294,18 +353,39 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     hold = waits ? 'waiting' : null;
   }
 
-  // How fast a held line rides: under the rider's own speed while they are
-  // behind, by a share that grows with their time gap. No floor.
-  let easedSpeedMps: number | null = null;
-  if (hold !== null) {
-    if (standing === 'off-the-front') {
-      easedSpeedMps = view.groupSpeedMps;
+  // The rider's pace, remembered from the first wait on. A stop is not a pace.
+  const planMps = view.groupSpeedMps;
+  let paceShare = state.paceShare;
+  if (!view.riderStopped && planMps > 0) {
+    const now = Math.min(1, rider.speedMps / planMps);
+    if (paceShare === null) {
+      if (hold !== null && behind) paceShare = now;
     } else {
-      const whole = rider.speedMps * NO_DROP_FULL_EASE_SECONDS;
-      const share = behindM >= whole ? 1 : behindM / whole;
-      easedSpeedMps = Math.min(view.groupSpeedMps, rider.speedMps * (1 - share));
+      paceShare += ((now - paceShare) * ROTATION_WINDOW_MS) / (1_000 * NO_DROP_PACE_SECONDS);
     }
   }
+
+  // How fast the line rides where that is under the plan's speed. Held: under
+  // the rider's own speed while they are behind, by a share that grows with
+  // their time gap. Paced: a margin over the rider's remembered pace, given
+  // back as they come off the wheel. No floor. Never for a rider off the front.
+  let asked = planMps;
+  if (standing !== 'off-the-front') {
+    if (hold !== null) {
+      const whole = rider.speedMps * NO_DROP_FULL_EASE_SECONDS;
+      const share = behindM >= whole ? 1 : behindM / whole;
+      asked = Math.min(asked, rider.speedMps * (1 - share));
+    }
+    // The pace as it was remembered before this window: the wait that seeds
+    // it is ridden as a wait.
+    if (state.paceShare !== null) {
+      const off = Math.max(0, behindM - BOT_TACTIC_WHEEL_GAP_METRES);
+      const whole = Math.max(rider.speedMps * NO_DROP_PACE_GAP_SECONDS, NO_DROP_GAPPED_METRES);
+      const give = off >= whole ? 1 : off / whole;
+      asked = Math.min(asked, planMps * state.paceShare * (1 + NO_DROP_PACE_MARGIN) * (1 - give));
+    }
+  }
+  const easedSpeedMps = hold !== null || asked < planMps ? asked : null;
 
   // The line's phase follows the hold.
   const wasHeld = rotation.phase === 'waiting' || rotation.phase === 'regrouping';
@@ -315,7 +395,16 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     order === rotation.order && phase === rotation.phase ? rotation : { ...rotation, order, phase };
 
   return {
-    state: { nextWindowAtMs, hold, standing, sweep, easedSpeedMps, insideSinceMs, overTheTop },
+    state: {
+      nextWindowAtMs,
+      hold,
+      standing,
+      sweep,
+      easedSpeedMps,
+      paceShare,
+      insideSinceMs,
+      overTheTop,
+    },
     rotation: line,
   };
 }

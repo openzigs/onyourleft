@@ -88,11 +88,17 @@
  * their standing. A bot has no brake here either: a held line loses speed by
  * pedalling nothing and sitting up, as any bot does.
  *
- * **The ledger while the line holds.** A held tick is booked as paused
- * (`plan.ts` rule 6), and the road the front covers in it is booked at the
- * plan's own time for that road. So the group is exactly as late after a wait
- * as it was before: the time is not chased back, and a group that crawled
- * forward while it waited is not taken to be early either.
+ * After the first wait the line is **paced to the rider** (`no-drop.ts` §5,
+ * the owner's ruling of 2026-11-27): it is asked a margin over the rider's
+ * remembered pace and rides that as a held line rides its eased speed.
+ *
+ * **The ledger while the line is eased**, held or paced. An eased tick is
+ * booked as paused (`plan.ts` rule 6), and the road the front covers in it is
+ * booked at the plan's own time for that road; so is every tick after it
+ * until the front is back at {@link GROUP_LEDGER_RESUME_SHARE} of the plan's
+ * speed, and so is a rider's own pull under that speed. So the group is exactly as late when it rides the plan again as it
+ * was before: **the eased pace is the rider's ride**, none of it is chased
+ * back, and a group that crawled forward is not taken to be early either.
  *
  * {@link GroupRoad.noDrop} `false` leaves the rule out: the line never holds,
  * nobody sweeps and every tick is booked, as before #3301.
@@ -132,6 +138,12 @@ import {
   type RotationState,
   type RotationStep,
 } from './rotation';
+
+/**
+ * After the line has been eased for the rider, its ticks are booked as riding
+ * again once the front is back at this share of the plan's speed: **98 %**.
+ */
+export const GROUP_LEDGER_RESUME_SHARE = 0.98;
 
 /**
  * The physics a group's bots ride through, handed in by the caller (see the
@@ -199,8 +211,8 @@ export interface GroupRideState {
   /** The no-drop rule's state (#3301). */
   readonly noDrop: NoDropState;
   /**
-   * Where the front was as the last tick began, metres, if the line held for
-   * the rider in it: the road covered since is booked at the plan's time.
+   * Where the front was as the last tick began, metres, if that tick was not
+   * booked as riding (the line eased for the rider, or getting back up to speed): the road covered since is booked at the plan's time.
    * `null` after a tick that was ridden.
    */
   readonly heldFromM: number | null;
@@ -349,7 +361,8 @@ export function stepGroupRide(
     noDrop = decided.state;
     lineBefore = decided.rotation;
   }
-  const holding = noDrop.hold !== null;
+  // Eased: held for the rider, or paced to them (#3301).
+  const easing = noDrop.easedSpeedMps !== null;
   const groupSpeedMps = noDrop.easedSpeedMps ?? planSpeedMps;
 
   // The road a held line covered in the last tick, at the plan's own time for it.
@@ -361,6 +374,17 @@ export function stepGroupRide(
           Math.max(0, plan.plannedSecondsAt(frontM) - plan.plannedSecondsAt(state.heldFromM)),
           false,
         );
+
+  // The eased pace is the rider's ride, not time the plan lost: an eased tick
+  // is not booked as riding, and nor is one after it until the front is back
+  // at the plan's speed, so getting back up to speed is not chased either.
+  // A rider on the front who is under the group's speed is riding their own
+  // pull: that is theirs too.
+  const frontId = state.rotation.order[0] as string;
+  const underSpeed = at(frontId).speedMps < GROUP_LEDGER_RESUME_SHARE * planSpeedMps;
+  const unbooked =
+    road.noDrop !== false &&
+    (easing || (underSpeed && (state.heldFromM !== null || frontId === riderId)));
 
   const decision = stepRotation(lineBefore, {
     atMs: state.atMs,
@@ -452,8 +476,8 @@ export function stepGroupRide(
       });
     } else if (seat === 0) {
       const planned: number = plan.powerAt(own.distanceM, ledger);
-      if (holding) {
-        // A held line rides the eased speed, and sits up when it is over it.
+      if (easing) {
+        // A held or paced line rides the eased speed, and sits up when it is over it.
         wanted = Math.min(planned, held(asked));
       } else {
         const sheltered = ids.some((other) => {
@@ -504,9 +528,9 @@ export function stepGroupRide(
     state: {
       atMs: state.atMs + elapsed * 1_000,
       rotation: rotation.state,
-      ledger: stepGroupLedger(ledger, elapsed, holding),
+      ledger: stepGroupLedger(ledger, elapsed, unbooked),
       noDrop,
-      heldFromM: holding ? frontM : null,
+      heldFromM: unbooked ? frontM : null,
       bots,
       riderWas: { speedMps: input.rider.speedMps, elapsedSeconds: elapsed },
     },
