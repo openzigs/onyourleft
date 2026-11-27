@@ -1510,13 +1510,17 @@ export const REALISTIC_HOUSE_MODEL_SURFACES = {
  * card. In bytes they share the two files above: about 65 a triangle of the
  * GLB, and a cell of the atlas each.
  *
- * ⚠️ **One draw call, and no triangle a frame did not already have**: the
- * wraps are one mesh in one material, counted inside
- * {@link MAPPED_BUILDING_DRAW_CALLS} as the house models' is, and a wrapped
- * building holds {@link REALISTIC_TRIANGLES}' `structure`, 640 — the ceiling
- * of the extrusion it replaces (ADR 0099 D-4.1), where a house model pools
- * {@link MAPPED_BUILDING_TRIANGLES}. So no ceiling here is raised for the
- * kit, and a street of wraps draws as many buildings as it did.
+ * ⚠️ **One draw call, and no ceiling raised — but more triangles a frame
+ * than the extrusions were**: the wraps are one mesh in one material, counted
+ * inside {@link MAPPED_BUILDING_DRAW_CALLS} as the house models' is, and a
+ * wrapped building holds {@link REALISTIC_TRIANGLES}' `structure`, 640 — the
+ * ceiling of the extrusion it replaces (ADR 0099 D-4.1), where a house model
+ * costs several structures. It spends far more of that ceiling than its
+ * extrusion did (602 against 78 on the terrace fixture), out of
+ * {@link MAPPED_BUILDING_TRIANGLES}' pool: a street of wraps leaves the field
+ * boundaries fewer structures and, in a frame that billboards and procedural
+ * structures share, draws fewer buildings. The measured figures are
+ * `facade-kit.ts`' header's, held by `mapped-kit-belt.test.ts`.
  *
  * @test-facing held by `facade-kit.test.ts`, which reads the committed kit
  * back off disk against it; the renderer spends it only on the realistic path

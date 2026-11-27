@@ -39,10 +39,16 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { drawnRoadFrame } from './terrain';
-import { kitGeometriesOf, MappedBuildingBelt, type RealisticHouses } from './three-renderer';
+import {
+  kitGeometriesOf,
+  MappedBuildingBelt,
+  refillMappedBuildings,
+  type RealisticHouses,
+} from './three-renderer';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 
 function aTexture(): never {
@@ -234,9 +240,81 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
     expect(selection.triangles).toBe(extruded);
   });
 
-  it('never draws fewer buildings with the kit than without it', () => {
-    // A wrap holds an extrusion's ceiling, and the wraps' group takes one slot of the six.
-    expect(select(true).count).toBeGreaterThanOrEqual(select(false).count);
+  /**
+   * A refill as `refillMappedBuildings` prices one: `billboards` taken off the
+   * structure items first, and `rivals` procedural structures ranked in, every
+   * 25 m out from the rider.
+   */
+  const refill = (
+    kit: boolean,
+    billboards: number,
+    rivals: number,
+    slots: number,
+    along: number,
+  ) => {
+    const rider = roadAt(along);
+    const into = new MappedSelection();
+    selectMappedBuildings(
+      buildings,
+      rider.x,
+      rider.z,
+      Math.max(0, REALISTIC_STRUCTURE_ITEMS - billboards) * REALISTIC_TRIANGLES.structure,
+      into,
+      slots,
+      {
+        distances: Float64Array.from({ length: rivals }, (_, index) => 25 * (index + 1)),
+        count: rivals,
+        triangles: REALISTIC_TRIANGLES.structure,
+      },
+      undefined,
+      undefined,
+      kit,
+    );
+    return into;
+  };
+
+  it('prices a wrap far above the extrusion it replaces, and never above one structure', () => {
+    // PR #3343's review: a wrap is NOT the triangles its extrusion was. It is inside the one
+    // structure the frame's structure term prices a building at, which is the ceiling it holds.
+    const wrapped = plans.filter((plan) => plan.kit !== undefined);
+    const mean = (of: (plan: FootprintPlan) => number): number =>
+      wrapped.reduce((sum, plan) => sum + of(plan), 0) / wrapped.length;
+    const wraps = mean((plan) => plan.kit?.triangles ?? NaN);
+    const extrusions = mean((plan) => plan.triangleCount);
+    expect(wraps).toBeLessThan(10 * extrusions);
+    for (const plan of wrapped) {
+      expect(plan.kit?.triangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+      expect(plan.triangleCount).toBeLessThan(plan.kit?.triangles ?? NaN);
+    }
+  });
+
+  it('pools the frame’s structure triangles, so a frame of billboards and rivals draws fewer buildings with the kit', () => {
+    // What the kit costs where the budget binds — the figures `facade-kit.ts` states, at
+    // 1 250 m on this street: [billboards, rivals], then the buildings drawn and the rivals
+    // ranked in without the kit and with it. With nothing else in the frame every building is
+    // still drawn; with billboards and procedural structures in it, the wraps take the
+    // triangles the farthest buildings and structures were drawn in.
+    for (const [billboards, rivals, without, withKit] of [
+      [0, 0, { count: 36, rivals: 0 }, { count: 36, rivals: 0 }],
+      [4, 0, { count: 36, rivals: 0 }, { count: 34, rivals: 0 }],
+      [8, 6, { count: 36, rivals: 6 }, { count: 27, rivals: 2 }],
+    ] as const) {
+      const label = `${String(billboards)} billboards, ${String(rivals)} rivals`;
+      const extruded = refill(false, billboards, rivals, MAPPED_BUILDING_DRAW_CALLS, 1_250);
+      const wrapped = refill(true, billboards, rivals, MAPPED_BUILDING_DRAW_CALLS, 1_250);
+      expect({ count: extruded.count, rivals: extruded.rivals }, label).toEqual(without);
+      expect({ count: wrapped.count, rivals: wrapped.rivals }, label).toEqual(withKit);
+      expect(extruded.triangles, label).toBe(2_842);
+      expect(wrapped.kitCount, label).toBe(wrapped.count);
+      // The ceiling is held: the buildings and the rivals ranked in are inside the frame's term.
+      expect(
+        wrapped.triangles + wrapped.rivals * REALISTIC_TRIANGLES.structure,
+        label,
+      ).toBeLessThanOrEqual(
+        (REALISTIC_STRUCTURE_ITEMS - billboards) * REALISTIC_TRIANGLES.structure,
+      );
+    }
+    expect(refill(true, 0, 0, MAPPED_BUILDING_DRAW_CALLS, 1_250).triangles).toBe(21_658);
   });
 
   it('draws a wrapped plan as its extrusion where no slot is left for the wraps’ group', () => {
@@ -452,6 +530,28 @@ describe('the belt, with the committed kit — #3334', () => {
     belt.clearOf(undefined);
     expect(belt.hiddenAt(place)).toBe(false);
     expect([...array]).toEqual(whole);
+  });
+
+  it('leaves the field boundaries fewer structures than the same refill without the kit', () => {
+    // `refillMappedBuildings` hands a wall, a hedge or a fence only what the buildings leave
+    // (#2655): the product's own refill at 1 250 m, with nothing else in the frame.
+    const rider = roadAt(1_250);
+    const view = { buildings, chunk: 0, x: rider.x, z: rider.z };
+    const left = (houses: RealisticHouses): number => {
+      const cap = refillMappedBuildings(
+        aBelt(buildings, houses),
+        view,
+        [],
+        0,
+        REALISTIC_STRUCTURE_ITEMS,
+      );
+      if (cap === undefined) throw new Error('a new belt refills');
+      return cap;
+    };
+    const without = left(houseModels);
+    const withTheKit = left(withKit);
+    expect(withTheKit).toBeLessThan(without / 4);
+    expect(withTheKit).toBeGreaterThanOrEqual(0);
   });
 
   it('draws house models and wraps together, each in its own range of the one buffer', () => {

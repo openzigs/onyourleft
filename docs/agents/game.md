@@ -2223,8 +2223,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the relief's texture coordinates are that same
                         projection), and bays are raised to RELIEF, the kit's
                         own geometry, door first and outward along the street
-                        front, while the 640 allow. So a street of wraps
-                        never draws fewer buildings than its extrusions did.
+                        front, while the 640 allow. ⚠️ That is NOT what its
+                        extrusion cost: 602 triangles a wrap against 78 on
+                        the terrace fixture, out of the frame's pooled
+                        23 040 as a model's are. One refill of 36 buildings
+                        goes 2 842 to 21 658 mapped triangles and leaves the
+                        field boundaries 2 structures where it left 31; with
+                        8 billboards and 6 structures ranked in, 36 buildings
+                        become 27 (`mapped-kit-belt.test.ts` holds each
+                        figure; PR #3343's review measured them).
                         Drawn at the near level only, as a model is
                         (`FootprintPlan.kit`; its extrusion is its far level
                         and the same height); never where a house model fits

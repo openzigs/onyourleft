@@ -495,6 +495,9 @@ function landmarksAhead(
  * wrap's triangles — never more than an extrusion's ceiling — in ONE more
  * group of its own, counted inside `surfaceSlots` exactly as the models'
  * group is. With no slot left for it the plan is drawn as its extrusion.
+ * A wrap costs several times its extrusion's triangles, out of
+ * `triangleBudget` as a model's are, so where the budget binds the walk stops
+ * nearer the rider than it did (`facade-kit.ts`' header has the figures).
  * Without `kit` every wrapped plan is its extrusion, as before #3334.
  *
  * **A city centre's far boxes** — #1638, off by default. Where `buildings`

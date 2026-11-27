@@ -60,13 +60,39 @@
  * ⚠️ **A wrapped building holds the structure class's ceiling**,
  * `realistic-budget.ts` §`REALISTIC_TRIANGLES.structure`, 640 — ADR 0099
  * D-4.1: *"a new model takes a class that exists and holds that class's
- * ceiling"*. It replaces an extrusion of at most 640 in the frame's pooled
- * 23 040, so a street of wraps can never draw fewer buildings than the same
- * street of extrusions did. Every bay starts as a card; then, while the
+ * ceiling"*. So a wrap never costs the frame more than the one structure its
+ * structure term prices a building at, which a house model does.
+ *
+ * ⚠️ **It is not the triangles its extrusion was, and it takes them from the
+ * frame's pooled 23 040** (`realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`)
+ * as a house model does — PR #3343's review, which measured it;
+ * `mapped-kit-belt.test.ts` holds each figure. On `terraceStreetFixture`
+ * classed a town, a wrap averages **602** triangles (497 to 639) where the
+ * extrusion it replaces averaged **78** (36 to 136). One refill there at
+ * 1 250 m, 36 buildings either way with nothing else in the frame, goes from
+ * 2 842 mapped triangles to **21 658**, so what `refillMappedBuildings` leaves
+ * the field boundaries (walls, hedges, fences) falls from 31 structures to
+ * **2**. Where billboards and procedural structures share the frame the
+ * farthest buildings go undrawn too: with 4 billboards 36 buildings become
+ * **34**; with 8 billboards and 6 structures ranked in, **27**, and 2 of the
+ * 6 structures. No ceiling is passed in any of them. What that does to a
+ * tablet's frame is not measured: the frame check is owed (#3334).
+ *
+ * Every bay starts as a card; then, while the
  * budget allows, bays are raised to relief nearest the rider's eye first: the
  * door, the ground floor of the street front outward from it, the front's
  * cornice, then the front's upper storeys from the first up. A footprint
  * whose cards alone pass the budget keeps its extrusion.
+ *
+ * ## Two gaps, from PR #3343's review, not closed here
+ *
+ * - **Nothing a wrapped plan draws on the ground is drawn at the near level**:
+ *   the belt writes a wrapped plan's pieces and none of its extrusion's roles
+ *   (`three-renderer.ts` §`MappedBuildingBelt`), as it does for a house model,
+ *   so a wrapped shop's apron (#2848) is cleared of scenery and not paved.
+ * - **With an even number of bays the door is not on the middle of its
+ *   edge**, where `FootprintPlan.frontStep` and the extrusion's door are: it
+ *   is the bay before the middle, up to a metre along the wall.
  *
  * Pure, and names no rendering library. No coordinate is formatted into any
  * string here.
