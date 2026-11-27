@@ -14,7 +14,7 @@ import { countrysideFixture } from './footprint-fixtures-testing';
 import { GROWN_SPECIES } from './grown-trees';
 import { FOLIAGE_TINT, instanceTint } from './instance-tint';
 import { landClassMask } from './land-class';
-import { realisticVegetation } from './realistic-assets';
+import { realisticVegetation, type RealisticTrees } from './realistic-assets';
 import { northRoute } from './route-fixtures-testing';
 import { scatterAt, scatterSeed, SCATTER_VARIANT_SLOTS, type ScatterItem } from './scatter';
 import {
@@ -175,7 +175,7 @@ describe('what a setting grows — #3252', () => {
 });
 
 describe('a setting’s table over the shapes a world holds — #3252', () => {
-  const names = (kind: PlannedKind, trees: 'generated' | 'scanned'): string[] => [
+  const names = (kind: PlannedKind, trees: RealisticTrees): string[] => [
     ...realisticVegetation(trees)[kind].map((model) => model.name),
     ...GROWN_SPECIES.filter((species) => species.kind === kind).map((species) => species.id),
   ];
@@ -189,10 +189,11 @@ describe('a setting’s table over the shapes a world holds — #3252', () => {
   });
 
   it('is nothing for a world without a shape it names, which then folds the variant as before', () => {
-    // The scans host no grown species: every table names a shape they lack.
-    const scans = realisticVegetation('scanned')['tree-broadleaf'].map((model) => model.name);
+    // The scanned firs host no grown species: every table names a shape they
+    // lack. (The firs, since #1293 left no set with a scanned broadleaf.)
+    const scans = names('tree-conifer', 'scanned-conifers');
     for (const setting of SCENERY_SETTINGS) {
-      expect(slotTable('tree-broadleaf', setting, scans), setting).toBeUndefined();
+      expect(slotTable('tree-conifer', setting, scans), setting).toBeUndefined();
     }
     const without = names('tree-broadleaf', 'generated').filter((name) => name !== 'grown_lime');
     expect(slotTable('tree-broadleaf', 'park', without)).toBeUndefined();

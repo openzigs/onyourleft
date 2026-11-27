@@ -3730,10 +3730,6 @@ describe('the generated trees, loaded and drawn through the product’s own path
         expect(belt.levelsOf('tree-conifer').full).toHaveLength(3);
         expect(belt.levelsOf('shrub').full).toHaveLength(4);
       }
-      if (set === 'scanned') {
-        expect(belt.levelsOf('tree-broadleaf').full).toHaveLength(2);
-        expect(belt.levelsOf('shrub').full).toHaveLength(2);
-      }
       // And the triangles drawn are the committed files', variant by variant
       // — the broadleaves', and since #1294 the conifers', which differ
       // between the sets too.
