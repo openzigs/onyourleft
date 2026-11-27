@@ -13,6 +13,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BOT_TACTICS_MISJUDGE_LINE_METRES,
   botTacticsMisjudgement,
+  TACTIC_MEMORY_AT_START,
   type BotTactic,
 } from '@onyourleft/domain';
 
@@ -91,6 +92,30 @@ describe('what the model reads of the race (#2616)', () => {
     expect(later.bots.map((bot) => bot.secondsInMove)).toEqual(
       input.bots.map((bot) => bot.secondsInMove),
     );
+  });
+
+  it('reads 0 s in its move for a bot that has made no choice yet, as on the line (#2715)', () => {
+    // A bot still carrying the tactics' starting memory has `sinceMs: null`.
+    expect(TACTIC_MEMORY_AT_START.sinceMs).toBeNull();
+    const fresh = ride.bots.map((bot, seat) =>
+      seat === 0 ? { ...bot, tactics: TACTIC_MEMORY_AT_START } : bot,
+    );
+    const read = modelInput(
+      ride.race,
+      fresh,
+      SPIKE_CIRCUITS.hilly,
+      ride.seed,
+      ride.draft,
+      200 / 75,
+      12.6,
+    );
+    const first = read.bots.find((bot) => bot.bot === 0);
+    expect(first?.move).toBe(TACTIC_MEMORY_AT_START.tactic);
+    expect(first?.secondsInMove).toBe(0);
+    // Every other bot still reads the seconds it has held its own move.
+    const held = (view: ModelInput): number[] =>
+      view.bots.filter((bot) => bot.bot !== 0).map((bot) => bot.secondsInMove);
+    expect(held(read)).toEqual(held(input));
   });
 
   it('reads the lull in whole seconds, and opens or shuts no attack itself (#2720)', () => {
