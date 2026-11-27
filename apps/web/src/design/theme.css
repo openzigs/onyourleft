@@ -2441,13 +2441,16 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
- * The days ridden of the last seven, then since #2049 the week's bar chart —
- * where #939's ring was, the same fact and each day's moving time. Since the
- * owner's screenshot review of 2026-11-05 the chart is the card's whole width
- * (it was 8.5rem beside the sentence), so the sentence is a line of its own
- * above it. The sentence comes first in the DOM and is read first; the
- * drawing is `aria-hidden`. Under it, the table's disclosure, or the table
- * itself when the chart has thrown.
+ * Since #2049 the week's bar chart — where #939's ring was, the same fact and
+ * each day's moving time. Since the owner's screenshot review of 2026-11-05
+ * the chart is the card's whole width (it was 8.5rem beside the sentence).
+ * Since the owner's ruling of 2026-11-06 the days-ridden sentence and the week
+ * before's figures are no longer above it: they are inside the table's
+ * disclosure under the chart, before the table (`ChartSlot` `alongside`), so
+ * the module is as short as the chart. The drawing is `aria-hidden`. When the
+ * chart has thrown, the sentence, the week before and the table stand open in
+ * its place. A week with no ride has no chart, and its sentence and the week
+ * before stand on their own.
  */
 /* The week's inset is Next up's and the sensors' (#2045), the cards it sits
    under and beside on a landscape tablet. */
@@ -2545,7 +2548,7 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /* The sensors module's glyph (the Trainer card's until #2045) — a medium
-   drawing like the ring above and the cards' pictures (the owner's ruling of
+   drawing like the cards' pictures (the owner's ruling of
    2026-10-01 on #935), at the least a medium drawing is (44 px,
    `home.browser.spec.ts` §`MEDIUM_DRAWING_PIXELS`), so the module with four
    sensors paired is as short as it can be (the owner's review of #2045). */
@@ -14510,9 +14513,17 @@ html:has(.oyl-open-world__go) {
  * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
  *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
  *   leaning rider's box.
- * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ * - **60 rem wide and 48 rem tall** (the 4:3 tablet, 1024×768): three
  *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
- *   under the rider.
+ *   under the rider, 19 px with the Pixel Tablet's 32 px bottom inset.
+ *   Not 40 rem (#2417): the two rows are a fixed 104 px tall while the room
+ *   under the rider's feet is a fifth of the height, so a short 16:10 tablet,
+ *   1024×640 or 960×640, had them 17 px under the rider with no insets and
+ *   7 px over it with that inset; 44 rem (1024×704) left 6 px, less than the
+ *   HUD's 8 px gap and within a runner's fonts of the rider. One row of five
+ *   needs 464 px (five 5 rem cells and their gaps), more than the road
+ *   between the panels under 78 rem, so a tablet that short gives the strip
+ *   way.
  * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
  *   68 rem tall or more):
  *   on the actions panel, in its column, by the rule after these
@@ -14551,7 +14562,7 @@ html:has(.oyl-open-world__go) {
   }
 }
 
-@media (min-width: 60rem) and (min-height: 40rem), (min-width: 78rem) and (height > 30rem) {
+@media (min-width: 60rem) and (min-height: 48rem), (min-width: 78rem) and (height > 30rem) {
   .oyl-game--riding .oyl-hud__totals {
     display: grid;
     position: absolute;
@@ -14600,12 +14611,13 @@ html:has(.oyl-open-world__go) {
  * SIZE") — and only where a strip is drawn (`:has`), so every other ride's
  * grid is what it was.
  *
- * Measured (`ride-hud-layout.browser.spec.ts` §"#2387"): at 800×1280 three
- * columns in two rows across the actions panel's column, 392 × 104 px, from
- * 1010 px down (1026 in a workout, whose actions panel is shorter): 102 px
- * under the leaning rider's box and 35 px over *Pause* and *End ride*, and
- * 70 px under the rider with the Pixel Tablet's 36 and 32 px insets. No other
- * panel moves. 68 rem tall or more, because the rider's feet are 71 % of the
+ * Measured (`ride-hud-layout.browser.spec.ts` §"#2387", §"#2418"): at
+ * 800×1280 three cells over two (a route ride) or three over three (a loop),
+ * the actions panel's own 320 px wide and its left edge, 116 px tall with
+ * 16 px between a value and the label under it, from 1004 px down (1020 in a
+ * workout, whose actions panel is shorter): 97 px under the leaning rider's
+ * box and 29 px over *Pause* and *End ride*, and 73 px under the rider with
+ * the Pixel Tablet's 36 and 32 px insets. No other panel moves. 68 rem tall or more, because the rider's feet are 71 % of the
  * way down an upright frame and the strip is about 270 px up from the bottom:
  * at 768×1024 it measured 13 px under the rider with no insets, which a
  * gesture bar's inset would take, so a tablet that short keeps it hidden.
@@ -14636,7 +14648,26 @@ html:has(.oyl-open-world__go) {
     display: grid;
     grid-area: actions;
     align-self: end;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* #2418: the actions panel's own width and edge, so the two panels'
+       left edges line up (§"the corners layout": `justify-self: end`, at
+       most 20 rem); the column is 72 px wider than the panel at 800×1280. */
+    justify-self: end;
+    width: min(100%, 20rem);
+    /* #2418: two cells to a row's third, so a row of two (a route ride's
+       second row: five cells, no Lap) shares the width in halves and the
+       grid has no empty cell; a loop's six are three and three. */
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    /* #2418: a value and the label under it, a gap apart that reads. */
+    row-gap: var(--oyl-space-md);
+  }
+
+  .oyl-game--riding .oyl-hud__totals > * {
+    grid-column: span 2;
+  }
+
+  .oyl-game--riding .oyl-hud__totals > :nth-child(4):nth-last-child(2),
+  .oyl-game--riding .oyl-hud__totals > :nth-child(5):last-child {
+    grid-column: span 3;
   }
 
   /* The tablet's own sizes are set on every value here too (§"#2130"). */

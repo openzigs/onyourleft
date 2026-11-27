@@ -19,6 +19,14 @@
  * privacy zone, a rate limit) is the answer: a leg the instance refused for a
  * privacy zone is not then sent anywhere else.
  *
+ * ⚠️ **An instance's leg that does not reach its waypoints is drawn straight**
+ * (#3179, `reach.ts`). The instance's Valhalla is sent no search cut-off, so a
+ * waypoint its graph has no road near is snapped to one far away and the leg
+ * comes back looking routed. Checked here, in the client, so an instance
+ * running any version is held to it. The leg is not then sent to the browser
+ * engine: its graph is no nearer to a road the instance's lacks, and a rider
+ * with an instance does not load it for that.
+ *
  * Heights follow the same order: the instance's own, else the terrain archive
  * read in the app (#2013), which the in-browser engine does not replace.
  *
@@ -34,10 +42,15 @@ import {
   type HeightProfile,
   type HeightRequest,
   type Metres,
+  type RoutedLeg,
+  type RouteRequest,
   type RoutingProvider,
 } from '@onyourleft/domain';
 
 import type { RouteHeights } from '../terrain/heights';
+
+import { FreehandFallback } from './draft';
+import { reachesItsWaypoints } from './reach';
 
 /** What the tiers are built from. Each is optional; a build may have none. */
 export interface RoutingTiers {
@@ -79,6 +92,22 @@ export type ReleasableProvider = RoutingProvider & { readonly release?: () => vo
 /** The spacing a provider's heights are asked at, when it says; see {@link TieredRouting}. */
 export function heightIntervalOf(provider: RoutingProvider): Metres | undefined {
   return 'heightInterval' in provider ? (provider as TieredRouting).heightInterval : undefined;
+}
+
+/** Said when the instance's line does not reach a waypoint (#3179). */
+export const INSTANCE_NO_ROAD_NEAR_TEXT =
+  "A waypoint of this leg is too far from any road on your instance's road map, so it is drawn as a straight line.";
+
+/** The instance's legs, unless one does not reach its waypoints; see the header. */
+function reachingLegs(request: RouteRequest, legs: readonly RoutedLeg[]): readonly RoutedLeg[] {
+  legs.forEach((leg, index) => {
+    const from = request.waypoints[index]?.position;
+    const to = request.waypoints[index + 1]?.position;
+    if (from === undefined || to === undefined || !reachesItsWaypoints(leg, from, to)) {
+      throw new FreehandFallback(INSTANCE_NO_ROAD_NEAR_TEXT);
+    }
+  });
+  return legs;
 }
 
 /** Said when no tier can give heights: the planner then saves the route flat. */
@@ -144,11 +173,13 @@ export function routingTiers(tiers: RoutingTiers): TieredRouting | undefined {
     },
     route: async (request) => {
       if (instance !== undefined) {
+        let legs: readonly RoutedLeg[] | undefined;
         try {
-          return await instance.route(request);
+          legs = await instance.route(request);
         } catch (error) {
           if (makeBrowser === undefined || !unavailable(error)) throw error;
         }
+        if (legs !== undefined) return reachingLegs(request, legs);
       }
       // Only reached with a browser maker: with no instance it is there
       // (checked above), and an instance with none has rethrown its error.

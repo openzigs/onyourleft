@@ -65,6 +65,7 @@ function box(
 function plansOf(
   footprints: readonly (readonly [readonly (readonly [number, number])[], number])[],
   urban: UrbanClassMap | undefined,
+  options: Parameters<typeof footprintPlans>[6] = {},
 ): readonly FootprintPlan[] {
   const buildings: BuildingFeature[] = footprints.map(([ring, height]) =>
     buildingBeside(profile, origin, [ring], height),
@@ -86,6 +87,7 @@ function plansOf(
     origin,
     FOOTPRINT_MAX_VERTICES,
     urban,
+    options,
   );
   expect(verdicts.kept).toBe(footprints.length);
   return plans;
@@ -195,7 +197,9 @@ describe('a terrace — the read path (#1635)', () => {
   });
 
   it('plans the same pair in a village exactly as with no urban class: the class gate', () => {
-    const village = plansOf(pair(0), everywhere('village'));
+    // #3251: with the choice by setting off. On, a village's detached pair is contemporary,
+    // which is that rule's and not the terrace's class gate.
+    const village = plansOf(pair(0), everywhere('village'), { houseStyles: false });
     const none = plansOf(pair(0), undefined);
     expect(village.map(bytesOf)).toStrictEqual(none.map(bytesOf));
     expect(village.some(terraced)).toBe(false);
@@ -302,10 +306,14 @@ describe('the roof — #1635', () => {
       [box(1_000, 7, 12, 31), 6],
       [box(1_007, 7, 12, 31), 6],
     ];
-    expect(plansOf(lots(), everywhere('village')).some((plan) => plan.model !== undefined)).toBe(
-      true,
-    );
-    const town = plansOf(lots(), everywhere('town'));
+    // #3251: with the choice by setting off, so that a model of either style may be taken.
+    // On, every committed model is traditional and a town's footprints take none, terraced or
+    // not: the town's half of this would hold whatever the terrace rule did.
+    const anyStyle = { houseStyles: false };
+    expect(
+      plansOf(lots(), everywhere('village'), anyStyle).some((plan) => plan.model !== undefined),
+    ).toBe(true);
+    const town = plansOf(lots(), everywhere('town'), anyStyle);
     expect(town.every(terraced)).toBe(true);
     expect(town.every((plan) => plan.model === undefined)).toBe(true);
   });

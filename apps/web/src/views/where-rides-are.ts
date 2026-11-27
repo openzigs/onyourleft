@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import type { InstancePort } from '../instance/instance-port';
+import { platformCapacitor, shellKind, type ShellKind } from '../support/capacitor';
 
 /**
  * Where a rider's rides are, said once for every screen that says it. #1438
@@ -28,15 +29,26 @@ export type InstanceKnown = 'none' | 'connected' | 'unknown';
  * "Nowhere else" is never said. A rider who synced and then disconnected (or
  * whose session is gone) reads as `none`, yet the instance still holds what it
  * was sent. So the sentence says only what is here and what deletes it.
+ *
+ * @param kind which native shell (#3239), read from the real Capacitor global
+ * unless a caller says; only read when `nativeShell` is set.
  */
-export function whereRidesAreText(nativeShell: boolean, instance: InstanceKnown): string {
+export function whereRidesAreText(
+  nativeShell: boolean,
+  instance: InstanceKnown,
+  kind: ShellKind | undefined = shellKind(platformCapacitor()),
+): string {
   const lead =
     instance === 'connected'
       ? 'Rides are stored on this device, and a ride you sync is also kept on your instance.'
       : 'Rides are stored on this device.';
-  const deletes = nativeShell
-    ? 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device'
-    : 'Clearing this browser’s site data deletes them from this device';
+  const deletes = !nativeShell
+    ? 'Clearing this browser’s site data deletes them from this device'
+    : kind === 'ios'
+      ? // #3239: iOS keeps an app's data until the app is deleted, and has no
+        // setting that clears it. ⚠️ Draft wording for the owner.
+        'Deleting the app deletes them from this device'
+      : 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device';
   return `${lead} ${deletes} — export anything you want to keep.`;
 }
 

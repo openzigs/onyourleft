@@ -110,13 +110,13 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     spec: 'game.browser.spec.ts',
     describe: 'the trees’ levels of detail in the realistic world — #617',
     seconds:
-      '82 s to 105 s: the `?realistic&trees` load, and since #1283 about 8 s to 13 s more for the scans’ frame',
+      '82 s to 105 s: the `?realistic&trees` load (#1283 added 8 s to 13 s for the scans’ frame, and #1293 took that out again)',
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
       'since #870, #630’s far-band light and foliage breeze, which are appearance. Since #1283 ' +
       'the trees it measures are the GENERATED ones a ride draws — since #1294 the firs with ' +
-      'the broadleaves — and the same wooded frame is counted again with every tree a scan ' +
-      'as the control.',
+      'the broadleaves. Until #1293 the same wooded frame was counted again with every tree ' +
+      'a scan; the scanned broadleaves are deleted, and so is that control.',
   },
   {
     spec: 'realistic.browser.spec.ts',
@@ -129,11 +129,11 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'realistic-trees.browser.spec.ts',
     describe: 'the realistic page’s tree levers — #1283, #1294',
-    seconds: 'about 54 s: three more loads of the owner’s page',
+    seconds: 'two more loads of the owner’s page (three, about 54 s, until #1293)',
     why:
-      'the owner’s page’s levers for the generated trees (#1283, #1294): that ' +
-      '`-generated-trees` fetches every tree’s scan instead, `-generated-conifers` the ' +
-      'scanned firs alone, and never both makings of a tree, with each frame’s triangles ' +
+      'the owner’s page’s lever for the generated firs (#1294; #1283’s own lever went ' +
+      'with the scanned broadleaves in #1293): that `-generated-conifers` fetches the ' +
+      'scanned firs instead, and never both makings of a tree, with each frame’s triangles ' +
       'and draw calls. An instrument of a page that ships in no build; which files the ' +
       'PRODUCT asks for is held in the required suite by `realistic-renderer.test.ts` ' +
       '§"asks for the generated broadleaves".',

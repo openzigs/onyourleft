@@ -154,6 +154,11 @@ function natural(across: number, top: number): Reach {
  * (`tools/realistic/blender/process_tree.py`), so a fir's branches reach half
  * its height.
  *
+ * ⚠️ **The two broadleaf scans the table names were deleted by #1293** (the
+ * owner's ruling of 2026-11-26), and the realistic broadleaf's 3.0 / 4.5 was
+ * not moved with them: 3.0 m is still what `generated_oak_a` needs, and the
+ * top is now more than any committed broadleaf reaches.
+ *
  * ⚠️ **A generated broadleaf (#1283) is inside the scans' 3.0 m, and not by
  * construction.** It stands with its trunk on its pivot and is fitted so that
  * nothing of it is further than 2.2 m from the trunk in plan

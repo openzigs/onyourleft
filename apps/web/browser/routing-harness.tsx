@@ -18,7 +18,8 @@
  *   check that routes must fail, so a green `contract()` is about the engine;
  * - `drag()`: five waypoints routed, the middle one moved, and the engine's
  *   `route()` calls counted at the SDK's own router, before and after;
- * - `refusals()`: what the planner makes of a leg off the graph and of a leg
+ * - `refusals()`: what the planner makes of a leg off the graph, of a leg
+ *   to a point inside the graph's coverage that no road is near, and of a leg
  *   to the unconnected square beside the grid;
  * - `saved()`: the routes this page's planner saved, read back from the store.
  *
@@ -83,6 +84,10 @@ interface RoutingHarness {
       readonly mode: string | undefined;
       readonly message: string | undefined;
     };
+    readonly farFromRoads: {
+      readonly mode: string | undefined;
+      readonly message: string | undefined;
+    };
     readonly unconnected: {
       readonly state: string | undefined;
       readonly message: string | undefined;
@@ -107,6 +112,13 @@ const GRAPH = { manifestUrl: `${window.location.origin}${GRID_PATH}${GRID_RELEAS
  * turns a corner: along the bottom street, up a column, along a street.
  */
 const CONTRACT_POINTS = [at(0.05, 0.0525), at(0.0625, 0.065), at(0.075, 0.0725)] as const;
+
+/**
+ * Inside the graph's coverage rectangle and its one level-2 tile, about 7.7 km
+ * north of the grid's top street, with no road nearer (#3179): the engine
+ * snaps a waypoint here to the grid and answers a leg that never reaches it.
+ */
+const FAR_FROM_ROADS = at(0.22, 0.1);
 
 /** Where the planner's first waypoint goes: on the bottom street, 22 m east of a corner. */
 const PLANNER_ORIGIN = at(0.05, 0.0502);
@@ -165,6 +177,7 @@ async function run(): Promise<void> {
         points: CONTRACT_POINTS,
         preferences: RIDING_DEFAULTS,
         snapMetres: 30,
+        farFromRoads: FAR_FROM_ROADS,
       }),
     contractWithTilesOff: () =>
       runRoutingContract({
@@ -172,6 +185,7 @@ async function run(): Promise<void> {
         points: CONTRACT_POINTS,
         preferences: RIDING_DEFAULTS,
         snapMetres: 30,
+        farFromRoads: FAR_FROM_ROADS,
       }),
     drag: async () => {
       const counted = counting(loadBrowserRouter);
@@ -192,10 +206,13 @@ async function run(): Promise<void> {
       const engine = inBrowser(true);
       // Off the graph: north of the grid's tile, where the graph has nothing.
       const off = await drawn([at(0.05, 0.0525), at(0.3, 0.0525)], engine);
+      // Inside the coverage, with no road near it: the engine snaps it to the grid.
+      const far = await drawn([at(0.05, 0.0525), FAR_FROM_ROADS], engine);
       // To the square beside the grid that no road reaches.
       const island = await drawn([at(0.05, 0.0525), at(0.05, 0.2025)], engine);
       return {
         offTheGraph: { mode: off.legs[0]?.mode, message: off.legs[0]?.failure?.message },
+        farFromRoads: { mode: far.legs[0]?.mode, message: far.legs[0]?.failure?.message },
         unconnected: { state: island.legs[0]?.state, message: island.legs[0]?.failure?.message },
       };
     },

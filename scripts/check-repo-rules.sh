@@ -36,7 +36,8 @@
 #           directory docs/agents/conventions.md section 7 gives the same convention (#493)
 #   SPIKE003 docs/spikes/ is there and holds a write-up, so the two rules above
 #           cannot pass over an empty or renamed directory (#493)
-#   REL001  no signing key material is committed anywhere (#95)
+#   REL001  no signing key material is committed anywhere (#95); since #1761
+#           that names iOS's .mobileprovision and .cer as well
 #   REL002  the Android build targets at least API 36 (#95)
 #   XML001  no "--" inside an XML comment (#225)
 #   XML002  no XML comment left unclosed (#225)
@@ -886,7 +887,16 @@ check_spikes
 # them would fail open on the one that was encrypted or renamed. Names are what a
 # build tool requires, so a key that is actually usable by Gradle has one of
 # them.
-KEY_MATERIAL_NAMES='.*\.(jks|keystore|p12|pfx|key)$|^keystore\.properties$|^(release|upload)-key\.'
+#
+# `.mobileprovision` and `.cer` since #1761, for iOS signing (#1778 keeps all of
+# it in repository secrets): a provisioning profile and the distribution
+# certificate. Neither is a private key, so the content half below never sees
+# them, and each is a binary DER blob with nothing in it to grep for. An App
+# Store Connect `.p8` key is NOT named here, because it does not need to be: it
+# is a PKCS#8 PEM whose banner is `-----BEGIN PRIVATE KEY-----`, which the
+# content half's pattern matches with an empty `[A-Z ]*`, and the suite pins
+# that case with a fixture written at test time.
+KEY_MATERIAL_NAMES='.*\.(jks|keystore|p12|pfx|key|mobileprovision|cer)$|^keystore\.properties$|^(release|upload)-key\.'
 
 #
 # ⚠️ Both halves walk `repo_files`, which is the shared prune list and nothing

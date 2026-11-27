@@ -840,8 +840,12 @@ describe('the archetypes’ variants and the lever — #1785', () => {
   ): readonly FootprintPlan[] => {
     const land = landClassMask(town.corridor);
     const urban = urbanClassMap(town.corridor, land, town.profile);
-    return footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, options)
-      .plans;
+    // #3251: with the choice by setting off. These are #1782's archetypes' variants, and a
+    // village's and a town's houses are contemporary now, which wear none.
+    return footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, {
+      houseStyles: false,
+      ...options,
+    }).plans;
   };
 
   it('plans every footprint as `origin/main` did with `-roof-variants`, and chooses no variant', () => {

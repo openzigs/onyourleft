@@ -129,6 +129,7 @@ import {
   setRealisticChainLink,
   setRealisticTrees,
   threeGameRenderer,
+  parkedCarStatsOf,
   villageHouseStatsOf,
   villageModelsShownOf,
   weatheringOf,
@@ -136,6 +137,7 @@ import {
   windowRoomsOf,
   lotRealismOf,
   type MappedBuildingStats,
+  type ParkedCarStats,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
@@ -397,6 +399,13 @@ declare global {
        * Absent with the result, or before a realistic frame.
        */
       readonly villageHouses?: VillageHouseStats;
+      /**
+       * #3278: the parked cars the view's belt drew on the last frame before
+       * the result was published — how many, how many with their wheels, and
+       * their triangles (`three-renderer.ts` §`parkedCarStatsOf`). Absent
+       * until a realistic frame carried a car.
+       */
+      readonly parkedCars?: ParkedCarStats;
       /**
        * #1815: what the view's Delivery belt drew on the last frame before the
        * result was published, read back off its instances
@@ -838,6 +847,8 @@ async function run(): Promise<void> {
       countrysideOff: countrysideWithLevers(config.leversOff),
       // #2685's pair: the golf courses and cemeteries as their planting alone.
       parkDressingOff: config.leversOff.includes('park-dressing'),
+      // #3278's pair: no parked car — and none in a Delivery round, whatever the lever.
+      parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
       // #2973's pair: the mapped streets off the route undrawn.
       nearbyStreetsOff: !nearbyStreetsWithLevers(config.leversOff),
       // #2972's pair: the mapped footways and zebras undrawn.
@@ -900,6 +911,7 @@ async function run(): Promise<void> {
               treeTriangles: VILLAGE_TREE_TRIANGLES,
             };
       const villageHouses = villageHouseStatsOf(view);
+      const parkedCars = parkedCarStatsOf(view);
       const mapped = mappedBuildingStatsOf(view)?.stats;
       const delivery =
         config.delivery === undefined
@@ -917,6 +929,7 @@ async function run(): Promise<void> {
         census,
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
+        ...(parkedCars === undefined ? {} : { parkedCars }),
         ...(mapped === undefined ? {} : { mapped }),
         ...(delivery === undefined ? {} : { delivery }),
         ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),

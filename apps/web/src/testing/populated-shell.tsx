@@ -56,6 +56,7 @@ import {
   type RideWriteUpRecord,
   type SegmentEffortRecord,
   type SegmentRecord,
+  type StreamChannel,
 } from '@onyourleft/store';
 
 import type { AthleteMassPort } from '../athlete/store-port';
@@ -525,7 +526,28 @@ const POPULATED_POWER = Array.from({ length: POPULATED_SAMPLES }, (_unused, inde
 );
 const POPULATED_HEART_RATE = Array.from({ length: POPULATED_SAMPLES }, () => beatsPerMinute(151));
 
-function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
+/**
+ * The ride's detail port, with every read of `failedRead` refused as a corrupt
+ * blob would be — #2261: the one way a browser gate can lay out a slot whose
+ * read failed (`list-detail.browser.spec.ts` §"#2194"). `undefined` refuses
+ * nothing.
+ */
+function detailPort(populated: boolean, failedRead?: StreamChannel): ReturnType<typeof stubDetail> {
+  const port = readyDetailPort(populated);
+  if (failedRead === undefined) return port;
+  return {
+    ...port,
+    store: {
+      ...port.store,
+      getStreamChannel: (owner, id, asked) =>
+        asked === failedRead
+          ? Promise.reject(new Error('The stored channel is corrupt.'))
+          : port.store.getStreamChannel(owner, id, asked),
+    },
+  };
+}
+
+function readyDetailPort(populated: boolean): ReturnType<typeof stubDetail> {
   const count = POPULATED_SAMPLES;
   const track = Array.from({ length: count }, (_unused, index) =>
     north(index * 8, Math.sin(index / 90) * 400),
@@ -907,8 +929,13 @@ export type PopulatedShellExtras = Pick<
 export function PopulatedShell({
   populated,
   capabilities = NO_BLUETOOTH,
+  failedRead,
   ...extras
-}: { readonly populated: boolean } & PopulatedShellExtras): JSX.Element {
+}: {
+  readonly populated: boolean;
+  /** #2261: a channel of the ride whose every read fails. @see detailPort */
+  readonly failedRead?: StreamChannel | undefined;
+} & PopulatedShellExtras): JSX.Element {
   // Before anything below renders, so a route builder mounted in this same
   // render reads it; once, so a re-render never rewrites a rider's edits.
   useState(() => {
@@ -951,7 +978,7 @@ export function PopulatedShell({
       // account that owns nothing.
       operate={scriptedOperate({ standing: populated ? 'owner' : 'not-owner', pageSize: 2 }).port}
       library={stubLibrary(ATHLETE, rides)}
-      detail={detailPort(populated)}
+      detail={detailPort(populated, failedRead)}
       instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,

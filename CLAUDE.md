@@ -15,7 +15,8 @@ smart-trainer control (ride any imported route on the trainer), and live sensor 
 **Bluetooth Low Energy**.
 
 Since ADR 0036 there is a self-hostable server, `apps/instance`; **no issue may take a paid service
-as a prerequisite** (ADR 0036 D-7). The rest of §1 is in [`docs/agents/layout.md`](docs/agents/layout.md).
+as a prerequisite** (ADR 0036 D-7; a store fee the publisher pays is not one, ADR 0057).
+The rest of §1 is in [`docs/agents/layout.md`](docs/agents/layout.md).
 
 > ⚠️ **The device is canonical, and a rider with no instance loses nothing.** That is the part of
 > the old rule that survives, as ADR 0036 D-3's four invariants: (a) no feature that works with no
