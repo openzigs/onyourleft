@@ -200,6 +200,12 @@ const steerOutputs = vi.hoisted((): (number | undefined)[] => []);
  * to the odometer), so it is read back off the input the frame was made from.
  */
 const drawnAlongInputs = vi.hoisted((): (number | undefined)[] => []);
+/**
+ * #3278: the `parkedCars` of every input `GameView` built a frame from, in
+ * order. `scene.ts` §`SceneInput.parkedCars` says whether a ride may stand
+ * scenery cars; a Delivery round's parked cars are its own obstacles.
+ */
+const parkedInputs = vi.hoisted((): (boolean | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -209,6 +215,7 @@ vi.mock('./scene', async (importOriginal) => {
       cameraInputs.push(args[0].cameraLateral);
       swayInputs.push(args[0].steeredSway);
       drawnAlongInputs.push(args[0].riderDistance);
+      parkedInputs.push(args[0].parkedCars);
       const frame = actual.sceneFrame(...args);
       steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
       return frame;
@@ -3165,5 +3172,17 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
       (frame) => frame.eye !== undefined && frame.lateral - frame.eye > 0.5,
     );
     expect(movedOff.length).toBeGreaterThan(0);
+  });
+
+  it('builds every frame of a round saying it may stand no scenery car: its parked cars are its obstacles — #3278', async () => {
+    steeredInputs.length = 0;
+    parkedInputs.length = 0;
+    await rideLevel('normal');
+    // Every frame a round steered: none of them asked for scenery cars.
+    const inRound = steeredInputs.flatMap((lateral, index) =>
+      lateral === undefined ? [] : [parkedInputs[index]],
+    );
+    expect(inRound.length).toBeGreaterThan(20);
+    expect(new Set(inRound)).toEqual(new Set([false]));
   });
 });
