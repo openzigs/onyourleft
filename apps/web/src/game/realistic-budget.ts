@@ -904,7 +904,7 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * is a red test and an edit here, rather than a draw call nobody decided to
  * spend.
  *
- * ## 35 → 36 with #3252, and ⚠️ this edit is the pull request's own
+ * ## 35 → 36 with #3252, by the owner's ruling of 2026-11-26
  *
  * The fence has a second shape: the built fences, a close-board timber fence
  * and a highway noise barrier, in one mesh between them (`three-renderer.ts`
@@ -922,9 +922,18 @@ export const REALISTIC_STRUCTURE_ITEMS = 36;
  * ADR 0099 D-4 item 3 says no draw-call ceiling is raised for a model without
  * a tablet measurement first. This figure is, in its own words above, "a
  * statement of what is built" that an added shape is meant to grow by an
- * edit here; but it does bound draw calls, so **whether it may stand at 36
- * is the owner's to rule on**, with #3252's tablet frame check. No tablet
- * measurement was taken for it.
+ * edit here; but it does bound draw calls, so whether it may stand at 36 was
+ * the owner's to rule on, and was put to the owner on the pull request.
+ *
+ * **The owner's ruling, 2026-11-26**, as the maintainer session recorded it
+ * on pull request #3274
+ * ([comment](https://github.com/openzigs/onyourleft/pull/3274#issuecomment-7207127166)),
+ * verbatim: *"`REALISTIC_STRUCTURE_MESHES` 36 is allowed for the timber fence
+ * and noise barrier. The tablet frame check on the trees ride confirms it; if
+ * frames suffer there, the two come out. Record this beside the constant."*
+ * So 36 stands, for those two fences and nothing else, and it rests on that
+ * ride: no figure from it is recorded here, and a frame that suffers there
+ * takes the two fences out and this back to 35.
  *
  * @test-facing held by `three-renderer.test.ts` §"#482", which counts the
  * meshes `RealisticStructureBelts` actually builds against it
