@@ -676,6 +676,8 @@ describe('a rail bridge — #3253', () => {
       if (Math.abs(corner.lateral) > half + 2) continue;
       expect(corner.y - roadAt(corner.along)).toBeGreaterThan(clear - 0.01);
     }
+    // And not far over it either: the clearance is the road's, held to the road at the crossing.
+    expect(girderFootAt(0) - roadAt(at)).toBeLessThan(clear + 0.5);
     // No crossing: the road's surface is not carried over it and no sign stands.
     expect(quads.filter(is(CROSSING_PANEL))).toEqual([]);
     expect(quads.filter(is(CROSSBUCK_WHITE))).toEqual([]);
@@ -814,9 +816,9 @@ describe('a rail bridge — #3253', () => {
       // Short: from under the ballast to its seat, never a wall down to the ground.
       const ys = quad.corners.map((corner) => corner.y);
       expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(faceHeight, 2);
-      expect(Math.min(...ys) - groundAt(here.along, here.lateral)).toBeGreaterThan(
-        DECK_CLEARANCE_METRES - ABUTMENT_SEAT_METRES - 1,
-      );
+      // The deck stands the clearance over the road, not over the ground at its ends (#3270), so how
+      // far its seat is over the ground here is what the ground gives: over it, never down to it.
+      expect(Math.min(...ys) - groundAt(here.along, here.lateral)).toBeGreaterThan(0.5);
       // Its foot is the seat: just under the girder that bears on it.
       const side = Math.sign(here.lateral);
       expect(girderFootAt(side * (DECK_SPAN_HALF_METRES - 0.5)) - Math.min(...ys)).toBeGreaterThan(
@@ -1088,6 +1090,233 @@ describe('a rail bridge — #3253', () => {
     ]);
     expect(trackOf(frameAt(at - 30, tunnel))).toEqual([]);
   });
+});
+
+/** A bridge `length` long over the road at `site`, square to it, with a line at grade each side. */
+function bridgeOver(site: number, length: number): WorldCorridor {
+  const end = length / 2;
+  return corridorOf([
+    rail([
+      [site, -200],
+      [site, -end],
+    ]),
+    rail(
+      [
+        [site, -end],
+        [site, end],
+      ],
+      'bridge',
+    ),
+    rail([
+      [site, end],
+      [site, 200],
+    ]),
+  ]);
+}
+
+/**
+ * The girder's underside over the carriageway, each metre across it: how far
+ * over the ROAD's height at that spot, the way a rider under it sees.
+ */
+function clearancesUnder(quads: readonly Quad[]): number[] {
+  const half = ROAD_WIDTH_METRES / 2;
+  const out: number[] = [];
+  for (const quad of quads.filter(is(DECK_GIRDER))) {
+    const low = [...quad.corners].sort((a, b) => a.y - b.y).slice(0, 2) as [Corner, Corner];
+    const [from, to] = low[0].lateral <= low[1].lateral ? low : [low[1], low[0]];
+    if (to.lateral - from.lateral < 0.5) continue;
+    for (let lateral = -half; lateral <= half; lateral += 1) {
+      if (lateral < from.lateral || lateral > to.lateral) continue;
+      const t = (lateral - from.lateral) / (to.lateral - from.lateral);
+      out.push(from.y + (to.y - from.y) * t - roadAt(from.along + (to.along - from.along) * t));
+    }
+  }
+  return out;
+}
+
+describe('a rail bridge clears the road it crosses, wherever the ground is — #3253', () => {
+  const clear = DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES;
+  const sites = Array.from({ length: 47 }, (_, index) => 700 + index * 100);
+
+  /** How far a deck square to the road needs lifting over its own level to clear it, at `site`. */
+  const neededAt = (site: number, length: number): number =>
+    roadAt(site) +
+    DECK_CLEARANCE_METRES -
+    (groundAt(site, -length / 2) + groundAt(site, length / 2)) / 2 -
+    BALLAST_DEPTH_METRES -
+    SIDE_ROAD_LIFT_METRES;
+
+  it.each(sites)('holds the clearance over the road at %i m, for each length of bridge', (site) => {
+    for (const length of [120, 64, 40]) {
+      const found = clearancesUnder(quadsOf(trackOf(frameAt(site - 30, bridgeOver(site, length)))));
+      expect(found.length).toBeGreaterThan(3);
+      // Never less than the clearance over the road under it…
+      expect(Math.min(...found)).toBeGreaterThan(clear - 0.1);
+      // …and, where the road is not in a cutting under the ground at its ends, no more: the lift
+      // is the road's height and the clearance, from the deck's own level.
+      if (neededAt(site, length) > 0.3) {
+        // The deck slopes with the ground at its ends across the road's width, and the road's own
+        // grade adds to it under the girder's two sides.
+        const slope = Math.abs(groundAt(site, length / 2) - groundAt(site, -length / 2)) / length;
+        const grade = Math.abs(roadAt(site + 2) - roadAt(site - 2)) / 4;
+        expect(Math.max(...found)).toBeLessThan(
+          clear + 0.2 + (slope + grade) * (ROAD_WIDTH_METRES + BALLAST_CROWN_METRES),
+        );
+      }
+    }
+  });
+
+  it('is tested on sites where the lift has to be found, and on sites where the ground is higher', () => {
+    // Non-vacuity: the fixture has ground at a span's ends well under the road's clearance
+    // (the lift is most of the girder's height there) and ground over it (a road in a cutting).
+    expect(sites.filter((site) => neededAt(site, 120) > 0.3).length).toBeGreaterThan(30);
+    expect(sites.filter((site) => neededAt(site, 120) < -0.3).length).toBeGreaterThan(0);
+    expect(Math.max(...sites.map((site) => neededAt(site, 120)))).toBeGreaterThan(
+      DECK_CLEARANCE_METRES - 3,
+    );
+  });
+});
+
+/**
+ * How many points of `quads` stand in the road's space: over the carriageway
+ * and between the road's surface and the girder's underside, each quad sampled
+ * on a grid across its face.
+ */
+function inTheRoad(quads: readonly Quad[]): number {
+  const half = ROAD_WIDTH_METRES / 2;
+  const clear = DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES;
+  let inside = 0;
+  for (const quad of quads) {
+    const [a, b, c, d] = quad.corners as [Corner, Corner, Corner, Corner];
+    for (let i = 0; i <= 6; i += 1) {
+      for (let j = 0; j <= 6; j += 1) {
+        const u = i / 6;
+        const v = j / 6;
+        const at = (pick: (corner: Corner) => number): number =>
+          (pick(a) * (1 - u) + pick(b) * u) * (1 - v) + (pick(d) * (1 - u) + pick(c) * u) * v;
+        const lateral = at((corner) => corner.lateral);
+        const over = at((corner) => corner.y) - roadAt(at((corner) => corner.along));
+        if (Math.abs(lateral) < half && over > 0.1 && over < clear - 0.1) inside += 1;
+      }
+    }
+  }
+  return inside;
+}
+
+describe('a rail bridge’s bank and abutments are kept out of the road — #3253', () => {
+  const site = dryStretch(80, 200, 2_600) + 40;
+  const solids = (quads: readonly Quad[]): Quad[] =>
+    quads.filter((quad) =>
+      [EMBANKMENT_GRASS, ABUTMENT, PIER_FOOT, PIER_CAP, TRACK_WALL].some((c) => is(c)(quad)),
+    );
+  const frame = (corridor: WorldCorridor) => quadsOf(trackOf(frameAt(site - 30, corridor)));
+
+  it('on a bridge that crosses at a shallow angle', () => {
+    const quads = frame(
+      corridorOf([
+        rail(
+          [
+            [site - 100, -30],
+            [site + 100, 30],
+          ],
+          'bridge',
+        ),
+        rail([
+          [site + 100, 30],
+          [site + 300, 130],
+        ]),
+        rail([
+          [site - 300, -130],
+          [site - 100, -30],
+        ]),
+      ]),
+    );
+    // Non-vacuity: it has a bank, and it is on this fixture's long approaches.
+    expect(quads.filter(is(EMBANKMENT_GRASS)).length).toBeGreaterThan(20);
+    expect(inTheRoad(solids(quads))).toBe(0);
+    // And its girder is over the road all the way the road runs under it.
+    expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
+      DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
+    );
+  });
+
+  it('on a bridge that crosses at 7 degrees, which runs over the road beyond the open span', () => {
+    const quads = frame(
+      corridorOf([
+        rail(
+          [
+            [site - 250, -30],
+            [site + 250, 30],
+          ],
+          'bridge',
+        ),
+        rail([
+          [site + 250, 30],
+          [site + 450, 54],
+        ]),
+        rail([
+          [site - 450, -54],
+          [site - 250, -30],
+        ]),
+      ]),
+    );
+    // Non-vacuity: the girder is over the road farther along the line than the open span reaches.
+    const along = quads
+      .filter(is(DECK_GIRDER))
+      .filter((quad) => Math.abs(centre(quad).lateral) < ROAD_WIDTH_METRES / 2)
+      .map((quad) => Math.abs(quad.corners.reduce((sum, c) => sum + c.along, 0) / 4 - site));
+    expect(Math.max(...along)).toBeGreaterThan(DECK_SPAN_HALF_METRES);
+    expect(inTheRoad(solids(quads))).toBe(0);
+    expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
+      DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
+    );
+  });
+
+  it('where the line runs beside the road before it crosses on a skew bridge', () => {
+    const quads = frame(
+      corridorOf([
+        rail([
+          [site - 400, 12],
+          [site - 80, 12],
+        ]),
+        rail(
+          [
+            [site - 80, 12],
+            [site + 80, -52],
+          ],
+          'bridge',
+        ),
+        rail([
+          [site + 80, -52],
+          [site + 300, -140],
+        ]),
+      ]),
+    );
+    expect(quads.filter(is(EMBANKMENT_GRASS)).length).toBeGreaterThan(20);
+    expect(inTheRoad(solids(quads))).toBe(0);
+  });
+
+  it.each([12, 24, 48])(
+    'on a %i m bridge, shorter than the open span: an abutment each end',
+    (length) => {
+      const quads = frame(bridgeOver(site, length));
+      const concrete = quads.filter(is(ABUTMENT));
+      // A face and two wings at each end of the mapped span.
+      expect(concrete).toHaveLength(6);
+      const faces = concrete.filter((quad) => span(quad, (c) => c.lateral) < 1);
+      expect(faces).toHaveLength(2);
+      for (const face of faces) {
+        expect(Math.abs(centre(face).lateral)).toBeCloseTo(length / 2, 0);
+      }
+      expect(inTheRoad(solids(quads))).toBe(0);
+      // It clears the road, and its girder is the open span.
+      expect(Math.min(...clearancesUnder(quads))).toBeGreaterThan(
+        DECK_CLEARANCE_METRES - DECK_KERB_METRES - DECK_GIRDER_METRES - 0.1,
+      );
+      // Its banks are grass, as the long bridge's are.
+      expect(quads.filter(is(EMBANKMENT_GRASS)).length).toBeGreaterThan(10);
+    },
+  );
 });
 
 describe('a disused line — #3253', () => {
