@@ -608,7 +608,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
      for a rider who is merely off the wheel, which D-4.1 said it did not. Before the first wait
      D-4.1 holds as written.
   3. **It recovers**: the margin keeps the line a touch ahead of a rider who holds the wheel, the
-     remembered pace follows them up, and the line rides the plan again once they hold it.
+     remembered pace follows them up, and the line rides the plan again once they hold it. A rider keeping up with the wheel
+     inside 2 m (98 % of its speed, held by nothing) is credited with the margin over their pace,
+     because on a wheel their speed is the line's and shows only what they can ride, not what less.
   4. **A one-off gap still ends in a wait or a regroup** (D-4.2, D-4.3), with no floor in either.
   5. **D-2.6 reaches the paced line too: the eased pace is the rider's ride.** A tick in which the
      line is held or paced is not booked as riding time, nor is one after it until the front is

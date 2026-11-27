@@ -265,6 +265,35 @@ describe('a paced line recovers toward the plan as the rider’s pace rises (the
   });
 });
 
+describe('a rider who keeps up at a fixed gap behind the wheel does not drag the pace down', () => {
+  // One 45 s gap, then the rider holds a fixed gap at the wheel's own speed,
+  // standing with the line throughout: the line's speed is theirs, so it says
+  // nothing of what they can ride.
+  for (const metres of [1.5, 2]) {
+    it(`is back at the plan's speed within five minutes at ${metres} m`, () => {
+      const { frames, plan } = rideGroup({
+        course: FLAT,
+        targetKmh: TARGET_KMH,
+        line: RIDER_LAST,
+        seconds: 300,
+        bendRadiusM: 20,
+        rider: {
+          slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 },
+          gap: { fromSeconds: 50, metres },
+        },
+      });
+      expect(holdsBegun(frames)).toBe(1);
+      const end = frames.slice(-30 / TICK_SECONDS);
+      for (const frame of end) {
+        expect(standing(frame)).toBe('with');
+        expect(frame.groupSpeedMps).toBeGreaterThan(
+          0.95 * plan.speedNowAt(at(frame, 'b1').distanceM),
+        );
+      }
+    });
+  }
+});
+
 describe('a rider who stops for five minutes (criterion 3)', () => {
   const STOP_FROM = 60;
   const STOP_TO = 360;

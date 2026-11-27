@@ -168,6 +168,19 @@ export const NO_DROP_PACE_MARGIN = 0.05;
  */
 export const NO_DROP_PACE_GAP_SECONDS = 2;
 
+/**
+ * The share of the wheel's speed from which a rider counts as keeping up with
+ * it: **98 %**. Held by nothing, they are then credited with the pace margin.
+ */
+export const NO_DROP_KEEPING_UP_SHARE = 0.98;
+
+/**
+ * The furthest behind the wheel a rider is credited for keeping up: **2 m**,
+ * where the close-gap cue starts to tell them. Beyond it the line's give is
+ * the rider's to close, not a pace to remember.
+ */
+export const NO_DROP_KEEPING_UP_METRES = 2;
+
 /** Where the rider stands to the line. */
 export const RIDER_STANDINGS = ['with', 'gapped', 'off-the-back', 'off-the-front'] as const;
 
@@ -361,7 +374,20 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     if (paceShare === null) {
       if (hold !== null && behind) paceShare = now;
     } else {
-      paceShare += ((now - paceShare) * ROTATION_WINDOW_MS) / (1_000 * NO_DROP_PACE_SECONDS);
+      // A rider on the wheel rides the line's speed, which the remembered pace
+      // itself sets, further back the lower by the give: it shows only that they
+      // can ride that, never what less they can. So a rider keeping up with the
+      // wheel, held by nothing and not yet told to close up, is credited with the
+      // margin over their pace.
+      const keepingUp =
+        last !== undefined &&
+        hold === null &&
+        behindM <= NO_DROP_KEEPING_UP_METRES &&
+        rider.speedMps >= NO_DROP_KEEPING_UP_SHARE * at(last).speedMps;
+      const target = keepingUp
+        ? Math.max(now, Math.min(1, paceShare * (1 + NO_DROP_PACE_MARGIN)))
+        : now;
+      paceShare += ((target - paceShare) * ROTATION_WINDOW_MS) / (1_000 * NO_DROP_PACE_SECONDS);
     }
   }
 

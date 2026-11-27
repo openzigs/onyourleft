@@ -104,6 +104,12 @@ export interface RiderScript {
     readonly toSeconds: number;
     readonly kmh: number;
   };
+  /**
+   * From `fromSeconds`, once they are within `metres` of the wheel ahead, they
+   * hold exactly that gap at the wheel's own speed: a rider who keeps up with
+   * the line but not close to it.
+   */
+  readonly gap?: { readonly fromSeconds: number; readonly metres: number };
   /** Where they start, in place of level with their seat at the route's start at the group's speed. */
   readonly start?: MemberView;
 }
@@ -190,6 +196,7 @@ export function rideGroup(script: GroupScript): GroupRide {
   let rider: MemberView = riding.start ?? seat;
   let state = startGroupRide({ line, seed: script.seed ?? 7, atMs: 0, rider: seat });
   let slowTo: number | null = null;
+  let holdingGap = false;
   const frames: Frame[] = [];
   let finishSeconds: number | null = null;
 
@@ -307,6 +314,14 @@ export function rideGroup(script: GroupScript): GroupRide {
           )
         : rolled.speedMps;
     rider = { distanceM: rolled.distanceM, speedMps: braked };
+    const wheelId = order[order.indexOf(YOU) - 1];
+    if (riding.gap !== undefined && wheelId !== undefined && seconds >= riding.gap.fromSeconds) {
+      const wheel = tick.state.bots[wheelId] as GroupBot;
+      holdingGap ||= wheel.distanceM - rider.distanceM <= riding.gap.metres;
+      if (holdingGap) {
+        rider = { distanceM: wheel.distanceM - riding.gap.metres, speedMps: wheel.speedMps };
+      }
+    }
     state = tick.state;
     const front = order[0] as string;
     const frontM = front === YOU ? rider.distanceM : (state.bots[front] as GroupBot).distanceM;

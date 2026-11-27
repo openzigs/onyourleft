@@ -397,6 +397,20 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
     expect(next(faster, 1_500, 0.65, 4).state).toBe(faster);
   });
 
+  it('credits a rider keeping up with the wheel inside 2 m with the margin, not with the line’s speed alone', () => {
+    // The remembered pace is 0.95; the wheel rides 8 m/s and the rider 7.84 of it, a share of 0.98.
+    const paced: NoDropState = { ...released, paceShare: 0.95 };
+    // 1.5 m behind at the wheel's speed: the mean heads for 0.95 x 1.05, not for 0.98.
+    const near = next(paced, 1_000, 1.5, 7.84).state.paceShare as number;
+    expect(near).toBeCloseTo(0.95 + (0.9975 - 0.95) / 20, 12);
+    // The same speed 3 m behind, where the close-gap cue speaks: the plain mean.
+    const far = next(paced, 1_000, 3, 7.84).state.paceShare as number;
+    expect(far).toBeCloseTo(0.95 + (0.98 - 0.95) / 20, 12);
+    // Not keeping up with the wheel at 1.5 m: the mean falls to their speed.
+    const slow = next(paced, 1_000, 1.5, 6).state.paceShare as number;
+    expect(slow).toBeCloseTo(0.95 + (0.75 - 0.95) / 20, 12);
+  });
+
   it('recovers to the plan: a rider who holds the plan’s speed has the line back at it, and it stays remembered', () => {
     let state: NoDropState = released;
     let atPlanFrom: number | null = null;
