@@ -36,3 +36,21 @@ allowBuilds:
 # and proxy settings from `.npmrc`, so the `engine-strict=true` there had been
 # ignored — Node 24 was let through a Node 26 `engines` with a warning.
 engineStrict: true
+
+# Advisory floors for transitive dependencies (#3277). Each entry raises a
+# package nothing in this workspace depends on directly to the release that
+# fixes a published high or critical advisory; `pnpm audit --audit-level=high`
+# is the check that they still hold. Remove an entry once every dependent's own
+# range resolves to a fixed release without it.
+#   undici       jsdom (dev) asks ^8.11.2 and @ai-sdk/provider-utils (the
+#                instance's runtime) asks 7.x; both lines are fixed from 7.30.1
+#                and 8.12.2. The 7.x line is not overridden: its dependent's
+#                range already resolves to 7.30.2.
+#   zod          @ai-sdk/* and ai (the instance's runtime), fixed in 4.6.6.
+#   handlebars   eslint-plugin-boundaries (dev), fixed in 4.7.10.
+#   source-map-js css-tree under jsdom (dev), fixed in 1.2.2.
+overrides:
+  'undici@>=8 <8.12.2': 8.13.1
+  zod@<4.6.6: 4.6.7
+  handlebars@<4.7.10: 4.7.10
+  source-map-js@<1.2.2: 1.2.4

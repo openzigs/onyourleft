@@ -779,3 +779,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   junction prompt; D-2.2's no-name rule and D-5.7's *"no street name"* no longer hold there for
   street names. **Status: proposed**, in force only once the owner accepts ADR 0096. A route ride's
   corridor reads no name, and D-2.2 and D-5.7 stand for it word for word.
+- **2026-11-26** — **Superseded in part, for the saved route ride only, by
+  [ADR 0100](0100-a-saved-route-ride-names-the-street-it-is-on.md)**
+  ([#3245](https://github.com/openzigs/onyourleft/issues/3245)). A route's corridor read asks for a
+  `roads` street's `name`, cleaned as ADR 0096 D-1.3 says, and the store keeps it on the street
+  (`n`, packed version 9, reader version 10) where the glyph atlas can paint it whole. A route ride
+  paints the name of the street it is on, now and then. D-2.2's no-name rule, D-3.3's *"no name"*
+  and D-5.7's *"no street name"* no longer hold for a street's name on a saved route. D-3.5 stands
+  word for word: nothing in the store leaves the device. **Status: proposed**, in force only once the
+  owner accepts ADR 0100; the pull request is not to be merged before that.

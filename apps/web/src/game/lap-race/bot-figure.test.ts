@@ -19,9 +19,14 @@
  * deals its one bot the even pace and reads the figures against its own W/kg.
  * In a live race a Brisk bot at ability 0.94 reads 2.6 on the flat.
  *
+ * Since #2463 its tactics read the race (ADR 0067 D-0), so the chooser's
+ * words say what a bot does on its own and what it does in the race (#2541):
+ * a second flat race, the rider a little slower, puts the bot on the rider's
+ * wheel, where it sits in.
+ *
  * Each case holds one clause of what the chooser now says
  * (`StageChooser.tsx` §`LAP_RACE_CHOICE_TEXT.tierLive`), so a change to the
- * plan that makes those words false goes red here.
+ * plan or the tactics that makes those words false goes red here.
  */
 
 import {
@@ -84,8 +89,11 @@ interface Reading {
   readonly onWheel: boolean;
 }
 
-/** Ride `choice` on `profile` to the bot's finish, the rider a steady 9 m/s, and read every tick. */
-function ride(profile: RouteProfile, choice: LapRaceChoice = BRISK): Reading[] {
+/**
+ * Ride `choice` on `profile` to the bot's finish, the rider a steady `speed`
+ * (9 m/s unless given), and read every tick.
+ */
+function ride(profile: RouteProfile, speed = 9, choice: LapRaceChoice = BRISK): Reading[] {
   vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
     <T extends ArrayBufferView>(array: T): T => {
       (array as unknown as Uint32Array)[0] = EVEN_SEED;
@@ -116,7 +124,7 @@ function ride(profile: RouteProfile, choice: LapRaceChoice = BRISK): Reading[] {
       return of('rider') - of('bot-1');
     };
     const ahead = gapToRider();
-    race = stepLapRaceRide(race, { ticks: 1, along: tick * LAP_RACE_TICK_SECONDS * 9 });
+    race = stepLapRaceRide(race, { ticks: 1, along: tick * LAP_RACE_TICK_SECONDS * speed });
     const bot = race.race.racers.find((entry) => entry.racer.id === 'bot-1');
     if (bot === undefined) throw new Error('the bot is not in the race');
     if (bot.racer.finishedAtMs !== null) return readings;
@@ -148,9 +156,12 @@ const HILLY = circuitRoute(
 describe('a Brisk bot’s W/kg on the HUD, against its tier — #2329', () => {
   let flat: Reading[] = [];
   let hilly: Reading[] = [];
+  /** The flat race with the rider at 8 m/s, a little under the bot: it catches the rider's wheel. */
+  let caught: Reading[] = [];
   beforeAll(() => {
     flat = ride(FLAT);
     hilly = ride(HILLY);
+    caught = ride(FLAT, 8);
   });
   afterAll(() => {
     vi.restoreAllMocks();
@@ -179,6 +190,24 @@ describe('a Brisk bot’s W/kg on the HUD, against its tier — #2329', () => {
     expect(alone.length).toBeGreaterThan(100);
     expect(new Set(alone.map((reading) => reading.figure))).toEqual(new Set([written(OWN)]));
     expect(OWN).toBeLessThanOrEqual(TIER);
+  });
+
+  it('sits in on a wheel and rides easier: under its own figure on the rider’s wheel, on the flat (#2541)', () => {
+    const own = Number.parseFloat(written(OWN));
+    const onWheel = caught.filter(
+      (reading) => reading.left > 400 && reading.tactic === 'sit-in' && reading.onWheel,
+    );
+    expect(onWheel.length).toBeGreaterThan(100);
+    expect(onWheel.every((reading) => reading.value < own)).toBe(true);
+  });
+
+  it('goes harder to close a gap to the racer ahead: over its own figure in a chase, on the flat (#2541)', () => {
+    // At 9 m/s the rider rides away from the bot, out of draft reach and
+    // within bridging distance, and the bot chases.
+    const own = Number.parseFloat(written(OWN));
+    const chasing = flat.filter((reading) => reading.left > 400 && reading.tactic === 'chase');
+    expect(chasing.length).toBeGreaterThan(100);
+    expect(chasing.every((reading) => reading.value > own)).toBe(true);
   });
 
   it('eases downhill: under its own figure on a descent', () => {

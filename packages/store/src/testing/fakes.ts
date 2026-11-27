@@ -208,6 +208,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     getRoute: async (owner, id) => real.getRoute(owner, id),
     listRoutes: async (owner, limit) => real.listRoutes(owner, limit),
     deleteRoute: async (owner, id) => real.deleteRoute(owner, id),
+    recordBestLap: async (owner, id, lap) => real.recordBestLap(owner, id, lap),
     putWorkout: async (record, condition) => real.putWorkout(record, condition),
     getWorkout: async (owner, id) => real.getWorkout(owner, id),
     listWorkouts: async (owner, limit) => real.listWorkouts(owner, limit),

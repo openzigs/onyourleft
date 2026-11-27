@@ -473,3 +473,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   which replaces the switch-on half of the
   [earlier ruling that day](https://github.com/openzigs/onyourleft/pull/2534#issuecomment-6829334664).
   This entry only clarifies D-2.4; nothing else in this ADR changes.
+- **2026-11-26** — **D-12.2 and a best lap per loop** ([#2319](https://github.com/openzigs/onyourleft/issues/2319),
+  the owner's ruling of 2026-11-06 on #2316: the Games tab's Lap race card shows the rider's best lap
+  time on each loop). **D-12.2 stands: a lap race stores no position, no finish order and no item
+  event against bots.** What it now keeps is one figure per loop: the moving time of the fastest
+  whole lap the rider has ridden in a solo lap race on one of their own saved loops. It is a lap time
+  and nothing else. It is the recording's own lap (`recording/laps.ts`), timed on the trainer's
+  clock and ended at the lap line, so ADR 0067 D-3's draft reaches it the same way it reaches every
+  lap time (the 2026-11-12 entry above).
+  It is kept on this device, as a field of the route (`@onyourleft/store` §`RouteRecord.bestLap`,
+  `ActivityStore.recordBestLap`), so it goes where the route goes. It is in the export's manifest
+  with the route. It is erased with the route and with the rider. It is never synced, because no
+  route is. A new line for the route drops it, because that is a different lap.
+  A built-in circuit keeps none (it is no saved route), nor does a room's race, a simulated rider's
+  ride or a part lap. The card says "on your loops" when it lists circuits beside them.
+  `packages/store/src/route-store.test.ts` › `the best lap of a loop — #2319` reads it back through
+  the real store, and `activity-store.scoping.test.ts` probes `recordBestLap` across athletes.
+  Nothing else in this ADR changes.

@@ -568,6 +568,8 @@ export function replaceRouteLine(
     ...stored,
     profile: line.profile,
     ...(elevation === undefined ? {} : { elevation }),
+    // #2319: a best lap is a lap of the old line, and the new one is another lap.
+    bestLap: undefined,
     updatedAt: now === stored.updatedAt ? unixSeconds(now + 1) : now,
   };
   if (stored.visibility !== 'private') {

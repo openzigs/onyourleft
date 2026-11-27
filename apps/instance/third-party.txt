@@ -20,10 +20,10 @@ In the instance (15 packages)
   eventsource-parser 3.1.1 — MIT
   json-schema 0.4.0 — (AFL-2.1 OR BSD-3-Clause)
   kysely 0.29.6 — MIT
-  undici 7.30.0 — MIT
+  undici 7.30.2 — MIT
   uqr 0.1.3 — MIT
   ws 8.22.0 — MIT
-  zod 4.6.5 — MIT
+  zod 4.6.7 — MIT
 
 ========================================================================
 Name: @ai-sdk/gateway
@@ -658,7 +658,7 @@ SOFTWARE.
 
 ========================================================================
 Name: undici
-Version: 7.30.0
+Version: 7.30.2
 Licence: MIT
 Part: in the instance
 
@@ -748,7 +748,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Name: zod
-Version: 4.6.5
+Version: 4.6.7
 Licence: MIT
 Part: in the instance
 

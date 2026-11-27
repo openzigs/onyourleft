@@ -137,9 +137,9 @@ describe('the kinds layer 2 replaces — ADR 0026 D-12, #474', () => {
 });
 
 describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
-  it('draws a ride with the generated trees, and keeps the scans beside them', () => {
+  it('draws a ride with the generated trees, and keeps the scanned firs beside them', () => {
     expect(REALISTIC_TREES_DEFAULT).toBe('generated');
-    expect([...REALISTIC_TREE_SETS].sort()).toEqual(['generated', 'scanned', 'scanned-conifers']);
+    expect([...REALISTIC_TREE_SETS].sort()).toEqual(['generated', 'scanned-conifers']);
     // What a ride draws is the default set's table, the very object.
     expect(REALISTIC_VEGETATION).toEqual(realisticVegetation(REALISTIC_TREES_DEFAULT));
     expect(REALISTIC_VEGETATION['tree-broadleaf']).toBe(REALISTIC_BROADLEAVES.generated);
@@ -149,11 +149,7 @@ describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
       'generated_fir_a',
       'generated_fir_b',
     ]);
-    // The scans are the trees every realistic world drew until #1283 and #1294.
-    expect(REALISTIC_BROADLEAVES.scanned.map((model) => model.name)).toEqual([
-      'island_tree_02',
-      'tree_small_02',
-    ]);
+    // The scanned firs are the conifers every realistic world drew until #1294.
     expect(REALISTIC_CONIFERS.scanned.map((model) => model.name)).toEqual([
       'fir_sapling_medium_a',
       'fir_sapling_medium_b',
@@ -161,7 +157,6 @@ describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
     // Still committed, and still named for the precache rule and the budget —
     // every tree of either making.
     for (const model of [
-      ...REALISTIC_BROADLEAVES.scanned,
       ...REALISTIC_CONIFERS.scanned,
       ...REALISTIC_BROADLEAVES.generated,
       ...REALISTIC_CONIFERS.generated,
@@ -171,15 +166,37 @@ describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
         expect(COMMITTED, model.name).toContain(file);
       }
     }
-    // Each file once, though three sets name most of them twice.
+    // Each file once, though both sets name the broadleaves.
     expect(new Set(realisticFiles()).size).toBe(realisticFiles().length);
+  });
+
+  it('ships no scanned broadleaf, in any set, table or committed file — #1293', () => {
+    // The owner's ruling of 2026-11-26: the two Poly Haven broadleaf scans a
+    // default ride had not drawn since #1283 are deleted, not hidden. Named
+    // here by the names they had, because a table that no longer lists them
+    // cannot be asked for them.
+    const deleted = (file: string): boolean => /^(island_tree_02|tree_small_02)/.test(file);
+    expect(COMMITTED.filter(deleted)).toEqual([]);
+    expect(realisticFiles().filter(deleted)).toEqual([]);
+    expect(shippedFiles().filter(deleted)).toEqual([]);
+    // The broadleaves have one making, and no set draws another.
+    expect(Object.keys(REALISTIC_BROADLEAVES)).toEqual(['generated']);
+    expect(REALISTIC_TREE_SETS).not.toContain('scanned');
+    for (const trees of REALISTIC_TREE_SETS) {
+      expect(realisticVegetation(trees)['tree-broadleaf'], trees).toBe(
+        REALISTIC_BROADLEAVES.generated,
+      );
+    }
+    // Non-vacuity: the pattern is the shape of a tree's four files, and the
+    // scanned firs that DO still ship are found by the same shape.
+    const fir = (file: string): boolean => /^fir_sapling_medium_[ab]/.test(file);
+    expect(COMMITTED.filter(fir)).toHaveLength(8);
   });
 
   it('differs between the sets in its trees alone, each set the making its name says', () => {
     expect(REALISTIC_TREE_MAKING).toEqual({
       generated: { broadleaves: 'generated', conifers: 'generated' },
       'scanned-conifers': { broadleaves: 'generated', conifers: 'scanned' },
-      scanned: { broadleaves: 'scanned', conifers: 'scanned' },
     });
     for (const trees of REALISTIC_TREE_SETS) {
       const set = realisticVegetation(trees);
@@ -194,12 +211,10 @@ describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
         expect(set[kind], `${trees} ${kind}`).toEqual(realisticVegetation('generated')[kind]);
       }
     }
-    // No tree is in both makings of its kind.
-    for (const table of [REALISTIC_BROADLEAVES, REALISTIC_CONIFERS]) {
-      const names = (making: 'generated' | 'scanned'): string[] =>
-        table[making].map((each) => each.name);
-      expect(names('generated').some((name) => names('scanned').includes(name))).toBe(false);
-    }
+    // No fir is in both makings; the broadleaves have one (#1293).
+    const firs = (making: 'generated' | 'scanned'): string[] =>
+      REALISTIC_CONIFERS[making].map((each) => each.name);
+    expect(firs('generated').some((name) => firs('scanned').includes(name))).toBe(false);
     // As many generated firs as scanned ones: a tree is a draw call a level a
     // SHAPE, and the firs add none (#1289's review, #1294).
     expect(REALISTIC_CONIFERS.generated).toHaveLength(REALISTIC_CONIFERS.scanned.length);
@@ -207,7 +222,8 @@ describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
 
   it('gives a rider more shapes than the scans did, two species turn about', () => {
     const names = REALISTIC_BROADLEAVES.generated.map((model) => model.name);
-    expect(names.length).toBeGreaterThan(REALISTIC_BROADLEAVES.scanned.length);
+    // The scans were two trees (`island_tree_02`, `tree_small_02`), until #1293.
+    expect(names.length).toBeGreaterThan(2);
     expect(new Set(names).size).toBe(names.length);
     // An item's variant picks modulo the count, so neighbouring slots are
     // different SPECIES: no two of one stand side by side in the table.

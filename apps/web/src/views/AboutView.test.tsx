@@ -430,3 +430,77 @@ describe('the About page names the channel the Android app came from', () => {
     expect(await section({ nativeShell: false, releaseChannel: 'play' })).toBeUndefined();
   });
 });
+
+/**
+ * #3239 — the About page inside the iOS app: its channel is the App Store or
+ * TestFlight, read from the build, and nothing on the page names Android or
+ * Google Play. Read through the rendered page, with a Capacitor global that
+ * says it is the iOS app.
+ */
+describe('the About page in the iOS app', () => {
+  const HEADING = 'Which copy of the app this is';
+  const IOS_SWITCHING =
+    'Export your rides, or sync them with an instance, before you move from one to the other.';
+  const APP_STORE =
+    'This copy was installed from the App Store. Test builds of the app come through ' +
+    `TestFlight instead. ${IOS_SWITCHING}`;
+  const TESTFLIGHT =
+    'This copy is a test build, installed through TestFlight rather than the App Store. ' +
+    IOS_SWITCHING;
+  const IOS_NOT_RELEASED =
+    'This copy was not built by a release, so it is neither the App Store copy nor a ' +
+    'TestFlight build. Export your rides, or sync them with an instance, before you replace ' +
+    'it with one of them.';
+
+  async function page(
+    props: Parameters<typeof AboutView>[0],
+  ): Promise<{ readonly section: string | undefined; readonly text: string }> {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'ios' });
+    try {
+      const mounted = await mount(<AboutView {...props} />);
+      await settle();
+      const heading = queryAll(mounted.container, 'h2').find((h) => h.textContent === HEADING);
+      const section = heading?.parentElement?.querySelector('p')?.textContent ?? undefined;
+      const text = mounted.container.textContent ?? '';
+      mounted.unmount();
+      return { section, text };
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it('names the App Store in an App Store build', async () => {
+    const { section, text } = await page({ nativeShell: true, releaseChannel: 'app-store' });
+    expect(section).toBe(APP_STORE);
+    expect(text).not.toMatch(/Android|Google Play/);
+  });
+
+  it('names TestFlight in a TestFlight build', async () => {
+    const { section, text } = await page({ nativeShell: true, releaseChannel: 'testflight' });
+    expect(section).toBe(TESTFLIGHT);
+    expect(text).not.toMatch(/Android|Google Play/);
+  });
+
+  it('claims neither in an iOS build no release made', async () => {
+    const { section, text } = await page({ nativeShell: true, releaseChannel: undefined });
+    expect(section).toBe(IOS_NOT_RELEASED);
+    expect(text).not.toMatch(/Android|Google Play/);
+  });
+
+  it('reads the App Store channel from the build when nothing is passed', async () => {
+    vi.stubEnv('VITE_OYL_RELEASE_CHANNEL', 'app-store');
+    try {
+      expect((await page({ nativeShell: true })).section).toBe(APP_STORE);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('says what deletes the rides on iOS', async () => {
+    const { text } = await page({ nativeShell: true, releaseChannel: 'app-store' });
+    expect(text.replace(/\s+/g, ' ')).toContain(
+      'Rides are stored on this device. Deleting the app deletes them from this device — ' +
+        'export anything you want to keep.',
+    );
+  });
+});

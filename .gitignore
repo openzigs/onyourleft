@@ -29,6 +29,21 @@ __pycache__/
 .claude/*
 !.claude/delivery.md
 
+# Signing material (#95, #1761): the names `scripts/check-repo-rules.sh`
+# REL001 refuses, so `git add` passes over a key before that rule ever has to
+# report one. Keys and certificates live in repository secrets. Never force one
+# past this: a pushed commit is permanent whatever a later commit deletes.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+*.mobileprovision
+*.cer
+keystore.properties
+release-key.*
+upload-key.*
+
 # The home deploy's record of what it deployed (#52): a file on the box.
 apps/instance/deploy/home/.deployed
 # The home deploy's secret files (#2146): the Discord bot token. On the box only.

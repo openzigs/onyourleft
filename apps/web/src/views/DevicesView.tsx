@@ -17,9 +17,10 @@ import {
   BluetoothSupportNotice,
 } from '../support/BluetoothSupportNotice';
 import { ShellSupportNotice } from '../support/ShellSupportNotice';
-import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
+import { beforeTheAskLabel, bluetoothWhy, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import { platformCapacitor, shellKind } from '../support/capacitor';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
 import { useBluetoothSupport } from '../support/useBluetoothSupport';
@@ -338,11 +339,13 @@ function ShellDevices({
  * control is the press that lets Android ask.
  */
 function BeforeAndroidAsks({ onLook }: { readonly onLook: () => void }): JSX.Element {
+  // #3239: the iOS app's own sentence, where its system is the one asking.
+  const kind = shellKind(platformCapacitor());
   return (
     <>
       <h2>This phone</h2>
-      <StatusMessage tone="info" label="Before Android asks">
-        {BLUETOOTH_WHY}
+      <StatusMessage tone="info" label={beforeTheAskLabel(kind)}>
+        {bluetoothWhy(kind)}
       </StatusMessage>
       <Button onClick={onLook}>{LOOK_FOR_DEVICES}</Button>
       <h2>Paired sensors</h2>

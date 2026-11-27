@@ -30,8 +30,8 @@
  * - {@link REALISTIC_VEGETATION} is ADR 0026 D-12's second layer: the four
  *   kinds `scatter.ts` places that a photoscan can stand in for. Trees carry an
  *   impostor strip for the far band. ⚠️ Since #1283 a broadleaf tree is
- *   GENERATED rather than scanned ({@link REALISTIC_BROADLEAVES}), and the
- *   scans it replaced are still shipped beside it.
+ *   GENERATED rather than scanned ({@link REALISTIC_BROADLEAVES}), and since
+ *   #1293 the scans it replaced are no longer shipped.
  * - {@link REALISTIC_STRUCTURE_SURFACES} are ADR 0026 D-12's third layer
  *   (#475): the photographic surfaces the structures wear. The structures'
  *   SHAPES are built from numbers — a building's in `buildings.ts` since #500,
@@ -415,20 +415,22 @@ export interface RealisticModel {
 export type TreeMaking = 'generated' | 'scanned';
 
 /**
- * Which trees a realistic world is drawn with — #1283, and since #1294 three
- * sets where there were two:
+ * Which trees a realistic world is drawn with — #1283, #1294, and since #1293
+ * two sets where there were three:
  *
  * - `generated` — every tree generated: the broadleaves (#1283) and the firs
  *   (#1294). What a ride draws.
  * - `scanned-conifers` — the generated broadleaves beside the SCANNED firs:
  *   the world #1283 left, and the other half of the fir's own before/after
  *   pair.
- * - `scanned` — every tree a scan: the world before #1283.
  *
- * Three and not four: scanned broadleaves beside generated firs is a world
- * nobody drew and no row of validation 0002 asks for.
+ * ⚠️ **There was a third, `scanned` — every tree a scan, the world before
+ * #1283 — and a reviewer who remembers it is reading the file before #1293.**
+ * The owner ruled on 2026-11-26 that the scanned broadleaves go, so no set
+ * can draw one: their files, their `ASSETS.toml` rows and their pipeline
+ * recipe are deleted, not hidden.
  */
-export type RealisticTrees = 'generated' | 'scanned-conifers' | 'scanned';
+export type RealisticTrees = 'generated' | 'scanned-conifers';
 
 /**
  * All of them, in a fixed order.
@@ -438,19 +440,17 @@ export type RealisticTrees = 'generated' | 'scanned-conifers' | 'scanned';
  * each for real, and read by {@link realisticFiles}; a ride draws one set and
  * never asks which others there are
  */
-export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = [
-  'generated',
-  'scanned-conifers',
-  'scanned',
-];
+export const REALISTIC_TREE_SETS: readonly RealisticTrees[] = ['generated', 'scanned-conifers'];
 
-/** How each kind of tree in a set was made. */
+/**
+ * How each kind of tree in a set was made. Since #1293 a broadleaf is
+ * generated in every set: there is no scanned one to name.
+ */
 export const REALISTIC_TREE_MAKING: Readonly<
-  Record<RealisticTrees, { readonly broadleaves: TreeMaking; readonly conifers: TreeMaking }>
+  Record<RealisticTrees, { readonly broadleaves: 'generated'; readonly conifers: TreeMaking }>
 > = {
   generated: { broadleaves: 'generated', conifers: 'generated' },
   'scanned-conifers': { broadleaves: 'generated', conifers: 'scanned' },
-  scanned: { broadleaves: 'scanned', conifers: 'scanned' },
 };
 
 /**
@@ -472,10 +472,13 @@ export const REALISTIC_TREE_MAKING: Readonly<
  * #1283, which are the owner's, and ADR 0049 D-1 keeps a generated tree "only
  * where the tablet measurement says it should".
  *
- * ⚠️ **So the scans are still committed and still loadable**, behind the
- * owner's page (`browser/realistic/config.ts` §`LEVERS`, `-generated-trees`)
- * and `three-renderer.ts` §`setRealisticTrees`. Removing them, or making them
- * the default again, is the change after the rows.
+ * ⚠️ **The scanned broadleaves are gone — #1293, the owner's ruling of
+ * 2026-11-26.** Until then they stayed committed and loadable, behind the
+ * owner's page's `-generated-trees` lever, waiting for those rows; the owner
+ * ruled that they go without the rows, because they were 10 616 301 bytes of
+ * a build at its ceiling that no default ride drew (ADR 0049's amendment of
+ * 2026-11-26 on the scans). So there is no going back to them by a switch: it is their
+ * recipe in git history and a run of the pipeline.
  *
  * ⚠️ **Since #1294 the firs are generated too** ({@link REALISTIC_CONIFERS},
  * which says what that default rests on), and a reviewer who remembers this
@@ -492,24 +495,25 @@ const tree = (name: string): RealisticModel => ({
 });
 
 /**
- * The broadleaf trees of each set, in variant order.
+ * The broadleaf trees, in variant order.
  *
  * - `generated` — #1283: two oaks and two hornbeams, each a seed of its
  *   species (`tools/realistic/generated-trees.ts` §`GENERATED_TREES`, which
  *   says why two and why there is no `_b`), interleaved so that two
  *   neighbouring variant slots are different species as well as different
  *   seeds.
- * - `scanned` — the two Poly Haven photoscans every realistic world drew until
- *   #1283, decimated to their budget.
+ *
+ * One making and still a table: until #1293 it had a `scanned` row beside
+ * this one, the two Poly Haven photoscans every realistic world drew until
+ * #1283, and {@link REALISTIC_CONIFERS} still has both.
  */
-export const REALISTIC_BROADLEAVES: Readonly<Record<TreeMaking, readonly RealisticModel[]>> = {
+export const REALISTIC_BROADLEAVES: Readonly<Record<'generated', readonly RealisticModel[]>> = {
   generated: [
     tree('generated_oak_a'),
     tree('generated_hornbeam_a'),
     tree('generated_oak_c'),
     tree('generated_hornbeam_c'),
   ],
-  scanned: [tree('island_tree_02'), tree('tree_small_02')],
 };
 
 /**
@@ -534,8 +538,8 @@ export const REALISTIC_BROADLEAVES: Readonly<Record<TreeMaking, readonly Realist
  * this change's author looking at screenshots, and nothing here was measured
  * on a device.
  *
- * ⚠️ **So the scanned firs are still committed and still loadable**, as the
- * scanned broadleaves are: the owner's page loads them with
+ * ⚠️ **So the scanned firs are still committed and still loadable** — as the
+ * scanned broadleaves were until #1293: the owner's page loads them with
  * `?levers=-generated-conifers` (`browser/realistic/config.ts` §`LEVERS`).
  * ADR 0049 D-1 keeps a generated tree "only where the tablet measurement
  * says it should", and those rows are the owner's (validation 0002).
@@ -928,8 +932,8 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_SURFACES.rock.normal,
     REALISTIC_SURFACES.crag.colour,
     REALISTIC_SURFACES.crag.normal,
-    // #1283, #1294: EVERY set's trees, each file once — the sets a ride does
-    // not draw still ship, and are still held to their budget.
+    // #1283, #1294: EVERY set's trees, each file once — the set a ride does
+    // not draw (the scanned firs') still ships, and is still held to its budget.
     ...new Set(
       REALISTIC_TREE_SETS.flatMap((trees) =>
         REALISTIC_VEGETATION_KINDS.flatMap((kind) =>

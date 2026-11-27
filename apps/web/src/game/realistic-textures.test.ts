@@ -3688,7 +3688,7 @@ describe('the generated trees, loaded and drawn through the product’s own path
           Math.round(mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN),
         );
 
-  it('loads the generated broadleaves for a ride, and the scans only when told to', async () => {
+  it('loads the generated trees for a ride, and the scanned firs only when told to', async () => {
     expect(REALISTIC_TREES_DEFAULT).toBe('generated');
     for (const set of [undefined, ...REALISTIC_TREE_SETS]) {
       const renderer = await loadedOn(TABLET, set);
