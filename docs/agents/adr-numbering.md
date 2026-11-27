@@ -12,6 +12,19 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0101 is [ADR 0101](../adr/0101-the-ai-group-ride.md)**, taken by
+  [#3297](https://github.com/openzigs/onyourleft/issues/3297) on 2026-11-26 for the AI group ride
+  (epic [#3296](https://github.com/openzigs/onyourleft/issues/3296)): a solo ride in a paceline of
+  synthetic riders that coaches the rotation and never drops the rider. **Proposed.** It records
+  the owner's four rulings of 2026-11-26 as decided (a true ride average, a HUD line and a sound
+  per cue kind, no-drop with no lower limit, and the patent-risk acceptance extended to group-ride
+  bots and a waiting group with trainer safety held), and puts twenty further questions to the
+  owner, each with a proposed answer **the owner has not given**. It supersedes nothing, so no ADR
+  gained a pointer. It took 0101 because **0100 is claimed** by the open pull request
+  [#3261](https://github.com/openzigs/onyourleft/pull/3261), which adds an ADR numbered 0100 for
+  #3245's street names on a saved-route ride; the 0099 paragraph below said 0100 was free, and
+  that was stale. 0098 is still claimed by the open pull request #2966. The next free number is
+  **0102**.
   ⚠️ **0099 is [ADR 0099](../adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)**,
   taken by [#3250](https://github.com/openzigs/onyourleft/issues/3250) on 2026-11-26 for the model
   sources #3251 to #3253 may use, the two licences, the credit and the budget a new model holds.
@@ -26,7 +39,8 @@ It has the same authority as the root file. Where the text below says "this file
   route ride naming the street it is on, now and then. **Proposed**, pending the owner. It
   supersedes in part ADR 0096 D-1.2 and ADR 0054 D-2.2, D-3.3 and D-5.7, for the saved route ride
   only; ADR 0054 and ADR 0096 each gained one dated `## Amendments` pointer. 0098 is claimed by the
-  open pull request #2966, and 0099 is ADR 0099 (#3250). The next free number is **0101**.
+  open pull request #2966, and 0099 is ADR 0099 (#3250). 0101 is ADR 0101, above, so the next
+  free number is **0102**.
   ⚠️ **0097 is [ADR 0097](../adr/0097-in-browser-valhalla-is-a-routing-tier-when-there-is-no-instance.md)**,
   taken by [#2734](https://github.com/openzigs/onyourleft/issues/2734) on 2026-11-24 for in-browser
   Valhalla as a routing tier when no instance routes a leg, **Accepted** the same day on the owner's
