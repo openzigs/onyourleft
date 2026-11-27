@@ -25,6 +25,7 @@ import type { RiderBody, UnitSystem } from '@onyourleft/store';
 
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
+import { clearOfTheRoadOn, drawnPastTheFinish } from './past-the-finish';
 import {
   distanceOnRoute,
   ghostDistanceAt,
@@ -98,6 +99,7 @@ import {
 } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
+import { drawnScale } from './scenery-plan';
 import {
   gradeCrossingsAt,
   mappedGradeCrossings,
@@ -204,7 +206,7 @@ import {
 } from './parked-cars';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
-import { sceneryAnchor } from './scenery-anchor';
+import { routeOf, sceneryAnchor } from './scenery-anchor';
 import {
   CITY_PAVEMENT_WIDTH_METRES,
   cityPavementOn,
@@ -816,8 +818,24 @@ function withWaysPlaced(input: SceneInput): SceneInput {
   return placed === ways ? input : { ...input, waysOut: placed };
 }
 
+/**
+ * `input` drawn on past its route's end where the view reaches it — #3336,
+ * `past-the-finish.ts`: the same object everywhere else.
+ */
+function drawnOnPastTheEnd(input: SceneInput): SceneInput {
+  const odometer = Math.max(input.state.ride.distance, input.riderDistance ?? 0);
+  const profile = drawnPastTheFinish(input.profile, odometer);
+  if (profile === input.profile) return input;
+  // …and no mapped building stands on the road drawn on.
+  return input.mappedBuildings === undefined
+    ? { ...input, profile }
+    : { ...input, profile, mappedBuildings: clearOfTheRoadOn(input.mappedBuildings, profile) };
+}
+
 /** Builds one frame. */
-export function sceneFrame(handed: SceneInput): SceneFrame {
+export function sceneFrame(given: SceneInput): SceneFrame {
+  // #3336: past a route's end, the road and the world go on.
+  const handed = drawnOnPastTheEnd(given);
   // #3119: the ways out whose scenery this frame may place, a few new ones a frame.
   const input = withWaysPlaced(handed);
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
@@ -1063,7 +1081,8 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
-    world: worldStyle(input.profile),
+    // #3336: a route drawn past its end keeps the route's own.
+    world: worldStyle(routeOf(input.profile)),
     // #2685: the golf courses' and cemeteries' ground and what stands on it,
     // round the camera, stood on this frame's ground as the scenery is.
     ...(input.worldCorridor === undefined || input.parkDressingOff === true
@@ -1151,11 +1170,12 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     // and the mapped pools round the camera.
     water: water(input, corridor, ways, streamBridges, crossings, nearby, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
+    // #3336: at the ROUTE's lines, on a route drawn past its end too.
     lines: linesNear(
-      input.profile,
+      routeOf(input.profile),
       corridor,
       riderDistance,
-      lineStands(input.profile, input.units ?? 'metric'),
+      lineStands(routeOf(input.profile), input.units ?? 'metric'),
     ),
   };
 }
@@ -1664,7 +1684,8 @@ export function sideRoadNaturalMargin(item: ScatterItem): number {
     sceneryPlanRadius(item.kind, 'stylised'),
   );
   const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
-  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
+  // #3252's review: by the size it is DRAWN at, as the renderer sizes it.
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * drawnScale(item).across + sway);
 }
 
 /**
