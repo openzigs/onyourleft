@@ -80,8 +80,9 @@ import { useInstanceKnown, whereRidesAreText } from './where-rides-are';
  *
  * ## Which copy of the app this is — #1745
  *
- * In the Android app only, a section names the channel the copy came from —
- * Google Play or the direct download — read from the build
+ * In a native app only, a section names the channel the copy came from —
+ * Google Play or the direct download, and since #3239 the App Store or
+ * TestFlight in the iOS app — read from the build
  * (`support/release-channel.ts`), and says the two cannot update each other
  * and that switching means an uninstall that deletes the rides on the device.
  * A browser has neither channel, so it is not shown there.
@@ -97,7 +98,7 @@ export function AboutView({
    * rides are.
    */
   readonly instance?: InstancePort | undefined;
-  /** Running inside the Android app rather than a browser — #1450, as History's #1438. */
+  /** Running inside a native app rather than a browser — #1450, as History's #1438. */
   readonly nativeShell?: boolean | undefined;
   /** The channel this build was released through — #1745. The build's own, unless a test says otherwise. */
   readonly releaseChannel?: ReleaseChannel | undefined;

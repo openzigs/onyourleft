@@ -32,7 +32,7 @@ import { describe, expect, it } from 'vitest';
 
 import { stripComments } from '../units/no-inline-units';
 
-import { ANALYSIS_FAILURE_TEXT, type AnalysisPort } from './analysis-port';
+import { ANALYSIS_FAILURE_TEXT, analysisFailureText, type AnalysisPort } from './analysis-port';
 import { endpointDecision } from './analysis-endpoint';
 import { riderAnalysisPort } from './analysis-transport';
 import { computerPoseEstimator } from './computer-pose';
@@ -367,5 +367,7 @@ describe('3. in the text, an answer is reduced before anything renders', () => {
     for (const [failure, text] of Object.entries(ANALYSIS_FAILURE_TEXT)) {
       expect(frameLeaksIn(text), failure).toStrictEqual([]);
     }
+    // #3239: and the iOS app's own sentence.
+    expect(frameLeaksIn(analysisFailureText('address-not-numeric', 'ios'))).toStrictEqual([]);
   });
 });
