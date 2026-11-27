@@ -12,7 +12,8 @@
   lists the amendments a build would need.
 - **Addendum**: §10, dated 2026-11-16 (#2708), re-measures with a tuned prompt and corrects four
   statements in §1, §4 and §8 (#2705). §11, dated 2026-11-16 (#2720), measures the looser rules
-  of ADR 0073 (Proposed) with a new prompt and input. The body above is left as it was measured.
+  of ADR 0073 (Proposed) with a new prompt and input. §12, dated 2026-11-26 (#2715), corrects
+  §10.3's chase comparison. The body above is left as it was measured.
 
 > ## ⚠️ What this does NOT do
 >
@@ -517,3 +518,41 @@ Other things the numbers show:
   sit-in, so a bot marking someone behind it rides at the bunch's pace, not slower (ADR 0073 D-3.4).
 - **150 s ends before the finish**, as in §5 and §10, so no field reached a kick, and the lifted
   launch is not measured live.
+
+## 12. Addendum, 2026-11-26: a correction to §10.3, and the tool (#2715)
+
+Nothing was re-measured for this section, and no model was called. Every figure is read from the
+committed `results/comparison.json` and `results/2708/comparison.json` (`chaseStartGapsM`).
+
+### 12.1 §10.3's chase comparison compares different circuits
+
+§10.3's "Chases follow real gaps" sets the tuned run's chases, which were all on the hills,
+against the first prompt's, which it cites from the flat only. Circuit by circuit:
+
+| Chases started (gap ahead, m) | Flat 1–3 | Hilly 1–3 | In all |
+|---|---|---|---:|
+| Seeded | 1 (29.7), 0, 0 | 5 (30.9–104.5), 4 (30.8–95.1), 5 (29.2–86.6) | 15 |
+| First prompt | 2 (26.8, 32.0), 2 (26.4, 31.4), 2 (26.2, 31.2) | 0, 0, 7 (34.8–111.4) | 13 |
+| Tuned prompt (#2708) | 0, 0, 0 | 1 (94.5), 0, 1 (134.7) | 2 |
+
+So the tuned run did chase only across gaps the draft does not reach, but it hardly chased at
+all: 2 chases in six fields, and none on the flat, against 15 seeded and 13 with the first
+prompt. The first prompt's flat chases began at 26 m to 32 m, about where the seeded chase on flat
+1 began (29.7 m), and its seven on hilly 3 were all across real gaps. This belongs beside
+§10.6's "the tuned flat race is quiet": it is part of the same quiet.
+
+### 12.2 The tool
+
+- **`chaseStartGapsM` leaves out a chase begun in the lead** (`compare.ts`). It used to record one
+  as a chase across 0 m. No committed field has such a chase, so no committed `comparison.json`
+  changes. (The 0 in `results/2720/comparison.json`'s flat 1 is a chase begun under 0.05 m behind
+  another racer, and stays.)
+- **A flag given with no value is refused** with exit 2, in `run-live.mjs` and `run-harness.mjs`
+  (`options.ts`). Before this, a `--run` with its name forgotten wrote to `results/` itself, over
+  the first run's logs.
+- **`bench` unloads `gemma4:12b`**, the model the instance writes its write-ups with (§10). Run it
+  only when no write-up is running; `live.ts`'s header now says so.
+- Running `compare` again at this commit still matches every log's outcome counts, but no longer
+  reproduces #2708's or #2720's live traces bit for bit (`traceMatchesLive: false`): the bot code
+  has changed since 2026-11-16, as `replay.test.ts`'s header expects. The committed comparison
+  files are left as they were written that day, when the traces matched.
