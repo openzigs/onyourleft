@@ -540,12 +540,41 @@ function wheelWatts(view: RaceView): number | null {
   if (view.holdWatts === null) return null;
   const effort = view.wheelPaceWatts;
   if (effort !== null && effort < cp * BOT_TACTIC_WHEEL_PACE_SHARE) return null;
+  return botWheelWatts({
+    gapMetres: gap,
+    closingMetresPerSecond: view.closingMetresPerSecond,
+    holdWatts: view.holdWatts,
+    cpWatts: cp,
+  });
+}
+
+/** What {@link botWheelWatts} reads of a wheel: {@link RaceView}'s own fields, by the same names. */
+export interface WheelHold {
+  /** Metres to the wheel. */
+  readonly gapMetres: number;
+  /** The holder's speed less the wheel's, m/s: above 0 it is closing. */
+  readonly closingMetresPerSecond: number;
+  /** The power that holds the wheel's speed in the holder's own draft, watts: the feed-forward. */
+  readonly holdWatts: number;
+  /** The holder's critical power, watts: what the correction is a share of. */
+  readonly cpWatts: number;
+}
+
+/**
+ * The wheel rule itself (#2542), the header's feed-forward and damped
+ * correction and nothing else: what a bot rides to hold a wheel, watts,
+ * **signed** (a wheel slowing down a descent asks for less than nothing).
+ * Split out of {@link wheelWatts} for #3300, so a group-ride bot holds a wheel
+ * by this rule and not by a copy of it. Whether there is a wheel worth
+ * holding is the caller's question, as it is `wheelWatts`'.
+ */
+export function botWheelWatts(wheel: WheelHold): number {
   const correction =
-    BOT_TACTIC_WHEEL_GAP_GAIN * (gap - BOT_TACTIC_WHEEL_GAP_METRES) -
-    BOT_TACTIC_WHEEL_CLOSING_GAIN * view.closingMetresPerSecond;
+    BOT_TACTIC_WHEEL_GAP_GAIN * (wheel.gapMetres - BOT_TACTIC_WHEEL_GAP_METRES) -
+    BOT_TACTIC_WHEEL_CLOSING_GAIN * wheel.closingMetresPerSecond;
   return (
-    view.holdWatts +
-    cp * Math.min(BOT_TACTIC_WHEEL_SURGE, Math.max(-BOT_TACTIC_WHEEL_EASE, correction))
+    wheel.holdWatts +
+    wheel.cpWatts * Math.min(BOT_TACTIC_WHEEL_SURGE, Math.max(-BOT_TACTIC_WHEEL_EASE, correction))
   );
 }
 
