@@ -1251,10 +1251,13 @@ describe('the belt, with the committed kit — #3334', () => {
     // Among its shops: the lots the brick shop fits, and the ones it does not.
     // ⚠️ On this street the house models take most of the frame's triangles (seven of them
     // are 20 622), and a wrap is never drawn at a building's cost: at 1 250 m, among the
-    // models, none is. At 1 220 m one fits beside eight models.
+    // models, none is. At 1 160 m one fits beside six models.
+    // #3251: 1 220 m and eight models until a town's houses were planned contemporary and
+    // only its shops kept a model (the brick shop, the owner's ruling on #3273): the models
+    // in reach are now the shops', and from 1 180 m on, seven of them leave a wrap no room.
     const among = roadAt(1_250, richmond);
     expect(belt.refill(among.x, among.z, MAPPED_BUILDING_TRIANGLES).kitted).toBe(0);
-    const rider = roadAt(1_220, richmond);
+    const rider = roadAt(1_160, richmond);
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     expect(stats.modelled).toBeGreaterThan(0);
     expect(stats.kitted).toBeGreaterThan(0);

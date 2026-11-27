@@ -479,3 +479,168 @@ export function droppedFeatures(features: ArchetypeFeatures, dropped: number): A
     ...(gone.has('porch') ? { canopy: 0, frontPorch: 0 } : {}),
   };
 }
+
+// --- Contemporary houses — #3251 ---------------------------------------------
+
+/**
+ * A contemporary house — #3251, the owner's ruling of 2026-11-26: houses are
+ * modern unless the road is in a farm or rural setting. Two, built from the
+ * features the plan already has, so no file, no surface and no draw call is
+ * added:
+ *
+ * | archetype | roof | together |
+ * |---|---|---|
+ * | `contemporary-flat` | flat, behind its parapet | plain windows with no sash bars or shutters, a picture window whatever its storeys, a garage on most, a door canopy with no posts, no porch, chimney or dormer; walls of plain render, or of boards on three in ten |
+ * | `contemporary-low` | a low gable, 25°, tight eaves | the same, under a grey roof with no shingles |
+ *
+ * ⚠️ **Beside #1782's six, never in their tables.** {@link ARCHETYPE_CUES},
+ * {@link ARCHETYPE_ERAS}, {@link ARCHETYPE_FEATURES} and
+ * {@link HOUSE_ARCHETYPES} are the owner's tuned tables and are not touched:
+ * {@link HouseArchetype} still names those six and `unknown`. A contemporary
+ * house is chosen FIRST, by {@link contemporaryArchetypeOf}, only for a
+ * footprint whose setting calls for the modern style (`house-models.ts`
+ * §`houseStyleOf`: beside a village, town or city-centre stretch, off
+ * farmland); every other footprint is {@link houseArchetypeOf}'s, as before.
+ */
+export type ContemporaryArchetype = 'contemporary-flat' | 'contemporary-low';
+
+/** The two, in the order the module's table lists them. */
+export const CONTEMPORARY_ARCHETYPES = [
+  'contemporary-flat',
+  'contemporary-low',
+] as const satisfies readonly ContemporaryArchetype[];
+
+/** What a plan's house may be: one of #1782's, a contemporary one, or `unknown`. */
+export type PlanHouseArchetype = HouseArchetype | ContemporaryArchetype;
+
+/**
+ * The footprints a contemporary house is — #3251: a detached house of one to
+ * three storeys, a clean rectangle or L, from **40 to 300 m²**. Wider than
+ * #1782's bands end to end (a Cape's 70 m² to a ranch's 250), because beside
+ * a modern street the footprints those bands leave `unknown` — the small
+ * house and the three-storey one — would otherwise keep the seeded sash
+ * windows, shutters and steep roofs the ruling is about. A sketch, to be
+ * tuned on the owner's look pair (`?town=houses`, a village's street, and
+ * `?town=mixed`, a town's, against `levers=-house-styles`).
+ */
+export const CONTEMPORARY_CUE = {
+  area: [40, 300],
+  storeys: [1, 3],
+  shapes: ['rectangle', 'L'],
+} as const;
+
+/**
+ * The share of contemporary houses whose roof is flat, where a pitched one
+ * would fit and no roof is mapped — #3251: **0.5**. A sketch, as the cue is.
+ */
+export const CONTEMPORARY_FLAT_SHARE = 0.5;
+
+/**
+ * The first year a mapped start year admits a contemporary house — #3251:
+ * **1990**. #1793's rule, carried over: the year is the building's own tag,
+ * so a house mapped as built in 1925 beside a suburban street keeps #1782's
+ * archetype of its era, whatever the street's style.
+ */
+export const CONTEMPORARY_FROM_YEAR = 1990;
+
+/** What {@link contemporaryArchetypeOf} reads of a footprint. */
+export interface ContemporaryInput {
+  readonly area: number;
+  readonly rectangularity: number;
+  readonly shape: FootprintShape;
+  readonly storeys: number;
+  readonly residential: boolean;
+  readonly terraced: boolean;
+  /** Whether its roof would be pitched by the plan's own rule, or is mapped as pitched. */
+  readonly pitched: boolean;
+  /** Whether its roof's shape is mapped: the tag is the building's own, and decides. */
+  readonly roofMapped: boolean;
+  /** Its own seeded draw for the roof, in `[0, 1)`. */
+  readonly share: number;
+}
+
+/**
+ * The contemporary house a footprint is, or `undefined` where
+ * {@link CONTEMPORARY_CUE} does not fit it — a terraced one, one that is not
+ * a home, a T, U or Z, and one outside the bands. Flat where its roof would
+ * be flat anyway or is mapped flat, low-pitched where it is mapped pitched,
+ * and else flat on {@link CONTEMPORARY_FLAT_SHARE} of footprints. A mapped
+ * `year` before {@link CONTEMPORARY_FROM_YEAR} is no contemporary house.
+ *
+ * ⚠️ It does not ask the setting: the caller does, and calls this only for a
+ * footprint whose style is modern.
+ */
+export function contemporaryArchetypeOf(
+  input: ContemporaryInput,
+  year: number | null = null,
+): ContemporaryArchetype | undefined {
+  const [leastArea, mostArea] = CONTEMPORARY_CUE.area;
+  const [leastStoreys, mostStoreys] = CONTEMPORARY_CUE.storeys;
+  if (input.terraced || !input.residential) return undefined;
+  if (year !== null && year < CONTEMPORARY_FROM_YEAR) return undefined;
+  if (!(CONTEMPORARY_CUE.shapes as readonly FootprintShape[]).includes(input.shape))
+    return undefined;
+  if (input.shape === 'rectangle' && input.rectangularity < ARCHETYPE_MIN_RECTANGULARITY) {
+    return undefined;
+  }
+  if (input.area < leastArea || input.area > mostArea) return undefined;
+  if (input.storeys < leastStoreys || input.storeys > mostStoreys) return undefined;
+  if (!input.pitched) return 'contemporary-flat';
+  if (input.roofMapped) return 'contemporary-low';
+  return input.share < CONTEMPORARY_FLAT_SHARE ? 'contemporary-flat' : 'contemporary-low';
+}
+
+/**
+ * The share of contemporary houses clad in boards rather than plain render —
+ * #3251: **0.3**. The boards are #1588's clapboard, which the shader draws on
+ * the render surface, so a boarded house opens no surface a rendered one does
+ * not: `mapped-buildings.ts` draws a frame's buildings in at most six, and a
+ * surface of the contemporary houses' own (timber planks, a concrete panel)
+ * left front-row buildings waiting for a refill
+ * (`mapped-buildings-ahead.test.ts`).
+ */
+export const CONTEMPORARY_BOARDED_SHARE = 0.3;
+
+/** What both contemporary houses share: the "together" column of the table above. */
+const CONTEMPORARY_SHARED: ArchetypeFeatures = {
+  ...SEEDED_FEATURES,
+  hip: 0,
+  chimney: 0,
+  canopy: 1,
+  canopyPosts: 0,
+  frontPorch: 0,
+  shutters: 0,
+  picture: 1,
+  garage: 0.75,
+  dormer: 0,
+  siding: CONTEMPORARY_BOARDED_SHARE,
+  brickFoundation: 0,
+};
+
+/**
+ * What each contemporary house admits — #3251. The low one's pitch is
+ * **25°**, the lowest `footprint-buildings.ts` §`ROOF_PITCHES_DEGREES` has
+ * (a lower one would be a new entry in the list every seeded roof draws
+ * from), under eaves of **0.15 m**, a Cape's tight ones.
+ */
+export const CONTEMPORARY_FEATURES: Readonly<Record<ContemporaryArchetype, ArchetypeFeatures>> = {
+  'contemporary-flat': CONTEMPORARY_SHARED,
+  'contemporary-low': { ...CONTEMPORARY_SHARED, pitches: [25], eaves: 0.15 },
+};
+
+/** Whether a plan's house is a contemporary one. */
+export function isContemporary(archetype: PlanHouseArchetype): archetype is ContemporaryArchetype {
+  return (CONTEMPORARY_ARCHETYPES as readonly string[]).includes(archetype);
+}
+
+/**
+ * The features of a plan's house — #1782's from {@link ARCHETYPE_FEATURES},
+ * a contemporary one's from {@link CONTEMPORARY_FEATURES} — or `undefined`
+ * for `unknown`, whose features the plan chooses.
+ */
+export function archetypeFeaturesOf(archetype: PlanHouseArchetype): ArchetypeFeatures | undefined {
+  if (archetype === 'unknown') return undefined;
+  return isContemporary(archetype)
+    ? CONTEMPORARY_FEATURES[archetype]
+    : ARCHETYPE_FEATURES[archetype];
+}

@@ -352,6 +352,8 @@ describe('#1792: an untagged town plans as before', () => {
     const plan = (options: FootprintPlanOptions) =>
       footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, {
         shopAprons: false,
+        // Since #3251 the choice by setting too: they had no contemporary house.
+        houseStyles: false,
         ...options,
       }).plans;
     const on = plan({});

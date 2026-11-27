@@ -21,7 +21,9 @@
  * Since #1794 `-landmark-churches`: the street of churches' naves under their
  * steep gables without it, and every one planned as before with it. Since
  * #1795 `-landmark-civic`: the town halls' and schools' odd-bayed brick fronts
- * without it, and every one planned as before with it.
+ * without it, and every one planned as before with it. Since #3251
+ * `-house-styles`: the model street, a town's, drawn with none of #1585's
+ * traditional models without it, and with them, as before, with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -48,6 +50,7 @@ import {
   neighbourhoodFixture,
   planFingerprint,
   poiStreetFixture,
+  richmondStreetFixture,
   terraceStreetFixture,
   typedStreetFixture,
   untaggedStreetFixture,
@@ -134,8 +137,13 @@ describe('the realistic page’s `house-archetypes` lever — #1782', () => {
 describe('the realistic page’s `roof-variants` lever — #1785', () => {
   const street = houseStreetFixture();
 
-  it('gives the street of houses every roof variant on the product’s page', () => {
-    const { plans } = plannedTown(street, parseConfig('?town=houses').leversOff);
+  it('gives the street of houses every roof variant on the page', () => {
+    // #3251: with `-house-styles`, the look pair this lever is taken on. On the product's page
+    // most of this village street is contemporary, and a contemporary house wears no variant.
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-house-styles').leversOff,
+    );
     const variants = new Set(plans.map((plan) => plan.roofVariant));
     for (const variant of ROOF_VARIANTS) expect(variants).toContain(variant);
   });
@@ -224,6 +232,87 @@ describe('the realistic page’s `start-year` lever — #1793', () => {
     }).plans;
     expect(planFingerprint(plans)).toBe(planFingerprint(off));
     expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
+  });
+});
+
+describe('the realistic page’s `house-styles` lever — #3251', () => {
+  const street = richmondStreetFixture();
+  const modelled = (plans: readonly FootprintPlan[]): number =>
+    plans.filter((plan) => plan.model !== undefined).length;
+
+  it('draws the model street’s village stretch with few of #1585’s models and its rural stretch with all of them', () => {
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    ).plans;
+    expect(on.length).toBe(off.length);
+    const drawn = { village: { on: 0, off: 0 }, rural: { on: 0, off: 0 } };
+    on.forEach((plan, index) => {
+      const before = off[index];
+      if (before?.model === undefined) {
+        // The style never gives a footprint a model it did not have.
+        expect(plan.model).toBeUndefined();
+        return;
+      }
+      // The page classes this street a village's and then a rural stretch, and nothing else.
+      if (plan.urban !== 'village' && plan.urban !== 'rural') throw new Error(plan.urban);
+      drawn[plan.urban].on += plan.model === undefined ? 0 : 1;
+      drawn[plan.urban].off += 1;
+      // Every committed model is traditional: beside the rural stretch, the model it had.
+      if (plan.urban === 'rural') expect(plan.model?.model).toBe(before.model.model);
+    });
+    expect(drawn.rural.off).toBeGreaterThan(5);
+    expect(drawn.rural.on).toBe(drawn.rural.off);
+    // The village stretch: its houses' seeded traditional half keeps a model, and its shops all do.
+    expect(drawn.village.off).toBeGreaterThan(10);
+    expect(drawn.village.on).toBeLessThan(drawn.village.off);
+    expect(drawn.village.on).toBeGreaterThan(0);
+  });
+
+  it('plans the street, with `levers=-house-styles`, as the planner with them off does, its models back', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { houseStyles: false },
+    ).plans;
+    expect(plans.map((plan) => plan.model?.model)).toEqual(off.map((plan) => plan.model?.model));
+    // Not vacuous: on, the street has fewer models.
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    expect(modelled(plans)).toBeGreaterThan(30);
+    expect(modelled(on)).toBeLessThan(modelled(plans));
+  });
+
+  it('draws the street of houses and the mixed town contemporary on the product’s page, and not with the lever', () => {
+    for (const [town, query] of [
+      [houseStreetFixture(), 'houses'],
+      [mixedTownFixture(), 'mixed'],
+    ] as const) {
+      const contemporary = (levers: string): number =>
+        plannedTown(town, parseConfig(`?town=${query}${levers}`).leversOff).plans.filter((plan) =>
+          plan.archetype.startsWith('contemporary'),
+        ).length;
+      expect(contemporary(''), query).toBeGreaterThan(10);
+      expect(contemporary('&levers=-house-styles'), query).toBe(0);
+      // And with no class there is no modern setting.
+      expect(contemporary('&levers=-urban-class'), query).toBe(0);
+    }
+  });
+
+  it('draws every footprint traditional with `levers=-urban-class`, which gives the street no class', () => {
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-urban-class').leversOff,
+    );
+    expect(modelled(plans)).toBe(54);
   });
 });
 
@@ -331,8 +420,9 @@ describe('the realistic page’s `dormer-variants` lever — #1786', () => {
       .plans.filter((plan) => plan.archetype === 'foursquare')
       .reduce((sum, plan) => sum + plan.dormers, 0);
 
-  it('stands a dormer on the street’s Foursquares on the product’s page', () => {
-    expect(foursquareDormers('?town=houses')).toBeGreaterThan(3);
+  it('stands a dormer on the street’s Foursquares on the page', () => {
+    // #3251: with `-house-styles`, for the reason the roof variants' case gives.
+    expect(foursquareDormers('?town=houses&levers=-house-styles')).toBeGreaterThan(3);
   });
 
   it('plans every house as the planner with them off does, with `levers=-dormer-variants`', () => {
