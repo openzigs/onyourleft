@@ -165,12 +165,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-11-26** — **The owner's ruling on
   [#3344](https://github.com/openzigs/onyourleft/issues/3344): a route ride's name reads across the
   lane, like a real road marking.** D-2.5's *"drawn exactly as the open world's are"* no longer holds
-  for how the letters are laid. A route ride's name is painted in the rider's own lane, right of the
-  centre line and 0.2 m inside its lines: each letter upright to the approaching rider, its up the
-  way the route runs; 2.75 times as long along the road as it is wide, as road-marking type is
-  stretched; at most 0.7 m wide; reading left to right across the lane. A name too wide for the lane
-  is wrapped at a space onto two lines, stacked along the road with the first nearest the rider, and
-  what is still too wide is shrunk, never past the lane's lines (`street-names.ts`
+  for how the letters are laid. A route ride's name is painted in capitals in the rider's own lane,
+  0.2 m inside its lines and centred left of the rider's own line as far as the lane allows, so the
+  chase camera sees it past the rider: each letter upright to the approaching rider, its up the way
+  the route runs; at road-marking size, 0.6 m a letter across the lane and each capital 2.4 m long
+  along the road; reading left to right across the lane. After the maintainer's look check on the
+  pull request, a name too wide for the lane has its last word abbreviated (Street to ST, Road to
+  RD and ten more), is then stacked onto up to three lines along the road with the first nearest the
+  rider, and has its letters narrowed to no less than 0.45 m only where no stacking fits at 0.6 m; a
+  name that still does not fit is not painted, never shrunk (`street-names.ts`
   §`routeNameLayout`). Where a name fits (D-2.4) is measured along the road from its first line's
   near edge to its last line's far edge, and the 1.5 times guard is measured against each letter's
   own painted size. The glyph atlas, the belt and the one draw call of D-2.5 stand, and so does every

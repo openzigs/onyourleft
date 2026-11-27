@@ -4,28 +4,45 @@
  * #3344, the owner's ruling of 2026-11-26: a route ride's street name is
  * painted across the rider's lane as a real road marking is ("SLOW", "BUS"),
  * readable as the rider comes up to it — not along the road as a map label
- * is. Each case reads the letter quads the renderer is handed
- * (`sceneFrame`'s `streetNames`) on a synthetic square route whose four
- * sides are invented, named streets, against the road the scene draws
- * (`terrain.ts` §`drawnRoadFrame`, its right-hand normal) and the lane its
- * paint marks out (`terrain.ts`'s road, edge-line and centre-line widths).
+ * is. Then the maintainer's look check on PR #3346: at road-marking size,
+ * 0.6 m wide and 2.4 m long a letter, in capitals, abbreviated and stacked
+ * rather than shrunk, and left of the rider's own line so the chase camera
+ * sees it past the rider. Each scene case reads the letter quads the
+ * renderer is handed (`sceneFrame`'s `streetNames`) on a synthetic square
+ * route whose sides are invented, named streets, against the road the scene
+ * draws (`terrain.ts` §`drawnRoadFrame`, its right-hand normal) and the lane
+ * its paint marks out (`terrain.ts`'s road, edge-line and centre-line widths).
  */
 
 import { ATHLETE_A, resetFixtureIds, routeFor } from '@onyourleft/store/testing';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { LANE_OFFSETS_METRES } from './lanes';
 import { drawnRoadPoints, nearestOnDrawnRoad } from './road-grid';
-import { routeStreetNameLabels, type RouteStreet } from './route-street-names';
+import {
+  ROUTE_STREET_NAME_JOIN_METRES,
+  routeStreetNameLabels,
+  type RouteStreet,
+} from './route-street-names';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import {
+  glyphCell,
   paintedSize,
+  roadMarkingText,
+  ROUTE_STREET_NAME_ABBREVIATIONS,
+  ROUTE_STREET_NAME_CAP_SHARE,
+  ROUTE_STREET_NAME_CELL_LENGTH_METRES,
+  ROUTE_STREET_NAME_GLYPH_LENGTH_METRES,
+  ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES,
   ROUTE_STREET_NAME_GLYPH_WIDTH_METRES,
+  ROUTE_STREET_NAME_LANE_MARGIN_METRES,
   ROUTE_STREET_NAME_LINE_WIDTH_METRES,
-  ROUTE_STREET_NAME_STRETCH,
+  ROUTE_STREET_NAME_MAX_LINES,
   routeNameLayout,
   streetNamesInView,
+  type RouteNameLayout,
   type StreetNameLabel,
   type StreetNamesInView,
 } from './street-names';
@@ -39,14 +56,24 @@ import {
 
 const SIDE_METRES = 1_500;
 
-/** Invented names: one short enough for one line, one that wraps, one long word that only shrinks. */
+/**
+ * Invented names: one that fits one line at full size, one stacked onto
+ * three at full size, one whose last word is abbreviated to fit, one whose
+ * first line is narrowed (but not past the floor), and one that only fits
+ * a lane at a size too small to read.
+ */
 const SHORT = 'Elm';
-const WRAPS = 'Testa Way';
-const SHRINKS = 'Testaaaaaaaaaaaaaaaaaaaaa';
+const STACKS = 'Oak 3rd St.';
+const ABBREVIATED = 'Test Avenue';
+const NARROWED = 'Testa Way';
+const TOO_LONG = 'Testaaaaaaa';
 
 /** The rider's lane, metres right of the centreline: the centre line's right edge to the right edge line. */
 const LANE_INNER = CENTRE_LINE_WIDTH_METRES / 2;
 const LANE_OUTER = ROAD_WIDTH_METRES / 2 - EDGE_LINE_WIDTH_METRES;
+
+/** The rider's own line, metres right of the centreline (`lanes.ts`). */
+const RIDER_LINE = LANE_OFFSETS_METRES[2] as number;
 
 let profile: RouteProfile;
 
@@ -54,6 +81,13 @@ beforeEach(() => {
   resetFixtureIds();
   profile = routeFor(ATHLETE_A, { sideMetres: SIDE_METRES }).profile;
 });
+
+/** `name`'s layout, which every name here but {@link TOO_LONG} has. */
+function layoutOf(name: string): RouteNameLayout {
+  const layout = routeNameLayout(name);
+  expect(layout).toBeDefined();
+  return layout as RouteNameLayout;
+}
 
 /** A street along the drawn road from `from` to `to` metres, straight between its corners. */
 function streetAlong(from: number, to: number, name: string): RouteStreet {
@@ -65,7 +99,7 @@ function streetAlong(from: number, to: number, name: string): RouteStreet {
   return { line: Float32Array.of(...at(from), ...at(to)), name };
 }
 
-/** The square's first three sides, named in turn. */
+/** The square's first sides, named in turn. */
 function labelsOf(names: readonly string[]): StreetNameLabel[] {
   return routeStreetNameLabels(
     names.map((name, side) => streetAlong(side * SIDE_METRES, (side + 1) * SIDE_METRES, name)),
@@ -89,7 +123,7 @@ function viewOf(labels: readonly StreetNameLabel[], label: StreetNameLabel, befo
   expect(view?.labels.map((each) => each.key)).toContain(label.key);
   // Every letter of every label in view is drawn, so each label's are found by count.
   expect(view?.cells.length).toBe(
-    view?.labels.reduce((sum, each) => sum + routeNameLayout(each.text).letters, 0),
+    view?.labels.reduce((sum, each) => sum + layoutOf(each.text).letters, 0),
   );
   return view as StreetNamesInView;
 }
@@ -101,9 +135,9 @@ function lettersOf(view: StreetNamesInView, label: StreetNameLabel) {
   let first = 0;
   for (const each of view.labels) {
     if (each.key === label.key) break;
-    first += routeNameLayout(each.text).letters;
+    first += layoutOf(each.text).letters;
   }
-  const count = routeNameLayout(label.text).letters;
+  const count = layoutOf(label.text).letters;
   return Array.from({ length: count }, (_, letter) => {
     const at = (first + letter) * 12;
     return {
@@ -130,11 +164,34 @@ function onRoad(x: number, z: number): { along: number; right: number } {
   return { along, right };
 }
 
+/** A letter's plan size: across (bottom edge) and along (left edge), metres. */
+function planSize([a, b, , d]: readonly Corner[]): { across: number; along: number } {
+  const plan = (p: Corner, q: Corner): number => Math.hypot(q[0] - p[0], q[2] - p[2]);
+  return { across: plan(a as Corner, b as Corner), along: plan(a as Corner, d as Corner) };
+}
+
+/** Each of `label`'s lines, in order: its letters' near corners on the road. */
+function linesOf(labels: readonly StreetNameLabel[], label: StreetNameLabel) {
+  const letters = lettersOf(viewOf(labels, label), label);
+  const lines: { along: number; right: number; farRight: number }[][] = [];
+  let index = 0;
+  for (const line of layoutOf(label.text).lines) {
+    lines.push(
+      letters.slice(index, index + Array.from(line).length).map(({ corners }) => {
+        const [a, b] = corners;
+        return { ...onRoad(a[0], a[2]), farRight: onRoad(b[0], b[2]).right };
+      }),
+    );
+    index += Array.from(line).length;
+  }
+  return lines;
+}
+
 describe('a route ride’s street name reads across the lane, as a road marking does — #3344', () => {
   it('stands each letter upright to the approaching rider: its up along the way the route runs, its bottom edge across the lane to the rider’s right', () => {
-    const labels = labelsOf([SHORT, WRAPS, SHRINKS]);
+    const labels = labelsOf([SHORT, STACKS, NARROWED]);
     expect(new Set(labels.map((label) => label.text))).toStrictEqual(
-      new Set([SHORT, WRAPS, SHRINKS]),
+      new Set([SHORT, STACKS, NARROWED]),
     );
     const origin = corridorOrigin(profile);
     let letters = 0;
@@ -155,96 +212,184 @@ describe('a route ride’s street name reads across the lane, as a road marking 
         letters += 1;
       }
     }
-    expect(letters).toBeGreaterThan(20);
+    expect(letters).toBeGreaterThan(10);
   });
 
-  it('lays a wrapped name’s first line nearest the rider and each line left to right across the lane', () => {
-    const labels = labelsOf([WRAPS]);
-    const [label] = labels as [StreetNameLabel];
-    expect(routeNameLayout(WRAPS).lines).toStrictEqual(['Testa', 'Way']);
-    const letters = lettersOf(viewOf(labels, label), label).map(({ corners }) => {
-      const [a, b] = corners;
-      return { near: onRoad(a[0], a[2]), far: onRoad(b[0], b[2]) };
-    });
-    const [first, second] = [letters.slice(0, 5), letters.slice(5)];
-    expect(second).toHaveLength(3);
-    // Every letter of the first line nearer than any of the second.
-    const firstFarthest = Math.max(...first.map((letter) => letter.near.along));
-    const secondNearest = Math.min(...second.map((letter) => letter.near.along));
-    expect(secondNearest).toBeGreaterThan(firstFarthest);
-    // And left to right across the lane, in reading order, along each line.
-    for (const line of [first, second]) {
-      for (let index = 1; index < line.length; index += 1) {
-        expect(line[index]?.near.right).toBeGreaterThan(line[index - 1]?.near.right as number);
-        expect(line[index]?.near.along).toBeCloseTo(line[0]?.near.along as number, 1);
-      }
-    }
-  });
-
-  it('stretches every letter lengthwise by the stated factor, and keeps it inside the lane’s lines', () => {
-    expect(ROUTE_STREET_NAME_STRETCH).toBeGreaterThanOrEqual(2.5);
-    expect(ROUTE_STREET_NAME_STRETCH).toBeLessThanOrEqual(3);
-    const labels = labelsOf([SHORT, WRAPS, SHRINKS]);
-    let letters = 0;
-    for (const label of labels) {
-      for (const { corners } of lettersOf(viewOf(labels, label), label)) {
-        const plan = (p: Corner, q: Corner): number => Math.hypot(q[0] - p[0], q[2] - p[2]);
-        const [a, b, c, d] = corners;
-        // To 0.5 %: the corners are float32, a thousand metres from the origin.
-        expect(Math.abs(plan(a, d) / plan(a, b) / ROUTE_STREET_NAME_STRETCH - 1)).toBeLessThan(
-          0.005,
-        );
-        expect(Math.abs(plan(b, c) / plan(d, c) / ROUTE_STREET_NAME_STRETCH - 1)).toBeLessThan(
-          0.005,
-        );
-        for (const [x, , z] of corners) {
-          const { right } = onRoad(x, z);
-          expect(right).toBeGreaterThan(LANE_INNER);
-          expect(right).toBeLessThan(LANE_OUTER);
-        }
-        letters += 1;
-      }
-    }
-    expect(letters).toBeGreaterThan(20);
-  });
-
-  it('paints a name that fits its lane at full size on one line', () => {
-    const layout = routeNameLayout(SHORT);
-    expect(layout.lines).toStrictEqual([SHORT]);
-    expect(layout.width).toBe(ROUTE_STREET_NAME_GLYPH_WIDTH_METRES);
-    expect(layout.length).toBeCloseTo(ROUTE_STREET_NAME_STRETCH * layout.width, 9);
-    expect(layout.extent).toBeCloseTo(layout.length, 9);
-  });
-
-  it('wraps a name too wide for the lane at the space that leaves its longer line shortest, and shrinks what is still too wide', () => {
-    // Two lines at full size.
-    const two = routeNameLayout('Oak Elm');
-    expect(two.lines).toStrictEqual(['Oak', 'Elm']);
-    expect(two.width).toBe(ROUTE_STREET_NAME_GLYPH_WIDTH_METRES);
-    expect(two.letters).toBe(6);
-    // The best of three spaces, the rest kept inside their line.
-    const best = routeNameLayout('Testford 3rd St.');
-    expect(best.lines).toStrictEqual(['Testford', '3rd St.']);
-    expect(best.width * 8).toBeCloseTo(ROUTE_STREET_NAME_LINE_WIDTH_METRES, 9);
-    // A long word with no space is shrunk to the lane on one line.
-    const word = routeNameLayout(SHRINKS);
-    expect(word.lines).toStrictEqual([SHRINKS]);
-    expect(word.width * Array.from(SHRINKS).length).toBeCloseTo(
-      ROUTE_STREET_NAME_LINE_WIDTH_METRES,
-      9,
+  it('paints every letter at road-marking size: 0.6 m across the lane and 2.4 m along the road, never narrower than 0.45 m', () => {
+    expect(ROUTE_STREET_NAME_GLYPH_WIDTH_METRES).toBe(0.6);
+    expect(ROUTE_STREET_NAME_GLYPH_LENGTH_METRES).toBe(2.4);
+    // A capital fills 37 of its 64 px atlas cell's rows (`three-renderer.ts` §`streetNameAtlas`).
+    expect(ROUTE_STREET_NAME_CAP_SHARE).toBeCloseTo(0.58, 2);
+    expect(ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES).toBe(0.45);
+    const labels = labelsOf([SHORT, STACKS, ABBREVIATED, NARROWED]);
+    expect(new Set(labels.map((label) => label.text))).toStrictEqual(
+      new Set([SHORT, STACKS, ABBREVIATED, NARROWED]),
     );
-    // And every line of every layout no wider than the lane allows.
-    for (const layout of [two, best, word, routeNameLayout('Testaaaaaaaaaaaaaaaaaaaaa Road')]) {
-      for (const line of layout.lines) {
-        expect(Array.from(line).length * layout.width).toBeLessThanOrEqual(
-          ROUTE_STREET_NAME_LINE_WIDTH_METRES + 1e-9,
+    for (const label of labels) {
+      // The size the scene paints, in metres: 0.6 m a letter where the name
+      // fits at it; the 5-letter line narrowed to fill the lane, and no more.
+      const width = label.text === NARROWED ? ROUTE_STREET_NAME_LINE_WIDTH_METRES / 5 : 0.6;
+      expect(layoutOf(label.text).width).toBeCloseTo(width, 9);
+      for (const { corners } of lettersOf(viewOf(labels, label), label)) {
+        const size = planSize(corners);
+        // To 0.5 %: the corners are float32, a thousand metres from the origin.
+        expect(Math.abs(size.across / width - 1)).toBeLessThan(0.005);
+        // The quad as long as makes the capital in it 2.4 m long.
+        expect(Math.abs((size.along * ROUTE_STREET_NAME_CAP_SHARE) / 2.4 - 1)).toBeLessThan(0.005);
+        expect(size.across).toBeGreaterThan(0.45 * 0.995);
+      }
+    }
+  });
+
+  it('spells the name in capitals, as a road marking is, and draws the capitals’ cells', () => {
+    expect(layoutOf(SHORT).lines).toStrictEqual(['ELM']);
+    const labels = labelsOf([SHORT]);
+    const [label] = labels as [StreetNameLabel];
+    expect(lettersOf(viewOf(labels, label), label).map(({ cell }) => cell)).toStrictEqual(
+      Array.from('ELM', (letter) => glyphCell(letter)),
+    );
+    // Accented capitals the atlas holds are painted; a capital it does not hold refuses the name.
+    expect(layoutOf('Testé').lines).toStrictEqual(['TESTÉ']);
+    expect(routeNameLayout('Testÿ')).toBeUndefined();
+    expect(
+      routeStreetNameLabels(
+        [streetAlong(0, SIDE_METRES, 'Testÿ')],
+        profile,
+        corridorOrigin(profile),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('abbreviates a name’s last word as road markings do, by a small table', () => {
+    expect(ROUTE_STREET_NAME_ABBREVIATIONS).toStrictEqual({
+      STREET: 'ST',
+      ROAD: 'RD',
+      AVENUE: 'AVE',
+      DRIVE: 'DR',
+      LANE: 'LN',
+      BOULEVARD: 'BLVD',
+      PLACE: 'PL',
+      COURT: 'CT',
+      HIGHWAY: 'HWY',
+      PARKWAY: 'PKWY',
+      TERRACE: 'TER',
+      CIRCLE: 'CIR',
+    });
+    for (const [word, short] of Object.entries(ROUTE_STREET_NAME_ABBREVIATIONS)) {
+      const suffix = word.charAt(0) + word.slice(1).toLowerCase();
+      expect(roadMarkingText(`Testa ${suffix}`)).toBe(`TESTA ${short}`);
+    }
+    // Only the last word: a suffix word earlier in the name is spelled out.
+    expect(roadMarkingText('Lane Testa Road')).toBe('LANE TESTA RD');
+    // A word not in the table is kept, in capitals.
+    expect(roadMarkingText('Testa Way')).toBe('TESTA WAY');
+    // And the abbreviation is what is laid out: "TEST AVE" on two full-size lines.
+    expect(layoutOf(ABBREVIATED).lines).toStrictEqual(['TEST', 'AVE']);
+    expect(layoutOf(ABBREVIATED).width).toBe(ROUTE_STREET_NAME_GLYPH_WIDTH_METRES);
+  });
+
+  it('stacks a long name onto up to three lines along the road, the first nearest the rider, each read left to right', () => {
+    expect(ROUTE_STREET_NAME_MAX_LINES).toBe(3);
+    expect(layoutOf(STACKS).lines).toStrictEqual(['OAK', '3RD', 'ST.']);
+    // Fewest lines first: two lines where two fit at full size.
+    expect(layoutOf('Oak Elm').lines).toStrictEqual(['OAK', 'ELM']);
+    const labels = labelsOf([STACKS]);
+    const [label] = labels as [StreetNameLabel];
+    const lines = linesOf(labels, label);
+    expect(lines.map((line) => line.length)).toStrictEqual([3, 3, 3]);
+    for (let line = 1; line < lines.length; line += 1) {
+      const before = Math.max(...(lines[line - 1] ?? []).map((letter) => letter.along));
+      const next = Math.min(...(lines[line] ?? []).map((letter) => letter.along));
+      // Each line wholly beyond the one before it, cell to cell: the clear
+      // road between their capitals the cell's margin, about 1.75 m.
+      expect(next - before).toBeCloseTo(ROUTE_STREET_NAME_CELL_LENGTH_METRES, 1);
+    }
+    for (const line of lines) {
+      for (let index = 1; index < line.length; index += 1) {
+        expect(line[index]?.right).toBeGreaterThan(line[index - 1]?.right as number);
+        expect(line[index]?.along).toBeCloseTo(line[0]?.along as number, 1);
+      }
+    }
+  });
+
+  it('skips a name that does not fit three lines at 0.45 m a letter, rather than paint it smaller', () => {
+    // One word: no stacking helps, and 11 letters at 0.45 m are wider than the lane.
+    expect(routeNameLayout(TOO_LONG)).toBeUndefined();
+    // Four words that would fit four lines, but not three.
+    expect(routeNameLayout('Abcd Efgh Ijkl Mnop')).toBeUndefined();
+    expect(routeNameLayout('Abcd Efgh Ijkl')).toBeDefined();
+    // No label is placed for either, however long the street.
+    expect(labelsOf([TOO_LONG, 'Abcd Efgh Ijkl Mnop'])).toStrictEqual([]);
+    // And a label handed to the scene anyway is not drawn, while the next one is.
+    const skipped: StreetNameLabel = {
+      key: 'route:0',
+      text: TOO_LONG,
+      x: 0,
+      z: 50,
+      alongX: 0,
+      alongZ: 1,
+      along: 50,
+    };
+    const drawn: StreetNameLabel = { ...skipped, key: 'route:1', text: SHORT, z: 80, along: 80 };
+    const view = streetNamesInView([skipped, drawn], { x: 0, z: 0 }, 0, () => 0);
+    expect(view.labels.map((label) => label.key)).toStrictEqual(['route:1']);
+    expect(view.cells).toHaveLength(3);
+  });
+
+  it('paints each line in the rider’s lane, inside its lines and left of the rider’s own line', () => {
+    const PAIR = 'Ab Cd';
+    const labels = labelsOf([SHORT, STACKS, NARROWED, PAIR]);
+    let lines = 0;
+    for (const label of labels) {
+      const spans = linesOf(labels, label).map((line) => ({
+        left: Math.min(...line.map((letter) => letter.right)),
+        right: Math.max(...line.map((letter) => letter.farRight)),
+      }));
+      for (const { left, right } of spans) {
+        expect(left).toBeGreaterThan(LANE_INNER);
+        expect(right).toBeLessThan(LANE_OUTER);
+        // Its middle left of the rider's line, for the chase camera to see it
+        // past the rider's body; every line of a name on the same middle.
+        expect((left + right) / 2).toBeLessThan(RIDER_LINE);
+        expect((left + right) / 2).toBeCloseTo(
+          ((spans[0]?.left ?? 0) + (spans[0]?.right ?? 0)) / 2,
+          2,
+        );
+        // A line narrow enough lies wholly left of the rider's line.
+        if (label.text === PAIR) expect(right).toBeLessThan(RIDER_LINE);
+        lines += 1;
+      }
+      // A wider name as far left as the lane's margin allows.
+      if (label.text !== PAIR) {
+        expect(Math.min(...spans.map((span) => span.left))).toBeCloseTo(
+          LANE_INNER + ROUTE_STREET_NAME_LANE_MARGIN_METRES,
+          2,
         );
       }
-      expect(layout.length).toBeCloseTo(ROUTE_STREET_NAME_STRETCH * layout.width, 9);
-      expect(layout.extent).toBeCloseTo(layout.length * (layout.lines.length === 2 ? 2.5 : 1), 9);
     }
-    // The lane the name is kept to is inside the lane's lines.
-    expect(ROUTE_STREET_NAME_LINE_WIDTH_METRES).toBeLessThan(LANE_OUTER - LANE_INNER);
+    // Each side's name is painted twice, a kilometre apart.
+    expect(lines).toBe(2 * (1 + 3 + 2 + 2));
+  });
+
+  it('places a stacked name only where its whole stacked length lies past the join distance', () => {
+    const layout = layoutOf(STACKS);
+    expect(layout.extent).toBeCloseTo(3 * ROUTE_STREET_NAME_CELL_LENGTH_METRES, 9);
+    const labels = labelsOf([STACKS]);
+    const [label] = labels as [StreetNameLabel];
+    const lines = linesOf(labels, label);
+    const near = Math.min(...(lines[0] ?? []).map((letter) => letter.along));
+    const far = Math.max(...(lines[2] ?? []).map((letter) => letter.along)) + layout.length;
+    // What is painted is as long as the placement measured.
+    expect(far - near).toBeCloseTo(layout.extent, 1);
+    // And placement measured all three lines: on the same street, its middle
+    // is half the difference in length further on than a one-line name's, so
+    // each starts the same join distance past where the route came onto it.
+    const [one] = labelsOf([SHORT]) as [StreetNameLabel];
+    expect((label.along as number) - (one.along as number)).toBeCloseTo(
+      (layout.extent - layoutOf(SHORT).extent) / 2,
+      6,
+    );
+    expect(near).toBeGreaterThanOrEqual(ROUTE_STREET_NAME_JOIN_METRES - 1);
   });
 
   it('leaves the open world’s labels laid along their street', () => {
@@ -264,6 +409,9 @@ describe('a route ride’s street name reads across the lane, as a road marking 
     // Its bottom edge runs along the street, as since #3052.
     expect(Math.abs(b[1] - a[1])).toBeCloseTo(1.5, 5);
     expect(b[0]).toBeCloseTo(a[0], 5);
+    // In the name's own case.
+    expect(view.cells[0]).toBe(glyphCell('O'));
+    expect(view.cells[1]).toBe(glyphCell('a'));
   });
 });
 

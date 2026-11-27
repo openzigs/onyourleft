@@ -38,14 +38,16 @@
  *
  * A label with a route distance (`route-street-names.ts`, #3245) is painted
  * as a real road marking is — the owner's ruling of 2026-11-26 on #3344, as
- * "SLOW" or "BUS" is painted: in the rider's own lane, right of the centre
- * line, each letter upright to the approaching rider (its up along the way the
- * route runs) and {@link ROUTE_STREET_NAME_STRETCH} times as long along the
- * road as it is wide, so it reads at a shallow angle. The name reads left to
- * right across the lane; one too wide for it is wrapped at a space onto two
- * lines, stacked along the road with the first nearest the rider, and what is
- * still too wide is shrunk, never past the lane's lines. The open world's
- * labels keep their style above.
+ * "SLOW" or "BUS" is painted: in capitals, in the rider's own lane between
+ * its lines and left of the rider's own line, each letter upright to the
+ * approaching rider (its up along the way the route runs),
+ * {@link ROUTE_STREET_NAME_GLYPH_WIDTH_METRES} wide and
+ * {@link ROUTE_STREET_NAME_GLYPH_LENGTH_METRES} long, so it reads at a
+ * shallow angle. Each line reads left to right across the lane. A name too
+ * wide for the lane has its last word abbreviated, then is stacked onto up
+ * to {@link ROUTE_STREET_NAME_MAX_LINES} lines along the road, the first
+ * nearest the rider; one that still does not fit is not painted at all,
+ * never shrunk. The open world's labels keep their style above.
  *
  * ## Cost
  *
@@ -61,6 +63,7 @@
  * Pure, and names no rendering library.
  */
 
+import { LANE_OFFSETS_METRES } from './lanes';
 import { CENTRE_LINE_WIDTH_METRES, EDGE_LINE_WIDTH_METRES, ROAD_WIDTH_METRES } from './terrain';
 
 /**
@@ -144,25 +147,69 @@ export const STREET_NAME_MAX_STRETCH = 1.5;
 export const STREET_NAME_PASS_SLACK_METRES = 30;
 
 /**
- * How much longer along the road than across it a route ride's letter is
- * painted, against the glyph atlas's own square cell: **2.75** — #3344, the
- * owner's "about 2.5 to 3× tall", as road-marking type is stretched to read
- * at a shallow viewing angle.
+ * How wide a route ride's letter is painted across its lane, metres: **0.6**,
+ * as road-marking type is — #3344's look check: a name a few pixels high at
+ * 30 m could not be read. This is the letter's cell, from one letter to the
+ * next: the atlas draws a capital about half its cell wide, the rest the
+ * space between letters. A line too wide for the lane at that is narrowed,
+ * never below {@link ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES} ({@link routeNameLayout}).
  */
-export const ROUTE_STREET_NAME_STRETCH = 2.75;
+export const ROUTE_STREET_NAME_GLYPH_WIDTH_METRES = 0.6;
+
+/** The narrowest a route ride's letter is ever painted, metres: **0.45**. A name that needs narrower is not painted. */
+export const ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES = 0.45;
 
 /**
- * How wide a route ride's letter is painted across its lane at the most,
- * metres: **0.7**, four to the lane, as "SLOW" is. A name wider than its lane
- * at that is wrapped, then shrunk ({@link routeNameLayout}).
+ * How long a route ride's capital letter is painted along the road, metres:
+ * **2.4**, whatever its width — road-marking type, stretched to read at the
+ * shallow angle a rider sees it at. Never shortened. This is the letter's
+ * ink; its atlas cell is longer ({@link ROUTE_STREET_NAME_CELL_LENGTH_METRES}).
  */
-export const ROUTE_STREET_NAME_GLYPH_WIDTH_METRES = 0.7;
+export const ROUTE_STREET_NAME_GLYPH_LENGTH_METRES = 2.4;
+
+/**
+ * How much of its atlas cell's height a capital's ink fills: **0.58** —
+ * `three-renderer.ts` §`streetNameAtlas` draws a bold sans-serif at 0.8 of
+ * its 64 px cell, centred, and a capital's ink there is rows 14 to 50, 37 px
+ * (measured in Chromium for #3344; Roboto's cap height gives 36).
+ */
+export const ROUTE_STREET_NAME_CAP_SHARE = 37 / 64;
+
+/**
+ * How long a route ride's letter's quad is along the road, metres: about
+ * **4.15**, so that the capital in it is {@link ROUTE_STREET_NAME_GLYPH_LENGTH_METRES}
+ * long. A stacked name's lines are laid cell to cell, so the clear road
+ * between one line's capitals and the next is the cell's own margin, about
+ * 1.75 m.
+ */
+export const ROUTE_STREET_NAME_CELL_LENGTH_METRES =
+  ROUTE_STREET_NAME_GLYPH_LENGTH_METRES / ROUTE_STREET_NAME_CAP_SHARE;
+
+/** How many lines a route ride's name is stacked onto at most: **3**, the first nearest the rider. */
+export const ROUTE_STREET_NAME_MAX_LINES = 3;
 
 /** How far inside its lane's lines a route ride's name is kept, metres: **0.2**. */
 export const ROUTE_STREET_NAME_LANE_MARGIN_METRES = 0.2;
 
-/** How far apart a wrapped name's two lines are along the road, as a share of a letter's length: **0.5**. */
-export const ROUTE_STREET_NAME_LINE_GAP_SHARE = 0.5;
+/**
+ * The road-marking abbreviation of a street name's last word, by the word in
+ * capitals — #3344: a long name is abbreviated before it is stacked, as
+ * "MAIN ST" is painted, never shrunk.
+ */
+export const ROUTE_STREET_NAME_ABBREVIATIONS: Readonly<Record<string, string>> = Object.freeze({
+  STREET: 'ST',
+  ROAD: 'RD',
+  AVENUE: 'AVE',
+  DRIVE: 'DR',
+  LANE: 'LN',
+  BOULEVARD: 'BLVD',
+  PLACE: 'PL',
+  COURT: 'CT',
+  HIGHWAY: 'HWY',
+  PARKWAY: 'PKWY',
+  TERRACE: 'TER',
+  CIRCLE: 'CIR',
+});
 
 /**
  * The near and far side of the room a route ride's name has, metres right of
@@ -177,63 +224,107 @@ const LANE_OUTER_METRES =
 /** How wide a line of a route ride's name may be, metres: **2.875**. */
 export const ROUTE_STREET_NAME_LINE_WIDTH_METRES = LANE_OUTER_METRES - LANE_INNER_METRES;
 
+/**
+ * Where a route ride's name is centred, metres right of the centreline: half
+ * way from the lane's inner margin to the rider's own line (`lanes.ts`, the
+ * right-hand lane's middle), so the chase camera sees it past the rider's
+ * body — #3344's look check. A line too wide to be centred there is moved
+ * right only as far as keeps it off the centre line.
+ */
+const LANE_TARGET_METRES = (LANE_INNER_METRES + (LANE_OFFSETS_METRES[2] as number)) / 2;
+
+/**
+ * A route ride's name as a road marking spells it — #3344: in capitals, its
+ * last word abbreviated by {@link ROUTE_STREET_NAME_ABBREVIATIONS} ("Testa
+ * Street" is "TESTA ST"), spaces run together.
+ */
+export function roadMarkingText(name: string): string {
+  const words = name.toUpperCase().trim().split(/\s+/u);
+  const last = words.length - 1;
+  words[last] = ROUTE_STREET_NAME_ABBREVIATIONS[words[last] as string] ?? (words[last] as string);
+  return words.join(' ');
+}
+
 /** How a route ride's name is laid across its lane — #3344. @see routeNameLayout */
 export interface RouteNameLayout {
-  /** One or two lines, the first nearest the approaching rider. */
+  /** One to {@link ROUTE_STREET_NAME_MAX_LINES} lines, the first nearest the approaching rider. */
   readonly lines: readonly string[];
   /** How many letters the lines hold. */
   readonly letters: number;
   /** How wide each letter is, across the lane, metres. */
   readonly width: number;
-  /** How long each letter is, along the road, metres: {@link ROUTE_STREET_NAME_STRETCH} times its width. */
+  /** How long each letter's quad is, along the road, metres: {@link ROUTE_STREET_NAME_CELL_LENGTH_METRES}. */
   readonly length: number;
   /** From the near edge of the first line to the far edge of the last, along the road, metres. */
   readonly extent: number;
+  /** Where each line's middle is, metres right of the centreline: inside the lane, left of the rider's line. */
+  readonly centre: number;
+}
+
+/** `words` split into `count` lines the way that makes the longest line shortest, or `undefined` with too few words. */
+function stacked(words: readonly string[], count: number): string[] | undefined {
+  if (count > words.length) return undefined;
+  if (count === 1) return [words.join(' ')];
+  let best: string[] | undefined;
+  let shortest = Number.POSITIVE_INFINITY;
+  for (let split = 1; split <= words.length - count + 1; split += 1) {
+    const rest = stacked(words.slice(split), count - 1);
+    if (rest === undefined) continue;
+    const lines = [words.slice(0, split).join(' '), ...rest];
+    const longest = Math.max(...lines.map((line) => Array.from(line).length));
+    if (longest < shortest) {
+      shortest = longest;
+      best = lines;
+    }
+  }
+  return best;
 }
 
 /**
- * How a route ride's `text` is painted across the rider's lane — #3344: on
- * one line where it fits at {@link ROUTE_STREET_NAME_GLYPH_WIDTH_METRES} a
- * letter; else wrapped at the space that makes its longer line shortest; and
- * every letter shrunk alike until the longer line fits
- * {@link ROUTE_STREET_NAME_LINE_WIDTH_METRES}. A name with no space is shrunk.
+ * How a route ride's street name is painted across the rider's lane —
+ * #3344, as a road marking is, or `undefined` where it cannot be painted at
+ * a size that reads. Spelled by {@link roadMarkingText}; then on the fewest
+ * lines, up to {@link ROUTE_STREET_NAME_MAX_LINES} and split at spaces, whose
+ * longest fits {@link ROUTE_STREET_NAME_LINE_WIDTH_METRES} at
+ * {@link ROUTE_STREET_NAME_GLYPH_WIDTH_METRES} a letter; failing that, on the
+ * fewest whose letters need narrowing no further than
+ * {@link ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES}. A name that fits neither
+ * way, or whose capitals the glyph atlas does not hold, is not painted:
+ * never shrunk.
  */
-export function routeNameLayout(text: string): RouteNameLayout {
-  const characters = Array.from(text.trim());
-  let lines = [characters];
-  if (
-    characters.length * ROUTE_STREET_NAME_GLYPH_WIDTH_METRES >
-    ROUTE_STREET_NAME_LINE_WIDTH_METRES
-  ) {
-    let longest = characters.length;
-    for (const [index, character] of characters.entries()) {
-      if (character !== ' ') continue;
-      const first = Array.from(characters.slice(0, index).join('').trim());
-      const second = Array.from(
-        characters
-          .slice(index + 1)
-          .join('')
-          .trim(),
-      );
-      const longer = Math.max(first.length, second.length);
-      if (first.length > 0 && second.length > 0 && longer < longest) {
-        longest = longer;
-        lines = [first, second];
-      }
-    }
+export function routeNameLayout(name: string): RouteNameLayout | undefined {
+  const text = roadMarkingText(name);
+  if (text.length === 0 || !paintable(text)) return undefined;
+  const words = text.split(' ');
+  const options: string[][] = [];
+  for (let count = 1; count <= ROUTE_STREET_NAME_MAX_LINES; count += 1) {
+    const lines = stacked(words, count);
+    if (lines !== undefined) options.push(lines);
   }
-  const longest = Math.max(1, ...lines.map((line) => line.length));
+  const widest = (lines: readonly string[]): number =>
+    Math.max(...lines.map((line) => Array.from(line).length));
+  const fits = (lines: readonly string[], width: number): boolean =>
+    widest(lines) * width <= ROUTE_STREET_NAME_LINE_WIDTH_METRES + 1e-9;
+  const lines =
+    options.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_WIDTH_METRES)) ??
+    options.find((each) => fits(each, ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES));
+  if (lines === undefined) return undefined;
   const width = Math.min(
     ROUTE_STREET_NAME_GLYPH_WIDTH_METRES,
-    ROUTE_STREET_NAME_LINE_WIDTH_METRES / longest,
+    ROUTE_STREET_NAME_LINE_WIDTH_METRES / widest(lines),
   );
-  const length = ROUTE_STREET_NAME_STRETCH * width;
+  const length = ROUTE_STREET_NAME_CELL_LENGTH_METRES;
+  const across = widest(lines) * width;
   return {
-    lines: lines.map((line) => line.join('')),
-    letters: lines.reduce((sum, line) => sum + line.length, 0),
+    lines,
+    letters: lines.reduce((sum, line) => sum + Array.from(line).length, 0),
     width,
     length,
-    extent: length * (lines.length + (lines.length - 1) * ROUTE_STREET_NAME_LINE_GAP_SHARE),
+    extent: length * lines.length,
+    centre: Math.min(
+      Math.max(LANE_TARGET_METRES, LANE_INNER_METRES + across / 2),
+      LANE_OUTER_METRES - across / 2,
+    ),
   };
 }
 
@@ -440,7 +531,7 @@ function openWorldLetters(
 
 /**
  * A route ride's label's letters — #3344, as a road marking reads: in the
- * rider's lane, right of the centre line; each letter upright to the
+ * rider's lane, each line centred on {@link RouteNameLayout.centre}; each letter upright to the
  * approaching rider, its up the way the route runs and its bottom edge
  * across the lane; the lines of {@link routeNameLayout} left to right across
  * the lane, the first line nearest. Each letter rigid on the road's height at
@@ -460,12 +551,11 @@ function routeLetters(
   const rightX = -label.alongZ;
   const rightZ = label.alongX;
   const { width, length } = layout;
-  const middle = (LANE_INNER_METRES + LANE_OUTER_METRES) / 2;
   const letters: Letter[] = [];
   for (const [line, text] of layout.lines.entries()) {
     const characters = Array.from(text);
-    const near = -layout.extent / 2 + line * length * (1 + ROUTE_STREET_NAME_LINE_GAP_SHARE);
-    const left = middle - (characters.length * width) / 2;
+    const near = -layout.extent / 2 + line * length;
+    const left = layout.centre - (characters.length * width) / 2;
     for (const [index, letter] of characters.entries()) {
       const from = left + index * width;
       const quad: number[] = [];
@@ -540,6 +630,8 @@ export function streetNamesInView(
   for (const { label } of near) {
     if (drawn.length >= STREET_NAMES_PER_FRAME) break;
     const layout = label.along === undefined ? undefined : routeNameLayout(label.text);
+    // A route ride's name that cannot be painted at a size that reads is not painted (#3344).
+    if (label.along !== undefined && layout === undefined) continue;
     const count = layout?.letters ?? Array.from(label.text).length;
     if (cells.length + count > STREET_NAME_GLYPHS_PER_FRAME) continue;
     const y = heightAt(label.x, label.z);

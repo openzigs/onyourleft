@@ -46,10 +46,18 @@ import {
   NO_STREET_NAMES,
   routeNameLayout,
   STREET_NAME_LIFT_METRES,
+  type RouteNameLayout,
   streetNamesInView,
   type StreetNameLabel,
 } from './street-names';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
+
+/** `name`'s layout across the lane (#3344), which every name here has. */
+function layoutOf(name: string): RouteNameLayout {
+  const layout = routeNameLayout(name);
+  expect(layout).toBeDefined();
+  return layout as RouteNameLayout;
+}
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
@@ -143,7 +151,7 @@ const PIECES = 32;
  * What a painted letter is: its edges across the lane and along the road,
  * metres — #3344, the name painted across the rider's lane.
  */
-const LAYOUT = routeNameLayout('Testo Loop 10');
+const LAYOUT = layoutOf('Testo Loop 10');
 const EDGES = [LAYOUT.width, LAYOUT.length, LAYOUT.width, LAYOUT.length] as const;
 
 /**
@@ -253,7 +261,7 @@ describe('a letter drawn much larger than it is painted is not drawn at all — 
   const gap = (from: number, to: number): number => Math.abs(to - from);
 
   it('on a route ride: the line across a 20 m step of the road is left out, the rest drawn', () => {
-    expect(routeNameLayout(label.text).lines).toStrictEqual(['Testo', 'Testa']);
+    expect(layoutOf(label.text).lines).toStrictEqual(['TESTO', 'TESTA']);
     // The step is inside the second line's letters.
     const view = streetNamesInView([label], { x: 0, z: 0 }, 0, flat, {
       heightAt: (metres) => (metres < 101 ? 0 : 20),

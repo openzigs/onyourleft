@@ -33,10 +33,11 @@
  * ## Where a label goes
  *
  * Its middle on the drawn road's centreline, painted across the rider's lane
- * as a road marking is (#3344, `street-names.ts` §`routeNameLayout`: each
- * letter upright to the approaching rider and stretched along the road, a
- * long name wrapped or shrunk to the lane), in the open world's one draw call
- * (`street-names.ts` §`streetNamesInView`). **Only where the whole name
+ * as a road marking is (#3344, `street-names.ts` §`routeNameLayout`: in
+ * capitals, each letter upright to the approaching rider and 2.4 m long
+ * along the road, a long name abbreviated and stacked onto up to three
+ * lines, and one that still does not fit not painted), in the open world's
+ * one draw call (`street-names.ts` §`streetNamesInView`). **Only where the whole name
  * fits** along the road, from its first line's near edge to its last line's
  * far edge: inside its street's stretch,
  * and where the road runs straight under it, within
@@ -377,7 +378,10 @@ export function routeStreetNameLabels(
   const nearATurn = (at: number, half: number): boolean =>
     turns.some((turn) => Math.abs(turn - at) < half + ROUTE_STREET_NAME_TURN_CLEAR_METRES);
   for (const stretch of stretchesOf(cells, road)) {
-    const half = routeNameLayout(stretch.name).extent / 2;
+    // #3344: a name that cannot be painted at a size that reads gets no label.
+    const layout = routeNameLayout(stretch.name);
+    if (layout === undefined) continue;
+    const half = layout.extent / 2;
     let at = stretch.from + ROUTE_STREET_NAME_JOIN_METRES + half;
     while (at + half <= stretch.to) {
       const place = nearATurn(at, half) ? undefined : straightPlace(road, at, half);

@@ -248,7 +248,7 @@ describe('a saved route ride names the street it is on, through the press — #3
  * its centreline {@link OFFSET_METRES} to the side of the drawn road, and each
  * name carries digits and a full stop. Every name is invented.
  */
-const REAL_NAMES = ['Testford 3rd St.', 'Testa 12th Ave.', 'Testb St. 40', 'Testc Rd. 7'] as const;
+const REAL_NAMES = ['Testf 3rd St.', 'Testa 12th Ave.', 'Testb St. 40', 'Testc Rd. 7'] as const;
 
 /** How far a mapped centreline is from the drawn road, metres: a lane's width, as OSM's often is. */
 const OFFSET_METRES = 4;
