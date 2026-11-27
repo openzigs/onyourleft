@@ -1,14 +1,19 @@
 # ADR 0057: Store fees the publisher pays are outside ADR 0036 D-7
 
-- **Status**: **Proposed**, 2026-11-26. The decision is the owner's: **D-2** on the epic
+- **Status**: **Accepted, 2026-11-26**, by the owner, 2026-11-26, on its pull request
+  [#3330](https://github.com/openzigs/onyourleft/pull/3330)
+  ([comment](https://github.com/openzigs/onyourleft/pull/3330#issuecomment-7207451311)): *"accepted
+  as written"*, Q1 (D-3's list of what the carve-out does not permit) and Q2 (the `CLAUDE.md` §1
+  qualifier as drafted). It was **Proposed** earlier the same day, and that wording was only ever on
+  the pull request's branch. The decision is the owner's: **D-2** on the epic
   [#15](https://github.com/openzigs/onyourleft/issues/15), 2026-10-27: *"a **new ADR** says store
   fees the publisher pays (Apple's $99 a year, Play's one-off fee) are outside D-7. Riding,
   recording and self-hosting never need a paid service."* The author wrote the wording and chose
-  D-3's list of what the carve-out does not permit. It is accepted when the owner approves that
-  list and the `CLAUDE.md` §1 qualifier (§"Questions for the owner")
+  D-3's list, which the owner accepted
 - **Date**: 2026-11-26
 - **Deciders**: **the owner** (D-2, and D-1 on the same day, which makes the organisation account
-  the payer); the author (the wording, and D-3)
+  the payer; D-3 and the `CLAUDE.md` §1 qualifier, accepted 2026-11-26); the author (the wording,
+  and D-3's list as proposed)
 - **Issue**: [#1748](https://github.com/openzigs/onyourleft/issues/1748), under the iOS epic
   [#15](https://github.com/openzigs/onyourleft/issues/15). It comes before
   [#1749](https://github.com/openzigs/onyourleft/issues/1749), the Apple Developer Program
@@ -114,11 +119,13 @@ So that D-1 cannot widen without anyone noticing, it does **not** permit any of 
 
 ## Questions for the owner
 
-1. **Q1 — D-3's list.** *Recommendation: accept it as written.* Each item is a way D-1 could widen
+Both were answered by the owner on 2026-11-26 on #3330: **accepted as written**.
+
+1. **Q1 — D-3's list.** **Accepted as written, 2026-11-26.** *Recommendation was: accept it as written.* Each item is a way D-1 could widen
    without anyone noticing. Items 1 and 3 restate rules that already bind, and items 2 and 4 are the
    author's.
-2. **Q2 — The `CLAUDE.md` §1 qualifier**, as written in this pull request. *Recommendation:
-   approve it.* The issue asks for the owner's approval of this line in the pull request.
+2. **Q2 — The `CLAUDE.md` §1 qualifier**, as written in this pull request. **Accepted as drafted,
+   2026-11-26.** *Recommendation was: approve it.* The issue asks for the owner's approval of this line in the pull request.
 
 ## Consequences
 

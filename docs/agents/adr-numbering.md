@@ -14,8 +14,8 @@ It has the same authority as the root file. Where the text below says "this file
 
   ⚠️ **0057 is [ADR 0057](../adr/0057-store-fees-the-publisher-pays-are-outside-adr-0036-d-7.md)**,
   taken by [#1748](https://github.com/openzigs/onyourleft/issues/1748) on 2026-11-26. It says that
-  store fees the publisher pays are outside ADR 0036 D-7. It is **Proposed**, waiting on the
-  owner's approval of its D-3 list and the `CLAUDE.md` §1 qualifier. It took the number reserved for
+  store fees the publisher pays are outside ADR 0036 D-7. It was **Proposed**, and the owner
+  **accepted** it as written the same day on #3330, its D-3 list and the `CLAUDE.md` §1 qualifier. It took the number reserved for
   it on #15 on 2026-10-27, which every entry below kept as claimed. **0058 stays claimed** by
   [#1752](https://github.com/openzigs/onyourleft/issues/1752). ADR 0036 gained one dated
   `## Amendments` pointer. The next free number is still the one the 0099 entry below states.
