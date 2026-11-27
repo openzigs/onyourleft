@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Test support for #3300: a whole group ride on the real physics, with a
- * scripted rider. Imported by `group-ride.test.ts` only; the harness with
- * scripted riders that scores a ride is #3309's.
+ * Test support for #3300 and #3301: a whole group ride on the real physics,
+ * with a scripted rider. Imported by `group-ride.test.ts` and
+ * `group-no-drop.test.ts` only; the harness with scripted riders that scores
+ * a ride is #3309's.
  *
  * ## The scripted rider
  *
@@ -15,6 +16,9 @@
  *   the wheel's surplus) on the wheel ahead of them in the line; on the
  *   front, what holds the group's speed; and they press pull off
  *   {@link RiderScript.pressAfterSeconds} into a pull.
+ * - `gapM` (#3301): holding the wheel, but that far behind it and not a
+ *   wheel gap: a rider who follows at a human distance. Behind the sweep,
+ *   which comes back to sit a wheel gap ahead of them, they take the wheel.
  * - `watts`: a fixed power, whatever the group does.
  * - `share` (#3301): that share of the plan's power on the road under them.
  * - `stop` (#3301): for a while they pedal nothing, and the group is told
@@ -88,6 +92,8 @@ export const SIX: readonly LineMember[] = [
 
 /** How the scripted rider rides. */
 export interface RiderScript {
+  /** How far behind the wheel they hold, metres, in place of a wheel gap. */
+  readonly gapM?: number;
   /** A fixed power, watts, in place of holding the wheel. */
   readonly watts?: number;
   /** A share of the plan's power on the road under them, in place of holding the wheel. */
@@ -249,8 +255,13 @@ export function rideGroup(script: GroupScript): GroupRide {
               )) *
               RIDER_MASS_KILOGRAMS) /
             physics.massKilograms;
+      // The rule aims a wheel gap behind: a rider who holds further back is that much nearer its aim.
+      const further =
+        riding.gapM === undefined || id === state.noDrop.sweep
+          ? 0
+          : riding.gapM - BOT_TACTIC_WHEEL_GAP_METRES;
       return botWheelWatts({
-        gapMetres: wheel.distanceM - rider.distanceM,
+        gapMetres: wheel.distanceM - rider.distanceM - further,
         closingMetresPerSecond: rider.speedMps - wheel.speedMps,
         holdWatts: own.holdWatts(wheel.speedMps, grade, k) + surplus,
         cpWatts: RIDER_CP_WATTS,

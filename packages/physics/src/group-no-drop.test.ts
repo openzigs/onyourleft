@@ -19,6 +19,7 @@ import {
   BOT_TACTIC_WHEEL_FURTHEST_METRES,
   BOT_TACTIC_WHEEL_NEAREST_METRES,
   gradeAt,
+  NO_DROP_GAPPED_METRES,
   NO_DROP_REACH_METRES,
   NO_DROP_SETTLE_MS,
   type GroupLedger,
@@ -178,13 +179,13 @@ describe('a rider at 25 % of the group’s power ends on a wheel (criterion 2, a
     return frames.findIndex((frame, index) => index > began && hold(frame) === null);
   };
 
-  it('finishes on a wheel: with the line, inside 2 m of the wheel ahead, and nobody waiting', () => {
+  it('finishes on a wheel: with the line, inside the 5 m wheel band, and nobody waiting', () => {
     const { frames, finishSeconds } = ride();
     expect(finishSeconds).not.toBeNull();
     const last = frames[frames.length - 1] as Frame;
     expect(standing(last)).toBe('with');
     expect(hold(last)).toBeNull();
-    expect(behindLine(last)).toBeLessThan(2);
+    expect(behindLine(last)).toBeLessThan(NO_DROP_GAPPED_METRES);
     expect(last.roles[YOU]).not.toBe('gapped');
   });
 
@@ -394,6 +395,59 @@ describe('a gapped rider is given a wheel, and the rest of the line rides on (cr
     expect(checked).toBeGreaterThan(20);
   });
 });
+
+describe.each([1.5, 2, 4])(
+  'a rider who follows %s m behind the wheel has the group back at the plan’s speed after one wait',
+  (gapM) => {
+    /** The stated recovery time, seconds: from the wait's end to the line at the plan's speed for good. */
+    const RECOVERY_SECONDS = 360;
+    // The one-off gap of `oneGap`, by a rider who then follows at a human distance, inside the 5 m band.
+    const ride = ridden(() =>
+      rideGroup({
+        course: FLAT,
+        targetKmh: TARGET_KMH,
+        line: RIDER_LAST,
+        seconds: 480,
+        bendRadiusM: 20,
+        rider: { gapM, slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 } },
+      }),
+    );
+    const released = (): number => {
+      const { frames } = ride();
+      const began = frames.findIndex((frame) => hold(frame) !== null);
+      return frames.findIndex((frame, index) => index > began && hold(frame) === null);
+    };
+
+    it('follows at that gap, with the line, once the one wait is over', () => {
+      const { frames } = ride();
+      expect(holdsBegun(frames)).toBe(1);
+      const after = frames.slice(released() + 30 / TICK_SECONDS);
+      for (const frame of after) {
+        expect(standing(frame)).toBe('with');
+        expect(Math.abs(behindLine(frame) - gapM)).toBeLessThan(0.25);
+      }
+    });
+
+    it('never has the remembered pace fall while they keep up, and rides the plan again within the recovery time', () => {
+      const { frames, plan } = ride();
+      const from = released();
+      const asked = windowsOf(frames.slice(from)).map((frame) => frame.groupSpeedMps);
+      // A minute after the wait the rider has settled at their gap. From there the
+      // asked speed is higher every half minute: the pace does not feed on itself.
+      for (let second = 60; second + 30 < asked.length; second += 30) {
+        expect(asked[second + 30] as number).toBeGreaterThanOrEqual(asked[second] as number);
+      }
+      expect(asked[90] as number).toBeGreaterThan((asked[60] as number) + 0.1);
+      const end = frames.slice(from + RECOVERY_SECONDS / TICK_SECONDS);
+      expect(end.length * TICK_SECONDS).toBeGreaterThan(30);
+      for (const frame of end) {
+        expect(eased(frame)).toBe(false);
+        expect(frame.groupSpeedMps).toBe(plan.speedNowAt(at(frame, 'b1').distanceM));
+        expect(at(frame, 'b1').speedMps).toBeGreaterThan(0.98 * frame.groupSpeedMps);
+      }
+    });
+  },
+);
 
 describe('over the crest with the rider 15 s behind, the line regroups and settles (criterion 5)', () => {
   // The fixture's climb tops out at 4 500 m. The line forms up with its front

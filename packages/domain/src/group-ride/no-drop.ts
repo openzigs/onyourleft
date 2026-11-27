@@ -23,14 +23,15 @@
  * |---|---|
  * | `gapped` | more than {@link NO_DROP_GAPPED_METRES} behind it, inside the draft's reach |
  * | `off-the-back` | more than {@link NO_DROP_REACH_METRES} behind it |
- * | `off-the-front` | in the line, not on the front, and ahead of every bot of it |
+ * | `off-the-front` | in the line, not on the front, and more than the wheel band ahead of every bot of it |
  * | `with` | anything else, a rider on the front included |
  *
  * A rider at the back of the line, the usual place to lose a wheel, is
  * measured from the line's last bot. Bots behind a rider in the middle of the
  * line stay on the rider's wheel, as `step.ts` has always had them.
  *
- * **A rider who goes off the front gives up their seat**: they move to the
+ * **A rider who goes off the front gives up their seat** (one who only
+ * overlaps the front, inside the wheel band, keeps it): they move to the
  * back of the order, so the bots that were behind them close up on a bot's
  * wheel and none follows the rider up the road.
  *
@@ -83,21 +84,36 @@
  * a wheel.* Without it a line released from a wait rode away at the plan's
  * pace and waited again, for the whole ride.
  *
- * {@link NoDropState.paceShare} is the rider's speed as a share of the plan's
- * speed, a running mean over about {@link NO_DROP_PACE_SECONDS}. It is
- * **seeded by the first wait** (or regroup) for a rider who is riding, and
- * from then on the line is asked for
+ * {@link NoDropState.paceShare} is what the rider can hold, as a share of the
+ * plan's speed. It is **seeded by the first wait** (or regroup) with the
+ * speed of a rider who is riding, and from then on the line is asked
  * `plan's speed × pace × (1 + margin) × (1 − give)`, never above the plan's:
  *
  * - the margin ({@link NO_DROP_PACE_MARGIN}) keeps the line a touch ahead of
- *   the rider's pace, so **it recovers toward the plan as the rider's pace
- *   rises** and rides the plan again once they hold it;
+ *   the pace;
  * - the give grows with how far off the wheel the rider is, whole at
  *   {@link NO_DROP_PACE_GAP_SECONDS} of their own speed (and never nearer
  *   than {@link NO_DROP_GAPPED_METRES}), so the line comes back to a rider
  *   who is slipping off long before the reach.
  *
- * A rider who has stopped does not move the mean: a stop is not a pace. A
+ * **How the pace moves.** A rider with the line rides the line's own speed,
+ * so their speed says nothing of what they can hold, and a mean fed on it
+ * feeds on itself: at 2 m behind the wheel the line was asked a quarter of a
+ * metre a second within five minutes. So, once a decision window:
+ *
+ * | The rider | The pace |
+ * |---|---|
+ * | with the line, which is eased, and keeping their gap (it grew by no more than {@link NO_DROP_PACE_SLIP_METRES}) | rises, by the margin over {@link NO_DROP_PACE_SECONDS} |
+ * | with the line, which is eased, and losing ground | comes down, {@link NO_DROP_PACE_SLIP_STEP} times as fast |
+ * | with the line at the plan's speed | stays |
+ * | `gapped` or `off-the-back` | follows their own speed, a running mean over {@link NO_DROP_PACE_SECONDS} |
+ *
+ * So **it recovers toward the plan for as long as the rider keeps up**, at any
+ * gap inside the wheel band, and rides the plan again once they hold it. It
+ * may pass 1, to {@link NO_DROP_PACE_MOST}: a rider who follows well back,
+ * where the line gives speed away, still gets the plan's speed.
+ *
+ * A rider who has stopped does not move the pace: a stop is not a pace. A
  * one-off gap still ends in a wait or a regroup, as above.
  *
  * ## What it never does
@@ -124,6 +140,7 @@ import { GroupRideError } from './errors';
 import { unknownValue, type LinePhase, type RiderRole } from './roles';
 import {
   ROTATION_RIDER_WHEEL_BAND_METRES,
+  ROTATION_WHEEL_BAND_METRES,
   ROTATION_WINDOW_MS,
   type MemberView,
   type RotationState,
@@ -154,7 +171,8 @@ export const NO_DROP_SETTLE_MS = 10_000;
 
 /**
  * The time constant of the rider's remembered pace, seconds: **20 s**. Each
- * 1 s decision moves the mean a twentieth of the way to the rider's pace now.
+ * 1 s decision moves it a twentieth of its step: of the way to the speed of
+ * a rider off the wheel, or of the margin for one with the line.
  */
 export const NO_DROP_PACE_SECONDS = 20;
 
@@ -167,6 +185,27 @@ export const NO_DROP_PACE_MARGIN = 0.05;
  * {@link NO_DROP_GAPPED_METRES}. Under it, in proportion.
  */
 export const NO_DROP_PACE_GAP_SECONDS = 2;
+
+/**
+ * A rider with a paced line keeps their gap if it grew by no more than this
+ * in a decision window, metres: **1 cm**.
+ */
+export const NO_DROP_PACE_SLIP_METRES = 0.01;
+
+/**
+ * A rider losing ground brings the remembered pace down this many times as
+ * fast as one keeping their gap brings it up: **1.5**. More, and a rider who
+ * follows well back never has the line at the plan's speed again; less, and a
+ * rider at their limit settles further off the wheel.
+ */
+export const NO_DROP_PACE_SLIP_STEP = 1.5;
+
+/**
+ * The most the remembered pace may be, as a share of the plan's speed: **2**.
+ * Over 1 so that a rider who follows well back, where the line gives speed
+ * away, still has it at the plan's speed.
+ */
+export const NO_DROP_PACE_MOST = 2;
 
 /** Where the rider stands to the line. */
 export const RIDER_STANDINGS = ['with', 'gapped', 'off-the-back', 'off-the-front'] as const;
@@ -197,6 +236,8 @@ export interface NoDropState {
    * `null` until the first wait.
    */
   readonly paceShare: number | null;
+  /** How far the rider was behind the line at the last decision, metres; 0 when not behind it. */
+  readonly behindM: number;
   /** Since when a regrouping line's rider has been inside the reach, or `null`. */
   readonly insideSinceMs: number | null;
   /** Whether the front was over the top of a climb at the last window. */
@@ -235,6 +276,7 @@ export function startNoDrop(atMs: number): NoDropState {
     sweep: null,
     easedSpeedMps: null,
     paceShare: null,
+    behindM: 0,
     insideSinceMs: null,
     overTheTop: false,
   };
@@ -279,28 +321,30 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
   if (
     rider === undefined ||
     !Number.isFinite(rider.distanceM) ||
-    !Number.isFinite(rider.speedMps)
+    !Number.isFinite(rider.speedMps) ||
+    rider.speedMps < 0
   ) {
     throw new GroupRideError(
       'view-out-of-range',
-      'every member needs a finite odometer and a finite speed of at least zero',
+      'the rider needs a finite odometer and a finite speed of at least zero',
     );
   }
   const frontId = rotation.order[0] as string;
   const frontM = at(frontId).distanceM;
 
-  // The furthest any bot of the line is up the road: the front, unless the
-  // line has bunched at a crawl. Ahead of that, the rider is off the front.
-  let leadM = frontM;
-  for (const id of rotation.order) {
-    if (id !== riderId) leadM = Math.max(leadM, at(id).distanceM);
-  }
-  if (frontId === riderId) leadM = rider.distanceM;
+  /**
+   * Whether the rider is off the front of `line`, the bots in the seats ahead
+   * of theirs: more than the wheel band up the road from every one of them.
+   * One who only overlaps the front keeps their seat; and at a crawl, where
+   * the line bunches, it is the furthest bot that counts and not the front's.
+   */
+  const pastEvery = (line: readonly string[]): boolean =>
+    line.every((id) => rider.distanceM > at(id).distanceM + ROTATION_WHEEL_BAND_METRES);
 
   // A rider who goes off the front gives up their seat.
   let order = rotation.order;
   const seat = order.indexOf(riderId);
-  if (seat > 0 && seat < order.length - 1 && rider.distanceM > leadM) {
+  if (seat > 0 && seat < order.length - 1 && pastEvery(order.slice(0, seat))) {
     order = [...order.filter((id) => id !== riderId), riderId];
   }
 
@@ -313,7 +357,7 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
   let standing: RiderStanding = 'with';
   let behindM = 0;
   if (last !== undefined) {
-    if (seatNow > 0 && rider.distanceM > leadM) {
+    if (seatNow > 0 && pastEvery(ahead)) {
       standing = 'off-the-front';
     } else {
       const tail =
@@ -353,15 +397,26 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     hold = waits ? 'waiting' : null;
   }
 
-  // The rider's pace, remembered from the first wait on. A stop is not a pace.
+  // The rider's pace, remembered from the first wait on. A stop is not a pace,
+  // and a plan that asks no speed has no share to take.
   const planMps = view.groupSpeedMps;
   let paceShare = state.paceShare;
   if (!view.riderStopped && planMps > 0) {
-    const now = Math.min(1, rider.speedMps / planMps);
+    const step = ROTATION_WINDOW_MS / (1_000 * NO_DROP_PACE_SECONDS);
     if (paceShare === null) {
-      if (hold !== null && behind) paceShare = now;
-    } else {
-      paceShare += ((now - paceShare) * ROTATION_WINDOW_MS) / (1_000 * NO_DROP_PACE_SECONDS);
+      if (hold !== null && behind) paceShare = Math.min(1, rider.speedMps / planMps);
+    } else if (behind) {
+      // Off the wheel: what they are riding is what they can hold.
+      paceShare += (Math.min(1, rider.speedMps / planMps) - paceShare) * step;
+    } else if (state.easedSpeedMps !== null) {
+      // With the line while it is eased for them. Their speed is the line's
+      // own there, so it says nothing of what they can hold: read whether
+      // they keep the gap. Keeping it, the pace rises by its margin; losing
+      // ground, it comes down by half as much again.
+      const keeping = behindM <= state.behindM + NO_DROP_PACE_SLIP_METRES;
+      const moved =
+        paceShare * (1 + (keeping ? step : -step * NO_DROP_PACE_SLIP_STEP) * NO_DROP_PACE_MARGIN);
+      paceShare = Math.min(NO_DROP_PACE_MOST, moved);
     }
   }
 
@@ -402,6 +457,7 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
       sweep,
       easedSpeedMps,
       paceShare,
+      behindM,
       insideSinceMs,
       overTheTop,
     },
