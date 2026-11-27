@@ -3057,9 +3057,9 @@ export class ScatterBelt {
    * without it draws each mesh's own model alone, instanced, as before
    * #3287 — a rider loses variety, never an item, and never a frame.
    *
-   * What it costs beside the instanced mesh it stands in for: two data
-   * textures a mesh (its matrices, and which instance each draw is) and a
-   * third for a tinted kind's colours, uploaded when a frame's items change.
+   * What it costs beside the instanced mesh it stands in for: three small
+   * data textures a mesh — its matrices, which instance each draw is, and
+   * its colours — uploaded when a frame's items change.
    */
   readonly #batches = new Map<string, BatchedMesh>();
   /** How many shapes each of {@link #batches}' meshes holds. */
@@ -3251,6 +3251,15 @@ export class ScatterBelt {
     batch.frustumCulled = false;
     for (const part of ready) batch.addGeometry(part);
     for (const part of ready) if (!parts.includes(part)) part.dispose();
+    // ⚠️ **Every batch carries a colour table from the start, a building's
+    // too**, all white until a tinted kind writes its own. three compiles a
+    // batch with colours and one without as two programs, and makes the table
+    // on the first colour written: a ride's first tree would then link a
+    // program on the frame it came into view (#3107). So one program draws
+    // every batch, and {@link warm} lets `prepare` link it before a ride.
+    const first = batch.addInstance(0);
+    batch.setColorAt(first, this.#tintColour.setRGB(1, 1, 1));
+    batch.setVisibleAt(first, false);
     batch.visible = false;
     this.#batchShapes.set(batch, parts.length);
     this.#batched.set(batch, 0);
@@ -3265,6 +3274,17 @@ export class ScatterBelt {
       if (batch !== undefined) found.push(batch);
     }
     return found;
+  }
+
+  /**
+   * Shows every mesh of several shapes, with whatever it last drew — #3287,
+   * for `ThreeGameView.prepare`: three links a program for a mesh it can
+   * see, and a first frame need not hold a tree or a house. A batch that
+   * drew nothing still draws nothing; the next {@link update} hides it again.
+   */
+  warm(): void {
+    if (!this.#shown) return;
+    for (const batch of this.#batches.values()) batch.visible = true;
   }
 
   /** How many instances of `batch` the last {@link update} drew — #3287. */
@@ -28862,6 +28882,9 @@ class ThreeGameView implements GameView {
     }
     try {
       this.#stage(frame);
+      // #3287: and the program the batched scenery is drawn with, whether or
+      // not this frame holds any of it.
+      this.#scatter.warm();
       // Not `compileAsync`: its own poll can neither be stopped nor survive the
       // view going away. @see programsLinked
       renderer.compile(this.#scene, this.#camera);

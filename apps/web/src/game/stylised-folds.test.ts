@@ -359,8 +359,8 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
     expect(batch.visible).toBe(true);
     expect([0, 1, 2, 3].map((at) => batch.getGeometryIdAt(at))).toEqual([0, 1, 2, 0]);
     expect([0, 1, 2, 3].map((at) => batch.getVisibleAt(at))).toEqual([true, true, true, true]);
-    // A building is not tinted, and its batch carries no colours at all.
-    expect(tintOf(batch, 0)).toBeUndefined();
+    // A building is not tinted: its batch's colours are all white.
+    for (const at of [0, 1, 2, 3]) expect(tintOf(batch, at)).toEqual([1, 1, 1]);
     belt.dispose();
   });
 
@@ -467,6 +467,31 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
     const tint = tintOf(batch, drawn - 1) ?? [];
     expect(Math.max(...tint)).toBeLessThanOrEqual(1);
     expect(Math.min(...tint)).toBeGreaterThan(0.5);
+    belt.dispose();
+  });
+
+  it('can be shown before it draws anything, so its program is linked before a ride', async () => {
+    await loadByShape();
+    const belt = batchedBelt();
+    const batches = SCENERY_KINDS.flatMap((kind) => belt.batchesOf(kind));
+    expect(batches).toHaveLength(9);
+    for (const batch of batches) expect(batch.visible).toBe(false);
+
+    belt.warm();
+    for (const batch of batches) {
+      expect(batch.visible).toBe(true);
+      // Shown, and still nothing of it drawn — and with a colour table already.
+      expect(belt.batchedCount(batch)).toBe(0);
+      expect(batch.getVisibleAt(0)).toBe(false);
+      expect(tintOf(batch, 0)).toEqual([1, 1, 1]);
+    }
+    // The next frame decides again.
+    belt.update([item({ kind: 'rock', x: 1, z: 12 })], POSE);
+    expect(batches.filter((batch) => batch.visible)).toHaveLength(1);
+    // And a belt that is not shown at all stays hidden.
+    belt.setShown(false);
+    belt.warm();
+    for (const batch of batches) expect(batch.visible).toBe(false);
     belt.dispose();
   });
 
