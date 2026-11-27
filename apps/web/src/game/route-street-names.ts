@@ -34,7 +34,7 @@
  *
  * Its middle on the drawn road's centreline, painted across the rider's lane
  * as a road marking is (#3344, `street-names.ts` §`routeNameLayout`: in
- * capitals, each letter upright to the approaching rider and 2.4 m long
+ * capitals, each letter upright to the approaching rider and 5 m long
  * along the road, a long name abbreviated and stacked onto up to three
  * lines, and one that still does not fit not painted), in the open world's
  * one draw call (`street-names.ts` §`streetNamesInView`). **Only where the whole name

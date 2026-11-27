@@ -161,11 +161,13 @@ export const ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES = 0.45;
 
 /**
  * How long a route ride's capital letter is painted along the road, metres:
- * **2.4**, whatever its width — road-marking type, stretched to read at the
- * shallow angle a rider sees it at. Never shortened. This is the letter's
+ * **5**, whatever its width — highway-marking size, stretched to read at the
+ * shallow angle a rider sees it at: the owner's ruling of 2026-11-27 on
+ * #3344, so a name reads from 25 to 30 m on the chase camera (2.4 m did not).
+ * Never shortened. This is the letter's
  * ink; its atlas cell is longer ({@link ROUTE_STREET_NAME_CELL_LENGTH_METRES}).
  */
-export const ROUTE_STREET_NAME_GLYPH_LENGTH_METRES = 2.4;
+export const ROUTE_STREET_NAME_GLYPH_LENGTH_METRES = 5;
 
 /**
  * How much of its atlas cell's height a capital's ink fills: **0.58** —
@@ -177,10 +179,10 @@ export const ROUTE_STREET_NAME_CAP_SHARE = 37 / 64;
 
 /**
  * How long a route ride's letter's quad is along the road, metres: about
- * **4.15**, so that the capital in it is {@link ROUTE_STREET_NAME_GLYPH_LENGTH_METRES}
+ * **8.65**, so that the capital in it is {@link ROUTE_STREET_NAME_GLYPH_LENGTH_METRES}
  * long. A stacked name's lines are laid cell to cell, so the clear road
  * between one line's capitals and the next is the cell's own margin, about
- * 1.75 m.
+ * 3.65 m.
  */
 export const ROUTE_STREET_NAME_CELL_LENGTH_METRES =
   ROUTE_STREET_NAME_GLYPH_LENGTH_METRES / ROUTE_STREET_NAME_CAP_SHARE;

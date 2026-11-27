@@ -5,7 +5,7 @@
  * painted across the rider's lane as a real road marking is ("SLOW", "BUS"),
  * readable as the rider comes up to it — not along the road as a map label
  * is. Then the maintainer's look check on PR #3346: at road-marking size,
- * 0.6 m wide and 2.4 m long a letter, in capitals, abbreviated and stacked
+ * 0.6 m wide and (the owner's ruling of 2026-11-27) 5 m long a letter, in capitals, abbreviated and stacked
  * rather than shrunk, and left of the rider's own line so the chase camera
  * sees it past the rider. Each scene case reads the letter quads the
  * renderer is handed (`sceneFrame`'s `streetNames`) on a synthetic square
@@ -215,9 +215,9 @@ describe('a route ride’s street name reads across the lane, as a road marking 
     expect(letters).toBeGreaterThan(10);
   });
 
-  it('paints every letter at road-marking size: 0.6 m across the lane and 2.4 m along the road, never narrower than 0.45 m', () => {
+  it('paints every letter at road-marking size: 0.6 m across the lane and 5 m along the road, never narrower than 0.45 m', () => {
     expect(ROUTE_STREET_NAME_GLYPH_WIDTH_METRES).toBe(0.6);
-    expect(ROUTE_STREET_NAME_GLYPH_LENGTH_METRES).toBe(2.4);
+    expect(ROUTE_STREET_NAME_GLYPH_LENGTH_METRES).toBe(5);
     // A capital fills 37 of its 64 px atlas cell's rows (`three-renderer.ts` §`streetNameAtlas`).
     expect(ROUTE_STREET_NAME_CAP_SHARE).toBeCloseTo(0.58, 2);
     expect(ROUTE_STREET_NAME_GLYPH_MIN_WIDTH_METRES).toBe(0.45);
@@ -234,8 +234,8 @@ describe('a route ride’s street name reads across the lane, as a road marking 
         const size = planSize(corners);
         // To 0.5 %: the corners are float32, a thousand metres from the origin.
         expect(Math.abs(size.across / width - 1)).toBeLessThan(0.005);
-        // The quad as long as makes the capital in it 2.4 m long.
-        expect(Math.abs((size.along * ROUTE_STREET_NAME_CAP_SHARE) / 2.4 - 1)).toBeLessThan(0.005);
+        // The quad as long as makes the capital in it 5 m long.
+        expect(Math.abs((size.along * ROUTE_STREET_NAME_CAP_SHARE) / 5 - 1)).toBeLessThan(0.005);
         expect(size.across).toBeGreaterThan(0.45 * 0.995);
       }
     }
@@ -301,7 +301,7 @@ describe('a route ride’s street name reads across the lane, as a road marking 
       const before = Math.max(...(lines[line - 1] ?? []).map((letter) => letter.along));
       const next = Math.min(...(lines[line] ?? []).map((letter) => letter.along));
       // Each line wholly beyond the one before it, cell to cell: the clear
-      // road between their capitals the cell's margin, about 1.75 m.
+      // road between their capitals the cell's margin, about 3.65 m.
       expect(next - before).toBeCloseTo(ROUTE_STREET_NAME_CELL_LENGTH_METRES, 1);
     }
     for (const line of lines) {

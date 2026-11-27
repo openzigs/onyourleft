@@ -180,3 +180,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   rule of the entry above. The open world's labels are unchanged (D-5). **Status: in force when
   #3344's pull request merges**, after the maintainer's tablet flash scan and frame check and the
   owner's look.
+- **2026-11-27** — **The owner's ruling on
+  [#3344](https://github.com/openzigs/onyourleft/issues/3344)'s pull request: highway-marking
+  size.** Each capital of a route ride's name is painted **5 m** long along the road, not 2.4 m,
+  so a name reads from 25 to 30 m on the chase camera. Fewer names fit and more are skipped, and
+  that is accepted. Its quad is still sized from the capital's share of its atlas cell, about
+  8.65 m, and where a name fits (D-2.4) is measured over its lines times that. The width rules
+  (0.6 m a letter, never below 0.45 m), the abbreviations, the three stacked lines, skipping rather
+  than shrinking and the place left of the rider's line all stand, as does every rule of the two
+  entries above.
