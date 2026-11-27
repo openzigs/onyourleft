@@ -5,57 +5,21 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BotCapacity } from '../lap-race/wbal';
-import {
-  altitudeMetres,
-  degreesLatitude,
-  degreesLongitude,
-  geographicPosition,
-  gradePercent,
-  metres,
-} from '../quantities';
 import { courseHillsAhead } from '../route/course-ahead';
 import type { RouteProfile } from '../route/profile';
 import { lineClimbAheadM } from './climb-ahead';
+import { courseOf, type Stretch } from './fixtures/courses';
 import { rideLine, type LineWindow } from './line-testing';
 import { ROTATION_CLIMB_HOLD_METRES, type LineMember } from './rotation';
 
 const STEP = 10;
 
 /**
- * A made-up profile on a 10 m grid of straight pieces, each `[metres, grade %]`,
- * from 100 m up: the grade at each sample is the slope to the next one, so a
- * piece is on its grade from its first sample to its last. No place is real.
+ * A made-up profile of straight pieces (`fixtures/courses.ts`: a 10 m grid,
+ * unsmoothed), as a loop when asked. No place is real.
  */
-function course(stretches: readonly (readonly [number, number])[], loop = false): RouteProfile {
-  const length = stretches.reduce((sum, [run]) => sum + run, 0);
-  const heightAt = (along: number): number => {
-    let height = 100;
-    let start = 0;
-    for (const [run, grade] of stretches) {
-      height += (Math.min(Math.max(0, along - start), run) * grade) / 100;
-      start += run;
-    }
-    return height;
-  };
-  const heights = Array.from({ length: Math.round(length / STEP) + 1 }, (_, at) =>
-    heightAt(at * STEP),
-  );
-  const grades = heights.map((value, at) => {
-    const next = heights[at + 1];
-    // The last sample keeps the slope into it, as a real profile's end does.
-    const prior = heights[at - 1] ?? value;
-    return ((next === undefined ? value - prior : next - value) / STEP) * 100;
-  });
-  return {
-    loop,
-    resolution: metres(STEP),
-    totalDistance: metres(length),
-    totalAscent: metres(0),
-    totalDescent: metres(0),
-    elevations: heights.map((value) => altitudeMetres(value)),
-    grades: grades.map((value) => gradePercent(value)),
-    positions: heights.map(() => geographicPosition(degreesLatitude(0), degreesLongitude(0))),
-  };
+function course(stretches: readonly Stretch[], loop = false): RouteProfile {
+  return { ...courseOf(stretches), loop };
 }
 
 /** Level to 400 m, a 5 % climb from 400 m to its crest at 1 000 m, level to 2 000 m. */

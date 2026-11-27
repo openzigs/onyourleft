@@ -154,10 +154,11 @@ describe('the line stays together over the hilly fixture (criterion 1)', () => {
     }
   });
 
-  it('starts no pull change from 300 m before the climb until it is nearly over', () => {
+  it('starts no pull change from 300 m before the climb to its crest', () => {
     const starts = changeStarts(windowsOf(hilly().frames)).map(frontM);
-    // The climb is 3 000 to 4 500 m; a climb's last 200 m is no longer one ahead (`courseHillsAhead`).
-    expect(starts.filter((at) => at >= 2_700 && at < 4_290)).toEqual([]);
+    // The climb is 3 000 to 4 500 m, held to its crest (`lineClimbAheadM`, #3348): its
+    // last 10 m sample is where the grade falls under a climb's 3 %.
+    expect(starts.filter((at) => at >= 2_700 && at < 4_490)).toEqual([]);
     expect(starts.filter((at) => at < 2_700).length).toBeGreaterThan(5);
   });
 });
