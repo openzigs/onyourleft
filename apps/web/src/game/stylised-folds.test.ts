@@ -433,6 +433,9 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
     belt.update(rocks.slice(0, 2), POSE);
     expect(belt.batchedCount(batch)).toBe(2);
     expect(belt.drawnItems).toBe(2);
+    // The pool is the five the first frame needed, not seven: a count that is
+    // not rewound each frame grows the pool without end.
+    expect(batch.instanceCount).toBe(5);
     expect([0, 1, 2, 3, 4].map((at) => batch.getVisibleAt(at))).toEqual([
       true,
       true,
@@ -444,6 +447,17 @@ describe('#3287 the belt a view builds where the driver has multi-draw', () => {
     belt.update([], POSE);
     expect(belt.batchedCount(batch)).toBe(0);
     expect(batch.visible).toBe(false);
+    belt.update(rocks.slice(0, 2), POSE);
+    expect(batch.instanceCount).toBe(5);
+    belt.dispose();
+  });
+
+  it('never lets three cull a batch whole: its sphere is taken once, at the first frame', async () => {
+    await loadByShape();
+    const belt = batchedBelt();
+    const batches = SCENERY_KINDS.flatMap((kind) => belt.batchesOf(kind));
+    expect(batches).toHaveLength(9);
+    for (const batch of batches) expect(batch.frustumCulled).toBe(false);
     belt.dispose();
   });
 
