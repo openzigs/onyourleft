@@ -110,9 +110,11 @@ describe('where the rider stands', () => {
       sweep: null,
       easedSpeedMps: null,
       paceShare: null,
+      behindM: step.state.behindM,
       insideSinceMs: null,
       overTheTop: false,
     });
+    expect(step.state.behindM).toBeCloseTo(0.65, 9);
     expect(step.rotation).toBe(view.rotation);
   });
 
@@ -217,6 +219,20 @@ describe('a rider off the front', () => {
       hold: null,
       easedSpeedMps: null,
     });
+  });
+
+  it('leaves a rider who only overlaps the front their seat: off the front is more than the wheel band past it', () => {
+    const rotation = lineOf(['b1', 'you', 'b2', 'b3']);
+    // Second wheel, a centimetre past the front, then a metre past it: still in their seat.
+    for (const riderM of [500.01, 501]) {
+      const step = decide(membersAt({ you: riderM, b1: 500, b2: 498.7, b3: 498.05 }), { rotation });
+      expect(step.state.standing).toBe('with');
+      expect(step.rotation).toBe(rotation);
+    }
+    // More than the 1 m band past it, the seat goes.
+    const gone = decide(membersAt({ you: 501.01, b1: 500, b2: 499.35, b3: 498.7 }), { rotation });
+    expect(gone.state.standing).toBe('off-the-front');
+    expect(gone.rotation.order).toEqual(['b1', 'b2', 'b3', 'you']);
   });
 
   it('keeps the order where the rider is already at the back of it', () => {
@@ -388,28 +404,71 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
     expect(far).toMatchObject({ standing: 'gapped', hold: null, easedSpeedMps: 0 });
   });
 
-  it('follows the rider’s pace: a twentieth of the way each second, up as well as down', () => {
-    const slower = next(released, 1_000, 0.65, 4).state;
-    expect(slower.paceShare).toBeCloseTo(0.75 + (0.5 - 0.75) / 20, 12);
-    const faster = next(released, 1_000, 0.65, 8).state;
-    expect(faster.paceShare).toBeCloseTo(0.75 + (1 - 0.75) / 20, 12);
+  /** The released line, eased, with the rider `wasM` behind b3 at the last window. */
+  const paced = (wasM: number): NoDropState => ({ ...released, behindM: wasM });
+  const UP = 1 + 0.05 / 20;
+  const DOWN = 1 - (1.5 * 0.05) / 20;
+
+  it('rises by its margin over 20 s while the rider keeps their gap, whatever speed the line has them at', () => {
+    // 2 m behind the wheel, as a second ago: a rider who follows at a human distance.
+    for (const speed of [2, 4, 8]) {
+      expect(next(paced(2), 1_000, 2, speed).state.paceShare).toBeCloseTo(0.75 * UP, 12);
+    }
+    // Closing counts, and so does a gap a centimetre longer.
+    expect(next(paced(2), 1_000, 1.2, 4).state.paceShare).toBeCloseTo(0.75 * UP, 12);
+    expect(next(paced(2), 1_000, 2.01, 4).state.paceShare).toBeCloseTo(0.75 * UP, 12);
     // Inside a window nothing moves.
-    expect(next(faster, 1_500, 0.65, 4).state).toBe(faster);
+    const moved = next(paced(2), 1_000, 2, 4).state;
+    expect(next(moved, 1_500, 4, 4).state).toBe(moved);
   });
 
-  it('recovers to the plan: a rider who holds the plan’s speed has the line back at it, and it stays remembered', () => {
-    let state: NoDropState = released;
+  it('comes down half as fast again while the rider loses ground inside the wheel band', () => {
+    const slipping = next(paced(2), 1_000, 2.02, 8).state;
+    expect(slipping.standing).toBe('with');
+    expect(slipping.paceShare).toBeCloseTo(0.75 * DOWN, 12);
+  });
+
+  it('stays while the line is at the plan’s speed, and follows the speed of a rider who is off the wheel', () => {
+    const atPlan: NoDropState = { ...paced(2), easedSpeedMps: null };
+    expect(next(atPlan, 1_000, 2, 8).state.paceShare).toBe(0.75);
+    expect(next(atPlan, 1_000, 3, 8).state.paceShare).toBe(0.75);
+    // Gapped, 12 m back: what they are riding is what they can hold. A twentieth of the way to it.
+    const slower = next(paced(2), 1_000, 12, 4).state;
+    expect(slower.standing).toBe('gapped');
+    expect(slower.paceShare).toBeCloseTo(0.75 + (0.5 - 0.75) / 20, 12);
+    expect(next(paced(2), 1_000, 12, 8).state.paceShare).toBeCloseTo(0.75 + (1 - 0.75) / 20, 12);
+  });
+
+  it('does not feed on the line’s own speed: a rider who follows 2 m back at whatever the line rides has it at the plan’s again', () => {
+    let state = paced(2);
+    let speed = 6;
     let atPlanFrom: number | null = null;
-    for (let second = 1; second <= 60; second += 1) {
-      state = next(state, second * 1_000, 0.65, PLAN_MPS).state;
+    for (let second = 1; second <= 240; second += 1) {
+      const before = state.paceShare as number;
+      state = next(state, second * 1_000, 2, speed).state;
+      // The rider rides what the line was asked: the pace never falls for it.
+      expect(state.paceShare as number).toBeGreaterThanOrEqual(before);
+      speed = state.easedSpeedMps ?? PLAN_MPS;
       if (state.easedSpeedMps === null) atPlanFrom ??= second;
       else expect(atPlanFrom).toBeNull();
     }
-    // 0.75 to the 0.952 at which a 5 % margin reaches the plan: about half a minute.
-    expect(atPlanFrom as number).toBeGreaterThan(25);
-    expect(atPlanFrom as number).toBeLessThan(40);
-    expect(state.paceShare as number).toBeGreaterThan(0.95);
-    expect(state.paceShare as number).toBeLessThanOrEqual(1);
+    // From 0.75 to the 1.04 at which the margin, less what 2 m gives back, reaches the plan.
+    expect(atPlanFrom as number).toBeGreaterThan(100);
+    expect(atPlanFrom as number).toBeLessThan(160);
+    expect(state.paceShare as number).toBeGreaterThan(1);
+  });
+
+  it('is at most twice the plan’s speed', () => {
+    const most = next({ ...paced(2), paceShare: 1.999 }, 1_000, 2, 8).state;
+    expect(most.paceShare).toBe(2);
+  });
+
+  it('takes no share of a plan that asks no speed: nothing is seeded or moved, and nothing is not a number', () => {
+    const seeded = next(START, 0, 40, 6, { groupSpeedMps: 0 }).state;
+    expect(seeded).toMatchObject({ hold: 'waiting', paceShare: null, easedSpeedMps: 0 });
+    const kept = next(paced(2), 1_000, 12, 6, { groupSpeedMps: 0 }).state;
+    expect(kept.paceShare).toBe(0.75);
+    expect(kept.easedSpeedMps).toBeNull();
   });
 
   it('is not moved by a rider who has stopped: a stop is not a pace', () => {
@@ -426,11 +485,11 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
     expect(ahead.state).toMatchObject({ standing: 'off-the-front', easedSpeedMps: null });
   });
 
-  it('with the line bunched at a crawl, is off the front only ahead of every bot, not of the front alone', () => {
+  it('with the line bunched at a crawl, is off the front only past every bot, not past the front alone', () => {
     // b2 has rolled a metre past b1, the front; the rider is between them.
     const bunched = membersAt({ b2: 501, you: 500.5, b1: 500, b3: 499 }, 1);
     expect(decide(bunched).state.standing).toBe('with');
-    const past = membersAt({ you: 501.5, b2: 501, b1: 500, b3: 499 }, 1);
+    const past = membersAt({ you: 502.5, b2: 501, b1: 500, b3: 499 }, 1);
     expect(decide(past).state.standing).toBe('off-the-front');
   });
 });
@@ -582,6 +641,7 @@ describe('what it refuses', () => {
   it.each([
     ['an odometer', { distanceM: Number.NaN, speedMps: 8 }],
     ['a speed', { distanceM: 400, speedMps: Number.POSITIVE_INFINITY }],
+    ['a speed of at least zero', { distanceM: 400, speedMps: -1 }],
   ])('a rider without %s that is finite, naming no value', (_what, rider) => {
     const members = { ...riderBehind(1), you: rider };
     let raised: unknown;

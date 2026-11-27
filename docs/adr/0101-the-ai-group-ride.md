@@ -599,16 +599,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   hold), so the rider stays on a wheel. This replaces the repeating ride-away-and-wait cycle …
   The wait and regroup still apply to a one-off gap. The group's plan speed recovers if the
   rider's pace rises."* So:
-  1. **The rider's pace is remembered from the first wait or regroup**: their speed as a share of
-     the plan's speed, a running mean over about 20 s, never above the plan's. A rider who has
-     stopped does not move it.
+  1. **The rider's pace is remembered from the first wait or regroup**: what they can hold, as a
+     share of the plan's speed, seeded with their speed in that wait. A rider who has stopped
+     does not move it.
   2. **From then on the line is asked a 5 % margin over that pace**, never above the plan's
      speed, and **gives the speed back as the rider comes off the wheel**, all of it at 2 s of the
      rider's own speed (and never nearer than 5 m). So after the first wait the line does ease
      for a rider who is merely off the wheel, which D-4.1 said it did not. Before the first wait
      D-4.1 holds as written.
-  3. **It recovers**: the margin keeps the line a touch ahead of a rider who holds the wheel, the
-     remembered pace follows them up, and the line rides the plan again once they hold it.
+  3. **It recovers for as long as the rider keeps up, at any gap inside the 5 m wheel band.** A
+     rider with the line rides the line's own speed, so their speed says nothing of what they can
+     hold, and a pace fed on it would feed on itself. So the pace reads whether the rider keeps
+     their gap: keeping it, the pace rises by the margin over about 20 s; losing ground, it comes
+     down half as fast again; off the wheel, it follows the rider's own speed. The line rides the
+     plan again once they hold it.
   4. **A one-off gap still ends in a wait or a regroup** (D-4.2, D-4.3), with no floor in either.
   5. **D-2.6 reaches the paced line too: the eased pace is the rider's ride.** A tick in which the
      line is held or paced is not booked as riding time, nor is one after it until the front is

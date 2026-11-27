@@ -96,9 +96,10 @@
  * booked as paused (`plan.ts` rule 6), and the road the front covers in it is
  * booked at the plan's own time for that road; so is every tick after it
  * until the front is back at {@link GROUP_LEDGER_RESUME_SHARE} of the plan's
- * speed, and so is a rider's own pull under that speed. So the group is exactly as late when it rides the plan again as it
- * was before: **the eased pace is the rider's ride**, none of it is chased
- * back, and a group that crawled forward is not taken to be early either.
+ * speed, and so is a rider's own pull under that speed. So the group is
+ * exactly as late when it rides the plan again as it was before: **the eased
+ * pace is the rider's ride**, none of it is chased back, and a group that
+ * crawled forward is not taken to be early either.
  *
  * {@link GroupRoad.noDrop} `false` leaves the rule out: the line never holds,
  * nobody sweeps and every tick is booked, as before #3301.
@@ -212,8 +213,9 @@ export interface GroupRideState {
   readonly noDrop: NoDropState;
   /**
    * Where the front was as the last tick began, metres, if that tick was not
-   * booked as riding (the line eased for the rider, or getting back up to speed): the road covered since is booked at the plan's time.
-   * `null` after a tick that was ridden.
+   * booked as riding (the line eased for the rider, or getting back up to
+   * speed): the road covered since is booked at the plan's time. `null`
+   * after a tick that was ridden.
    */
   readonly heldFromM: number | null;
   /** Every bot, by id. Never the rider. */
