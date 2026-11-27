@@ -1,14 +1,20 @@
 # ADR 0058: On iOS the camera screens detect screen capture and blank the picture
 
-- **Status**: **Proposed**, 2026-11-26. The decision is the owner's: **D-11** on the epic
-  [#15](https://github.com/openzigs/onyourleft/issues/15), 2026-10-27: *"detect screen capture and
-  blank the camera picture, through a new ADR (the iOS counterpart of ADR 0044 D-12)"*. The author
-  chose the terms below: the trigger, the signal, the port's shape and the draft words. It is
-  accepted when the owner approves the rider's sentence and answers Q1 to Q3 in §"Questions for the
-  owner", each of which carries a recommendation
+- **Status**: **Accepted, 2026-11-26**, by the owner, 2026-11-26, on its pull request
+  [#3316](https://github.com/openzigs/onyourleft/pull/3316)
+  ([comment](https://github.com/openzigs/onyourleft/pull/3316#issuecomment-7207451593)), with every
+  recommendation in §"Questions for the owner": **Q1 yes**, the picture is also hidden from the
+  app-switcher snapshot (D-6); **Q2**, the draft words of D-5 are approved, with the iOS sentence in
+  its switcher variant; **Q3 yes**, nothing is done on a screenshot (D-3). It was **Proposed**
+  earlier the same day, and that wording was only ever on the pull request's branch. The decision
+  is the owner's: **D-11** on the epic [#15](https://github.com/openzigs/onyourleft/issues/15),
+  2026-10-27: *"detect screen capture and blank the camera picture, through a new ADR (the iOS
+  counterpart of ADR 0044 D-12)"*. The author chose the terms below: the trigger, the signal, the
+  port's shape and the draft words
 - **Date**: 2026-11-26
-- **Deciders**: **the owner** (D-11, the decision itself, and the rider wording when approved); the
-  author (the engineering terms, D-1 to D-6)
+- **Deciders**: **the owner** (D-11, the decision itself; the rider wording, approved 2026-11-26;
+  and Q1 to Q3, answered 2026-11-26); the author (the engineering terms, D-1 to D-5, and D-6's
+  cover as recommended)
 - **Issue**: [#1752](https://github.com/openzigs/onyourleft/issues/1752), under the iOS epic
   [#15](https://github.com/openzigs/onyourleft/issues/15). It is built by
   [#1771](https://github.com/openzigs/onyourleft/issues/1771), which is blocked by spike S1
@@ -117,7 +123,7 @@ again when it is not.
 - **A screenshot.** iOS gives an app no way to refuse one, and it says so only after it has been
   taken. The app does nothing with `userDidTakeScreenshotNotification`: there is nothing it could
   do that would take the picture back, and a message after the fact would only tell the rider what
-  they already know. *The author's choice*: Q3 asks the owner.
+  they already know. The author proposed it, and **the owner confirmed it on 2026-11-26 (Q3)**.
 - **The frames before the blank.** Between capture starting and the app hearing of it, the
   picture may be in the recording or on the mirrored screen. Apple's pages give no figure for that
   gap, and nobody here has measured it. #1771's device check observes it on a device, and the
@@ -171,47 +177,63 @@ ADR 0044 D-10's table puts it later, the same rule applies. **It is wrong on iOS
 something else. In the iOS app, the sentence must describe the iOS app and must not name Android.
 
 **The decision**: the sentence is chosen by platform, one per shell. The Android app's and the
-browser's words do not change. **Draft words for the iOS app, for the owner's approval**
-(ADR 0044 D-10: the published wording changes only with the owner's approval):
+browser's words do not change. **The words for the iOS app, approved by the owner on 2026-11-26**
+(Q2; ADR 0044 D-10: the published wording changes only with the owner's approval). Because the
+owner said yes to Q1, the iOS sentence is the switcher variant:
 
-> **(iOS, draft)** In the iPad and iPhone app, a camera picture is hidden while the screen is being
-> recorded or shared. A screenshot cannot be blocked.
+> **(iOS)** In the iPad and iPhone app, a camera picture is hidden while the screen is being
+> recorded or shared, and in the app switcher. A screenshot cannot be blocked.
 
-The line in the blank panel (D-2), also a draft:
+The line in the blank panel (D-2), also approved:
 
-> **(panel, draft)** Hidden while your screen is being recorded or shared.
+> **(panel)** Hidden while your screen is being recorded or shared.
 
-If the owner says yes to Q1 below, the iOS sentence becomes *"…is hidden while the screen is being
-recorded or shared, and in the app switcher. A screenshot cannot be blocked."*
+The draft without the switcher clause (*"…is hidden while the screen is being recorded or shared. A
+screenshot cannot be blocked."*) was the wording for a no to Q1, and is not used.
 
-### D-6 — The app switcher is a separate question (Q1)
+### D-6 — The app switcher: the picture is hidden from its snapshot too (Q1, the owner's ruling)
 
 D-11 rules on screen capture. Android's flag also blanks the recent-apps thumbnail, and iOS takes
 the app-switcher snapshot *"after your app enters the background and your delegate method
-returns"* (the article quoted in Context). D-11 does not say whether iOS should hide the picture
-from that snapshot, so this ADR does not decide it. Q1 asks, with a recommendation.
+returns"* (the article quoted in Context). D-11 did not say whether iOS should hide the picture
+from that snapshot, so this ADR asked (Q1), and **the owner ruled yes on 2026-11-26**.
+
+- **While a hold is taken**, the iOS half of the secure-window plugin puts an opaque **native**
+  view over the web view on `sceneWillResignActive(_:)`, and removes it when the scene is active
+  again. It reads the hold that `setSecureWindow` records (D-4).
+- **The cover is native**, because Apple's article puts the snapshot after the delegate method
+  returns, and nothing here shows the web view's JavaScript runs in time to remove the picture
+  first.
+- **It covers the whole window.** Only the snapshot and a moment on return show it. This matches
+  what D-12 gives Android's recent-apps thumbnail.
+- The rider is told so, in D-5's sentence: *"…and in the app switcher."*
 
 ## Questions for the owner
 
-1. **Q1 — Hide the picture from the app-switcher snapshot too?** *Recommendation: yes.* While a hold
+All three were answered by the owner on 2026-11-26 on #3316, each as recommended.
+
+1. **Q1 — Hide the picture from the app-switcher snapshot too?** **Answered yes, 2026-11-26** (D-6).
+   *Recommendation was: yes.* While a hold
    is taken, the iOS half of the plugin puts an opaque native view over the web view on
    `sceneWillResignActive(_:)`, and removes it when the scene is active again. The cover is native
    because Apple's article puts the snapshot after the delegate method returns, and nothing here
    shows the web view's JavaScript runs in time to remove the picture first. It covers the whole
    window, and only the snapshot and a moment on return show it. This matches what D-12 gives
    Android's recent-apps thumbnail.
-2. **Q2 — The two draft sentences in D-5.** *Recommendation: approve them as written.* They say
+2. **Q2 — The two draft sentences in D-5.** **Approved, 2026-11-26**, the iOS sentence in its
+   switcher variant after Q1. *Recommendation was: approve them as written.* They say
    what the app does and what it cannot do, in the words a rider uses ("recorded or shared"), and
    they leave out "mirrored", which riders rarely say.
-3. **Q3 — Do nothing on a screenshot (D-3)?** *Recommendation: yes, nothing.* The alternative is a
+3. **Q3 — Do nothing on a screenshot (D-3)?** **Answered yes, nothing, 2026-11-26.**
+   *Recommendation was: yes, nothing.* The alternative is a
    notice after `userDidTakeScreenshotNotification`, which cannot undo the screenshot and would
    tell the rider only what they did.
 
 ## Consequences
 
 - **What this enables.** #1771 can build the iOS half against a fixed contract: the trait it
-  observes, the port member it adds, the owner it goes through, and the words it ships once the
-  owner approves them.
+  observes, the port member it adds, the owner it goes through, and the words the owner
+  approved.
 - **What it costs.** The port gains a member that does nothing on two of its three platforms. The
   consent sentence becomes platform-dependent, so `consent.test.ts` has to pin one sentence per
   shell instead of one sentence. A rider who records their own iPad screen loses the camera picture
@@ -221,7 +243,8 @@ from that snapshot, so this ADR does not decide it. Q1 asks, with a recommendati
 - **Constraints on other work.**
   - #1771 adds `watchCapture` to `secure-window-port.ts`, gives `secure-window.ts` a `captured`
     state, makes each D-1 surface draw D-5's panel while captured, and changes `consent.ts` to a
-    per-shell sentence, all in one pull request with the owner-approved words.
+    per-shell sentence, all in one pull request with the owner-approved words (D-5), and adds
+    D-6's native cover for the app-switcher snapshot.
   - #1771 owes a device check on the owner's list (#733): start a screen recording and start
     mirroring with each D-1 surface on the screen, and record whether the picture is blank in the
     recording and on the mirror, and roughly how many frames reached them first.
