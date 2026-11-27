@@ -145,9 +145,10 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * D-1) rather than scans cut down to these ceilings: 6 692 and 5 800
  * triangles at full detail against 28 000, and 2 208 and 2 004 at the middle
  * level against 6 000. **No ceiling here moved**: what is spent fell, and the
- * scans — still committed, still loadable on the owner's page — are held to
- * the same figures. Same route position, same camera, pinned Chromium on
- * 2026-10-12, the scans first:
+ * scans — committed and loadable on the owner's page until #1293 deleted
+ * them, see "The scanned broadleaves, removed" below — were held to the same
+ * figures. Same route position, same camera, pinned Chromium on 2026-10-12,
+ * the scans first:
  *
  * | | Scanned broadleaves | Generated broadleaves |
  * |---|--:|--:|
@@ -187,7 +188,8 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * 41 943 040, 2 106 041 under it. The scanned broadleaves are
  * 10 616 301 of those bytes and go when the owner has judged the generated
  * ones on the tablet (ADR 0049 D-1, #1293), at which point the set is smaller
- * than it was before #1283.
+ * than it was before #1283. ⚠️ They went on 2026-11-26, on the owner's ruling
+ * and without those rows: "The scanned broadleaves, removed" below.
  *
  * ## The generated firs, measured — #1294
  *
@@ -248,6 +250,40 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * it**, where it was 2 106 041 under. The scanned firs are 8 681 763 of those
  * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
  * say after the tablet rows (ADR 0049 D-1, #1293).
+ *
+ * ## The scanned broadleaves, removed — #1293
+ *
+ * The owner ruled on 2026-11-26 that the scanned broadleaves go: no default
+ * ride had drawn them since #1283, and they were the largest thing in a build
+ * 231 387 bytes under the 47 MiB it then had while three lanes were adding models
+ * (#3249). ⚠️ **Without the tablet rows ADR 0049 D-1 asks for** — validation
+ * 0002's AH-1283 rows were never filled in — which is that ADR's amendment of
+ * 2026-11-26 on the scans, and the owner's to have ruled.
+ *
+ * What went: `island_tree_02` and `tree_small_02`, eight files at three
+ * levels each, **10 616 301 bytes**; their `ASSETS.toml` rows, their recipe
+ * (`tools/realistic/sources.ts` §`OUTPUTS`) and their pinned inputs; the
+ * `scanned` set (`realistic-assets.ts` §`RealisticTrees`); the owner's page's
+ * `generated-trees` lever; and the gate's load of them (`game-harness.ts`
+ * §`treeLevelRun`). Read off the committed files by `realistic-budget.test.ts`
+ * on 2026-11-26:
+ *
+ * | | Before | After |
+ * |---|--:|--:|
+ * | The realistic set, bytes | 48 466 823 | **37 850 522** |
+ * | With the transcoder | 49 051 685 | **38 435 384** |
+ * | Under {@link REALISTIC_BUILD_BYTES}' 104 857 600 | 55 805 915 | **66 422 216** |
+ *
+ * The ceiling is the 100 MiB the owner ruled on #3337 the same day, which
+ * merged first; against the 47 MiB (49 283 072) it replaced, the "before"
+ * was 231 387 under. **No figure in this file was moved by this change, the
+ * build ceiling included**: the bytes were freed for the models #3249's
+ * lanes add, and lowering the ceiling to the new figure would take them back. Every column headed "Scanned
+ * broadleaves" or "Every tree a scan" in the two tables above is a
+ * measurement of a set that can no longer be loaded: a record of 2026-10-12,
+ * not something a gate still holds. What a ride draws did not change — it
+ * was already the generated trees, and the scanned FIRS still ship behind
+ * `?levers=-generated-conifers`.
  *
  * Held by `realistic-budget.test.ts`, which reads every committed realistic
  * file back off disk against it. Since #1549 the renderer reads its
@@ -460,8 +496,9 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * a level a SHAPE and there are four shapes where there were two.
  * {@link REALISTIC_TRIANGLES} has the table, and says why it is four shapes
  * and not the six #1283 first made, which put the page AT 35. The scans,
- * loaded on the same views, still make 27 and 31 (32 in one run of seven:
- * the page's count moves by one between runs of the same held frame).
+ * loaded on the same views, made 27 and 31 (32 in one run of seven: the
+ * page's count moves by one between runs of the same held frame) until #1293
+ * deleted them.
  *
  * ⚠️ **#1294 found what moves, and the page's 33 and 31 were a mean, not a
  * frame's count**: the page counted its very first render, which makes about
@@ -750,8 +787,11 @@ export function stylisedSceneDrawCallCeiling(frame: Pick<SceneFrame, 'lapRace'>)
  * as {@link REALISTIC_TREE_LEVELS} ranks them.
  *
  * @test-facing the browser gate's control: `game-harness.ts` draws the same
- * view with it, whose triangles must be at least 60 000 more, and whose
- * hand-over must jump; the product never draws with it
+ * view with it, whose triangles must be at least 9 000 more (60 000 until
+ * #1283, the scans' figure: `game.browser.spec.ts` §`TRIANGLES_FALL_AT_LEAST`),
+ * and whose hand-over must jump; `realistic-budget.test.ts` holds the same
+ * floor off the committed files for every set that ships (#1293); the product
+ * never draws with it
  */
 export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
   near: 6,
@@ -887,6 +927,27 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
  * the owner's ruling (d) of 2026-10-24) and not in this term.
  */
 export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_TRIANGLES.structure;
+
+/**
+ * The most triangles ONE building model may have — #3251, ADR 0099 D-4.2:
+ * **3 000**, *"no heavier than the heaviest house committed today"*, which is
+ * the brick shop at 2 946. The house models are not held to
+ * {@link REALISTIC_TRIANGLES}' 640 each: by the owner's ruling on #1585 they
+ * pool {@link MAPPED_BUILDING_TRIANGLES}, and until this constant nothing
+ * bounded one of them but that whole term, 23 040. So a model of 20 000
+ * triangles passed every gate and left the frame room for one building.
+ *
+ * It is a ceiling on a FILE, and adds nothing to the frame's sum: a frame's
+ * models are still ranked inside {@link MAPPED_BUILDING_TRIANGLES} with every
+ * other structure (`mapped-buildings.ts` §`selectMappedBuildings`). ADR 0099
+ * D-4.3 holds for it as for every ceiling here: a new model fits it, and it
+ * is not raised to make one fit without a tablet measurement recorded first.
+ *
+ * @test-facing held by `realistic-budget.test.ts` §"keeps every building
+ * model at or under one building's triangles", which reads each committed
+ * house model back off disk against it
+ */
+export const REALISTIC_BUILDING_MODEL_TRIANGLES = 3_000;
 
 /**
  * The most mapped buildings the realistic world draws at once — #1549:
@@ -1128,6 +1189,68 @@ export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
  * cases) and `park-dressing-belt.test.ts` (the belt as built)
  */
 export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
+
+/**
+ * The most triangles a frame's parked cars may add — #3278: **13 440**, in
+ * ONE draw call of their own ({@link REALISTIC_PARKED_CAR_DRAW_CALLS}).
+ *
+ * | | triangles |
+ * |---|--:|
+ * | Near: `parked-cars.ts` §`PARKED_CARS_NEAR_MAX` cars, each the heaviest body with its four wheels (the hatchback's 336 and 4 × 28) | 12 × 448 = 5 376 |
+ * | Far: the rest of §`PARKED_CARS_MAX`, each the heaviest body alone | 24 × 336 = 8 064 |
+ *
+ * ⚠️ **A hard bound, not an estimate**: `three-renderer.ts` §`ParkedCarBelt`
+ * draws no more cars than that, and each car submits its OWN body's triangles
+ * at its own level and no other's. That is the difference from a Delivery
+ * round's cars, where every obstacle instance submits the whole roster
+ * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 640 an
+ * instance): 36 cars there would be 59 040. A street's cars are mostly the
+ * lighter saloon (200 and 312), so a real frame is well under this.
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, by that constant's own
+ * rule: the cars are the realistic world's alone. `realistic-budget.test.ts`
+ * adds this to the worst frame the caps allow — with a room's remote riders,
+ * a full belt of park pieces and a holiday's decorations all in it at once —
+ * and holds the sum; no ceiling above was raised to make the room. No file
+ * and no texture: the bodies and the atlas are the committed
+ * `realistic-assets.ts` §`REALISTIC_DELIVERY_CAR` and
+ * §`REALISTIC_DELIVERY_CAR_ATLAS`, loaded since #2847, so the set's bytes do
+ * not change.
+ *
+ * ⚠️ **Never on a Delivery frame**: a round's frame carries no parked car of
+ * these (`scene.ts` §`SceneInput.parkedCars`), so
+ * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES} does not hold them. The tablet's
+ * reading is the owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, priced
+ * off the committed file) and `parked-car-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARKED_CAR_TRIANGLES = 13_440;
+
+/**
+ * The draw calls a frame's parked cars may add — #3278: **1**, one merged
+ * mesh however many cars and whichever bodies (`three-renderer.ts`
+ * §`ParkedCarBelt`), and none on a frame that carries no car.
+ *
+ * ⚠️ **Not a call on the frozen village frame.** A procedural village has no
+ * mapped driveway, apron or side street, so it has no parked car
+ * (`parked-cars.ts`' header says why none stands at its kerb), the belt is
+ * never built there, and {@link REALISTIC_VILLAGE_DRAW_CALLS} stays exactly
+ * 50 — `realistic-town.browser.spec.ts` §"#1689" still holds it to that,
+ * measured at 50 with this belt in the build. The call is spent on mapped
+ * land, which no frozen ceiling holds: measured in the pinned Chromium on
+ * 2026-11-26, each frame one call and exactly the belt's triangles over the
+ * same frame with `levers=-parked-cars` — a street of houses 43 → 44 calls
+ * (7 cars, 2 522 triangles), a main street of shops 38 → 39 (33 cars,
+ * 10 836). A city centre, whose pavements run to its building line, has no
+ * car, and its frame is the 22 calls `realistic-mapped.browser.spec.ts`
+ * holds inside {@link REALISTIC_WOODED_DRAW_CALLS}.
+ *
+ * @test-facing held by `parked-car-belt.test.ts`, which counts the meshes the
+ * belt adds to a scene; nothing in the product applies a draw-call ceiling at
+ * run time
+ */
+export const REALISTIC_PARKED_CAR_DRAW_CALLS = 1;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,
@@ -1493,6 +1616,115 @@ export const REALISTIC_HOUSE_MODEL_SURFACES = {
 } as const;
 
 /**
+ * What the downtown kit's facade pieces may add — #3334's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **3 MiB** of texture memory as the tablet is handed it, and **1 MiB** of
+ * build. The one atlas is 2048² ETC1S, half a byte a texel and a third again
+ * for its mipmaps, 2.67 MiB estimated; the GLB and the atlas are 887 010
+ * bytes (560 112 and 326 898). `facade-kit.test.ts` reads both off the
+ * committed files. It was 1 MiB and 256 KiB for twelve pieces in a 1024²
+ * atlas; the look check on PR #3343 asked for the kit to be used properly,
+ * after the owner raised {@link REALISTIC_BUILD_BYTES} to 100 MiB (#3339).
+ *
+ * ADR 0099 D-4: what each piece costs in triangles is `facade-kit.ts`
+ * §`KIT_PIECES`, which that test holds to the GLB: 39 pieces, 31 meshes
+ * (eight are a mesh again in another skin), 9 407 triangles between them and
+ * 2 each as a card. In bytes they share the two files.
+ *
+ * @test-facing held by `facade-kit.test.ts`, which reads the committed kit
+ * back off disk against it; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_DOWNTOWN_KIT_SURFACES = {
+  textureBytes: 3 * MEBIBYTE,
+  buildBytes: 1 * MEBIBYTE,
+} as const;
+
+/**
+ * The most triangles one building wrapped in the downtown kit's facade
+ * pieces may be, at the near level — #3334, the maintainer's direction on
+ * PR #3343: **3 000**, the house models' price a building (#3273's
+ * `REALISTIC_BUILDING_MODEL_TRIANGLES`, which is not on `main` as this is
+ * written; the two are one number, and this is to be written as that one once
+ * it is). It was {@link REALISTIC_TRIANGLES}' `structure`, 640, under which
+ * most of a wrap's bays were flat cards and the wrap read worse than the
+ * painted extrusion it replaced.
+ *
+ * `footprint-buildings.ts` hands it to `facade-kit.ts` §`wrapFootprint`,
+ * which spends it on the street front first.
+ */
+export const REALISTIC_KIT_WRAP_TRIANGLES = 3_000;
+
+/**
+ * The most buildings drawn as wraps at once — #3334: **6**, the nearest
+ * wrapped plans of the walk (`mapped-buildings.ts` §`selectMappedBuildings`);
+ * every wrapped plan past them is its extrusion, as a far one is.
+ *
+ * ⚠️ **It is what keeps the worst frame where it was.** A wrap is some thirty
+ * times its extrusion's triangles, and with no cap a street of them took the
+ * whole of {@link MAPPED_BUILDING_TRIANGLES} for seven buildings and left the
+ * other twenty-nine undrawn.
+ */
+export const MAPPED_KIT_NEAR_MAX = 6;
+
+/**
+ * How far the rider rides before the belt asks again which plans are wraps —
+ * #3334, PR #3343's review: **10 m**. A refill is a chunk's
+ * ({@link MAPPED_CHUNK_METRES}, 100 m), and six wraps are some 22 m of street
+ * a side, so chosen once a chunk they were behind the rider for most of it.
+ * The question is cheap (one pass over the plans, and the selection where the
+ * six candidates are other plans); the belt is refilled only where the wraps
+ * it would draw are other plans, and never asked where the last refill drew
+ * none (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`,
+ * §`wrapsWouldChange`). Measured a metre a frame: 38 refills between chunks
+ * in 700 m of the terrace fixture, 41 in 1 200 m of the city streetscape, 2 in
+ * 700 m of the street of house models.
+ *
+ * ⚠️ **So on a street of wraps the belt refills every 18 to 29 m on average,
+ * and at the most every 10 m, where it refilled every 100 m.** A refill writes every mapped building in the frame.
+ * What that costs a tablet's frame is not measured: it is part of the frame
+ * check owed on #3334.
+ */
+export const MAPPED_KIT_STRIDE_METRES = 10;
+
+/**
+ * How far up the road from the rider the point is that the wraps are nearest
+ * — #3334: **14 m**. With three wraps a side, about 22 m of street, the wraps
+ * then reach from about 3 m to 25 m ahead as they are chosen and from 7 m
+ * behind to 15 m ahead {@link MAPPED_KIT_STRIDE_METRES} later: beside the
+ * rider and ahead, where the camera looks. A building becomes a wrap about
+ * 25 m ahead, which is seen; six wraps cannot reach further.
+ */
+export const MAPPED_KIT_FOCUS_AHEAD_METRES = 14;
+
+/**
+ * The most triangles the wraps drawn at once may be between them — #3334:
+ * **18 000**, {@link MAPPED_KIT_NEAR_MAX} at {@link REALISTIC_KIT_WRAP_TRIANGLES}.
+ * They come out of {@link MAPPED_BUILDING_TRIANGLES}' 23 040, which is NOT
+ * raised: at least 5 040 are left for the frame's other mapped buildings and
+ * the procedural structures ranked with them, where a street of extrusions
+ * spends about 2 800 on all thirty-six.
+ *
+ * **The worst frame**: the structure term is 23 040 triangles with the kit as
+ * without it, of which wraps are never more than 18 000, in one draw call
+ * inside {@link MAPPED_BUILDING_DRAW_CALLS}. And never at a building's cost:
+ * `mapped-buildings.ts` §`selectMappedBuildings` draws one wrap fewer until
+ * the frame has every building, and every procedural structure, it has with
+ * no wrap. What the wraps do take is the field boundaries': on the terrace
+ * fixture at 1 250 m a refill is 2 842 mapped triangles without the kit and
+ * 19 334 with it (six wraps, 16 822, and their paved aprons), and leaves walls, hedges and fences 5
+ * structures where it left 31; with 8 billboards and 6 procedural structures
+ * in the frame, four wraps (11 160) and all 36 buildings and 6 structures
+ * still. `mapped-kit-belt.test.ts` holds the arithmetic, the selection and
+ * each of those figures. What it does to a tablet's frame is not measured: the
+ * frame check is owed (#3334).
+ *
+ * @test-facing the wraps' share of the worst frame, stated: it is the product of
+ * the two constants the product does read, and `mapped-kit-belt.test.ts` holds
+ * every refill's wraps to it
+ */
+export const MAPPED_KIT_TRIANGLES = MAPPED_KIT_NEAR_MAX * REALISTIC_KIT_WRAP_TRIANGLES;
+
+/**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
  * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
  * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
@@ -1558,8 +1790,8 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * ## Raised to 47 MiB for the people's models — the owner's request of 2026-11-18
  *
  * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).**
- * ⚠️ **This rise is the pull request's own and waits on the owner's
- * confirmation**: asked for "a real model for the pedestrian", the owner
+ * **Confirmed by the owner on 2026-11-26** (#3337, below). It began as
+ * the pull request's own rise, which waited on that confirmation: asked for "a real model for the pedestrian", the owner
  * named no figure. Measured on the committed files: the set with its
  * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
  * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
@@ -1584,17 +1816,61 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
  * three — which is what keeps the cost to one GLB rather than 1.5 MB.
  *
- * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
- * and this one has not been ruled on**: the issue asks for the body and its
- * stated cost, not for a figure. As before, the APK carries the same bytes
+ * The ceiling itself was the owner's to rule on, as each rise above was, and
+ * the issue asked for the body and its stated cost, not for a figure; the
+ * owner confirmed the 47 MiB on 2026-11-26 and then raised it (below). As before, the APK carries the same bytes
  * more, and a browser's first download does not move: the file is outside
  * the precache, and a ride fetches it only when it draws a female rider.
+ *
+ * ## Raised to 100 MiB for real model files — #3337, the owner's ruling of 2026-11-26
+ *
+ * **Old ceiling 47 MiB (49 283 072 bytes), new 100 MiB (104 857 600).** The
+ * owner ruled on #3337 (2026-11-26) to raise it to make room for real model
+ * files — buildings, cars, scenery — under epic #3249, and in the same ruling
+ * **confirmed the 46 to 47 MiB rise** above (the people's models and the
+ * female rider), which had waited on that. This change adds nothing to the
+ * build: it moved the ceiling and no file, so the set was still the
+ * 49 051 685 bytes the female rider's section measured, and 55 805 915 under
+ * the new ceiling, until #1293 (below) took 10 616 301 of them away.
+ *
+ * What that does to a download: **every megabyte the set grows by ships in the
+ * APK and in the Play download**, since every file in `dist` is copied into
+ * the app (ADR 0026 D-7). The whole Android app is about 49 MB today. Play's
+ * base-module limit is 500 MB and it warns a rider installing on mobile data
+ * above 200 MB, so a full 100 MiB would roughly triple the app yet stay well
+ * under that warning. A **browser's first download** of the app does not move:
+ * the realistic files are outside the service worker's precache by their
+ * location (`realistic-assets.ts` §`REALISTIC_DIRECTORY`), and are fetched
+ * only when a rider picks the realistic world.
+ *
+ * ⚠️ **The ceiling is room, not a reason to stop counting.** ADR 0099 D-4
+ * stands: every new model states what it costs the build, in the pull request
+ * that adds it, and `realistic-budget.test.ts` still reads every committed
+ * file back off disk against this figure.
+ *
+ * ## 10 616 301 bytes freed, and the ceiling not lowered — #1293
+ *
+ * The scanned broadleaves were deleted on the owner's ruling of 2026-11-26
+ * ({@link REALISTIC_TRIANGLES}, "The scanned broadleaves, removed"). It
+ * landed after the rise to 100 MiB above, so it is measured against that:
+ * the set with its transcoder is **38 435 384**, 66 422 216 under 100 MiB,
+ * where it was 49 051 685. The room is for the models #3249's lanes add, so
+ * this figure stays where the owner's ruling on #3337 put it.
+ *
+ * ## The downtown kit's facade pieces, inside the 100 MiB — #3334
+ *
+ * Measured on the committed files, after #1293's deletion above: the kit's
+ * GLB and its atlas ({@link REALISTIC_DOWNTOWN_KIT_SURFACES}) add **887 010**
+ * (560 112 and 326 898; they were 153 952 before the kit was used properly,
+ * PR #3343's look check), so the set with its transcoder is **39 322 394**,
+ * 65 535 206 under 100 MiB. Nothing was raised for them. The APK carries the
+ * same bytes more, and a browser's first download does not move.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 100 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
