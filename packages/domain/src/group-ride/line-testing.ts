@@ -20,6 +20,7 @@ import {
   type MemberView,
   type RotationRequest,
   type RotationState,
+  type RotationStep,
   type RotationView,
 } from './rotation';
 
@@ -67,6 +68,8 @@ export interface LineWindow {
   readonly requests: readonly RotationRequest[];
   /** The view the window decided on. */
   readonly view: RotationView;
+  /** The rotation's whole answer for the window. */
+  readonly step: RotationStep;
 }
 
 /** The front member's id in a view's terms: the first of the order. */
@@ -140,6 +143,7 @@ export function rideLine(script: LineScript): {
       demands: step.demands,
       requests: step.requests,
       view,
+      step,
     });
 
     // Move everyone on to the next window, by the roles just decided.
