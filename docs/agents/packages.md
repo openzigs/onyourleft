@@ -96,7 +96,11 @@ packages/             Apache-2.0, without exception
                         `stepGroupRide`: the bots ridden a tick at a time
                         through a physics the caller passes (physics'
                         `groupRidePhysics`), one draft call for every rider;
-                        the rider is read and never written
+                        the rider is read and never written. Since #3301
+                        no-drop (`no-drop.ts`): a sweep bot for a gapped
+                        rider, a line that waits or regroups at a speed
+                        with no lower limit, and a ledger paused while it
+                        does; it hands the rider a standing and nothing else
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

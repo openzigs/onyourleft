@@ -97,3 +97,18 @@ export type {
   GroupRoad,
 } from './step';
 export { startGroupRide, stepGroupRide } from './step';
+
+// No-drop (#3301): where the rider stands, the sweep, and a line that holds
+// for the rider at a speed with no lower limit. Decided once a window, ridden
+// by `stepGroupRide`; nothing for the rider but a standing.
+export type { NoDropHold, NoDropState, NoDropStep, NoDropView, RiderStanding } from './no-drop';
+export {
+  NO_DROP_FULL_EASE_SECONDS,
+  NO_DROP_GAPPED_METRES,
+  NO_DROP_REACH_METRES,
+  NO_DROP_SETTLE_MS,
+  noDropRole,
+  RIDER_STANDINGS,
+  startNoDrop,
+  stepNoDrop,
+} from './no-drop';

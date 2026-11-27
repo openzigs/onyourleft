@@ -16,6 +16,10 @@
  *   front, what holds the group's speed; and they press pull off
  *   {@link RiderScript.pressAfterSeconds} into a pull.
  * - `watts`: a fixed power, whatever the group does.
+ * - `share` (#3301): that share of the plan's power on the road under them.
+ * - `stop` (#3301): for a while they pedal nothing, and the group is told
+ *   they have stopped. They roll to rest through the physics, as a rider on
+ *   a trainer does: nothing here stops them short.
  *
  * ⚠️ **The script has a brake, and a rider on a trainer has none.** Where
  * the wheel rule asks the scripted rider for less than nothing (down the
@@ -29,6 +33,7 @@ import {
   BOT_TACTIC_WHEEL_GAP_METRES,
   botWheelWatts,
   gradeAt,
+  GROUP_LEDGER_START,
   metresPerSecond,
   planGroupRide,
   ROTATION_EASE_SHARE,
@@ -85,6 +90,10 @@ export const SIX: readonly LineMember[] = [
 export interface RiderScript {
   /** A fixed power, watts, in place of holding the wheel. */
   readonly watts?: number;
+  /** A share of the plan's power on the road under them, in place of holding the wheel. */
+  readonly share?: number;
+  /** From `fromSeconds` to `toSeconds` they pedal nothing and the group is told they have stopped. */
+  readonly stop?: { readonly fromSeconds: number; readonly toSeconds: number };
   /** How long into their own pull they press pull off, seconds; 20 unless named. */
   readonly pressAfterSeconds?: number;
   /** Whether they sit in. */
@@ -111,6 +120,10 @@ export interface GroupScript {
   readonly rider?: RiderScript;
   /** The bend radius the group is told of, metres. */
   readonly bendRadiusM?: number;
+  /** Where on the course the line forms up, metres; the start unless named. */
+  readonly fromM?: number;
+  /** Whether the no-drop rule (#3301) is on; on unless `false`. */
+  readonly noDrop?: boolean;
 }
 
 /** One tick of a scripted ride: the line as the tick began, and what the tick decided on it. */
@@ -160,14 +173,20 @@ export function rideGroup(script: GroupScript): GroupRide {
   const physics = groupRidePhysics();
   const own = groupRidePhysics(RIDER_MASS_KILOGRAMS);
   const plan = planFor(course, script.targetKmh);
-  const road = { course, plan, physics };
+  const road = {
+    course,
+    plan,
+    physics,
+    ...(script.noDrop === undefined ? {} : { noDrop: script.noDrop }),
+  };
   const line = script.line ?? SIX;
   const riding = script.rider ?? {};
   const total = course.totalDistance as number;
 
   // The bots form up at the route's start at the group's speed; so does the
   // rider, unless the script starts them somewhere else.
-  const seat: MemberView = { distanceM: 0, speedMps: plan.speedNowAt(0) };
+  const fromM = script.fromM ?? 0;
+  const seat: MemberView = { distanceM: fromM, speedMps: plan.speedNowAt(fromM) };
   let rider: MemberView = riding.start ?? seat;
   let state = startGroupRide({ line, seed: script.seed ?? 7, atMs: 0, rider: seat });
   let slowTo: number | null = null;
@@ -182,6 +201,10 @@ export function rideGroup(script: GroupScript): GroupRide {
       state.rotation.phase === 'steady' &&
       pull?.by === YOU &&
       state.atMs - pull.fromMs >= (riding.pressAfterSeconds ?? 20) * 1_000;
+    const stopped =
+      riding.stop !== undefined &&
+      seconds >= riding.stop.fromSeconds &&
+      seconds < riding.stop.toSeconds;
     // Frozen: a step that wrote to the rider would throw here.
     Object.freeze(rider);
     const tick = stepGroupRide(
@@ -191,6 +214,7 @@ export function rideGroup(script: GroupScript): GroupRide {
         rider,
         riderSignal: press,
         riderSittingIn: riding.sittingIn ?? false,
+        ...(stopped ? { riderStopped: true } : {}),
         ...(script.bendRadiusM === undefined ? {} : { bendRadiusM: script.bendRadiusM }),
       },
       road,
@@ -236,8 +260,12 @@ export function rideGroup(script: GroupScript): GroupRide {
     const slow = riding.slow;
     let wanted: number;
     let brakes = true;
-    if (riding.watts !== undefined) {
+    if (stopped) {
+      wanted = 0;
+    } else if (riding.watts !== undefined) {
       wanted = riding.watts;
+    } else if (riding.share !== undefined) {
+      wanted = riding.share * plan.powerAt(rider.distanceM, GROUP_LEDGER_START);
     } else if (slow !== undefined && seconds >= slow.fromSeconds && seconds < slow.toSeconds) {
       slowTo ??= rider.speedMps - slow.kmh / 3.6;
       wanted = held(slowTo);
