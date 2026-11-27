@@ -42,7 +42,7 @@ import {
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { drawnRoadFrame } from './terrain';
-import { MappedBuildingBelt, type RealisticHouses } from './three-renderer';
+import { kitGeometriesOf, MappedBuildingBelt, type RealisticHouses } from './three-renderer';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 
 function aTexture(): never {
@@ -247,6 +247,61 @@ describe('a refill’s selection, with the kit loaded — #3334', () => {
     expect(one.kitCount).toBeGreaterThan(0);
     expect(one.surfaces.length).toBe(0);
     expect(one.passed).toBeGreaterThan(0);
+  });
+});
+
+describe('the kit a loaded scene is read as — #3334', () => {
+  /** A scene as the loader leaves one: a node a piece, named by its id, holding `triangles`. */
+  function sceneOf(triangles: (id: string) => number | undefined): never {
+    const nodes = KIT_PIECES.flatMap((piece) => {
+      const count = triangles(piece.id);
+      if (count === undefined) return [];
+      const attribute = (size: number): { array: Float32Array } => ({
+        array: new Float32Array(count * 3 * size),
+      });
+      const node = {
+        name: piece.id,
+        isMesh: true,
+        geometry: {
+          index: null,
+          getAttribute: (name: string) => attribute(name === 'uv' ? 2 : 3),
+        },
+        traverse: (visit: (each: unknown) => void): void => {
+          visit(node);
+        },
+      };
+      return [node];
+    });
+    const scene = {
+      name: '',
+      traverse: (visit: (each: unknown) => void): void => {
+        visit(scene);
+        for (const node of nodes) visit(node);
+      },
+    };
+    return scene as never;
+  }
+  const table = (id: string): number | undefined =>
+    KIT_PIECES.find((piece) => piece.id === id)?.triangles;
+
+  it('takes a scene whose every piece is the table’s, with a card made for each', () => {
+    const kit = kitGeometriesOf(sceneOf(table));
+    expect(kit?.pieces.map((piece) => piece.triangles)).toEqual(
+      KIT_PIECES.map((piece) => piece.triangles),
+    );
+    expect(kit?.cards.map((card) => card.triangles)).toEqual(KIT_PIECES.map(() => 2));
+  });
+
+  it('refuses a scene with a piece missing, or one that is not the triangles a wrap was priced at', () => {
+    // A wrap's count was planned from the table: a piece of another size would be
+    // written past its building's range of the buffer.
+    expect(
+      kitGeometriesOf(sceneOf((id) => (id === 'metal-door' ? undefined : table(id)))),
+    ).toBeUndefined();
+    expect(
+      kitGeometriesOf(sceneOf((id) => (id === 'brick-window' ? 173 : table(id)))),
+    ).toBeUndefined();
+    expect(kitGeometriesOf(sceneOf(() => undefined))).toBeUndefined();
   });
 });
 
