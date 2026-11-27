@@ -68,6 +68,20 @@ import type { WeekProgress } from '../round';
 import { LEVEL_CATALOGUE } from './catalogue';
 import { parseLevelFile, type LevelFile } from './level-file';
 
+/** #2969: whether each scene the ride built walked people on the verges, in order. */
+const verges = vi.hoisted((): (boolean | undefined)[] => []);
+
+vi.mock('../../scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../scene')>();
+  return {
+    ...actual,
+    sceneFrame: (input: Parameters<typeof actual.sceneFrame>[0]) => {
+      verges.push(input.vergeWalkers);
+      return actual.sceneFrame(input);
+    },
+  };
+});
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_JSON = JSON.parse(
   readFileSync(join(HERE, 'fixtures', 'fixture-level.json'), 'utf8'),
@@ -147,6 +161,7 @@ beforeEach(() => {
   nowMs = 0;
   realisticAsked = 0;
   read.length = 0;
+  verges.length = 0;
   localStorage.clear();
   writeRealisticWorldChoice(localStorage, true);
   localStorage.setItem(
@@ -579,6 +594,20 @@ describe('a press on a level is always a round — ADR 0065 D-8.1', () => {
     expect(houses?.querySelector('.oyl-hud__value')?.firstChild?.textContent).toBe(
       String(fixtureAs(FIRST.id).round.houses),
     );
+  });
+});
+
+describe('people on a level’s round — #2969', () => {
+  it('asks the scene for verge walkers on every frame of a level’s round (a saved route’s: delivery-wiring.test.tsx)', async () => {
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    for (let frame = 0; frame < 8; frame += 1) await pump();
+    // The round starts once the level's town is planned; every frame from it asks.
+    const from = verges.indexOf(true);
+    expect(from).toBeGreaterThanOrEqual(0);
+    expect(verges.length - from).toBeGreaterThanOrEqual(4);
+    expect(verges.slice(from).every((asked) => asked === true)).toBe(true);
   });
 });
 

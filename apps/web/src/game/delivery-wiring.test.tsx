@@ -200,6 +200,8 @@ const steerOutputs = vi.hoisted((): (number | undefined)[] => []);
  * to the odometer), so it is read back off the input the frame was made from.
  */
 const drawnAlongInputs = vi.hoisted((): (number | undefined)[] => []);
+/** #2969: whether each frame asked for people on the verges, which only a level's round does. */
+const vergeInputs = vi.hoisted((): (boolean | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -209,6 +211,7 @@ vi.mock('./scene', async (importOriginal) => {
       cameraInputs.push(args[0].cameraLateral);
       swayInputs.push(args[0].steeredSway);
       drawnAlongInputs.push(args[0].riderDistance);
+      vergeInputs.push(args[0].vergeWalkers);
       const frame = actual.sceneFrame(...args);
       steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
       return frame;
@@ -773,6 +776,9 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(ride.drawn.at(-1)?.delivery?.markers).toEqual([]);
     expect(ride.drawn.some((frame) => (frame.delivery?.parcels.length ?? 0) > 0)).toBe(true);
     expect(ride.drawn.some((frame) => (frame.delivery?.obstacles.length ?? 0) > 0)).toBe(true);
+    // #2969: a rider's own route walks its streets and footways only, never the verges.
+    expect(vergeInputs.length).toBeGreaterThan(100);
+    expect(vergeInputs.filter((asked) => asked !== false)).toEqual([]);
   });
 
   it('sends the trainer the same writes, each grade at the same time, with the round as without it (DL5)', async () => {

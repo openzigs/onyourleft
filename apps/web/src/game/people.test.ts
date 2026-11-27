@@ -27,6 +27,8 @@ import {
   PERSON_CLEARANCE_METRES,
   PERSON_HALF_WIDTH_METRES,
   RUNNER_SHARE,
+  VERGE_PEOPLE_PER_METRE,
+  VERGE_WALK_FROM_CENTRE_METRES,
   armLines,
   besideSideRoads,
   clearOfPavements,
@@ -34,6 +36,7 @@ import {
   streetWalks,
   peopleAt,
   personLook,
+  vergeWalks,
   villageDensity,
   walkLine,
   type PeopleOptions,
@@ -373,6 +376,84 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
     }
     expect(ruled).toBeGreaterThan(0);
     expect(over).toBeGreaterThan(0);
+  });
+});
+
+describe('people on both verges, where a ride asks — #2969, through `sceneFrame`', () => {
+  const FARMLAND = northRoute(6_000, () => 40);
+  const ORIGIN = corridorOrigin(FARMLAND);
+  const SEED = scatterSeed(FARMLAND);
+  const { sites } = siteSpacing(FARMLAND);
+  const village = [...Array(sites).keys()]
+    .map((index) => siteAt(FARMLAND, SEED, index))
+    .find((site): site is Site => site?.kind === 'village') as Site;
+  // Away from any village, and with no mapped footway: where nobody walked before.
+  const along = (village.centre + 1_000) % FARMLAND.totalDistance;
+  const road: RoadDistance = (x, z, reach) => distanceToDrawnRoad(FARMLAND, ORIGIN, x, z, reach);
+
+  function frameAt(
+    second: number,
+    extra: Partial<Parameters<typeof sceneFrame>[0]> = {},
+  ): ReturnType<typeof sceneFrame> {
+    const start = atStartLine(FARMLAND);
+    return sceneFrame({
+      profile: FARMLAND,
+      origin: ORIGIN,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres(along) },
+        elapsed: seconds(second),
+        ridden: seconds(second),
+      },
+      people: PEOPLE_NEAR_MAX,
+      ...extra,
+    });
+  }
+
+  it('walks nobody on an open road unless asked, and both verges when asked, off the carriageway', () => {
+    let asked = 0;
+    const sides = new Set<number>();
+    for (let second = 0; second < 120; second += 10) {
+      expect(frameAt(second).people, `second ${String(second)}`).toEqual(NO_PEOPLE);
+      expect(frameAt(second, { vergeWalkers: false }).people).toEqual(NO_PEOPLE);
+      const people = frameAt(second, { vergeWalkers: true }).people ?? NO_PEOPLE;
+      expect(people.near.length).toBeLessThanOrEqual(PEOPLE_NEAR_MAX);
+      for (const person of [...people.near, ...people.far]) {
+        asked += 1;
+        const out = road(person.x, person.z, 20);
+        expect(out).toBeGreaterThanOrEqual(PERSON_CLEARANCE_METRES);
+        expect(out).toBeLessThan(VERGE_WALK_FROM_CENTRE_METRES + 0.5);
+        const at = drawnRoadFrame(FARMLAND, ORIGIN, along);
+        if (at !== undefined) {
+          sides.add(Math.sign((person.x - at.x) * at.normalX + (person.z - at.z) * at.normalZ));
+        }
+      }
+    }
+    expect(asked).toBeGreaterThan(0);
+    expect(sides).toEqual(new Set([-1, 1]));
+  });
+
+  it('lays both verges the whole road long, at the verge’s density, and none with the rule broken', () => {
+    const lines = vergeWalks(FARMLAND, ORIGIN, road);
+    expect(vergeWalks(FARMLAND, ORIGIN, road)).toBe(lines);
+    // GameView asks with a fresh, equal origin every frame: still a hit.
+    expect(vergeWalks(FARMLAND, corridorOrigin(FARMLAND), road)).toBe(lines);
+    const length = lines.reduce((sum, line) => sum + line.length, 0);
+    // Two verges of a 6 km road, less what the rule breaks off at a bend.
+    expect(length).toBeGreaterThan(2 * 0.9 * FARMLAND.totalDistance);
+    const people = lines.reduce((sum, line) => sum + line.people, 0);
+    expect(people).toBeGreaterThanOrEqual(
+      Math.floor(length * VERGE_PEOPLE_PER_METRE) - lines.length,
+    );
+    expect(people).toBeLessThanOrEqual(Math.ceil(length * VERGE_PEOPLE_PER_METRE) + lines.length);
+    for (const line of lines) {
+      expect(line.kind).toBe('sidewalk');
+      expect(RUNNER_SHARE[line.kind]).toBe(0);
+      for (let at = 0; at < line.points.length; at += 3) {
+        const out = road(line.points[at] as number, line.points[at + 2] as number, 20);
+        expect(out).toBeGreaterThanOrEqual(PERSON_CLEARANCE_METRES);
+      }
+    }
   });
 });
 

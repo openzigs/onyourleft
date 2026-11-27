@@ -13,7 +13,9 @@
  *   each unbroken run, and its **front paths** (#1564), between the pavement
  *   and the door (`streets.ts` §`DoorPath.walk`);
  * - the corridor's mapped **footways** (#1551's `footways.ts`
- *   §`footwayNetwork`, crossings already out), on the ground beside them.
+ *   §`footwayNetwork`, crossings already out), on the ground beside them;
+ * - since #2969, on a ride that asks (a built-in level's round, which has
+ *   neither), both **verges** of the road ({@link vergeWalks}).
  *
  * Each is a {@link WalkLine}. A person walks one line to its end and back,
  * so they never step off it.
@@ -90,7 +92,7 @@ import { FOOTWAY_MAX_LINES, FOOTWAY_MAX_METRES, footwayNetwork } from './footway
 import { GAITS, STRIDE_PER_HEIGHT, wrappedPhase, type Gait } from './gait';
 import { kindAt, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
-import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
+import { distanceToDrawnRoad, drawnRoadPoints, nearestOnDrawnRoad } from './road-grid';
 import { scatterSeed } from './scatter';
 import { slotHash, uniformFrom } from './seeded';
 import { PLOT_METRES, VILLAGE_METRES } from './settlements';
@@ -533,6 +535,96 @@ export function streetWalks(
     );
   });
   byRule.set(rule, lines);
+  return lines;
+}
+
+/**
+ * How far from the road's centreline a verge walker walks, in metres: **5** —
+ * #2969: the kerb's 3.5 m and a metre and a half, where a pavement would be,
+ * so well clear of {@link PERSON_CLEARANCE_METRES}. This project's own number.
+ */
+export const VERGE_WALK_FROM_CENTRE_METRES = 5;
+
+/**
+ * People per metre of each verge, either side of the road — #2969: **0.0125**,
+ * one every 80 m a side, so about three bodies within
+ * {@link PEOPLE_NEAR_METRES} of the rider and seven in all within
+ * {@link PEOPLE_FAR_METRES}, a quarter of {@link PEOPLE_PER_METRE}'s
+ * `built-up` footway's. This project's own number, for the owner's approval
+ * in #2969's pull request.
+ */
+export const VERGE_PEOPLE_PER_METRE = 0.0125;
+
+/** Every how many of the drawn road's two-metre points a verge line takes one: **2**, four metres. */
+const VERGE_POINT_STRIDE = 2;
+
+/** The verge lines of each profile, by origin and rule. */
+const vergeLines = new WeakMap<
+  RouteProfile,
+  { origin: CorridorOrigin; rule: boolean; lines: readonly WalkLine[] }[]
+>();
+
+/**
+ * Both verges of the whole drawn road as lines people walk — #2969: a
+ * built-in level's round has no mapped footway and no village street, so
+ * nobody walked it (*"not seeing … people"*, the owner's ride of 2026-11-20).
+ * Each runs {@link VERGE_WALK_FROM_CENTRE_METRES} off the drawn centreline,
+ * either side, at {@link VERGE_PEOPLE_PER_METRE}, as a `sidewalk` (no
+ * runners), and is broken by the rule as any line is: wherever it comes
+ * within {@link PERSON_CLEARANCE_METRES} of any stretch of the road, the
+ * inside of a tight bend or another leg of the loop. `scene.ts` adds them
+ * only for a ride that asks (`SceneInput.vergeWalkers`). Built once per
+ * profile, origin and rule.
+ */
+export function vergeWalks(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  road: RoadDistance,
+  rule = true,
+): readonly WalkLine[] {
+  const cached = vergeLines.get(profile) ?? [];
+  const found = cached.find(
+    (entry) =>
+      entry.origin.latitude === origin.latitude &&
+      entry.origin.longitude === origin.longitude &&
+      entry.rule === rule,
+  );
+  if (found !== undefined) return found.lines;
+  const { points } = drawnRoadPoints(profile, origin);
+  const count = points.length / 2;
+  const lines: WalkLine[] = [];
+  for (const [side, sign] of [
+    [0, -1],
+    [1, 1],
+  ] as const) {
+    const verge: number[] = [];
+    for (let at = 0; at < count; at += VERGE_POINT_STRIDE) {
+      const before = Math.max(0, at - 1);
+      const after = Math.min(count - 1, at + 1);
+      const dx = (points[after * 2] as number) - (points[before * 2] as number);
+      const dz = (points[after * 2 + 1] as number) - (points[before * 2 + 1] as number);
+      const length = Math.hypot(dx, dz);
+      if (!(length > 0)) continue;
+      // The road's normal, (−dz, dx), to one side and then the other.
+      verge.push(
+        (points[at * 2] as number) - (sign * dz * VERGE_WALK_FROM_CENTRE_METRES) / length,
+        (points[at * 2 + 1] as number) + (sign * dx * VERGE_WALK_FROM_CENTRE_METRES) / length,
+      );
+    }
+    lines.push(
+      ...walkLine(
+        verge,
+        2,
+        'sidewalk',
+        VERGE_PEOPLE_PER_METRE,
+        slotHash(0x2969, side, 4),
+        road,
+        rule,
+      ),
+    );
+  }
+  cached.push({ origin, rule, lines });
+  vergeLines.set(profile, cached);
   return lines;
 }
 

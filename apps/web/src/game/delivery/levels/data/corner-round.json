@@ -16,7 +16,7 @@
       "afterMetres": 1
     },
     "hazardsPerKilometre": {
-      "static": 2,
+      "static": 5,
       "moving": 1
     },
     "mailboxShare": 0,
