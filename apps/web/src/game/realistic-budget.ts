@@ -1588,12 +1588,16 @@ export const MAPPED_KIT_NEAR_MAX = 6;
  * #3334, PR #3343's review: **10 m**. A refill is a chunk's
  * ({@link MAPPED_CHUNK_METRES}, 100 m), and six wraps are some 22 m of street
  * a side, so chosen once a chunk they were behind the rider for most of it.
- * The question is cheap (one pass over the plans); the answer changes about
- * once a building passed, and only then is the belt refilled
- * (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`).
+ * The question is cheap (one pass over the plans, and the selection where the
+ * six candidates are other plans); the belt is refilled only where the wraps
+ * it would draw are other plans, and never asked where the last refill drew
+ * none (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`,
+ * §`wrapsWouldChange`). Measured a metre a frame: 38 refills between chunks
+ * in 700 m of the terrace fixture, 41 in 1 200 m of the city streetscape, 2 in
+ * 700 m of the street of house models.
  *
- * ⚠️ **So on a street of wraps the belt refills up to every 10 m, where it
- * refilled every 100 m.** A refill writes every mapped building in the frame.
+ * ⚠️ **So on a street of wraps the belt refills every 18 to 29 m on average,
+ * and at the most every 10 m, where it refilled every 100 m.** A refill writes every mapped building in the frame.
  * What that costs a tablet's frame is not measured: it is part of the frame
  * check owed on #3334.
  */

@@ -78,7 +78,9 @@ describe('#2294 — the most houses a round can hold on a route', () => {
     planned.length = 0;
     const counted = roundHousesOn(town.corridor, town.profile);
     expect(planned.map((options) => options?.facadeKit)).toEqual([false]);
-    // And the count is the count a ride's own plans give: a wrap changes no house's.
+    // And the count is the count a ride's own plans give. (No footprint of this town is
+    // wrapped either way; that a wrap changes no house's count rests on `plan.kit` being
+    // read by the belt and the selection alone.)
     const land = landClassMask(town.corridor);
     const origin = corridorOrigin(town.profile);
     const { plans } = footprintPlans(town.corridor, land, town.profile, origin);

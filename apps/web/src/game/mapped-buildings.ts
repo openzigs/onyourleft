@@ -541,7 +541,48 @@ export function selectMappedBuildings(
   ahead?: Float32Array,
   kit = false,
 ): void {
-  const walk = (wraps: number): void => {
+  // No closure and no object here: since #3334 the belt runs this between chunks too, to ask
+  // whether the wraps would change, on a frame that may write nothing.
+  const most = kit ? MAPPED_KIT_NEAR_MAX : 0;
+  walkMappedBuildings(
+    buildings,
+    x,
+    z,
+    triangleBudget,
+    into,
+    surfaceSlots,
+    rivals,
+    models,
+    ahead,
+    most,
+  );
+  if (!kit) return;
+  // #3334: never fewer buildings, nor fewer structures ranked in, nor more passed over, than
+  // the same refill draws with no wrap at all. Where the wraps took triangles or a surface slot
+  // a farther building or a structure was drawn in, one wrap fewer, until none is. ⚠️ Not
+  // skipped where the first walk took no wrap: a wrap tried and not fitting stops that walk
+  // short, and the bare walk is what it must not be shorter than.
+  const firstCount = into.count;
+  const firstRivals = into.rivals;
+  const firstPassed = into.passed;
+  let wraps = into.kitCount;
+  walkMappedBuildings(
+    buildings,
+    x,
+    z,
+    triangleBudget,
+    into,
+    surfaceSlots,
+    rivals,
+    models,
+    ahead,
+    0,
+  );
+  const bareCount = into.count;
+  const bareRivals = into.rivals;
+  const barePassed = into.passed;
+  if (wraps === 0) return;
+  if (firstCount >= bareCount && firstRivals >= bareRivals && firstPassed <= barePassed) {
     walkMappedBuildings(
       buildings,
       x,
@@ -554,29 +595,23 @@ export function selectMappedBuildings(
       ahead,
       wraps,
     );
-  };
-  walk(kit ? MAPPED_KIT_NEAR_MAX : 0);
-  if (!kit) return;
-  // #3334: never fewer buildings, nor fewer structures ranked in, nor more passed over, than
-  // the same refill draws with no wrap at all. Where the wraps took triangles or a surface slot
-  // a farther building or a structure was drawn in, one wrap fewer, until none is. ⚠️ Not
-  // skipped where the first walk took no wrap: a wrap tried and not fitting stops that walk
-  // short, and the bare walk is what it must not be shorter than.
-  const first = { count: into.count, rivals: into.rivals, passed: into.passed };
-  let wraps = into.kitCount;
-  walk(0);
-  const bare = { count: into.count, rivals: into.rivals, passed: into.passed };
-  const holds = (): boolean =>
-    into.count >= bare.count && into.rivals >= bare.rivals && into.passed <= bare.passed;
-  if (wraps === 0) return;
-  if (first.count >= bare.count && first.rivals >= bare.rivals && first.passed <= bare.passed) {
-    walk(wraps);
     return;
   }
   while (wraps > 0) {
     wraps -= 1;
-    walk(wraps);
-    if (holds()) return;
+    walkMappedBuildings(
+      buildings,
+      x,
+      z,
+      triangleBudget,
+      into,
+      surfaceSlots,
+      rivals,
+      models,
+      ahead,
+      wraps,
+    );
+    if (into.count >= bareCount && into.rivals >= bareRivals && into.passed <= barePassed) return;
   }
 }
 
@@ -595,9 +630,9 @@ const NO_WRAPS: readonly number[] = [];
  * other choice of a refill ranks a building by its distance from the 200 m of
  * road ahead, which is much the same for every building beside it; ranked so,
  * the six wraps were wherever the index put them, and held for a whole
- * {@link MAPPED_CHUNK_METRES}. The belt asks this again every
- * `MAPPED_KIT_STRIDE_METRES` and refills when the answer changes
- * (`three-renderer.ts` §`MappedBuildingBelt.needsRefill`).
+ * {@link MAPPED_CHUNK_METRES}. The belt runs the selection again every
+ * `MAPPED_KIT_STRIDE_METRES` and refills when the wraps it would draw are
+ * other plans (`three-renderer.ts` §`MappedBuildingBelt.wrapsWouldChange`).
  *
  * Ahead of the rider, because the camera looks up the road: a wrap behind the
  * rider is three thousand triangles nobody sees.
@@ -608,49 +643,148 @@ export function nearWraps(
   z: number,
   ahead: Float32Array | undefined,
   wraps: number = MAPPED_KIT_NEAR_MAX,
+  /** Written and returned; a new list where none is given. Allocates nothing with one. */
+  into: number[] = [],
 ): readonly number[] {
-  let focusX = x;
-  let focusZ = z;
+  RIDER[0] = x;
+  RIDER[1] = z;
+  return wrapsNearRider(buildings, ahead, wraps, into);
+}
+
+/**
+ * {@link nearWraps} for the rider of a view — what the belt asks on a frame
+ * that is not a refill: the rider's place is read off `at` here, so no number
+ * crosses a call as an argument (which, below the engine's top tier, is a
+ * boxed number allocated on every call).
+ */
+export function nearWrapsAt(
+  buildings: MappedBuildings,
+  at: { readonly x: number; readonly z: number },
+  ahead: Float32Array | undefined,
+  into: number[],
+): readonly number[] {
+  RIDER[0] = at.x;
+  RIDER[1] = at.z;
+  return wrapsNearRider(buildings, ahead, MAPPED_KIT_NEAR_MAX, into);
+}
+
+/** {@link nearWraps}, the rider's place in {@link RIDER}. */
+function wrapsNearRider(
+  buildings: MappedBuildings,
+  ahead: Float32Array | undefined,
+  wraps: number,
+  into: number[],
+): readonly number[] {
+  // ⚠️ The focus and the nearest's distance are kept in a typed array, not in locals that an
+  // `if` or a loop reassigns: until the engine's top tier has the function, each such local
+  // is a boxed number allocated on every call (48 bytes a call, measured).
+  FOCUS[0] = RIDER[0] as number;
+  FOCUS[1] = RIDER[1] as number;
   if (ahead !== undefined && ahead.length >= 4) {
     const dx = (ahead[2] as number) - (ahead[0] as number);
     const dz = (ahead[3] as number) - (ahead[1] as number);
-    const span = Math.hypot(dx, dz);
+    // ⚠️ No `Math.hypot` in this function: the engine's allocates on every call, and this
+    // runs on frames that are not refills (`mapped-kit-belt.test.ts` measured 68 bytes a plan).
+    const span = Math.sqrt(dx * dx + dz * dz);
     if (span > 0) {
-      focusX += (dx / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
-      focusZ += (dz / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+      FOCUS[0] = (RIDER[0] as number) + (dx / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
+      FOCUS[1] = (RIDER[1] as number) + (dz / span) * MAPPED_KIT_FOCUS_AHEAD_METRES;
     }
   }
   const { plans } = buildings;
-  const near: { readonly index: number; readonly apart: number }[] = [];
+  // ⚠️ `into` is never emptied and filled again: that frees and reallocates its store. It is
+  // written in place and cut to length once.
+  const most = Math.min(wraps, MAPPED_KIT_NEAR_MAX);
+  if (most <= 0) {
+    if (into.length !== 0) into.length = 0;
+    return into;
+  }
+  // The nearest of all: its door's facing is the first side.
+  let nearest = -1;
+  FOCUS[2] = Number.POSITIVE_INFINITY;
   for (let index = 0; index < plans.length; index += 1) {
     const plan = plans[index] as FootprintPlan;
     if (plan.kit === undefined) continue;
     // Near is the rider's, as the walk's near level is.
-    if (Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES) {
-      continue;
-    }
-    near.push({ index, apart: Math.hypot(plan.centroid.x - focusX, plan.centroid.z - focusZ) });
-  }
-  // Ties broken by index, so the same ride draws the same town every time.
-  near.sort((a, b) => a.apart - b.apart || a.index - b.index);
-  const sides: [number[], number[]] = [[], []];
-  const facing = plans[near[0]?.index ?? 0]?.kit?.facing;
-  if (facing === undefined) return NO_WRAPS;
-  for (const { index } of near) {
-    const kit = (plans[index] as FootprintPlan).kit as KitWrap;
-    const alike = kit.facing[0] * facing[0] + kit.facing[1] * facing[1] >= 0;
-    const side = sides[alike ? 0 : 1];
-    if (side.length < wraps) side.push(index);
-  }
-  const chosen: number[] = [];
-  for (let turn = 0; chosen.length < wraps && turn < wraps; turn += 1) {
-    for (const side of sides) {
-      const index = side[turn];
-      if (index !== undefined && chosen.length < wraps) chosen.push(index);
+    const riderX = plan.centroid.x - (RIDER[0] as number);
+    const riderZ = plan.centroid.z - (RIDER[1] as number);
+    if (riderX * riderX + riderZ * riderZ > NEAR_SQUARED) continue;
+    const offX = plan.centroid.x - FOCUS[0];
+    const offZ = plan.centroid.z - FOCUS[1];
+    // Squared: only compared.
+    const apart = offX * offX + offZ * offZ;
+    // Ties broken by index, so the same ride draws the same town every time.
+    if (apart < FOCUS[2]) {
+      nearest = index;
+      FOCUS[2] = apart;
     }
   }
-  return chosen;
+  if (nearest < 0) {
+    if (into.length !== 0) into.length = 0;
+    return into;
+  }
+  const facing = ((plans[nearest] as FootprintPlan).kit as KitWrap).facing;
+  // Each side's `most` nearest, kept in order in scratch: `SIDE_PLANS[side * most + rank]`.
+  let counts0 = 0;
+  let counts1 = 0;
+  for (let index = 0; index < plans.length; index += 1) {
+    const plan = plans[index] as FootprintPlan;
+    const kit = plan.kit;
+    if (kit === undefined) continue;
+    const riderX = plan.centroid.x - (RIDER[0] as number);
+    const riderZ = plan.centroid.z - (RIDER[1] as number);
+    if (riderX * riderX + riderZ * riderZ > NEAR_SQUARED) continue;
+    const offX = plan.centroid.x - FOCUS[0];
+    const offZ = plan.centroid.z - FOCUS[1];
+    // Squared: only compared.
+    const apart = offX * offX + offZ * offZ;
+    const side = kit.facing[0] * facing[0] + kit.facing[1] * facing[1] >= 0 ? 0 : 1;
+    const base = side * MAPPED_KIT_NEAR_MAX;
+    const count = side === 0 ? counts0 : counts1;
+    // Where it stands among its side's nearest: after every one as near or nearer.
+    let rank = count;
+    while (rank > 0 && (SIDE_APART[base + rank - 1] as number) > apart) rank -= 1;
+    if (rank >= most) continue;
+    const kept = Math.min(count + 1, most);
+    for (let at = kept - 1; at > rank; at -= 1) {
+      SIDE_PLANS[base + at] = SIDE_PLANS[base + at - 1] as number;
+      SIDE_APART[base + at] = SIDE_APART[base + at - 1] as number;
+    }
+    SIDE_PLANS[base + rank] = index;
+    SIDE_APART[base + rank] = apart;
+    if (side === 0) counts0 = kept;
+    else counts1 = kept;
+  }
+  // A side in turn, the nearest's first.
+  let chosen = 0;
+  for (let turn = 0; chosen < most && turn < most; turn += 1) {
+    if (turn < counts0 && chosen < most) {
+      into[chosen] = SIDE_PLANS[turn] as number;
+      chosen += 1;
+    }
+    if (turn < counts1 && chosen < most) {
+      into[chosen] = SIDE_PLANS[MAPPED_KIT_NEAR_MAX + turn] as number;
+      chosen += 1;
+    }
+  }
+  if (into.length !== chosen) into.length = chosen;
+  return into;
 }
+
+/** {@link nearWraps}' rider, `x, z`. */
+const RIDER = new Float64Array(2);
+
+/** {@link nearWraps}' focus, `x, z`, and the nearest plan's squared distance from it. */
+const FOCUS = new Float64Array(3);
+
+/** {@link MAPPED_BUILDING_NEAR_METRES}, squared. */
+const NEAR_SQUARED = MAPPED_BUILDING_NEAR_METRES * MAPPED_BUILDING_NEAR_METRES;
+
+/** {@link nearWraps}' scratch: each side's nearest plans and how far each is, so a call allocates nothing. */
+const SIDE_PLANS = new Int32Array(2 * MAPPED_KIT_NEAR_MAX);
+const SIDE_APART = new Float64Array(2 * MAPPED_KIT_NEAR_MAX);
+/** The walk's own list of {@link nearWraps}, reused. */
+const WALK_WRAPS: number[] = [];
 
 /**
  * {@link selectMappedBuildings}' one walk, drawing at most `wraps` plans as
@@ -698,7 +832,7 @@ function walkMappedBuildings(
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const landmarks = landmarksAhead(plans, order, inReach);
   // #3334: which plans may be wraps: the nearest to the rider, never the road's ranking.
-  const kitted = wraps > 0 ? nearWraps(buildings, x, z, ahead, wraps) : NO_WRAPS;
+  const kitted = wraps > 0 ? nearWraps(buildings, x, z, ahead, wraps, WALK_WRAPS) : NO_WRAPS;
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
   // #1638: past MAPPED_BUILDING_MAX only where a city centre's far-level cap is on.
   const most = Math.min(mappedBuildingCap(buildings), into.plans.length);

@@ -121,7 +121,9 @@
  *
  * ⚠️ **Planned only where they can be drawn**: `GameView`'s press plans wraps
  * for a ride that asked for the realistic world, and Delivery's house count
- * and the demo player plan none (`FootprintPlanOptions.facadeKit`). The worst frame is `realistic-budget.ts`' to state.
+ * plans none (`FootprintPlanOptions.facadeKit`). The demo player plans them:
+ * its stage draws the realistic world.
+ * The worst frame is `realistic-budget.ts`' to state.
  *
  * ## A gap, from PR #3343's review, not closed here
  *
@@ -997,10 +999,11 @@ function over(albedo: Rgb, white = 1): Rgb {
 
 /**
  * A wrap's colours, from its plan's own paints (`FootprintPaint`), so that
- * `paintTown`'s rule — no two neighbours alike — and a mapped colour hold for
- * the wrap as for the extrusion: a `render` wall is the very house paint its
- * extrusion wears; brick, stone and metal are a shade chosen by the same
- * entry; the trim by its trim's; and a shop front, its awning and its sign
+ * `paintTown`'s rule — no two neighbours alike — holds for the wrap as for
+ * the extrusion: a `render` wall is the very house paint its extrusion
+ * wears, so a mapped colour holds for it too; brick, stone and metal are a
+ * shade chosen by the same entry, which is NOT the mapped colour's nearest
+ * (their lists are the kit's own); the trim by its trim's; and a shop front, its awning and its sign
  * band one of the main street's sign paints (`SIGN_PAINTS`), by its door's.
  */
 export function kitPaletteOf(

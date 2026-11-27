@@ -377,6 +377,7 @@ import {
   NEAR_ROLES,
   NO_RIVALS,
   nearWraps,
+  nearWrapsAt,
   rankFrom,
   roleTriangles,
   selectMappedBuildings,
@@ -668,6 +669,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  MAPPED_KIT_NEAR_MAX,
   MAPPED_KIT_STRIDE_METRES,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -24794,7 +24796,11 @@ export interface DrawnMappedBuilding {
  *
  * - **Rebuilt only at a refill**, which the view runs when the rider's chunk
  *   (`MAPPED_CHUNK_METRES`) changes, or the rung does; never per frame. A
- *   frame that is not a refill reads one number and allocates nothing.
+ *   frame that is not a refill reads one number and allocates nothing — and,
+ *   since #3334, with the downtown kit loaded and a wrap drawn, measures one
+ *   distance, and once a `MAPPED_KIT_STRIDE_METRES` ridden passes over the
+ *   plans once to ask whether the wraps' candidates changed; only where they
+ *   did is the selection run.
  * - **Uploaded in part**: each attribute's update range is what was written.
  * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls,
  *   plinth and roof (#1540's `farTriangleCount`). The parapet and door are
@@ -25006,9 +25012,16 @@ export class MappedBuildingBelt {
   };
   /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
   #chunk: number | undefined;
-  /** #3334: where the rider was when the wraps were last chosen or asked after, and which they were. */
-  #wrapsAt = { x: 0, z: 0 };
-  #wraps: readonly number[] = [];
+  /** #3334: where the rider was when the wraps were last chosen or asked after. */
+  readonly #wrapsAt = new Float64Array(2);
+  /** #3334: the plans the last refill drew as wraps, the first {@link #drawnWraps} of it. */
+  readonly #wrapPlans = new Int32Array(MAPPED_KIT_NEAR_MAX);
+  #drawnWraps = 0;
+  /** #3334: the wraps' candidates when last asked after, the first {@link #candidateCount} of it. */
+  readonly #candidates = new Int32Array(MAPPED_KIT_NEAR_MAX);
+  #candidateCount = 0;
+  /** #3334: scratch for {@link wrapsWouldChange}'s selection. */
+  readonly #probe: MappedSelection;
   #refills = 0;
   #shown = true;
   /** Whether the browser gate has turned the mapped buildings off — its control. */
@@ -25036,6 +25049,7 @@ export class MappedBuildingBelt {
     this.#ownsMaterials = materials === undefined;
     const drawnIn = materials ?? mappedBuildingMaterials(textures, houses);
     this.#selection = new MappedSelection(mappedBuildingCap(buildings));
+    this.#probe = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
@@ -25183,26 +25197,105 @@ export class MappedBuildingBelt {
 
   /**
    * Whether a frame at `chunk` needs a refill: the rider's chunk changed, or
-   * the rung did — or, #3334, with the downtown kit loaded and `view` given,
-   * the rider is `realistic-budget.ts` §`MAPPED_KIT_STRIDE_METRES` on from
-   * where the wraps were last chosen and would now be chosen otherwise
-   * (`mapped-buildings.ts` §`nearWraps`), so the wraps keep beside the rider
-   * and do not wait a chunk. One distance a frame until the stride is ridden.
+   * the rung did. Or, #3334, whether it must be ASKED whether the wraps would
+   * change ({@link wrapsWouldChange}): with the downtown kit loaded, `view`
+   * given and at least one wrap drawn by the last refill, once the rider is
+   * `realistic-budget.ts` §`MAPPED_KIT_STRIDE_METRES` on from where that was
+   * last asked. So the wraps keep beside the rider and do not wait a chunk.
+   *
+   * ⚠️ **Never between chunks where the last refill drew no wrap** — PR
+   * #3343's review: on a street the house models spend the pool of, the
+   * guard draws none, and asking rewrote the whole belt three times as often
+   * as before for nothing. So a ride that comes on its first wrappable
+   * building mid-chunk draws its extrusion until the chunk's end, 100 m at
+   * the most.
+   *
+   * One distance a frame until the stride is ridden, and nothing allocated;
+   * then one pass over the plans (`mapped-buildings.ts` §`nearWrapsAt`), and
+   * `true` only where the six candidates are other plans than when last
+   * asked. That pass keeps its numbers in typed arrays and writes its list in
+   * place; `mapped-kit-belt.test.ts` holds a moving rider's frames to under
+   * three bytes a frame.
    */
   needsRefill(chunk: number, view?: MappedBuildingsInView): boolean {
     if (chunk !== this.#chunk) return true;
-    if (view === undefined || this.#houses?.kit === undefined) return false;
-    if (Math.hypot(view.x - this.#wrapsAt.x, view.z - this.#wrapsAt.z) < MAPPED_KIT_STRIDE_METRES) {
-      return false;
+    if (view === undefined || this.#drawnWraps === 0) return false;
+    const at = this.#wrapsAt;
+    // Squared, and no `Math.hypot`: the engine's allocates on every call.
+    const dx = view.x - (at[0] as number);
+    const dz = view.z - (at[1] as number);
+    if (dx * dx + dz * dz < MAPPED_KIT_STRIDE_METRES * MAPPED_KIT_STRIDE_METRES) return false;
+    // In place: a frame that is not a refill allocates nothing.
+    at[0] = view.x;
+    at[1] = view.z;
+    // The candidates, AS A SET: the same six nearest in another order are no change, and
+    // the selection is not run for them. ⚠️ No closure in this method: one that captured a
+    // local would have the engine allocate a context on every call (`mapped-blobs.test.ts`).
+    const now = nearWrapsAt(this.buildings, view, view.ahead, ASKED);
+    let same = now.length === this.#candidateCount;
+    for (let at = 0; same && at < now.length; at += 1) {
+      let found = false;
+      for (let was = 0; was < this.#candidateCount; was += 1) {
+        if (this.#candidates[was] === now[at]) found = true;
+      }
+      same = found;
     }
-    this.#wrapsAt = { x: view.x, z: view.z };
-    // ⚠️ No closure in this method: one that captured a local would have the engine
-    // allocate a context on EVERY call, refill or not (`mapped-blobs.test.ts` §"allocates
-    // nothing … on a frame that is not a refill" measured 41 bytes a frame).
-    const now = nearWraps(this.buildings, view.x, view.z, view.ahead);
-    const were = this.#wraps;
-    if (now.length !== were.length) return true;
-    for (let at = 0; at < now.length; at += 1) if (now[at] !== were[at]) return true;
+    this.#remember(now);
+    return !same;
+  }
+
+  /** Keeps `candidates` as the wraps' candidates last asked after — #3334. */
+  #remember(candidates: readonly number[]): void {
+    this.#candidateCount = Math.min(candidates.length, MAPPED_KIT_NEAR_MAX);
+    for (let at = 0; at < this.#candidateCount; at += 1) {
+      this.#candidates[at] = candidates[at] as number;
+    }
+  }
+
+  /** Whether `chunk` is the chunk of the last refill: a refill asked for now is between chunks. */
+  inChunk(chunk: number): boolean {
+    return chunk === this.#chunk;
+  }
+
+  /**
+   * Whether a refill at `(riderX, riderZ)` would draw other plans as wraps
+   * than the last one drew — #3334, PR #3343's review: the selection itself,
+   * run into scratch, and its wraps compared with the drawn ones AS A SET.
+   * The six nearest in another order, or six candidates of which the guard
+   * draws the same four, are no change, and the belt is not rewritten for
+   * them. Run only where the candidates changed ({@link needsRefill}); the
+   * selection's own sort allocates a little, as it does at every refill.
+   */
+  wrapsWouldChange(
+    riderX: number,
+    riderZ: number,
+    triangleBudget: number,
+    rivals: RivalStructures = NO_RIVALS,
+    ahead?: Float32Array,
+  ): boolean {
+    const probe = this.#probe;
+    selectMappedBuildings(
+      this.buildings,
+      riderX,
+      riderZ,
+      Math.min(triangleBudget, MAPPED_BUILDING_TRIANGLES),
+      probe,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
+      this.#houses?.triangles,
+      ahead,
+      this.#houses?.kit !== undefined,
+    );
+    if (probe.kitCount !== this.#drawnWraps) return true;
+    for (let at = 0; at < probe.count; at += 1) {
+      if (probe.kitted[at] !== 1) continue;
+      const plan = probe.plans[at] as number;
+      let drawn = false;
+      for (let wrap = 0; wrap < this.#drawnWraps; wrap += 1) {
+        if (this.#wrapPlans[wrap] === plan) drawn = true;
+      }
+      if (!drawn) return true;
+    }
     return false;
   }
 
@@ -25273,10 +25366,11 @@ export class MappedBuildingBelt {
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
-    // #3334: where the wraps were chosen, and which, for `needsRefill` to ask again.
-    this.#wrapsAt = { x: riderX, z: riderZ };
-    this.#wraps =
-      this.#houses?.kit === undefined ? [] : nearWraps(this.buildings, riderX, riderZ, ahead);
+    // #3334: where the wraps were chosen and from which candidates, for `needsRefill` to ask
+    // again a stride on.
+    this.#wrapsAt[0] = riderX;
+    this.#wrapsAt[1] = riderZ;
+    this.#remember(nearWraps(this.buildings, riderX, riderZ, ahead, MAPPED_KIT_NEAR_MAX, ASKED));
     const selection = this.#selection;
     selectMappedBuildings(
       this.buildings,
@@ -25290,6 +25384,13 @@ export class MappedBuildingBelt {
       ahead,
       this.#houses?.kit !== undefined,
     );
+    // #3334: which plans are wraps now, for `wrapsWouldChange`.
+    this.#drawnWraps = 0;
+    for (let at = 0; at < selection.count && this.#drawnWraps < MAPPED_KIT_NEAR_MAX; at += 1) {
+      if (selection.kitted[at] !== 1) continue;
+      this.#wrapPlans[this.#drawnWraps] = selection.plans[at] as number;
+      this.#drawnWraps += 1;
+    }
     const surfaces = selection.surfaces;
     let end = 0;
     for (let slot = 0; slot < surfaces.length; slot += 1) {
@@ -26266,7 +26367,11 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * each structure item and billboard counted at `REALISTIC_TRIANGLES.structure`.
  * Returns the most procedural structures may then draw until the next refill,
  * or `undefined` on a frame that is not a refill — which reads one number and
- * allocates nothing.
+ * allocates nothing; since #3334, with the downtown kit loaded and a wrap
+ * drawn, it also measures one distance, and once a stride ridden passes over
+ * the plans to ask after the wraps (`MappedBuildingBelt.needsRefill`). Only where the wraps' candidates are other plans is
+ * the selection run (`wrapsWouldChange`), and the belt rewritten only where
+ * the wraps it would draw are.
  *
  * **The frame's procedural buildings and the mapped buildings are ranked
  * together, under the one cap** — the buildings by the road ahead since #2429,
@@ -26298,6 +26403,8 @@ export function refillMappedBuildings(
   billboards: number,
   structureItems: number,
 ): number | undefined {
+  // Read before `needsRefill`: whether this is a chunk's refill, or the wraps' asking.
+  const between = belt.inChunk(view.chunk);
   if (!belt.needsRefill(view.chunk, view)) return undefined;
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
@@ -26312,20 +26419,28 @@ export function refillMappedBuildings(
     at += 1;
   }
   rivalDistances.subarray(0, count).sort();
-  const stats = belt.refill(
-    view.x,
-    view.z,
-    Math.max(0, items - billboards) * structure,
-    view.chunk,
-    {
-      distances: rivalDistances,
-      count,
-      triangles: structure,
-    },
-    view.ahead,
-  );
+  const budget = Math.max(0, items - billboards) * structure;
+  RIVALS.distances = rivalDistances;
+  RIVALS.count = count;
+  RIVALS.triangles = structure;
+  // #3334: between chunks the belt is rewritten only where the wraps it draws would be
+  // other plans; asked, and nothing written or allocated, where they would not.
+  if (between && !belt.wrapsWouldChange(view.x, view.z, budget, RIVALS, view.ahead)) {
+    return undefined;
+  }
+  const stats = belt.refill(view.x, view.z, budget, view.chunk, RIVALS, view.ahead);
   return items - Math.ceil(stats.triangles / structure);
 }
+
+/** {@link MappedBuildingBelt.needsRefill}'s list of candidates, reused. */
+const ASKED: number[] = [];
+
+/** {@link refillMappedBuildings}' rivals, reused so asking after the wraps allocates nothing. */
+const RIVALS: { distances: Float64Array; count: number; triangles: number } = {
+  distances: new Float64Array(0),
+  count: 0,
+  triangles: 0,
+};
 
 /**
  * Whether a procedural structure is ranked against the mapped buildings —
@@ -26762,7 +26877,8 @@ class RealisticDrawing {
    * set to it ({@link MappedBuildingBelt.rebind}) and refills it, allocating
    * no buffer.
    *
-   * Every other frame reads one number and allocates nothing.
+   * Every other frame reads one number and allocates nothing (and, since
+   * #3334, may ask after the wraps once a stride: `refillMappedBuildings`).
    */
   updateMapped(
     view: MappedBuildingsInView | undefined,

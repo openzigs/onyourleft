@@ -12,6 +12,8 @@
  * of the belt's own buffers.
  */
 
+import { getHeapStatistics, GCProfiler } from 'node:v8';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -24,7 +26,11 @@ import {
 } from './facade-kit';
 import { committedKit } from './facade-kit-testing';
 import { FOOTPRINT_VERTEX_FLOATS, footprintPlans, type FootprintPlan } from './footprint-buildings';
-import { richmondStreetFixture, terraceStreetFixture } from './footprint-fixtures-testing';
+import {
+  cityStreetscapeFixture,
+  richmondStreetFixture,
+  terraceStreetFixture,
+} from './footprint-fixtures-testing';
 import { HOUSE_MODELS } from './house-models';
 import { landClassMask } from './land-class';
 import {
@@ -686,7 +692,7 @@ describe('the wraps in a moving ride — #3334, PR #3343’s review', () => {
     expect(belt.refills).toBeLessThan(steps / 3);
   });
 
-  it('asks again only once the stride is ridden, and never where the kit is not loaded', () => {
+  it('asks after the wraps only once the stride is ridden, with the kit loaded and a wrap drawn', () => {
     const rider = roadAt(1_150);
     const view = (along: number) => {
       const at = roadAt(along);
@@ -701,26 +707,19 @@ describe('the wraps in a moving ride — #3334, PR #3343’s review', () => {
       undefined,
       aheadOf(1_150),
     );
+    expect(belt.stats.kitted).toBeGreaterThan(0);
+    expect(belt.inChunk(mappedChunk(1_150))).toBe(true);
     expect(belt.needsRefill(mappedChunk(1_150), view(1_150))).toBe(false);
     expect(belt.needsRefill(mappedChunk(1_150), view(1_159))).toBe(false);
-    // 30 m on, the three nearest a side are other buildings.
+    // 30 m on, the three nearest a side are other buildings: asked. And asked from there,
+    // so not again a metre later.
     expect(belt.needsRefill(mappedChunk(1_150), view(1_180))).toBe(true);
-    // A stride on with the same six still the nearest: asked, and no refill. The write is
-    // what costs, so it is made only when the answer changes.
-    let same = 0;
-    const steady = aBelt(buildings, withKit);
-    for (let along = 1_100; along < 1_400; along += 1) {
-      const on = along + MAPPED_KIT_STRIDE_METRES + 1;
-      const [here, there] = [roadAt(along), roadAt(on)];
-      const before = nearWraps(buildings, here.x, here.z, aheadOf(along));
-      if (before.join() !== nearWraps(buildings, there.x, there.z, aheadOf(on)).join()) continue;
-      same += 1;
-      steady.refill(here.x, here.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, aheadOf(along));
-      expect(steady.needsRefill(7, { ...view(on), chunk: 7 }), String(along)).toBe(false);
-    }
-    expect(same).toBeGreaterThan(0);
-    // With no view, a chunk's refill only, as before.
+    expect(belt.needsRefill(mappedChunk(1_150), view(1_181))).toBe(false);
+    // With no view, a chunk's refill only, as before; and another chunk is a refill.
     expect(belt.needsRefill(mappedChunk(1_150))).toBe(false);
+    expect(belt.needsRefill(mappedChunk(1_250), view(1_150))).toBe(true);
+    expect(belt.inChunk(mappedChunk(1_250))).toBe(false);
+    // Never where the kit is not loaded.
     const bare = aBelt(buildings, houseModels);
     bare.refill(
       rider.x,
@@ -731,6 +730,253 @@ describe('the wraps in a moving ride — #3334, PR #3343’s review', () => {
       aheadOf(1_150),
     );
     expect(bare.needsRefill(mappedChunk(1_150), view(1_180))).toBe(false);
+  });
+
+  /** The plans `belt` draws as wraps, in plan order. */
+  const wrapsOf = (belt: MappedBuildingBelt, of: readonly FootprintPlan[]): string => {
+    const drawn: number[] = [];
+    for (let place = 0; ; place += 1) {
+      const at = belt.drawnAt(place);
+      if (at === undefined) break;
+      if (at.modelAt >= 0 && of[at.plan]?.kit !== undefined) drawn.push(at.plan);
+    }
+    return drawn.sort((a, b) => a - b).join();
+  };
+
+  /** A fixture's street classed `urban`, its belt with the kit, and its road. */
+  const streetOf = (
+    fixture: {
+      readonly corridor: typeof street.corridor;
+      readonly profile: typeof street.profile;
+      readonly origin: typeof street.origin;
+    },
+    urban: UrbanClass,
+  ) => {
+    const of = footprintPlans(
+      fixture.corridor,
+      landClassMask(fixture.corridor),
+      fixture.profile,
+      fixture.origin,
+      undefined,
+      everywhere(urban),
+    ).plans;
+    const index = mappedBuildingsOf(of);
+    const viewAt = (along: number, chunk = mappedChunk(along)) => {
+      const at = roadAt(along, fixture);
+      const steps = Math.round(MAPPED_RANKED_AHEAD_METRES / MAPPED_AHEAD_STEP_METRES);
+      const ahead = new Float32Array((steps + 1) * 2);
+      for (let step = 0; step <= steps; step += 1) {
+        const point = roadAt(along + step * MAPPED_AHEAD_STEP_METRES, fixture);
+        ahead[step * 2] = point.x;
+        ahead[step * 2 + 1] = point.z;
+      }
+      return { buildings: index, chunk, x: at.x, z: at.z, ahead };
+    };
+    return { plans: of, buildings: index, belt: aBelt(index, withKit), viewAt };
+  };
+
+  it.each([
+    ['the terrace', terraceStreetFixture, 1_600],
+    ['the city streetscape', cityStreetscapeFixture, 2_100],
+    ['the street of house models', richmondStreetFixture, 1_600],
+  ] as const)(
+    'rewrites the belt between chunks only where the wraps drawn are other plans: %s',
+    (_, fixture, to) => {
+      const ride = streetOf(fixture(), 'town');
+      let chunks = 0;
+      let last = -1;
+      let between = 0;
+      let none = 0;
+      // A metre a frame, as a ride asks.
+      for (let along = 900; along < to; along += 1) {
+        const chunk = mappedChunk(along);
+        const before = ride.belt.refills;
+        const wraps = wrapsOf(ride.belt, ride.plans);
+        const kitted = ride.belt.stats.kitted;
+        refillMappedBuildings(ride.belt, ride.viewAt(along), [], 0, REALISTIC_STRUCTURE_ITEMS);
+        if (chunk !== last) {
+          chunks += 1;
+          last = chunk;
+          continue;
+        }
+        if (ride.belt.refills === before) continue;
+        between += 1;
+        // Never where no wrap was drawn (PR #3343's review: 13 of 15 on this street of models).
+        if (kitted === 0) none += 1;
+        // And the plans drawn as wraps are other plans, whatever order they are named in.
+        expect(wrapsOf(ride.belt, ride.plans), String(along)).not.toBe(wraps);
+      }
+      expect(none).toBe(0);
+      expect(ride.belt.refills).toBe(chunks + between);
+      console.log(
+        `#3334: ${String(to - 900)} m: ${String(chunks)} refills at a chunk, ${String(between)} between`,
+      );
+    },
+  );
+
+  it('does not ask between chunks where the last refill drew no wrap, though the kit is loaded', () => {
+    // The street of house models: they spend the pool, and the guard draws no wrap among them.
+    const ride = streetOf(richmondStreetFixture(), 'town');
+    const here = ride.viewAt(1_250, 7);
+    ride.belt.refill(here.x, here.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, here.ahead);
+    expect(ride.belt.stats.kitted).toBe(0);
+    // Control: there are candidates here, and other ones 30 m on.
+    const there = ride.viewAt(1_280, 7);
+    const before = [...nearWraps(ride.buildings, here.x, here.z, here.ahead)];
+    const after = [...nearWraps(ride.buildings, there.x, there.z, there.ahead)];
+    expect(before.length).toBeGreaterThan(0);
+    expect([...after].sort().join()).not.toBe([...before].sort().join());
+    expect(ride.belt.needsRefill(7, there)).toBe(false);
+    expect(ride.belt.needsRefill(8, there)).toBe(true);
+  });
+
+  it('does not rewrite the belt where other plans are the nearest and the same ones are drawn', () => {
+    // Where the guard draws fewer wraps than there are candidates, a new candidate that
+    // would not be drawn is no change.
+    let found = 0;
+    for (const urban of ['town', 'city-centre'] as const) {
+      for (const fixture of [richmondStreetFixture, terraceStreetFixture]) {
+        const ride = streetOf(fixture(), urban);
+        for (let along = 900; along < 1_600 && found < 3; along += 1) {
+          const [here, there] = [ride.viewAt(along, 7), ride.viewAt(along + 11, 7)];
+          const set = (view: typeof here): string =>
+            [...nearWraps(ride.buildings, view.x, view.z, view.ahead)].sort().join();
+          if (set(here) === set(there)) continue;
+          ride.belt.refill(here.x, here.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, here.ahead);
+          if (ride.belt.stats.kitted === 0) continue;
+          const drawn = wrapsOf(ride.belt, ride.plans);
+          const probe = aBelt(ride.buildings, withKit);
+          probe.refill(there.x, there.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, there.ahead);
+          if (wrapsOf(probe, ride.plans) !== drawn) continue;
+          // Asked, the selection run, and nothing written.
+          const refills = ride.belt.refills;
+          expect(
+            ride.belt.wrapsWouldChange(
+              there.x,
+              there.z,
+              MAPPED_BUILDING_TRIANGLES,
+              undefined,
+              there.ahead,
+            ),
+          ).toBe(false);
+          expect(
+            refillMappedBuildings(ride.belt, there, [], 0, REALISTIC_STRUCTURE_ITEMS),
+            `${urban} ${String(along)}`,
+          ).toBeUndefined();
+          expect(ride.belt.refills).toBe(refills);
+          found += 1;
+        }
+      }
+    }
+    expect(found).toBeGreaterThan(0);
+  });
+
+  it('does not rewrite the belt where the same six are the nearest in another order', () => {
+    const ride = streetOf(cityStreetscapeFixture(), 'town');
+    let found = 0;
+    for (let along = 1_000; along < 1_400 && found < 5; along += 1) {
+      const on = along + MAPPED_KIT_STRIDE_METRES + 1;
+      const [here, there] = [ride.viewAt(along, 7), ride.viewAt(on, 7)];
+      const before = [...nearWraps(ride.buildings, here.x, here.z, here.ahead)];
+      const after = [...nearWraps(ride.buildings, there.x, there.z, there.ahead)];
+      // Another order, and the same plans.
+      if (before.join() === after.join()) continue;
+      if ([...before].sort().join() !== [...after].sort().join()) continue;
+      ride.belt.refill(here.x, here.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, here.ahead);
+      const drawn = wrapsOf(ride.belt, ride.plans);
+      const refills = ride.belt.refills;
+      // The stride is ridden, and the candidates are the same plans: not even selected.
+      expect(ride.belt.needsRefill(7, there), String(along)).toBe(false);
+      // Nor rewritten, asked through the product's own refill.
+      expect(
+        refillMappedBuildings(ride.belt, there, [], 0, REALISTIC_STRUCTURE_ITEMS),
+        String(along),
+      ).toBeUndefined();
+      expect(ride.belt.refills).toBe(refills);
+      expect(wrapsOf(ride.belt, ride.plans)).toBe(drawn);
+      // Control: a refill there would draw those plans too.
+      expect(
+        ride.belt.wrapsWouldChange(
+          there.x,
+          there.z,
+          MAPPED_BUILDING_TRIANGLES,
+          undefined,
+          there.ahead,
+        ),
+      ).toBe(false);
+      found += 1;
+    }
+    expect(found).toBeGreaterThan(0);
+  });
+
+  it('allocates next to nothing on the frames of a moving rider that are not refills', () => {
+    // 11 m of street whose two ends have the same six candidates, ridden up and down a
+    // quarter of a metre a frame: every frame measures how far the rider has come, a stride
+    // is crossed once a pass and asked after, and the belt is neither selected nor rewritten.
+    const ride = streetOf(cityStreetscapeFixture(), 'town');
+    let from: number | undefined;
+    for (let along = 1_000; along < 1_400 && from === undefined; along += 1) {
+      const set = (at: number): string => {
+        const view = ride.viewAt(at, 7);
+        return [...nearWraps(ride.buildings, view.x, view.z, view.ahead)].sort().join();
+      };
+      if (
+        Array.from({ length: 12 }, (_, step) => set(along + step)).every(
+          (each) => each === set(along),
+        )
+      ) {
+        from = along;
+      }
+    }
+    if (from === undefined) throw new Error('no such stretch on the street');
+    const start = from;
+    // Each view its own literal, its chunk a small integer as a ride's is.
+    const path = Array.from({ length: 45 }, (_, step) => {
+      const at = ride.viewAt(start + step * 0.25, 7);
+      return { buildings: ride.buildings, chunk: 7, x: at.x, z: at.z, ahead: at.ahead };
+    });
+    const first = path[0] as (typeof path)[number];
+    ride.belt.refill(first.x, first.z, MAPPED_BUILDING_TRIANGLES, 7, undefined, first.ahead);
+    expect(ride.belt.stats.kitted).toBeGreaterThan(0);
+    const refills = ride.belt.refills;
+    let sink = 0;
+    // One list for every frame: a new one a frame would be the test's own allocation.
+    const scatter: never[] = [];
+    const frames = (count: number): void => {
+      for (let at = 0; at < count; at += 1) {
+        // Up the path and back down it.
+        const step = at % 88;
+        const view = path[step < 44 ? step : 88 - step] as (typeof path)[number];
+        if (
+          refillMappedBuildings(ride.belt, view, scatter, 0, REALISTIC_STRUCTURE_ITEMS) ===
+          undefined
+        ) {
+          sink += 1;
+        }
+      }
+    };
+    frames(20_000);
+    const attempts: string[] = [];
+    let measured = false;
+    for (let attempt = 0; attempt < 8 && !measured; attempt += 1) {
+      const profiler = new GCProfiler();
+      profiler.start();
+      const before = getHeapStatistics().used_heap_size;
+      frames(20_000);
+      const after = getHeapStatistics().used_heap_size;
+      const { statistics } = profiler.stop();
+      if (statistics.length > 0) {
+        attempts.push('collected');
+        continue;
+      }
+      measured = true;
+      // As the other belts' cases allow: 64 KiB over 20 000 frames, about three bytes a frame.
+      expect(after - before).toBeLessThan(64 * 1024);
+    }
+    expect(measured, attempts.join(', ')).toBe(true);
+    // No frame rewrote the belt, though the stride was crossed on every pass.
+    expect(sink).toBeGreaterThanOrEqual(40_000);
+    expect(ride.belt.refills).toBe(refills);
   });
 
   it('chooses the wraps about the point up the road, whatever the road’s own ranking is', () => {

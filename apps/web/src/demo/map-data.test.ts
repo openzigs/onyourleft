@@ -79,9 +79,11 @@ describe('the demo player on a baked route — #1652', () => {
   it('rides the route’s road, and hands the scene its corridor, land and mapped town', () => {
     planned.length = 0;
     const player = createDemoPlayer(CLIMB_PRESET, { reducedMotion: false, route });
-    // #3334: planned once, and with no wrap of the downtown kit's pieces: the demo draws
-    // the stylised world, which draws none.
-    expect(planned.map((options) => options?.facadeKit)).toEqual([false]);
+    // #3334: planned once, and with the downtown kit's wraps left on (the planner's own
+    // default): the demo's stage draws the realistic world (`stage.ts`), which draws them.
+    // The fixture route has no block a wrap fits, so the option is what is read here.
+    expect(planned.length).toBe(1);
+    expect(planned[0]?.facadeKit).not.toBe(false);
     expect(player.profile).toBe(route.profile);
     expect(player.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
     const frame = player.frame(RUNG);
