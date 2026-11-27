@@ -130,6 +130,8 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   // The Web Audio context, resumed inside a press. Not a ride.
   [join('game', 'audio-cues.ts')]: { pause: 0, resume: 1 },
   [join('game', 'web-audio.ts')]: { pause: 0, resume: 1 },
+  // The same context, resumed inside the Ride press for a round's game sounds (#3012). Not a ride.
+  [join('game', 'game-effects.ts')]: { pause: 0, resume: 1 },
   // The same context, resumed inside a press on a menu control (#946). Not a ride.
   [join('shell', 'menu-sounds.ts')]: { pause: 0, resume: 1 },
   // The menus' music (#2058): its `<audio>` element paused, after a fade or

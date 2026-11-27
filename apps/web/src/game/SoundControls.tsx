@@ -47,9 +47,19 @@
  * route writes it but this button. The press keeps the master BEFORE it calls
  * `onChange`, whose `RideCues.begin` resumes the output, and the output sets
  * its buses from the mix as it is stored at that moment.
+ *
+ * ## It says which sounds it mutes — #3012
+ *
+ * Since #3012 a Delivery round plays game sounds on the EFFECTS bus, which
+ * this button does not mute: it is the cue bus's (the ride's cues and tone),
+ * and the master's clear. So the button is described by
+ * {@link SOUND_CONTROLS_MUTES_TEXT}, which says so and where the game sounds
+ * are set. Read by a screen reader with the button's name and state; on the
+ * HUD's narrowest layouts there is no room for a visible line, which is the
+ * owner's call (#3012's pull request).
  */
 
-import { useState, type JSX } from 'react';
+import { useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 
@@ -57,6 +67,14 @@ import { readMusicAndMaster, writeMasterMuted } from './audio-mix';
 import { steppedVolume, type CuePreference } from './cue-preference';
 import { deviceStorage, type PreferenceStorage } from './hud/announce-preference';
 import { HIDES_ATTRIBUTE } from './hud/controls-reveal';
+
+/**
+ * What *Mute sounds* mutes, and what it does not — #3012, for the owner's
+ * approval: the project's own words. "Menu sounds" is Settings' panel for the
+ * effects bus (`views/SettingsView.tsx`).
+ */
+export const SOUND_CONTROLS_MUTES_TEXT =
+  'Mutes the ride’s cues and tone. Game sounds, such as Delivery’s, follow Menu sounds in Settings.';
 
 export interface SoundControlsProps {
   readonly preference: CuePreference;
@@ -70,6 +88,7 @@ export function SoundControls({ preference, onChange, storage }: SoundControlsPr
   const store = (): PreferenceStorage | undefined => storage ?? deviceStorage();
   const [masterMuted, setMasterMuted] = useState(() => readMusicAndMaster(store()).masterMuted);
   const silenced = preference.muted || masterMuted;
+  const mutesId = useId();
   return (
     // #2600: on the ride HUD the sounds hide with Pause and End ride until
     // touched (`hud/controls-reveal.ts`); the attribute does nothing elsewhere.
@@ -84,6 +103,7 @@ export function SoundControls({ preference, onChange, storage }: SoundControlsPr
         pressed={silenced}
         size="ride"
         className="oyl-sound__mute"
+        describedBy={mutesId}
         onClick={() => {
           if (masterMuted) {
             // The output reads the master back from storage, so a clear the
@@ -105,6 +125,9 @@ export function SoundControls({ preference, onChange, storage }: SoundControlsPr
         */}
         Mute<span className="oyl-sound__mute-more"> sounds</span>
       </Button>
+      <span id={mutesId} className="oyl-visually-hidden">
+        {SOUND_CONTROLS_MUTES_TEXT}
+      </span>
       <label className="oyl-sound__volume">
         {/*
           The label's WORDS are clipped inside the ride HUD (theme.css

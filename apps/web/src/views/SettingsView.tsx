@@ -1501,7 +1501,12 @@ function MenuSoundsPanel({
             <p className="oyl-muted">
               A short soft note when you press a link or a button in the menus, two rising notes
               when you confirm something and two falling notes when you go back. They play only when
-              you press, never during a ride, and every press still shows its result on the screen.
+              you press, and every press still shows its result on the screen.
+            </p>
+            <p className="oyl-muted">
+              The same switch and volume are the game sounds during a Delivery round: a throw, a
+              delivery, a miss, a crash, each hazard’s warning and a car pulling out. Each is also
+              shown or said, and none changes what your trainer is sent.
             </p>
             <p className="oyl-muted">
               Off unless you turn it on, and separate from the sounds during a ride. Their volume is

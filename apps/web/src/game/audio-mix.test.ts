@@ -14,12 +14,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { effectsBus, writeMenuSoundPreference } from '../shell/menu-sound-preference';
 
-import { AUDIO_MIX_STORAGE_KEY, readAudioMix, writeAudioBus, writeMasterMuted } from './audio-mix';
+import {
+  AUDIO_MIX_STORAGE_KEY,
+  readAudioMix,
+  readEffectsAndMaster,
+  writeAudioBus,
+  writeMasterMuted,
+} from './audio-mix';
 import type { CueOutput } from './audio-port';
 import { busOf, fakeAudioContext, musicPath, type FakeAudio } from './audio-testing';
 import { cueBus, writeCuePreference } from './cue-preference';
 import type { PreferenceStorage } from './hud/announce-preference';
-import { deviceAudioMix, webAudioOutput } from './web-audio';
+import { deviceAudioMix, deviceEffectsAndMaster, webAudioOutput } from './web-audio';
 
 /** A device's storage that outlives the module and the graph, as `localStorage` outlives a reload. */
 function disk(): { readonly values: Map<string, string>; readonly store: PreferenceStorage } {
@@ -303,5 +309,30 @@ describe('what a device stores, read field by field', () => {
     expect(mix.music.volume).toBe(0.4);
     expect(mix.effects).toEqual(legacy().effects);
     expect(mix.cues).toEqual(legacy().cues);
+  });
+});
+
+describe('the effects bus and the master, read for the games’ sounds — #3012', () => {
+  it('reads the effects bus from its old key where the mix has none, and keeps nothing', () => {
+    const { values, store } = disk();
+    writeMenuSoundPreference(store, { enabled: true, volume: 0.7 });
+    values.delete(AUDIO_MIX_STORAGE_KEY);
+    const before = new Map(values);
+    expect(deviceEffectsAndMaster(() => store)()).toStrictEqual({
+      effects: effectsBus({ enabled: true, volume: 0.7 }),
+      masterMuted: false,
+    });
+    // Asked at the Ride press: the device is left exactly as it was.
+    expect(values).toStrictEqual(before);
+  });
+
+  it('reads the mix’s own effects bus and master mute once they are stored', () => {
+    const { store } = disk();
+    writeAudioBus(store, 'effects', { volume: 0.2, muted: true });
+    writeMasterMuted(store, true);
+    expect(readEffectsAndMaster(store, () => ({ volume: 1, muted: false }))).toStrictEqual({
+      effects: { volume: 0.2, muted: true },
+      masterMuted: true,
+    });
   });
 });

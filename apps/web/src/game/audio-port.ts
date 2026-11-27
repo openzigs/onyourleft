@@ -35,8 +35,24 @@ export type RideCueName = 'interval' | 'distance';
  */
 export type MenuCueName = 'select' | 'confirm' | 'back';
 
+/**
+ * The games' short sounds — #3012: Delivery's throw, delivery, miss and
+ * crash, each moving hazard's warning, and a car's engine as it pulls out
+ * (#2992). Played by `game-effects.ts` on the **effects** bus, during a
+ * round only; their shapes are `web-audio.ts`'s, and this project's own.
+ */
+export type GameEffectName =
+  | 'delivery-throw'
+  | 'delivery-delivered'
+  | 'delivery-missed'
+  | 'delivery-crash'
+  | 'hazard-dog'
+  | 'hazard-car'
+  | 'hazard-rider'
+  | 'car-engine';
+
 /** Every short sound the port can play. */
-export type CueName = RideCueName | MenuCueName;
+export type CueName = RideCueName | MenuCueName | GameEffectName;
 
 export interface CueOutput {
   /**
