@@ -1,13 +1,10 @@
 # ADR 0101: The AI group ride — a solo ride in a paceline of synthetic riders that coaches the rotation and never drops the rider
 
-- **Status**: **Proposed**, 2026-11-26, for the owner. **The owner's four rulings of 2026-11-26 were
-  never open**: Context quotes them, D-0 records them, and nothing here re-argues them.
-  **Everything else is a proposal.** D-1 to D-9 are the author's draft of the mode, from the plan on
-  the epic [#3296](https://github.com/openzigs/onyourleft/issues/3296), and the twenty questions in
-  *What the owner has not decided* (Q1 to Q20) each carry a proposed answer **the owner has not
-  given**. It becomes **Accepted** only when the owner approves it, in words, on its pull request,
-  with an answer to each question recorded. **Nothing is built by this ADR**: #3298 to #3310 build
-  Phase 1
+- **Status**: **Accepted, 2026-11-26**, by the owner, 2026-11-26, on its pull request (#3326):
+  "Accept all 20". **The owner's four rulings of 2026-11-26** (D-0) were never open. **Q1 to Q20**
+  in *What the owner has not decided* are accepted as proposed; each row's status reads accepted.
+  The cue sentences and sounds stay drafts for the owner's approval when #3305 and #3306 are built
+  (Q16). **Nothing is built by this ADR**: #3298 to #3310 build Phase 1
 - **Date**: 2026-11-26
 - **Deciders**: **the owner**, whose rulings of 2026-11-26 are quoted in Context. **The author**
   drafted the rest for the owner's approval; a point that rests on an open question says
@@ -528,26 +525,26 @@ recorded here when the ADR is accepted.
 
 | # | Question | Proposed answer | Where | Status |
 |---|---|---|---|---|
-| **Q1** | Where rulings 1 and 3 meet: must time lost while the group waits be made up? | **No.** Time spent waiting or regrouping for the rider is not chased back, since chasing would drop the rider again. The ride page shows the stated average beside the average actually ridden. *The planner's proposal, following from rulings 1 and 3* | D-2.6 | Awaiting the owner |
-| **Q2** | How much steadier on climbs? | The group's uphill lift is capped lower than the solo pacer's: +5 % against the pacer's +10 % at +8 %. The front rider keeps pedalling downhill (the existing −20 % floor). Feel parameters, tuned in the harness | D-2.3, D-2.4 | Awaiting the owner |
-| **Q3** | Group size and make-up? | 3 to 7 bots, default 5 (a line of six with the rider, the size the research reports its sources give for a single paceline). A spread of strength: stronger bots pull longer, weaker shorter, **all at the same speed** | D-3.4 | Awaiting the owner |
-| **Q4** | How long is the rider's pull? | 30 s by default with a visible countdown; the rider may end it early at any time | D-3.6 | Awaiting the owner |
-| **Q5** | How does the rider pull off? | A discrete press (the lane key, a HUD button or a gamepad button). If the rider does not press and fades, the line comes round anyway. Easing alone does not count as pulling off | D-3.7 | Awaiting the owner |
-| **Q6** | Which side? | One fixed side in Phase 1, stated on the ride. Following the wind waits for Phase 4 | D-3.7 | Awaiting the owner |
-| **Q7** | Is it offered beside a workout in ERG? | Not in the first build: in ERG the rider cannot freely vary power, so a rotation makes little sense | D-1.5 | Awaiting the owner |
-| **Q8** | Is it offered with the draft switched off (#2967)? | No, and the setup says why | D-1.5 | Awaiting the owner |
-| **Q9** | Where does it live? | A choice in *Your ride* beside *"Ride against a pacer"*. *The planner's choice; the research offered this or a card in the Games tab and recommended neither* | D-1.1 | Awaiting the owner |
-| **Q10** | What does the group do when the rider stops pedalling? | It stops and waits with them, and the existing auto-pause governs. It does not roll on. *Follows ruling 3; the research proposed a bounded wait* | D-4.4 | Awaiting the owner |
-| **Q11** | What does the group do when the rider goes off the front? | It does not chase. One cue, and the front bot holds its pace | D-3.8 | Awaiting the owner |
-| **Q12** | May anything be called a leader? | No. The group has a pace and no leader. No string calls a bot a leader, an instructor or a coach, and nothing is called a class (ADR 0028 D-7.2 is about rooms, and the solo mode keeps clear of its vocabulary anyway) | D-5.9 | Awaiting the owner |
-| **Q13** | Does a group ride follow the race rule or the pacer rule on capacity? | The pacer's: a group ride is not a race, so its bots may ease for the rider (a departure from ADR 0067 D-1.2 for a non-race, and a wider envelope than ADR 0083 D-1 for this mode only) | D-4.6 | Awaiting the owner |
-| **Q14** | Is a group ride marked as drafted? | Yes, like any solo ride in which the rider sat in a draft (ADR 0066 D-5), with the same effect on *"Your best"* and segments | D-5.8 | Awaiting the owner |
-| **Q15** | Are the Phase 1 modules written room-portable? | Yes: they keep to the arithmetic limits of ADR 0067 D-5.2 from the first build, so a room could run the same code in Phase 5. It costs little | D-3.9 | Awaiting the owner |
-| **Q16** | Who approves the cue wording? | The owner. The sentences are the build's draft and go to the owner for approval, as every new sentence has | D-5.2 | Awaiting the owner |
-| **Q17** | How much coaching in Phase 1? | One level (every event, corrections on, rate limited). Three levels and fading are Phase 2 | D-5.7 | Awaiting the owner |
-| **Q18** | When do echelons come? | Later, behind their own ADR and a new `physicsVersion` (ADR 0038 D-3.4) | D-3.3 | Awaiting the owner |
-| **Q19** | In what order against #2517 and #2598? | #2517 lands first and the group ride's wheel-holding and drawing build on it; #2598 is coordinated with Phases 3 and 4 | D-9 | Awaiting the owner |
-| **Q20** | Are the cue list and rate limits folded into this ADR? | Yes: one ADR, with the cue kinds, the announcer rank (below safety and workout items), the rate limits and what the debrief may say | D-5 | Awaiting the owner |
+| **Q1** | Where rulings 1 and 3 meet: must time lost while the group waits be made up? | **No.** Time spent waiting or regrouping for the rider is not chased back, since chasing would drop the rider again. The ride page shows the stated average beside the average actually ridden. *The planner's proposal, following from rulings 1 and 3* | D-2.6 | Accepted by the owner, 2026-11-26 |
+| **Q2** | How much steadier on climbs? | The group's uphill lift is capped lower than the solo pacer's: +5 % against the pacer's +10 % at +8 %. The front rider keeps pedalling downhill (the existing −20 % floor). Feel parameters, tuned in the harness | D-2.3, D-2.4 | Accepted by the owner, 2026-11-26 |
+| **Q3** | Group size and make-up? | 3 to 7 bots, default 5 (a line of six with the rider, the size the research reports its sources give for a single paceline). A spread of strength: stronger bots pull longer, weaker shorter, **all at the same speed** | D-3.4 | Accepted by the owner, 2026-11-26 |
+| **Q4** | How long is the rider's pull? | 30 s by default with a visible countdown; the rider may end it early at any time | D-3.6 | Accepted by the owner, 2026-11-26 |
+| **Q5** | How does the rider pull off? | A discrete press (the lane key, a HUD button or a gamepad button). If the rider does not press and fades, the line comes round anyway. Easing alone does not count as pulling off | D-3.7 | Accepted by the owner, 2026-11-26 |
+| **Q6** | Which side? | One fixed side in Phase 1, stated on the ride. Following the wind waits for Phase 4 | D-3.7 | Accepted by the owner, 2026-11-26 |
+| **Q7** | Is it offered beside a workout in ERG? | Not in the first build: in ERG the rider cannot freely vary power, so a rotation makes little sense | D-1.5 | Accepted by the owner, 2026-11-26 |
+| **Q8** | Is it offered with the draft switched off (#2967)? | No, and the setup says why | D-1.5 | Accepted by the owner, 2026-11-26 |
+| **Q9** | Where does it live? | A choice in *Your ride* beside *"Ride against a pacer"*. *The planner's choice; the research offered this or a card in the Games tab and recommended neither* | D-1.1 | Accepted by the owner, 2026-11-26 |
+| **Q10** | What does the group do when the rider stops pedalling? | It stops and waits with them, and the existing auto-pause governs. It does not roll on. *Follows ruling 3; the research proposed a bounded wait* | D-4.4 | Accepted by the owner, 2026-11-26 |
+| **Q11** | What does the group do when the rider goes off the front? | It does not chase. One cue, and the front bot holds its pace | D-3.8 | Accepted by the owner, 2026-11-26 |
+| **Q12** | May anything be called a leader? | No. The group has a pace and no leader. No string calls a bot a leader, an instructor or a coach, and nothing is called a class (ADR 0028 D-7.2 is about rooms, and the solo mode keeps clear of its vocabulary anyway) | D-5.9 | Accepted by the owner, 2026-11-26 |
+| **Q13** | Does a group ride follow the race rule or the pacer rule on capacity? | The pacer's: a group ride is not a race, so its bots may ease for the rider (a departure from ADR 0067 D-1.2 for a non-race, and a wider envelope than ADR 0083 D-1 for this mode only) | D-4.6 | Accepted by the owner, 2026-11-26 |
+| **Q14** | Is a group ride marked as drafted? | Yes, like any solo ride in which the rider sat in a draft (ADR 0066 D-5), with the same effect on *"Your best"* and segments | D-5.8 | Accepted by the owner, 2026-11-26 |
+| **Q15** | Are the Phase 1 modules written room-portable? | Yes: they keep to the arithmetic limits of ADR 0067 D-5.2 from the first build, so a room could run the same code in Phase 5. It costs little | D-3.9 | Accepted by the owner, 2026-11-26 |
+| **Q16** | Who approves the cue wording? | The owner. The sentences are the build's draft and go to the owner for approval, as every new sentence has | D-5.2 | Accepted by the owner, 2026-11-26 |
+| **Q17** | How much coaching in Phase 1? | One level (every event, corrections on, rate limited). Three levels and fading are Phase 2 | D-5.7 | Accepted by the owner, 2026-11-26 |
+| **Q18** | When do echelons come? | Later, behind their own ADR and a new `physicsVersion` (ADR 0038 D-3.4) | D-3.3 | Accepted by the owner, 2026-11-26 |
+| **Q19** | In what order against #2517 and #2598? | #2517 lands first and the group ride's wheel-holding and drawing build on it; #2598 is coordinated with Phases 3 and 4 | D-9 | Accepted by the owner, 2026-11-26 |
+| **Q20** | Are the cue list and rate limits folded into this ADR? | Yes: one ADR, with the cue kinds, the announcer rank (below safety and workout items), the rate limits and what the debrief may say | D-5 | Accepted by the owner, 2026-11-26 |
 
 ---
 
