@@ -62,8 +62,12 @@ export const GROUP_RIDE_MOST_BOTS = 7;
 /** The bots a group holds unless the rider chose: a line of six with the rider. */
 export const GROUP_RIDE_DEFAULT_BOTS = 5;
 
-/** The average the speed box starts on, metres a second: **30 km/h**, the epic's own example. */
-export const GROUP_RIDE_DEFAULT_SPEED = 30 / 3.6;
+/**
+ * The average the speed box starts on, metres a second: **30 km/h**, the
+ * epic's own example. Through `units/format.ts`, the one place a unit is
+ * converted (#238).
+ */
+export const GROUP_RIDE_DEFAULT_SPEED: number = speedFrom(30, 'metric');
 
 /** A group ride as it is ridden: what the rider chose, and nothing else. */
 export interface GroupRideChoice {
