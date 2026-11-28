@@ -356,7 +356,7 @@ function bootSimulator() {
 }
 
 /**
- * The job's `boot` step, before the install and the build: a runner's
+ * The job's `boot` step, after the install and before the build: a runner's
  * simulator takes minutes to finish its first boot (about eight on run
  * 46165807873), and started here it finishes while the app is built.
  */

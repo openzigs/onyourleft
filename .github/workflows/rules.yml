@@ -1233,13 +1233,6 @@ jobs:
       - name: Selected Xcode
         run: node apps/mobile/tools/ios-ci.mjs xcode
 
-      # A runner's simulator spends minutes on its first boot (about eight on
-      # run 46165807873, nearly all of the launch step). Asked for here, the
-      # boot runs on while the client and the app are built, and `launch`
-      # waits for what is left of it.
-      - name: Boot a simulator
-        run: node apps/mobile/tools/ios-ci.mjs boot
-
       - name: Enable pnpm through corepack
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -1250,6 +1243,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # A runner's simulator spends minutes on its first boot (about eight on
+      # run 46165807873, nearly all of the launch step). Asked for here, the
+      # boot runs on while the client and the app are built, and `launch`
+      # waits for what is left of it. ⚠️ AFTER the install, not before: a boot
+      # running beside corepack's download of pnpm slowed it from 4 s to 79 s
+      # (run 46167777877) and then broke it off part-way (run 46169189709).
+      - name: Boot a simulator
+        run: node apps/mobile/tools/ios-ci.mjs boot
 
       # `cap sync ios` copies the web build into the app (it refuses to without
       # one) and rewrites the plugin package from the installed plugins.
