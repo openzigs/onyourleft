@@ -19,6 +19,7 @@ import {
   BOT_TACTIC_WHEEL_FURTHEST_METRES,
   BOT_TACTIC_WHEEL_NEAREST_METRES,
   gradeAt,
+  NO_DROP_FULL_EASE_SECONDS,
   NO_DROP_GAPPED_METRES,
   NO_DROP_REACH_METRES,
   NO_DROP_SETTLE_MS,
@@ -50,6 +51,16 @@ const RISE = courseOf([
   [300, 5],
   [1_200, 0],
 ]);
+/**
+ * Rolling road, 8 km: 500 m stretches level, up at 3 %, level and down at 3 %,
+ * four times over (#3415).
+ */
+const ROLLING = courseOf(
+  Array.from({ length: 16 }, (_, stretch): readonly [number, number] => [
+    500,
+    [0, 3, 0, -3][stretch % 4] as number,
+  ]),
+);
 const TARGET_KMH = 30;
 /** Five bots and the rider last: the usual place to lose a wheel. */
 const RIDER_LAST = [bot('b1'), bot('b2'), bot('b3'), bot('b4'), bot('b5'), RIDER];
@@ -64,6 +75,12 @@ const eased = (frame: Frame): boolean => frame.tick.state.noDrop.easedSpeedMps !
 const holdsBegun = (frames: readonly Frame[]): number =>
   frames.filter((frame, index) => hold(frame) !== null && hold(frames[index - 1] as Frame) === null)
     .length;
+
+/** How many times the line began to wait for the rider: a hold that is not a regroup over the top. */
+const waitsBegun = (frames: readonly Frame[]): number =>
+  frames.filter(
+    (frame, index) => hold(frame) === 'waiting' && hold(frames[index - 1] as Frame) !== 'waiting',
+  ).length;
 
 /** The bots of the line ahead of the rider's seat, front first; the whole line for a rider aside. */
 function aheadOf(frame: Frame): readonly string[] {
@@ -191,12 +208,18 @@ describe('a rider at 25 % of the group’s power ends on a wheel (criterion 2, a
 
   it('has no repeating ride-away-and-wait cycle: one wait, then the line rides the rider’s pace', () => {
     const { frames } = ride();
-    expect(holdsBegun(frames)).toBe(1);
+    expect(waitsBegun(frames)).toBe(1);
     const after = frames.slice(afterFirstWait());
     expect(after.length * TICK_SECONDS).toBeGreaterThan(500);
-    // Never beyond the reach again, and never held again.
+    // Never beyond the reach again, and never waited for again. Over the top
+    // of the rise the line may regroup (D-4.3) for a rider just outside the
+    // wheel band, as the paced line has them there on the climb: that is not
+    // a ride away, and it begins with them inside the reach.
     expect(longestBeyondReach(after)).toBe(0);
-    expect(after.every((frame) => hold(frame) === null)).toBe(true);
+    expect(after.every((frame) => hold(frame) !== 'waiting')).toBe(true);
+    const regrouped = after.filter((frame) => hold(frame) === 'regrouping');
+    expect(regrouped.every((frame) => behindLine(frame) < NO_DROP_REACH_METRES)).toBe(true);
+    expect(regrouped.length * TICK_SECONDS).toBeLessThan(NO_DROP_SETTLE_MS / 1_000 + 5);
     // On a wheel for the ride: with the line in more than 85 % of it, a minute after the wait.
     const settled = after.slice(60 / TICK_SECONDS);
     expect(settled.filter((frame) => standing(frame) === 'with').length).toBeGreaterThan(
@@ -235,6 +258,48 @@ describe('a rider at 25 % of the group’s power ends on a wheel (criterion 2, a
     expect(rising.filter((frame) => standing(frame) === 'with').length).toBeGreaterThan(
       0.9 * rising.length,
     );
+  });
+});
+
+describe('a waiting line is ridden as a wait once the pace is remembered: it never stands still for a rider riding back to it (#3415)', () => {
+  // A fixed 120 W over rolling road: the rider is dropped on the first climb,
+  // the wait seeds the pace, and the rest of that wait is ridden after it.
+  const ride = ridden(() =>
+    rideGroup({ course: ROLLING, targetKmh: TARGET_KMH, seconds: 180, rider: { watts: 120 } }),
+  );
+  const riding = (frame: Frame): boolean => at(frame, YOU).speedMps > 2;
+
+  it('waits for the rider with the pace remembered', () => {
+    const { frames } = ride();
+    const waiting = frames.filter(
+      (frame) => hold(frame) === 'waiting' && frame.tick.state.noDrop.paceShare !== null,
+    );
+    expect(waiting.length * TICK_SECONDS).toBeGreaterThan(10);
+    expect(waiting.every(riding)).toBe(true);
+  });
+
+  it('asks the waiting line for more than nothing while the rider rides inside 10 s of it, and its front never comes to a stand', () => {
+    const { frames } = ride();
+    const held = frames.filter((frame) => hold(frame) !== null && riding(frame));
+    const near = held.filter(
+      (frame) => behindLine(frame) < 0.9 * at(frame, YOU).speedMps * NO_DROP_FULL_EASE_SECONDS,
+    );
+    expect(near.length).toBeGreaterThan(0);
+    expect(near.every((frame) => frame.groupSpeedMps > 0)).toBe(true);
+    // It crawls where D-4.2's share is nearly whole, 37 m back, and does not stop.
+    const slowest = Math.min(...held.map((frame) => at(frame, frame.order[0] as string).speedMps));
+    expect(slowest).toBeGreaterThan(0.5);
+  });
+
+  it('does not have the rider roll through the line it has just waited for and off its front', () => {
+    const { frames } = ride();
+    const released = frames.findIndex(
+      (frame, index) =>
+        index > 0 && hold(frame) === null && hold(frames[index - 1] as Frame) !== null,
+    );
+    expect(released).toBeGreaterThan(0);
+    const soon = frames.slice(released, released + 20 / TICK_SECONDS);
+    expect(soon.some((frame) => standing(frame) === 'off-the-front')).toBe(false);
   });
 });
 
