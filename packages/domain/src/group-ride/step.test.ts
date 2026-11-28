@@ -12,7 +12,17 @@ import { describe, expect, it } from 'vitest';
 
 import { BOT_TACTIC_WHEEL_GAP_METRES, botWheelWatts } from '../lap-race/tactics';
 import type { BotCapacity } from '../lap-race/wbal';
-import { metres, metresPerSecond, watts } from '../quantities';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  metresPerSecond,
+  watts,
+} from '../quantities';
+import { routeProfile } from '../route/profile';
+import { lineClimbAheadM } from './climb-ahead';
 import { GroupRideError } from './errors';
 import { courseOf, FLAT_COURSE } from './fixtures/courses';
 import type { GroupLedger, GroupPlan } from './plan';
@@ -496,6 +506,29 @@ describe('what a tick refuses', () => {
       ).toThrowError(expect.objectContaining({ code: 'view-out-of-range' }) as GroupRideError);
     },
   );
+
+  it('not a route under a metre long that routeProfile built: it holds nothing (#3362)', () => {
+    // Two made-up points 0.5 m apart on the equator from 0° 0°: no place is real.
+    // routeProfile gives it a spacing of 0.5 m, under the 1 m a hand-built profile must have.
+    const tiny = routeProfile([
+      {
+        position: geographicPosition(degreesLatitude(0), degreesLongitude(0)),
+        elevation: altitudeMetres(100),
+      },
+      {
+        position: geographicPosition(degreesLatitude(0), degreesLongitude(0.5 / 111_194.9)),
+        elevation: altitudeMetres(100.1),
+      },
+    ]);
+    expect(tiny.resolution as number).toBeLessThan(1);
+    const road: GroupRoad = { course: tiny, plan: PLAN, physics: standIn() };
+    const rider = { distanceM: 0, speedMps: GROUP_MPS };
+    let state = startGroupRide({ line: LINE, seed: 3, atMs: 0, rider });
+    for (let tick = 0; tick < 4; tick += 1) {
+      state = stepGroupRide(state, { elapsedSeconds: 0.5, rider }, road).state;
+    }
+    for (const at of [0, 0.25, 0.49]) expect([at, lineClimbAheadM(tiny, at)]).toEqual([at, null]);
+  });
 
   it('a rider who is nowhere finite, before any physics is asked', () => {
     const physics = standIn();

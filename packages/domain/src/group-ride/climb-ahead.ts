@@ -84,8 +84,9 @@ export const LINE_CLIMB_EASED_METRES = COURSE_HILL_LEAST_METRES;
 
 /**
  * The finest profile spacing read, metres: **1**. `routeProfile` samples about
- * every 10 m. Each walk here is counted in metres, so a spacing a fraction of
- * a metre makes it, and `courseHillsAhead`, millions of steps long.
+ * every 10 m, and on a route of a climb's least length or more never finer
+ * than 9.5 m. Each walk here is counted in metres, so its steps, and
+ * `courseHillsAhead`'s, grow as the spacing shrinks.
  */
 const LEAST_SPACING_METRES = 1;
 
@@ -158,13 +159,21 @@ function onClimb(profile: RouteProfile, nearest: number, step: number): boolean 
  * with none in `courseHillsAhead`'s reach or, on a route that is not a loop,
  * at or past its end. What `RotationView.climbAheadM` is given.
  *
- * @throws {GroupRideError} `view-out-of-range` for a profile whose
- *   `resolution` is not a finite number of metres, one metre or more. A
- *   hand-built or stored profile need not have come through `routeProfile`;
- *   on a spacing of 0 neither this nor `courseHillsAhead` would leave its
- *   loop, and on a fraction of a metre each would take seconds.
+ * A route shorter than {@link COURSE_HILL_LEAST_METRES} has no room for a
+ * climb, so it reads `null` before its spacing is looked at: `routeProfile`
+ * gives a route under a metre long a spacing under a metre, and a group ride
+ * on one must not stop on its first tick.
+ *
+ * @throws {GroupRideError} `view-out-of-range` for a profile of a climb's
+ *   least length or more whose `resolution` is not a finite number of metres,
+ *   one metre or more: only a hand-built or stored profile, never one
+ *   `routeProfile` built. On a spacing of 0 neither this nor
+ *   `courseHillsAhead` would leave its loop, and each walk here is counted in
+ *   metres, so its steps grow as the spacing shrinks: millions of them at a
+ *   ten-thousandth of a metre.
  */
 export function lineClimbAheadM(profile: RouteProfile, from: number): number | null {
+  if ((profile.totalDistance as number) < COURSE_HILL_LEAST_METRES) return null;
   const step = profile.resolution as number;
   if (!Number.isFinite(step) || !(step >= LEAST_SPACING_METRES)) {
     throw new GroupRideError(
