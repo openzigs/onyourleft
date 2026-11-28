@@ -102,6 +102,14 @@ import { readSoloDraftChoice } from './solo-draft-preference';
 import { draftedRide, soloDraftPercent, type SoloDraftSources } from './solo-draft';
 import { readRealisticWorldChoice } from './world-preference';
 import { readHolidayDecorations } from './holiday-preference';
+import {
+  readRideSkyChoice,
+  rideLookOf,
+  rideSkySeed,
+  rideWeatherOf,
+  writeRideSkyChoice,
+  type RideSkyChoice,
+} from './ride-sky';
 import { deviceToday, NO_SEASON, seasonOn, type CalendarDay, type Season } from './season';
 import { routeHemisphere, routeLatitudeMagnitude } from './world';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
@@ -163,7 +171,7 @@ import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } f
 import { corridorOrigin } from './terrain';
 import { routeStreetNameLabels } from './route-street-names';
 import type { StreetNameLabel } from './street-names';
-import type { GameRenderer, GameView as RendererView } from './port';
+import type { DeliveryWeatherFrame, GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { CaptureRecording } from './capture-recording';
 import {
@@ -1701,6 +1709,15 @@ function GameScreen({
   const [withWind, setWithWind] = useState(false);
   const [windSpeed, setWindSpeed] = useState('');
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
+  /**
+   * #3281: the ride's light and weather, the device's choice — read when the
+   * setup opens and written when the rider changes it, so it survives a restart.
+   */
+  const [rideSky, setRideSky] = useState<RideSkyChoice>(() => readRideSkyChoice(deviceStorage()));
+  const chooseRideSky = useCallback((choice: RideSkyChoice): void => {
+    setRideSky(choice);
+    writeRideSkyChoice(deviceStorage(), choice);
+  }, []);
   const [phase, setPhase] = useState<Phase>('choosing');
   /**
    * The room this device is in — made or joined on the picker's room panel
@@ -1856,6 +1873,12 @@ function GameScreen({
    * midnight keeps the day it started on.
    */
   const seasonRef = useRef<Season>(NO_SEASON);
+  /**
+   * #3281: what THIS ride's frames carry for its light and weather, settled
+   * at the press — `undefined` in clear daylight and on a Delivery round,
+   * which rides in its own (`port.ts` §`SceneFrame.weather`).
+   */
+  const rideWeatherRef = useRef<DeliveryWeatherFrame | undefined>(undefined);
   /**
    * Whether THIS ride asked for the realistic world — read from the device at
    * the start of the ride (`world-preference.ts`), off unless the rider chose
@@ -3563,6 +3586,11 @@ function GameScreen({
       // or there were no houses to count (the map still being read, a read
       // that failed, offline, the tiles off), which is never "too few".
       const deliveryAsked = deliveryWanted;
+      // #3281: the ride's light and weather, settled once here and held for
+      // the ride — *Surprise me* seeded by this ride. A round rides in its own.
+      rideWeatherRef.current = deliveryAsked
+        ? undefined
+        : rideWeatherOf(rideLookOf(rideSky, rideSkySeed(route.id, Date.now())));
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current = undefined;
@@ -3737,6 +3765,7 @@ function GameScreen({
       inventedSensors,
       level,
       preview,
+      rideSky,
     ],
   );
 
@@ -5169,9 +5198,14 @@ function GameScreen({
         // before a step, and a parcel drawn behind its throw would be worse.
         // Where a parcel lands is the step's either way (`throw.ts`).
         const round = deliveryRef.current;
+        // #3281: an ordinary ride's light and weather, which a clear day does
+        // not carry at all, so its frame is the one it always was.
+        const rideWeather = rideWeatherRef.current;
         const rounded =
           round === undefined
-            ? scene
+            ? rideWeather === undefined
+              ? scene
+              : { ...scene, weather: rideWeather }
             : {
                 ...scene,
                 delivery: deliveryInView({
@@ -5643,6 +5677,8 @@ function GameScreen({
           windUnit={speedUnit(units)}
           position={position}
           onPosition={setPosition}
+          // #3281: the ride's light and weather, kept on the device.
+          sky={{ chosen: rideSky, onChoose: chooseRideSky }}
           // #1818: a Delivery round, with the week this device kept, read
           // here for `worldChosen`'s reason: a round ridden since is seen at once.
           delivery={{

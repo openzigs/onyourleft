@@ -870,6 +870,17 @@ async function run(): Promise<void> {
           : { rain: config.weather !== 'dusk', dusk: config.weather !== 'rain' };
       drawn = { ...drawn, delivery: weather === undefined ? ahead : { ...ahead, weather } };
     }
+    // #3281: an ordinary ride's light and weather, as the rider chose it.
+    if (config.look !== undefined) {
+      drawn = {
+        ...drawn,
+        weather: {
+          rain: config.look === 'rain' || config.look === 'rain-dusk',
+          dusk: config.look === 'dusk' || config.look === 'rain-dusk',
+          ...(config.look === 'overcast' ? { overcast: true } : {}),
+        },
+      };
+    }
     // #1972: a lap race's pieces on the road ahead, or no race at all.
     if (config.race !== undefined) drawn = lapRaceAhead(drawn, distance);
     view.render(drawn);

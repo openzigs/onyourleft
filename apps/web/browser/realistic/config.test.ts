@@ -1064,3 +1064,24 @@ describe('where the page’s roads are ridden, for the route’s own season — 
     }
   });
 });
+
+describe('an ordinary ride’s light and weather on the page — #3281', () => {
+  it('draws clear daylight when the URL names no look', () => {
+    expect(parseConfig('').look).toBeUndefined();
+    expect(DEFAULT_CONFIG.look).toBeUndefined();
+  });
+
+  it('reads each look, and writes it back as the same configuration', () => {
+    for (const look of ['overcast', 'rain', 'dusk', 'rain-dusk'] as const) {
+      const config = parseConfig(`?look=${look}&route=village`);
+      expect(config.look).toBe(look);
+      expect(parseConfig(configQuery(config))).toEqual(config);
+    }
+  });
+
+  it('refuses a look it does not know', () => {
+    for (const bad of ['clear', 'Dusk', 'snow']) {
+      expect(() => parseConfig(`?look=${bad}`)).toThrow(/look is one of overcast/);
+    }
+  });
+});

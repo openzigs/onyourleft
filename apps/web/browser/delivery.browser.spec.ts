@@ -355,6 +355,54 @@ test.describe('Delivery’s belt — #1814', () => {
     }
   });
 
+  test('draws an ordinary ride in each of its four looks for the clear day’s calls and triangles, keeps its haze in rain, and draws a ride with no look as today — #3281', async ({
+    page,
+  }) => {
+    await open(page);
+    const read = await page.evaluate(() => window.__oylDelivery?.rideLooks());
+    console.log(`#3281 ride looks: ${JSON.stringify(read)}`);
+    if (read === undefined) throw new Error('#3281: the harness read no ride looks');
+    const { none, clear, overcast, rain, dusk, deliveryRain } = read;
+    // A ride with no look, and a clear day, are today's frame: the same
+    // calls, triangles and every colour the view was drawn with.
+    expect(clear).toEqual(none);
+    expect(none.calls).toBeGreaterThan(0);
+    expect(none.triangles).toBeGreaterThan(0);
+    for (const look of [overcast, rain, dusk]) {
+      // No draw call and no triangle: a re-lighting, never more drawn.
+      expect(look.calls).toBe(clear.calls);
+      expect(look.triangles).toBe(clear.triangles);
+      expect(look.rainShown).toBe(false);
+      // Fairness: no look thins how far ahead the road is seen.
+      expect(look.readback?.fogDensity).toBe(clear.readback?.fogDensity);
+      // And the look was drawn: the sky is not the clear day's.
+      expect(look.readback?.skyColour).not.toBe(clear.readback?.skyColour);
+    }
+    // The control: a Delivery round's rain does thicken the haze, and the readback sees it.
+    expect(deliveryRain.readback?.fogDensity ?? 0).toBeGreaterThan(
+      (clear.readback?.fogDensity ?? Infinity) * 1.5,
+    );
+    // Rain darkens the road as wet; an overcast leaves it dry.
+    expect(overcast.readback?.roadTint).toEqual(clear.readback?.roadTint);
+    expect(rain.readback?.roadTint[0] ?? 1).toBeLessThan(clear.readback?.roadTint[0] ?? 0);
+    // Dusk shades the scenery as the ground; the others do not.
+    expect(dusk.readback?.sceneryShade[0] ?? 1).toBeLessThan(1);
+    expect(overcast.readback?.sceneryShade).toEqual([1, 1, 1]);
+  });
+
+  for (const look of ['clear', 'overcast', 'rain', 'dusk'] as const) {
+    test(`photographs an ordinary ride in ${look} on the tablet for the owner — #3281`, async ({
+      page,
+    }, testInfo) => {
+      await open(page);
+      await page.evaluate((l) => window.__oylDelivery?.rideLookShowcase(l), look);
+      const shot = await page.locator(`#ride-look-${look}`).screenshot();
+      await testInfo.attach(`ride-look-${look}`, { body: shot, contentType: 'image/png' });
+      expect(shot.subarray(1, 4).toString('ascii')).toBe('PNG');
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    });
+  }
+
   for (const weather of ['clear', 'dusk', 'rain', 'rain-dusk'] as const) {
     test(`photographs a level in ${weather} on the tablet for the owner — #2508`, async ({
       page,

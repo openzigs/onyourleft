@@ -574,6 +574,17 @@ export interface SceneFrame {
    */
   readonly delivery?: DeliveryInView | undefined;
   /**
+   * An ordinary ride's light and weather — #3281, the rider's choice before
+   * the ride (`ride-sky.ts`): overcast, rain or dusk, drawn as a Delivery
+   * level's are (`weather-look.ts`), in both worlds and for no draw call.
+   * **Absent in clear daylight**, so a ride nobody chose a look for hands the
+   * view the frame it always has. A frame carrying {@link delivery} draws the
+   * round's own weather and never this one. ⚠️ Rain here keeps the haze
+   * (`weather-look.ts` §`weatheredWorld`): no look shortens how far the
+   * rider sees the road, and the 40 m reveal is Delivery's alone.
+   */
+  readonly weather?: DeliveryWeatherFrame | undefined;
+  /**
    * A lap race's pick-up points and the puddles on the road — #1902
    * (`lap-race/in-view.ts` §`lapRaceInView`). Drawn with every marker's
    * {@link RiderMarker.hit} in at most three instanced calls
@@ -733,6 +744,11 @@ export interface DeliveryInView {
 export interface DeliveryWeatherFrame {
   readonly rain: boolean;
   readonly dusk: boolean;
+  /**
+   * #3281: a grey sky and a duller sun with no rain — an ordinary ride's
+   * look (`ride-sky.ts`); no level file states it. Absent, not overcast.
+   */
+  readonly overcast?: boolean;
 }
 
 /**
