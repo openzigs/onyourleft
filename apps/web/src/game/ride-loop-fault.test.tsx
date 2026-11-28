@@ -31,6 +31,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
+import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -59,9 +60,22 @@ const faults = vi.hoisted(() => ({
   raceStep: false,
   /** How many times the lap race's step was called. */
   raceSteps: 0,
+  /** The AI pacer's director throws when it is ended while this is set. */
+  pacerEnd: false,
   /** The last draft factor the ride handed the simulation. */
   lastDraft: Number.NaN,
 }));
+
+vi.mock('./model-pacer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./model-pacer')>();
+  class FaultyPacer extends actual.ModelPacer {
+    override end(): void {
+      if (faults.pacerEnd) throw new RangeError(COORDINATE_MESSAGE);
+      super.end();
+    }
+  }
+  return { ...actual, ModelPacer: FaultyPacer };
+});
 
 vi.mock('./lap-race/ride-race', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lap-race/ride-race')>();
@@ -188,6 +202,7 @@ beforeEach(() => {
   nowMs = 1_000_000;
   faults.groupStep = false;
   faults.simulationStep = false;
+  faults.pacerEnd = false;
   faults.groupSteps = 0;
   faults.raceStep = false;
   faults.raceSteps = 0;
@@ -431,5 +446,78 @@ describe('a throw inside a frame of the ride — #3404', () => {
       "On Your Left: a fault in the ride's frame (TypeError) ended the group ride; the ride goes on.",
       "On Your Left: a fault in the ride's frame (TypeError) stopped the ride.",
     ]);
+  });
+  it("lets the trainer go and stops the loop when a mode's clean-up throws too", async () => {
+    const written: Write[] = [];
+    let consented = false;
+    const status = (): PacerStatus => ({
+      kind: 'offered',
+      instance: 'https://ride.example',
+      modelAddress: 'http://127.0.0.1:11434/v1',
+      consented,
+    });
+    const aiPacer: PacerPort = {
+      offered: () => true,
+      pacerStatus: () => Promise.resolve(status()),
+      consentToPacer: () => {
+        consented = true;
+        return Promise.resolve(status());
+      },
+      withdrawPacerConsent: () => {
+        consented = false;
+        return Promise.resolve(status());
+      },
+      warmPacer: () => Promise.resolve(true),
+      startPacerRide: () => Promise.resolve(true),
+      decidePacer: () => Promise.resolve({ kind: 'answer', say: 'Stay with me.' }),
+      endPacerRide: () => Promise.resolve(),
+    };
+    mounted = await mount(
+      <GameView
+        port={{ ...port, aiPacer }}
+        renderer={() => Promise.resolve(renderer)}
+        trainer={writingTrainer(written)}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    const control = (words: string): HTMLInputElement | undefined =>
+      queryAll<HTMLInputElement>(root(), 'input[type="checkbox"]').find((input) =>
+        (input.closest('label')?.textContent ?? '').includes(words),
+      );
+    await clickThrough(control('Ride against a pacer'));
+    await clickThrough(control('Let the AI on your server coach you through the pacer'));
+    await clickThrough(
+      queryAll<HTMLButtonElement>(root(), 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Allow the AI pacer'),
+      ),
+    );
+    await clickThrough(
+      queryAll<HTMLButtonElement>(root(), 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    for (let frame = 0; frame < 40; frame += 1) await oneFrame();
+    expect(grades(written)).toBeGreaterThan(0);
+    expect(releases(written)).toBe(0);
+
+    // A frame throws, and ending the AI pacer throws as well.
+    faults.simulationStep = true;
+    faults.pacerEnd = true;
+    await oneFrame();
+    await settle();
+
+    // The second throw did not escape: the trainer was let go, the loop
+    // stopped, and the rider was told.
+    expect(releases(written)).toBe(1);
+    expect(rideAsks()).toBe(false);
+    expect(root().textContent).toContain(rideStoppedText(true));
+    expect(faultLines()).toStrictEqual([
+      "On Your Left: a fault in the ride's frame (TypeError) stopped the ride.",
+    ]);
+    expect(logged.mock.calls.flat().join(' ')).not.toContain(COORDINATE);
+
+    // Leaving the ride ends the pacer as it always does.
+    faults.pacerEnd = false;
   });
 });

@@ -5649,17 +5649,26 @@ function GameScreen({
         crashShownRef.current = undefined;
         ended.push('delivery');
       }
+      // ⚠️ The pacer's clean-up writes its log through the trainer port, the
+      // call a fault may have come from, so it can throw a second time. A
+      // throw here must not escape `tick`: the ride would freeze with the
+      // trainer holding its grade. It takes the core answer below instead.
+      let cleanedUp = true;
       const directed = modelPacerRef.current;
       if (directed !== undefined) {
-        directed.director.end();
         modelPacerRef.current = undefined;
         pacerSayRef.current = undefined;
         pacerDoingRef.current = undefined;
+        try {
+          directed.director.end();
+          ended.push('ai-pacer');
+        } catch {
+          cleanedUp = false;
+        }
         setPacerSay(undefined);
-        ended.push('ai-pacer');
       }
       const simulation = simulationRef.current;
-      if (ended.length > 0) {
+      if (cleanedUp && ended.length > 0) {
         // A race's or a group's shelter ends with it: the rider rides alone.
         if (ended.includes('group-ride') || ended.includes('lap-race')) simulation?.draftWith(1);
         console.error(rideFaultLog(ended, error));
@@ -5672,7 +5681,7 @@ function GameScreen({
       const gradient = gradientRef.current;
       gradient?.stop();
       loopRunningRef.current = false;
-      console.error(rideFaultLog(ended, error));
+      console.error(rideFaultLog([], error));
       const text = rideStoppedText(gradient !== undefined);
       setRideStopped(text);
       setAnnouncement(text);
