@@ -24,7 +24,8 @@
 import type { RiderBody, UnitSystem } from '@onyourleft/store';
 
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
-import { lineStands, linesNear } from './gantry';
+import type { FootprintPlan } from './footprint-buildings';
+import { lineStands, linesNear, type PlacedStand } from './gantry';
 import { clearOfTheRoadOn, drawnPastTheFinish } from './past-the-finish';
 import {
   distanceOnRoute,
@@ -193,8 +194,9 @@ import {
   streetWalks,
   type PeopleInView,
   type Person,
-  type WalkKind,
 } from './people';
+import { APRON } from './shop-aprons';
+import { benchSitters, gantrySpectators, shopStanders, stillPeopleAt } from './still-people';
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import {
   NO_PARKED_CARS,
@@ -1062,6 +1064,14 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     seed,
     input.landClass ?? NO_LAND_CLASS,
   );
+  // #679: what stands at the lines, in the rider's units, near the rider.
+  // #3336: at the ROUTE's lines, on a route drawn past its end too.
+  const lines = linesNear(
+    routeOf(input.profile),
+    corridor,
+    riderDistance,
+    lineStands(routeOf(input.profile), input.units ?? 'metric'),
+  );
   const footways =
     input.worldCorridor === undefined || input.footwaysOff === true
       ? NO_FOOTWAYS
@@ -1163,6 +1173,8 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     // #2728: each on the ground drawn under them, and nobody on the drawn water.
+    // #3285: and the still people — on the benches, behind the lines' barriers
+    // and at the shop fronts — inside the same budget.
     people: people(
       input,
       streets,
@@ -1172,6 +1184,7 @@ export function sceneFrame(given: SceneInput): SceneFrame {
         ? sideRoads
         : [...crossSideRoads, ...crossings.roads, ...withinPeopleReach(nearby, camera)],
       ground,
+      lines,
     ),
     // #2722: and the other cyclists on the road, kept clear of the rider.
     // #3095: and along every way out, as the way's own view places them.
@@ -1189,14 +1202,7 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     // #2974: and the channels beside the road laid on this frame's ground,
     // and the mapped pools round the camera.
     water: water(input, corridor, ways, streamBridges, crossings, nearby, ground, camera, seed),
-    // #679: what stands at the lines, in the rider's units, near the rider.
-    // #3336: at the ROUTE's lines, on a route drawn past its end too.
-    lines: linesNear(
-      routeOf(input.profile),
-      corridor,
-      riderDistance,
-      lineStands(routeOf(input.profile), input.units ?? 'metric'),
-    ),
+    lines,
   };
 }
 
@@ -1250,6 +1256,7 @@ function people(
   seed: number,
   sideRoads: readonly SideRoad[],
   ground: TerrainMesh,
+  stands: readonly PlacedStand[],
 ): PeopleInView {
   const near = input.people ?? 0;
   if (near <= 0) return NO_PEOPLE;
@@ -1265,15 +1272,25 @@ function people(
       ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
     );
   }
+  const seconds = ghostClock(input.state);
   const placed = peopleAt(lines, {
     x: camera.x,
     z: camera.z,
-    seconds: ghostClock(input.state),
+    seconds,
     near,
     rule,
     // #1619: nobody on a side road this frame draws, either.
     road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
+    // #3285: and the people who are not walking, counted in the same budget.
+    still: stillPeopleAt(
+      [
+        benchSitters(streets),
+        gantrySpectators(stands),
+        shopStanders(input.mappedBuildings?.plans ?? NO_PLANS),
+      ],
+      { x: camera.x, z: camera.z, seconds },
+    ),
   });
   // #2728: a person's `y` is `terrainHeightAt`'s at the stretch of road they are
   // nearest, read at their line's points and carried straight between them. The
@@ -1312,13 +1329,26 @@ function stood(
   const footways = standingOnGround(
     kept.filter((person) => !STREET_WALKS.has(person.on)),
     ground,
+    // #3285: a shop front's stander on its apron, which is laid that far over the ground.
+  ).map((person) =>
+    person.on === 'shop-front' ? { ...person, y: person.y + APRON.lift } : person,
   );
   // Back in the order `peopleAt` gave, nearest first.
   return [...onStreets, ...footways].sort((a, b) => a.distance - b.distance);
 }
 
-/** What a village's street draws its walkers on, at its own top. @see stood */
-const STREET_WALKS: ReadonlySet<WalkKind> = new Set<WalkKind>(['pavement', 'door-path']);
+/**
+ * What a village's street draws its walkers on, at its own top — and, since
+ * #3285, its benches' sitters, whose `y` is the pavement the bench stands on. @see stood
+ */
+const STREET_WALKS: ReadonlySet<Person['on']> = new Set<Person['on']>([
+  'pavement',
+  'door-path',
+  'bench',
+]);
+
+/** No mapped building: a ride with none. */
+const NO_PLANS: readonly FootprintPlan[] = [];
 
 /**
  * How far behind a city centre's kerb its pavement's back is, and a hand, in

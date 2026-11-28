@@ -374,6 +374,20 @@ export const BOLLARD_ENDS_METRES = [0.6, 1.8] as const;
 /** How far in from the pavement's back edge a bench stands, in metres: **0.45**. */
 export const BENCH_SETBACK_METRES = 0.45;
 
+/**
+ * How high a bench's seat is, its slats' top above the pavement, in metres:
+ * **0.47** — what `three-renderer.ts` §`FURNITURE_STYLE` lays the slats at,
+ * and what a sitter's hips meet (`still-people.ts` §`benchSitters`, #3285).
+ */
+export const BENCH_SEAT_TOP_METRES = 0.47;
+
+/**
+ * Where a sitter sits on a bench, in the bench's own frame (`+z` to the road):
+ * **±0.45 m** along it, two to a 1.8 m bench, and **0.05 m** behind the seat's
+ * middle — #3285.
+ */
+export const BENCH_SITTER_PLACES = { along: [-0.45, 0.45], back: -0.05 } as const;
+
 /** How far along from its bench a bin stands, in metres: **1.6**. */
 export const BIN_BESIDE_METRES = 1.6;
 

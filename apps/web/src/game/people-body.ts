@@ -46,7 +46,7 @@
  * Pure, and names no rendering library.
  */
 
-import { GAITS, type Gait } from './gait';
+import { MOTIONS, type Motion } from './gait';
 
 /** The most triangles one person's body may be: **2 000** — #1541's figure. */
 export const PERSON_MAX_TRIANGLES = 2_000;
@@ -82,8 +82,19 @@ export const ANIMATION_BYTES_PER_TEXEL = 8;
  * the texture; three bodies share it now, and at the 4 m and more a person is
  * drawn from, a walk's knee between two phases 30° of the cycle apart is
  * within a centimetre of the gait's own. Runners are few, and on paths only.
+ *
+ * #3285: and each still pose — standing, sitting and clapping — at **2**:
+ * `gait.ts` §"Still poses" blends the two and back, which is all a weight
+ * shift, a clap or a sitter's seat needs. Seven rows a block were what the
+ * texture had left under {@link PERSON_ANIMATION_MAX_BYTES}; these are six.
  */
-export const PHASES: Readonly<Record<Gait, number>> = { walk: 12, run: 8 };
+export const PHASES: Readonly<Record<Motion, number>> = {
+  walk: 12,
+  run: 8,
+  stand: 2,
+  sit: 2,
+  clap: 2,
+};
 
 /**
  * How many phases of a crank's turn a scenery cyclist's body is baked at —
@@ -93,18 +104,19 @@ export const PHASES: Readonly<Record<Gait, number>> = { walk: 12, run: 8 };
 export const RIDE_PHASES = 12;
 
 /**
- * Where the cyclists' phases are, as a gait's index: **after every gait**,
- * which is what an instance says in place of a gait to be drawn riding.
+ * Where the cyclists' phases are, as a gait's index: **after every gait** and
+ * still pose (`gait.ts` §`MOTIONS`), which is what an instance says in place
+ * of a gait to be drawn riding.
  */
-export const RIDE_GAIT_INDEX = GAITS.length;
+export const RIDE_GAIT_INDEX = MOTIONS.length;
 
-/** Rows of one block: every phase of every gait. */
-export const GAIT_ROWS = GAITS.reduce((sum, gait) => sum + PHASES[gait], 0);
+/** Rows of one block: every phase of every gait and still pose. */
+export const GAIT_ROWS = MOTIONS.reduce((sum, motion) => sum + PHASES[motion], 0);
 
-/** The first row of a gait's phases inside a block, by the gait's index. */
+/** The first row of a gait's or still pose's phases inside a block, by its index in `MOTIONS`. */
 export function gaitRow(gaitIndex: number): number {
   let row = 0;
-  for (let at = 0; at < gaitIndex; at += 1) row += PHASES[GAITS[at] as Gait];
+  for (let at = 0; at < gaitIndex; at += 1) row += PHASES[MOTIONS[at] as Motion];
   return row;
 }
 

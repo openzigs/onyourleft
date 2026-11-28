@@ -77,6 +77,8 @@
  * 32 000 in all, one instanced draw); beyond that, out to
  * {@link PEOPLE_FAR_METRES}, at most {@link PEOPLE_FAR_MAX} impostors in one
  * more draw. The nearest first. A rung that draws no people asks for none.
+ * Since #3285 the people who are not walking — `still-people.ts`' sitters,
+ * spectators and standers — are in the same count ({@link PeopleOptions.still}).
  *
  * ⚠️ **Location data** (ADR 0004 D): nothing here formats a message.
  *
@@ -87,7 +89,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 
 import { SIDE_ROAD_WIDTHS, mappedJunctions, type Junction, type SideRoad } from './cross-streets';
 import { FOOTWAY_MAX_LINES, FOOTWAY_MAX_METRES, footwayNetwork } from './footways';
-import { GAITS, STRIDE_PER_HEIGHT, wrappedPhase, type Gait } from './gait';
+import { MOTIONS, STRIDE_PER_HEIGHT, wrappedPhase, type Gait, type Motion } from './gait';
 import { kindAt, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
@@ -128,6 +130,12 @@ export const PERSON_CLEARANCE_METRES = ROAD_WIDTH_METRES / 2 + PERSON_HALF_WIDTH
 
 /** What a line is. */
 export type WalkKind = 'pavement' | 'door-path' | 'sidewalk' | 'footway' | 'park';
+
+/**
+ * Where a person who is not walking is — #3285 (`still-people.ts`): on a
+ * village's bench, behind a gantry's barriers, or at a shop front.
+ */
+export type StillPlace = 'bench' | 'spectator' | 'shop-front';
 
 /**
  * People per metre of line, by what it is — #1541's density:
@@ -215,8 +223,12 @@ export interface Person {
   readonly z: number;
   /** Which way they face: three's yaw, so a body facing `+z` turns to face it. */
   readonly yaw: number;
-  readonly gait: Gait;
-  /** Where in their gait's cycle they are, `[0, 1)`. */
+  /** #3285: a walk or a run, or a still pose — standing, sitting or clapping. */
+  readonly gait: Motion;
+  /**
+   * Where in their gait's cycle they are, `[0, 1)`; a still pose's phase is
+   * `gait.ts` §"Still poses"'.
+   */
   readonly phase: number;
   /** Metres. */
   readonly height: number;
@@ -228,8 +240,12 @@ export interface Person {
    * is that street's own drawn top, or a mapped footway, whose `y` is the
    * ground's (`groundOf`) and which `scene.ts` §`people` stands on the ground
    * drawn under them.
+   *
+   * #3285: or where a person who is not walking is: a bench, whose `y` is its
+   * street's pavement top, or a gantry's verge or a shop front, which
+   * `scene.ts` §`people` stands on the ground drawn under them.
    */
-  readonly on: WalkKind;
+  readonly on: WalkKind | StillPlace;
 }
 
 /** The people a frame draws: bodies near, impostors beyond. */
@@ -783,6 +799,13 @@ export interface PeopleOptions {
   readonly road: RoadDistance;
   /** The ground at `(x, z)`, for a line whose `y` was not known. */
   readonly ground: (x: number, z: number) => number;
+  /**
+   * #3285: the people who are not walking, already placed
+   * (`still-people.ts`) — counted against the same {@link PEOPLE_NEAR_MAX}
+   * and {@link PEOPLE_FAR_MAX} as the walkers, nearest first, and held off
+   * the road by the same rule.
+   */
+  readonly still?: readonly Person[];
 }
 
 /** One person's seeded draw: start, speed, gait, height, look. */
@@ -904,6 +927,17 @@ export function peopleAt(lines: readonly WalkLine[], options: PeopleOptions): Pe
       });
     }
   }
+  for (const person of options.still ?? []) {
+    const distance = Math.hypot(person.x - options.x, person.z - options.z);
+    if (distance > reach || !Number.isFinite(person.y)) continue;
+    if (
+      options.rule &&
+      options.road(person.x, person.z, PERSON_CLEARANCE_METRES + 1) < PERSON_CLEARANCE_METRES
+    ) {
+      continue;
+    }
+    found.push(person.distance === distance ? person : { ...person, distance });
+  }
   found.sort((a, b) => a.distance - b.distance);
   const most = Math.min(PEOPLE_NEAR_MAX, options.near);
   const near = found.filter((person) => person.distance <= PEOPLE_NEAR_METRES).slice(0, most);
@@ -927,7 +961,7 @@ export function groundOf(
   };
 }
 
-/** Every gait's index in the animation texture. @see GAITS */
-export function gaitIndex(gait: Gait): number {
-  return GAITS.indexOf(gait);
+/** Every gait's and still pose's index in the animation texture. @see MOTIONS */
+export function gaitIndex(gait: Motion): number {
+  return MOTIONS.indexOf(gait);
 }
