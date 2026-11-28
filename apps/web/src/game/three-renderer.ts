@@ -315,6 +315,21 @@ import { settlingBasisWorker } from './basis-worker';
 import { FRONT_PORCH } from './porch';
 import { HOUSE_MODELS, placedPoint, placeOnPlot, type HousePlacement } from './house-models';
 import {
+  KIT_PIECES,
+  KIT_RUN_FLOATS,
+  KIT_TINT_CLASSES,
+  kitCardOf,
+  kitMeshIndex,
+  kitPaletteOf,
+  kitPieceIndex,
+  kitPlacedPoint,
+  kitProjectedUv,
+  kitSkinned,
+  type KitGeometry,
+  type KitPalette,
+  type KitWrap,
+} from './facade-kit';
+import {
   EAVES_OVERHANG_METRES,
   BAY_METRES,
   CLAD_BLOCK,
@@ -361,6 +376,8 @@ import {
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
+  nearWraps,
+  nearWrapsAt,
   rankFrom,
   roleTriangles,
   selectMappedBuildings,
@@ -524,6 +541,7 @@ import {
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
+  REALISTIC_DOWNTOWN_KIT,
   houseModelFile,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
@@ -605,6 +623,15 @@ import {
   type ParkPiece,
 } from './park-dressing';
 import {
+  PARKED_CARS_MAX,
+  PARKED_CARS_NEAR_MAX,
+  parkedCarBody,
+  parkedCarPaint as parkedCarPaintOf,
+  type ParkedCar,
+  type ParkedCarLevel,
+  type ParkedCarsInView,
+} from './parked-cars';
+import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
   gateLogoPlaces,
@@ -651,6 +678,8 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  MAPPED_KIT_NEAR_MAX,
+  MAPPED_KIT_STRIDE_METRES,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -670,6 +699,16 @@ import {
   TINT_CODEC_ZERO,
   type TintBound,
 } from './instance-tint';
+import { GROWN_SPECIES, growTree, type GrownMesh, type GrownSpecies } from './grown-trees';
+import {
+  drawnScale,
+  fenceFoldOf,
+  PLAN_SLOTS,
+  rockSeat,
+  SCENERY_SETTINGS,
+  slotTable,
+  type ScenerySetting,
+} from './scenery-plan';
 import {
   bandFade,
   highBound,
@@ -7196,6 +7235,20 @@ export interface RealisticShape {
    * levels are one part wearing one merged material. @see mergeShapeMaterials
    */
   readonly middle?: { readonly parts: readonly RealisticPart[]; readonly triangles: number };
+  /**
+   * How tall the full level stands, in the model's own units — #3252: what a
+   * tree grown in code sizes its host's impostor by. Absent on a shape whose
+   * file records none.
+   */
+  readonly height?: number;
+  /**
+   * A tree GROWN in code (`grown-trees.ts`) has no impostor of its own — #3252:
+   * beyond its middle level it is drawn as its host's, in the host's own
+   * instanced mesh, `scale` times the size its own levels are drawn at, which
+   * makes the host's picture as tall as this tree. So it adds no far draw
+   * call, no texture and no instance buffer. @see grownShapeOf
+   */
+  readonly far?: { readonly host: string; readonly scale: number };
 }
 
 /** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
@@ -7436,6 +7489,88 @@ export interface RealisticHouses {
   readonly atlas: Texture;
   /** Each model's triangles, as `mapped-buildings.ts` §`selectMappedBuildings` reads them. */
   readonly triangles: readonly number[];
+  /**
+   * The downtown kit's facade pieces and their atlas — #3334; absent where
+   * the kit's GLB is not the one `facade-kit.ts` describes, and every wrapped
+   * plan is then its extrusion.
+   */
+  readonly kit?: RealisticKit;
+}
+
+/**
+ * The facade pieces a mapped footprint is wrapped in, by their place in
+ * `facade-kit.ts` §`KIT_PIECES`, and their atlas — #3334.
+ */
+export interface RealisticKit {
+  /**
+   * Each piece in relief: its geometry out of the kit's GLB — or, for a piece
+   * that is another's in a second skin, that one's, mapped into its own cell.
+   */
+  readonly pieces: readonly KitGeometry[];
+  /** Each piece's card: its rectangle on the wall's plane (`facade-kit.ts` §`kitCardOf`). */
+  readonly cards: readonly KitGeometry[];
+  readonly atlas: Texture;
+}
+
+/**
+ * The downtown kit's pieces as the belt copies them — #3334: each of
+ * `facade-kit.ts` §`KIT_PIECES` found in `scene` by its id, with the card
+ * made for it; or `undefined` where a piece is missing or is not the
+ * triangles `facade-kit.ts` says, which a wrap's count was planned from.
+ */
+export function kitGeometriesOf(
+  scene: Object3D,
+): Pick<RealisticKit, 'pieces' | 'cards'> | undefined {
+  // By `traverse`, as `houseGeometryOf` reads a scene: the first node of each name.
+  const named = new Map<string, Object3D>();
+  scene.traverse((node) => {
+    if (!named.has(node.name)) named.set(node.name, node);
+  });
+  const own = new Map<number, KitGeometry>();
+  for (const [index, piece] of KIT_PIECES.entries()) {
+    if (kitMeshIndex(index) !== index) continue;
+    const node = named.get(piece.id);
+    const geometry = node === undefined ? undefined : kitGeometryOf(node);
+    if (geometry?.triangles !== piece.triangles) return undefined;
+    own.set(index, geometry);
+  }
+  const pieces: KitGeometry[] = [];
+  for (const [index, piece] of KIT_PIECES.entries()) {
+    const from = kitMeshIndex(index);
+    const geometry = own.get(from);
+    if (geometry === undefined) return undefined;
+    if (geometry.triangles !== piece.triangles) return undefined;
+    pieces.push(kitSkinned(index, geometry));
+  }
+  return { pieces, cards: KIT_PIECES.map((_, index) => kitCardOf(index)) };
+}
+
+/**
+ * A kit piece's mesh as the belt copies it — #3334: {@link houseGeometryOf}'s
+ * triangles and each vertex's colour class, which the pipeline wrote in the
+ * first of its second texture coordinates (`facade-kit.ts`
+ * §`KIT_TINT_CLASSES`); `undefined` where the mesh has none, or one that is
+ * no class.
+ */
+export function kitGeometryOf(node: Object3D): KitGeometry | undefined {
+  let found: Mesh | undefined;
+  node.traverse((each) => {
+    if (found === undefined && (each as Partial<Mesh>).isMesh === true) found = each as Mesh;
+  });
+  const classes = found?.geometry.getAttribute('uv1');
+  const geometry = houseGeometryOf(node);
+  if (found === undefined || classes === undefined || geometry === undefined) return undefined;
+  const flat = found.geometry.index === null ? found.geometry : found.geometry.toNonIndexed();
+  const from = flat.getAttribute('uv1');
+  const tint = new Uint8Array(from.count);
+  let known = true;
+  for (let vertex = 0; vertex < from.count; vertex += 1) {
+    const value = Math.round(from.getX(vertex));
+    if (!(value >= 0 && value < KIT_TINT_CLASSES.length)) known = false;
+    tint[vertex] = value;
+  }
+  if (flat !== found.geometry) flat.dispose();
+  return known && tint.length === geometry.triangles * 3 ? { ...geometry, tint } : undefined;
 }
 
 /**
@@ -7954,6 +8089,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       model(() => loaders.model(realisticUrl(houseModelFile(id)))),
     );
     const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
+    // #3334: the downtown kit's facade pieces and their atlas, likewise.
+    const kitScene = model(() => loaders.model(realisticUrl(REALISTIC_DOWNTOWN_KIT.model)));
+    const kitAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_DOWNTOWN_KIT.atlas)));
     // #1274: the roadside models, loaded and settled with everything else.
     // Or none, on the owner's page with that lever off. @see setRealisticRoadside
     const roadsideScenes = (realisticRoadside ? STREET_MODEL_NAMES : []).map((name) => ({
@@ -7996,7 +8134,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
       // #1283, #1294: the trees are the generated ones, or — for the owner's
-      // page — the scans they replaced. @see setRealisticTrees
+      // page — the generated broadleaves beside the scanned firs.
+      // @see setRealisticTrees
       models: realisticVegetation(realisticTrees)[kind].map(
         ({ name, file, impostor, impostorNormals, middle }) => ({
           name,
@@ -8043,6 +8182,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...bicycleMaps.map((each) => each.texture),
       ...houseScenes,
       houseAtlas,
+      kitScene,
+      kitAtlas,
       ...roadsideScenes.map((each) => each.scene),
       ...litterScenes.map((each) => each.scene),
       chainLinkScene,
@@ -8060,6 +8201,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       if (outcome.status === 'rejected') throw outcome.reason;
     }
     const vegetation = new Map<RealisticVegetationKind, readonly RealisticShape[]>();
+    // #3252: each committed tree before its materials are merged, by name.
+    const hosts = new Map<string, RealisticShape>();
     for (const each of shapes) {
       const prepared: RealisticShape[] = [];
       for (const one of each.models) {
@@ -8074,6 +8217,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         const levelled =
           middleScene === undefined ? near : prepareMiddleLevel(near, middleScene, one.name);
         loaded.shapes[loaded.shapes.length - 1] = levelled;
+        hosts.set(one.name, levelled);
         // #639: one material a level, so one draw call a level — unless this
         // is the browser gate loading its control. @see setRealisticMaterialsMerged
         const shape = realisticMaterialsMerged ? mergeShapeMaterials(levelled, one.name) : levelled;
@@ -8083,6 +8227,19 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
         prepared.push(shape);
       }
       vegetation.set(each.kind, prepared);
+    }
+    // #3252: the species grown in code, each dressed as the committed tree
+    // that hosts it and added to its kind's shapes, after the committed ones.
+    // None where the trees are the scans, which host nothing.
+    for (const species of GROWN_SPECIES) {
+      const host = hosts.get(species.host);
+      const grown = host === undefined ? undefined : grownShapeOf(species, host);
+      if (grown === undefined) continue;
+      loaded.shapes.push(grown);
+      const shape = realisticMaterialsMerged ? mergeShapeMaterials(grown, species.id) : grown;
+      loaded.shapes[loaded.shapes.length - 1] = shape;
+      withFoliageSwayOf(shape);
+      vegetation.set(species.kind, [...(vegetation.get(species.kind) ?? []), shape]);
     }
     const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
       await Promise.all([sky, road.colour, road.normal, ground.colour, ground.normal, rider]);
@@ -8192,6 +8349,13 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     atlasTexture.minFilter = LinearMipmapLinearFilter;
     atlasTexture.wrapS = ClampToEdgeWrapping;
     atlasTexture.wrapT = ClampToEdgeWrapping;
+    // #3334: the kit's pieces, copied once; its atlas, never repeated.
+    const kitGeometries = kitGeometriesOf(await kitScene);
+    const kitTexture = await kitAtlas;
+    kitTexture.colorSpace = SRGBColorSpace;
+    kitTexture.minFilter = LinearMipmapLinearFilter;
+    kitTexture.wrapS = ClampToEdgeWrapping;
+    kitTexture.wrapT = ClampToEdgeWrapping;
     const houses: RealisticHouses | undefined = houseGeometries.every(
       (each): each is HouseGeometry => each !== undefined,
     )
@@ -8199,6 +8363,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
           models: houseGeometries,
           atlas: atlasTexture,
           triangles: houseGeometries.map((each) => each.triangles),
+          ...(kitGeometries === undefined ? {} : { kit: { ...kitGeometries, atlas: kitTexture } }),
         }
       : undefined;
     // #1274: the roadside models' triangles, copied once, or none of them.
@@ -8332,22 +8497,24 @@ export function setRealisticMaterialsMerged(on: boolean): void {
 let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
 
 /**
- * Makes the NEXT realistic load draw its trees from the scans, as every load
- * did before #1283 — or, with `'generated'`, from the generated trees, as the
- * product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`), or with
- * `'scanned-conifers'` the generated broadleaves beside the scanned firs, as
- * every load did between #1283 and #1294. Only the one set asked for is
- * fetched, decoded and held.
+ * Makes the NEXT realistic load draw its firs from the scans
+ * (`'scanned-conifers'`: the generated broadleaves beside the scanned firs, as
+ * every load did between #1283 and #1294) — or, with `'generated'`, every
+ * tree generated, as the product does (`realistic-assets.ts`
+ * §`REALISTIC_TREES_DEFAULT`). Only the one set asked for is fetched, decoded
+ * and held.
  *
  * ADR 0049 D-1 keeps a generated tree only where the tablet measurement says
- * it should, so until that row is in, the scans are one switch away: the
- * owner's page loads them with `?levers=-generated-trees` or, for the firs
- * alone, `?levers=-generated-conifers`, and the browser gate measures the
- * generated set and the scans at the same route positions with the same camera.
+ * it should, so until the fir's row is in, the scanned firs are one switch
+ * away: the owner's page loads them with `?levers=-generated-conifers`.
  *
- * @test-facing `apps/web/browser/realistic-harness.ts` and
- * `apps/web/browser/game-harness.ts` §`treeLevelRun` load the scans with it; the
- * product never calls it
+ * ⚠️ **It could load every tree's scan until #1293** (`'scanned'`, the
+ * owner's page's `-generated-trees`). The scanned broadleaves were deleted on
+ * the owner's ruling of 2026-11-26, so that set is gone from
+ * `realistic-assets.ts` §`RealisticTrees` and nothing here can ask for it.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` loads the scanned firs
+ * with it; the product never calls it
  */
 export function setRealisticTrees(trees: RealisticTrees): void {
   realisticTrees = trees;
@@ -8509,6 +8676,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.wordmark.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
   world.houses?.atlas.dispose();
+  // #3334: and the downtown kit's, a 2048 px picture the GPU holds as long as the world does.
+  world.houses?.kit?.atlas.dispose();
   // #1274: the chain-link's wire; its piece's triangles are plain arrays.
   world.chainLink?.wire.dispose();
   // #2847: the cars' atlas; their triangles are plain arrays.
@@ -8744,7 +8913,106 @@ export function prepareRealisticShape(
           material: impostorMaterial(impostorStrip, extras, impostorNormals),
           ...(impostorNormals === undefined ? {} : { normals: impostorNormals }),
         };
-  return { name, parts, extent, triangles, ...(impostor === undefined ? {} : { impostor }) };
+  return {
+    name,
+    parts,
+    extent,
+    triangles,
+    ...(height > 0 ? { height } : {}),
+    ...(impostor === undefined ? {} : { impostor }),
+  };
+}
+
+/**
+ * The names a committed generated tree's two materials carry —
+ * `tools/realistic/generated-trees.ts` §`GENERATED_MATERIALS`, which nothing
+ * under `src/` may import. `grown-shapes.test.ts` reads them off the
+ * committed files, so a pipeline that renamed one is a red test.
+ */
+export const GROWN_HOST_MATERIALS = { bark: 'bark', leaves: 'leaves' } as const;
+
+/** A grown level's wood or leaves as a geometry: its arrays, as they are. */
+function grownGeometry(mesh: GrownMesh): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
+  geometry.setAttribute('color', new BufferAttribute(mesh.colours, 3));
+  geometry.setIndex(new BufferAttribute(mesh.indices, 1));
+  return geometry;
+}
+
+/** A material of this file's own that reads the maps `host` reads, cut where it is cut. */
+function materialWearing(host: MeshStandardMaterial): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: host.color.clone(),
+      map: host.map,
+      normalMap: host.normalMap,
+      normalScale: host.normalScale.clone(),
+      // A grown level always carries its crown's shade. @see grown-trees.ts
+      vertexColors: true,
+      roughness: REALISTIC_ROUGHNESS,
+      metalness: 0,
+      side: DoubleSide,
+      alphaTest: host.alphaTest,
+      transparent: false,
+    }),
+  );
+  material.name = host.name;
+  withTextureLodBias(material);
+  withAtmosphere(material);
+  return material;
+}
+
+/**
+ * A tree or a bush grown in code, as a shape to instance — #3252,
+ * `grown-trees.ts`: {@link growTree}'s wood and leaf cards, dressed in the
+ * bark and the leaf card of `host`, a committed generated tree as
+ * {@link prepareRealisticShape} and {@link prepareMiddleLevel} left it and
+ * BEFORE {@link mergeShapeMaterials} merged it. Its materials are its own,
+ * over the host's own maps, so it adds no texture and no image; a tree's
+ * middle level is grown from the same skeleton, and its far band is the
+ * host's impostor ({@link RealisticShape.far}).
+ *
+ * `undefined` when `host` is not such a tree — a scan, or a test's fixture
+ * with other materials — and then the species is not drawn and
+ * `scenery-plan.ts` §`slotTable` leaves every setting that names it to the
+ * shapes there are.
+ */
+export function grownShapeOf(
+  species: GrownSpecies,
+  host: RealisticShape,
+): RealisticShape | undefined {
+  const wears = (name: string): MeshStandardMaterial | undefined =>
+    host.parts.find((part) => part.material.name === name)?.material;
+  const bark = wears(GROWN_HOST_MATERIALS.bark);
+  const leaves = wears(GROWN_HOST_MATERIALS.leaves);
+  if (bark === undefined || leaves === undefined) return undefined;
+  if (bark.map === null || bark.normalMap === null) return undefined;
+  if (leaves.map === null || leaves.normalMap === null) return undefined;
+  const grown = growTree(species);
+  const materials = { bark: materialWearing(bark), leaves: materialWearing(leaves) };
+  const partsOf = (level: { readonly bark: GrownMesh; readonly leaves: GrownMesh }) => [
+    { geometry: grownGeometry(level.bark), material: materials.bark },
+    { geometry: grownGeometry(level.leaves), material: materials.leaves },
+  ];
+  const tree = species.kind !== 'shrub';
+  const far =
+    tree && host.impostor !== undefined && host.height !== undefined
+      ? { host: host.name, scale: grown.heightMetres / host.height }
+      : undefined;
+  return {
+    name: species.id,
+    parts: partsOf(grown.full),
+    extent: Math.max(grown.heightMetres, grown.widthMetres),
+    triangles: grown.full.triangles,
+    height: grown.heightMetres,
+    ...(tree && grown.middle !== undefined
+      ? { middle: { parts: partsOf(grown.middle), triangles: grown.middle.triangles } }
+      : {}),
+    ...(far === undefined ? {} : { far }),
+  };
 }
 
 /**
@@ -16278,6 +16546,11 @@ export class RealisticVegetationBelt {
   #drawn = 0;
   /** The item being placed's packed tint — #621. @see packedInstanceTint */
   #tint = 0;
+  /** #3252: the item being placed's seat if it is a rock, and its far band's matrix. */
+  readonly #seat = { sink: 0, tilt: 0, azimuth: 0 };
+  readonly #tiltAxis = new Vector3();
+  readonly #tilt = new Quaternion();
+  readonly #farMatrix = new Matrix4();
   /**
    * The items this frame drew as MESHES — each tree at its full or middle
    * level, and each shrub and rock — as the ground blobs' casters (#620).
@@ -16333,6 +16606,33 @@ export class RealisticVegetationBelt {
           if (shape.impostor !== undefined) withAutumn(shape.impostor.material);
         }
       }
+      const far = shapes.map((shape) =>
+        shape.impostor === undefined
+          ? undefined
+          : drawnInOrder(
+              keeps(
+                instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+                SCATTER_INSTANCE_CAPACITY,
+              ),
+              'impostor',
+            ),
+      );
+      // #3252: a tree grown in code is drawn, far off, as its host's impostor
+      // in the host's own mesh. @see RealisticShape.far
+      const farScale = shapes.map((shape, index) => {
+        const host =
+          shape.far === undefined ? -1 : shapes.findIndex((each) => each.name === shape.far?.host);
+        if (shape.far === undefined || host < 0) return 1;
+        far[index] = far[host];
+        return shape.far.scale;
+      });
+      // #3252: which shape each variant slot is, in each setting.
+      const names = shapes.map((shape) => shape.name);
+      const tables = new Map<ScenerySetting, readonly number[]>();
+      for (const setting of SCENERY_SETTINGS) {
+        const table = slotTable(kind, setting, names);
+        if (table !== undefined) tables.set(setting, table);
+      }
       this.#kinds.push({
         kind,
         tree,
@@ -16352,17 +16652,9 @@ export class RealisticVegetationBelt {
               )
             : undefined,
         ),
-        far: shapes.map((shape) =>
-          shape.impostor === undefined
-            ? undefined
-            : drawnInOrder(
-                keeps(
-                  instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
-                  SCATTER_INSTANCE_CAPACITY,
-                ),
-                'impostor',
-              ),
-        ),
+        far,
+        farScale,
+        tables,
         ranking: tree ? this.#trees : ranking(nearCap),
         tint: kind === 'rock' ? 'masonry' : 'foliage',
         fit: sceneryFitMetres(kind),
@@ -16433,7 +16725,8 @@ export class RealisticVegetationBelt {
     return this.#kinds.flatMap((each) => [
       ...each.near.flat(),
       ...each.middle.flatMap((meshes) => meshes ?? []),
-      ...each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+      // Each once: a grown tree's far mesh is its host's. @see RealisticShape.far
+      ...new Set(each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined)),
     ]);
   }
 
@@ -16451,7 +16744,15 @@ export class RealisticVegetationBelt {
     readonly impostor: readonly (InstancedMesh | undefined)[];
   } {
     const each = this.#kinds.find((slot) => slot.kind === kind);
-    return { full: each?.near ?? [], middle: each?.middle ?? [], impostor: each?.far ?? [] };
+    return {
+      full: each?.near ?? [],
+      middle: each?.middle ?? [],
+      // A shape's OWN impostor: a tree grown in code has none, and is drawn
+      // in its host's (#3252, `RealisticShape.far`), which is the host's entry.
+      impostor: (each?.far ?? []).map((mesh, shape) =>
+        each?.shapes[shape]?.far === undefined ? mesh : undefined,
+      ),
+    };
   }
 
   addTo(scene: Scene): void {
@@ -16600,12 +16901,14 @@ export class RealisticVegetationBelt {
         if (keep <= 0) continue;
       }
       if (each.tree && each.shapes.length > 0 && visibleOnly) {
-        const variant = variantOf(item.variant, each.shapes.length);
+        const variant = shapeIndexOf(each, item);
         const shape = each.shapes[variant] as RealisticShape;
         const reach = each.reach[variant];
-        const size = (each.fit * item.scale) / shape.extent;
-        const radius = (reach?.across ?? 0) * size;
-        if (!treeCanBeSeen(item, pose, radius, (reach?.up ?? 0) * size)) continue;
+        // #3252's review: by the size it is DRAWN at, its girth and height too.
+        const drawn = drawnScale(item);
+        const radius = ((reach?.across ?? 0) * each.fit * drawn.across) / shape.extent;
+        const height = ((reach?.up ?? 0) * each.fit * drawn.up) / shape.extent;
+        if (!treeCanBeSeen(item, pose, radius, height)) continue;
       }
       this.#seen[index] = 1;
       rankInto(each.ranking, index, Math.hypot(item.x - pose.x, item.z - pose.z));
@@ -16642,14 +16945,32 @@ export class RealisticVegetationBelt {
       // #545: a tree faded to nothing near the camera is not drawn at all.
       const keep = this.#keep[index] ?? 1;
       if (keep <= 0) continue;
-      const variant = variantOf(item.variant, each.shapes.length);
+      const variant = shapeIndexOf(each, item);
       const shape = each.shapes[variant] as RealisticShape;
       const rank = rankOf(each.ranking, index);
-      const size = (each.fit * item.scale) / shape.extent;
+      // #3252: its fit, its scale, its age and its own build — a little taller
+      // or stouter than the next — from the ONE function every guard reads.
+      const scaled = drawnScale(item);
+      const size = (each.fit * scaled.across) / shape.extent;
+      const tall = (each.fit * scaled.up) / shape.extent;
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
-      this.#scale.setScalar(size);
+      this.#scale.set(size, tall, size);
+      if (each.kind === 'rock') {
+        // #3252: a rock sits IN the ground, sunk and tipped, and not on it.
+        const seat = rockSeat(item.x, item.z, this.#seat);
+        this.#position.y -= seat.sink * (each.footprint[variant]?.height ?? 0) * tall;
+        this.#tiltAxis.set(Math.cos(seat.azimuth), 0, Math.sin(seat.azimuth));
+        this.#quaternion.premultiply(this.#tilt.setFromAxisAngle(this.#tiltAxis, seat.tilt));
+      }
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      // #3252: a grown tree's far band, its host's picture at this tree's height.
+      const farScale = each.farScale[variant] ?? 1;
+      if (farScale === 1) this.#farMatrix.copy(this.#matrix);
+      else {
+        this.#scale.multiplyScalar(farScale);
+        this.#farMatrix.compose(this.#position, this.#quaternion, this.#scale);
+      }
       // #621: one tint for every level the item is drawn at this frame.
       this.#tint = packedInstanceTint(item.x, item.z, realisticTints[each.tint]);
       let drawn = false;
@@ -16680,14 +17001,14 @@ export class RealisticVegetationBelt {
         if (high < 1) drawn = this.#put(each.near[variant], high * keep, keep);
         asMesh = drawn;
         if (middle === undefined) {
-          if (high > 0) drawn = this.#putOne(impostor, 0, high * keep) || drawn;
+          if (high > 0) drawn = this.#putOne(impostor, 0, high * keep, this.#farMatrix) || drawn;
         } else {
           if (high > low) {
             const middleDrawn = this.#put(middle, low * keep, high * keep);
             asMesh = asMesh || middleDrawn;
             drawn = middleDrawn || drawn;
           }
-          if (low > 0) drawn = this.#putOne(impostor, 0, low * keep) || drawn;
+          if (low > 0) drawn = this.#putOne(impostor, 0, low * keep, this.#farMatrix) || drawn;
         }
       }
       if (drawn) this.#drawn += 1;
@@ -16750,11 +17071,16 @@ export class RealisticVegetationBelt {
   }
 
   /** This frame's matrix into one mesh, keeping `[from, to)`, if it has room. */
-  #putOne(mesh: InstancedMesh | undefined, from: number, to: number): boolean {
+  #putOne(
+    mesh: InstancedMesh | undefined,
+    from: number,
+    to: number,
+    matrix: Matrix4 = this.#matrix,
+  ): boolean {
     if (mesh === undefined) return false;
     const capacity = mesh.instanceMatrix.count;
     if (mesh.count >= capacity) return false;
-    mesh.setMatrixAt(mesh.count, this.#matrix);
+    mesh.setMatrixAt(mesh.count, matrix);
     if (mesh.instanceColor !== null) {
       const channels = mesh.instanceColor.array as Float32Array;
       writeInterval(channels, mesh.count, from, to);
@@ -16828,8 +17154,12 @@ interface VegetationSlot {
   readonly near: readonly (readonly InstancedMesh[])[];
   /** Per shape, one instanced mesh per middle part, for a tree with a middle level. */
   readonly middle: readonly (readonly InstancedMesh[] | undefined)[];
-  /** Per shape, its impostor, for a tree. */
+  /** Per shape, its impostor, for a tree — its host's, for a tree grown in code (#3252). */
   readonly far: readonly (InstancedMesh | undefined)[];
+  /** Per shape, what its far band is drawn at, of its own size. @see RealisticShape.far */
+  readonly farScale: readonly number[];
+  /** #3252: per setting, the shape each variant slot is drawn as. @see slotTable */
+  readonly tables: ReadonlyMap<ScenerySetting, readonly number[]>;
   /** Both tree kinds share one; a shrub's and a rock's are their own. */
   readonly ranking: Ranking;
   /** Which of #621's bounds its tints are drawn inside: a rock's is masonry's. */
@@ -16857,6 +17187,18 @@ function instanced(geometry: BufferGeometry, material: Material, capacity: numbe
 function variantOf(variant: number, shapes: number): number {
   const wanted = Number.isInteger(variant) ? variant : 0;
   return ((wanted % shapes) + shapes) % shapes;
+}
+
+/**
+ * Which of a kind's shapes an item is drawn as — #3252: its setting's table
+ * (`scenery-plan.ts` §`SCENERY_PLAN`), or, in a world that does not hold the
+ * shapes the table names, its variant folded into the shapes there are.
+ */
+function shapeIndexOf(each: VegetationSlot, item: ScatterItem): number {
+  const table = each.tables.get(item.setting ?? 'wild');
+  return table === undefined
+    ? variantOf(item.variant, each.shapes.length)
+    : (table[variantOf(item.variant, PLAN_SLOTS)] as number);
 }
 
 /**
@@ -17788,6 +18130,277 @@ export const PARK_DRESSING_TRIANGLES = PARK_DRESSING_CAPACITY * PARK_PIECE_TRIAN
  * `realistic-budget.test.ts`
  */
 export const PARK_FIELD_TRIANGLES = PARK_FIELD_CAPACITY * PARK_PIECE_TRIANGLES;
+
+/** The parts of a body a parked car is drawn with at each level — #3278: its body and wheels, or its body alone. */
+const PARKED_CAR_ROLES: Readonly<Record<ParkedCarLevel, readonly DeliveryCarRole[]>> = {
+  near: ['body', 'front-wheel', 'back-wheel'],
+  far: ['body'],
+};
+
+/** One body of the cars at one level, in the car's own frame: its triangles, unindexed. */
+interface ParkedCarShape {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  /** Each corner's own colour, linear RGB, before its car's paint. */
+  readonly colour: Float32Array;
+  /** Each corner's coordinate in the cars' atlas. */
+  readonly uv: Float32Array;
+  readonly triangles: number;
+}
+
+/** `body` of `car` at `level`: the parts {@link PARKED_CAR_ROLES} names, end to end. */
+function parkedCarShapeOf(
+  car: DeliveryCarGeometry,
+  body: number,
+  level: ParkedCarLevel,
+): ParkedCarShape {
+  const parts = car.parts.filter(
+    (part) => part.body === body && PARKED_CAR_ROLES[level].includes(part.role),
+  );
+  const corners = parts.reduce((sum, part) => sum + part.position.length / 3, 0);
+  const shape = {
+    position: new Float32Array(corners * 3),
+    normal: new Float32Array(corners * 3),
+    colour: new Float32Array(corners * 3),
+    uv: new Float32Array(corners * 2),
+    triangles: corners / 3,
+  };
+  let at = 0;
+  for (const part of parts) {
+    shape.position.set(part.position, at * 3);
+    shape.normal.set(part.normal, at * 3);
+    shape.colour.set(part.colour, at * 3);
+    shape.uv.set(part.uv, at * 2);
+    at += part.position.length / 3;
+  }
+  return shape;
+}
+
+/**
+ * The most triangles the parked cars of a frame can be, of `car`'s bodies —
+ * #3278: `parked-cars.ts` §`PARKED_CARS_NEAR_MAX` cars each the heaviest body
+ * with its wheels, and the rest of §`PARKED_CARS_MAX` each the heaviest body
+ * alone. A hard bound: the belt draws no more cars, and each submits its own
+ * body's triangles and no other's.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES`
+ * by `parked-car-belt.test.ts`, on the committed cars
+ */
+export function parkedCarWorstTriangles(car: DeliveryCarGeometry): number {
+  const heaviest = (level: ParkedCarLevel): number =>
+    Math.max(...car.bodies.map((_, body) => parkedCarShapeOf(car, body, level).triangles));
+  return (
+    PARKED_CARS_NEAR_MAX * heaviest('near') +
+    (PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX) * heaviest('far')
+  );
+}
+
+/**
+ * Where a parked car's paint shows — #3278, in place of three's
+ * `color_fragment`: the corner's colour where the atlas's texel says paint
+ * (alpha 1), and nothing where it does not, as a Delivery car's
+ * ({@link withDeliveryCarPose}). Exported for `parked-car-belt.test.ts`,
+ * which holds the material's program to it.
+ */
+export const PARKED_CAR_PAINT_GLSL =
+  '\tdiffuseColor.rgb *= mix( vec3( 1.0 ), vColor.rgb, oylAtlas.a );';
+
+/**
+ * The parked cars' material — #3278: physically based and in the realistic
+ * air, wearing the cars' one atlas where one is handed, read as a Delivery
+ * car's is ({@link DELIVERY_CAR_ATLAS_GLSL}): a texel of a body's paint is the
+ * corner's colour — its car's paint, baked into the mesh — times its grey, and
+ * any other texel is the pack's own colour whatever the paint.
+ */
+function parkedCarMaterial(atlas: Texture | undefined): Material {
+  const material = withAtmosphere(
+    constructed(
+      new MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.8,
+        metalness: 0,
+        vertexColors: true,
+        ...(atlas === undefined ? {} : { map: atlas }),
+      }),
+    ),
+  );
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#3278's parked cars' paint";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <map_fragment>',
+        DELIVERY_CAR_ATLAS_GLSL,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      PARKED_CAR_PAINT_GLSL,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-parked-car`;
+  return material;
+}
+
+/** What the parked cars' belt drew on its last frame — #3278. */
+export interface ParkedCarStats {
+  readonly cars: number;
+  /** How many of them with their wheels. */
+  readonly near: number;
+  readonly triangles: number;
+  /** How many times the one mesh has been rebuilt. */
+  readonly rebuilds: number;
+}
+
+/**
+ * The parked cars in reach — #3278 (`parked-cars.ts`): **one merged mesh and
+ * ONE draw call of its own**, and none on a frame that carries no car. Each
+ * car submits its own body's triangles at its own level — the body and its
+ * four wheels near, the body alone far — and no other body's: never the
+ * Delivery obstacles' roster ({@link DELIVERY_REALISTIC_OBSTACLE_TRIANGLES}),
+ * where every instance submits every kind, which is right for a handful of
+ * obstacles and wrong for a street of cars.
+ *
+ * ⚠️ **Merged, not instanced**, for {@link FurnitureBelt}'s reason: an
+ * instanced draw is ONE shape, so three bodies at two levels would be six
+ * calls, or one call in which every instance submits all six shapes; and
+ * three's `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's
+ * page's counter does not see (`browser/realistic/draws.ts`). A parked car
+ * does not move, so its place, heading, pitch and paint are baked into the
+ * mesh's corners and nothing is uploaded on a frame whose cars are the last
+ * frame's — `scene.ts` hands the same list until the road ahead of the
+ * rider enters another cell (`parked-cars.ts` §`PARKED_CAR_CELL_METRES`) or a
+ * car gains or loses its wheels as the rider nears or passes it
+ * (§`parkedCarsSeenFrom`), so the mesh is rebuilt once every few metres
+ * ridden along a street of cars — every 5.4 m on the page's `town=streets`,
+ * 0.7 ms a rebuild at the caps on a desktop — and never per frame.
+ *
+ * The view builds it on the first realistic frame that carries a car, so
+ * every other frame — a ride with no corridor, the owner's village and wooded
+ * holds, a Delivery round — makes no call and submits no triangle for it.
+ * Held to `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES` and
+ * §`REALISTIC_PARKED_CAR_DRAW_CALLS`. No shadow caster, nothing transparent,
+ * no new pass, no texture the frame had not loaded.
+ */
+export class ParkedCarBelt {
+  readonly #mesh: Mesh;
+  readonly #shapes: Readonly<Record<ParkedCarLevel, readonly ParkedCarShape[]>>;
+  readonly #matrix = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #pitch = new Quaternion();
+  readonly #at = new Vector3();
+  readonly #one = new Vector3(1, 1, 1);
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #across = new Vector3(1, 0, 0);
+  readonly #corner = new Vector3();
+  readonly #paint = new Color();
+  #held: readonly ParkedCar[] | undefined;
+  #stats: ParkedCarStats = { cars: 0, near: 0, triangles: 0, rebuilds: 0 };
+
+  constructor(car: DeliveryCarGeometry) {
+    const bodies = car.bodies.map((_, body) => body);
+    this.#shapes = {
+      near: bodies.map((body) => parkedCarShapeOf(car, body, 'near')),
+      far: bodies.map((body) => parkedCarShapeOf(car, body, 'far')),
+    };
+    this.#mesh = new Mesh(new BufferGeometry(), parkedCarMaterial(car.atlas));
+    // Spread along a street: a sphere about them all culls nothing, and it is one call.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** What the last frame drew. @see parkedCarStatsOf */
+  get stats(): ParkedCarStats {
+    return this.#stats;
+  }
+
+  /** This frame's cars: the mesh is rebuilt only when they are not the last frame's; none hides it. */
+  update(view: ParkedCarsInView | undefined): void {
+    const cars = view?.cars ?? NO_CARS;
+    if (cars !== this.#held) {
+      this.#held = cars;
+      this.#rebuild(cars.slice(0, PARKED_CARS_MAX));
+    }
+    this.#mesh.visible = this.#stats.triangles > 0;
+  }
+
+  #rebuild(cars: readonly ParkedCar[]): void {
+    const bodies = this.#shapes.near.length;
+    // No car past the near cap is drawn with its wheels, whatever the list says.
+    let nearLeft = PARKED_CARS_NEAR_MAX;
+    const drawn = cars.map((car) => {
+      const near = car.level === 'near' && nearLeft > 0;
+      if (near) nearLeft -= 1;
+      const shapes = near ? this.#shapes.near : this.#shapes.far;
+      return { car, near, shape: shapes[parkedCarBody(car, bodies)] as ParkedCarShape };
+    });
+    const corners = drawn.reduce((sum, each) => sum + each.shape.triangles * 3, 0);
+    const position = new Float32Array(corners * 3);
+    const normal = new Float32Array(corners * 3);
+    const colour = new Float32Array(corners * 3);
+    const uv = new Float32Array(corners * 2);
+    let at = 0;
+    for (const { car, shape } of drawn) {
+      // Its nose along `(sin heading, cos heading)`, tipped up the ground by its pitch.
+      this.#turn
+        .setFromAxisAngle(this.#up, car.heading)
+        .multiply(this.#pitch.setFromAxisAngle(this.#across, -car.pitch));
+      this.#matrix.compose(this.#at.set(car.x, car.y, car.z), this.#turn, this.#one);
+      this.#paint.set(PARKED_CAR_PAINTS[parkedCarPaintOf(car, PARKED_CAR_PAINTS.length)] as number);
+      for (let corner = 0; corner < shape.triangles * 3; corner += 1) {
+        const to = (at + corner) * 3;
+        this.#corner
+          .fromArray(shape.position, corner * 3)
+          .applyMatrix4(this.#matrix)
+          .toArray(position, to);
+        this.#corner
+          .fromArray(shape.normal, corner * 3)
+          .applyQuaternion(this.#turn)
+          .toArray(normal, to);
+        colour[to] = (shape.colour[corner * 3] as number) * this.#paint.r;
+        colour[to + 1] = (shape.colour[corner * 3 + 1] as number) * this.#paint.g;
+        colour[to + 2] = (shape.colour[corner * 3 + 2] as number) * this.#paint.b;
+      }
+      uv.set(shape.uv, at * 2);
+      at += shape.triangles * 3;
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(position, 3));
+    geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+    geometry.setAttribute('color', new BufferAttribute(colour, 3));
+    geometry.setAttribute('uv', new BufferAttribute(uv, 2));
+    this.#mesh.geometry.dispose();
+    this.#mesh.geometry = geometry;
+    this.#stats = {
+      cars: drawn.length,
+      near: drawn.filter((each) => each.near).length,
+      triangles: corners / 3,
+      rebuilds: this.#stats.rebuilds + 1,
+    };
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
+  }
+}
+
+/** No cars: a frame that carries none. @see ParkedCarBelt.update */
+const NO_CARS: readonly ParkedCar[] = [];
 
 /**
  * The ground's photographic material — #425.
@@ -21291,8 +21904,109 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
     shade: 1,
     grounded: false,
     part: LOT_PART.other,
-    geometry: part.geometry(),
+    // #3252: the realistic wall is a drystone wall; the stylised one keeps its block.
+    geometry: kind === 'wall' ? stoneWallGeometry() : part.geometry(),
   }));
+}
+
+/** How many coping stones stand along a {@link stoneWallGeometry} piece: **13**. */
+export const STONE_WALL_COPES = 13;
+
+/**
+ * The realistic world's stone wall — #3252: a drystone wall where the field
+ * wall was a box. Its body is battered, 0.6 m at the foot and 0.42 m at the
+ * top, as a dry wall is built, and it carries a row of
+ * {@link STONE_WALL_COPES} coping stones set on edge, each its own width and
+ * height — tall and short in turn, the "cock and hen" of an upland wall — so
+ * its top is broken against the sky and not ruled. Built from numbers typed
+ * here; the stylised world keeps `BOUNDARY_STYLE`'s block.
+ *
+ * It keeps the block's footprint (`settlements.ts` §`STRUCTURE_FOOTPRINTS`,
+ * 0.6 m by 8 m) and its height — its tallest cope tops out under the block's
+ * 1.1 m, which `near-field.ts` clears a wall by — is set half a metre into
+ * the ground as every field boundary is, and is 168 triangles, under `realistic-budget.ts` §`REALISTIC_TRIANGLES`'
+ * `structure`.
+ */
+export function stoneWallGeometry(): BufferGeometry {
+  const body = new BoxGeometry(0.6, 1.34, BOUNDARY_PIECE_METRES).translate(0, 0.17, 0);
+  const corners = body.getAttribute('position');
+  for (let at = 0; at < corners.count; at += 1) {
+    if (corners.getY(at) > 0) corners.setX(at, corners.getX(at) * 0.7);
+  }
+  const span = BOUNDARY_PIECE_METRES / STONE_WALL_COPES;
+  const copes: BufferGeometry[] = [];
+  for (let cope = 0; cope < STONE_WALL_COPES; cope += 1) {
+    // Tall and short in turn, and no two alike: arithmetic, the same on every load.
+    const tall = cope % 2 === 0;
+    const wobble = 0.5 + 0.5 * Math.sin(cope * 2.4 + 0.7);
+    copes.push(
+      block(
+        0.36 + 0.08 * wobble,
+        (tall ? 0.2 : 0.12) + 0.04 * wobble,
+        span * (0.8 + 0.12 * wobble),
+        0.02 * Math.sin(cope * 1.7),
+        0.84,
+        -BOUNDARY_PIECE_METRES / 2 + (cope + 0.5) * span,
+      ),
+    );
+  }
+  return merged([body, ...copes]);
+}
+
+/**
+ * A close-board timber fence, one {@link BOUNDARY_PIECE_METRES} piece along
+ * `z` — #3252: three posts, a face of boards 1.65 m high on two arris rails,
+ * a gravel board at its foot and a capping rail. It wears the planks the
+ * field fence wears, and it is the fence of a garden or an allotment where
+ * the field's post-and-rail is a field's (`scenery-plan.ts` §`BOUNDARY_PLAN`).
+ */
+function timberFenceGeometry(): BufferGeometry {
+  const post = 0.1;
+  const end = BOUNDARY_PIECE_METRES / 2 - post / 2;
+  return merged([
+    ...[-end, 0, end].map((z) => block(post, 1.8 + 0.4, post, -0.05, -0.4, z)),
+    // The boards, then the rails behind them, the gravel board and the capping.
+    block(0.03, 1.65, BOUNDARY_PIECE_METRES, 0.02, 0.1),
+    block(0.05, 0.08, BOUNDARY_PIECE_METRES, -0.03, 0.4),
+    block(0.05, 0.08, BOUNDARY_PIECE_METRES, -0.03, 1.4),
+    block(0.04, 0.2, BOUNDARY_PIECE_METRES, 0.02, -0.1),
+    block(0.08, 0.04, BOUNDARY_PIECE_METRES, 0.01, 1.75),
+  ]);
+}
+
+/** How tall the noise barrier stands out of the ground, in metres: **3**. */
+export const NOISE_BARRIER_METRES = 3;
+
+/**
+ * A modern highway noise barrier, one {@link BOUNDARY_PIECE_METRES} piece
+ * along `z` — #3252: galvanised steel posts 4 m apart, and between each pair
+ * three stacked panels, the lower two concrete-grey absorbers and the top one
+ * a tinted band, under a capping rail. Each part with the colour it is
+ * drawn in, a colour a vertex, as the chain-link's frame is: it wears no
+ * photograph.
+ */
+function noiseBarrierParts(): readonly ShapePart[] {
+  const half = BOUNDARY_PIECE_METRES / 2;
+  const post = 0.2;
+  const bay = half - post;
+  const panel = (bottom: number, height: number): BufferGeometry =>
+    merged([-1, 1].map((side) => block(0.12, height, bay, 0, bottom, (side * half) / 2)));
+  const course = NOISE_BARRIER_METRES / 3;
+  return [
+    {
+      colour: 0x6a7175,
+      geometry: () =>
+        merged([
+          ...[-(half - post / 2), 0, half - post / 2].map((z) =>
+            block(post, NOISE_BARRIER_METRES + 0.6, post, 0, -0.5, z),
+          ),
+          block(0.16, 0.06, BOUNDARY_PIECE_METRES, 0, NOISE_BARRIER_METRES),
+        ]),
+    },
+    { colour: 0xa9a69d, geometry: () => panel(-0.5, 0.5 + course - 0.02) },
+    { colour: 0xb7b4ab, geometry: () => panel(course, course - 0.02) },
+    { colour: 0x7f9a8c, geometry: () => panel(2 * course, course - 0.02) },
+  ];
 }
 
 /**
@@ -21907,6 +22621,60 @@ export const CHAIN_LINK_FOLD_GLSL = `vOylChain = ${CHAIN_LINK_PART_ATTRIBUTE};
 if (abs(step(0.5, ${CHAIN_LINK_PART_ATTRIBUTE}) - ${CHAIN_LINK_SHAPE_ATTRIBUTE}) > 0.5) transformed = vec3(0.0);`;
 
 /**
+ * The BUILT fences as one shape of their own — #3252: the close-board timber
+ * fence and the highway noise barrier together, each taken through
+ * {@link projectedInMetres} as the field fence's planks are. It is the second
+ * variant of the realistic `fence` (`scenery-plan.ts` §`FENCE_VARIANTS`), so
+ * it is drawn by ONE mesh of its own and only where a built fence stands: a
+ * frame with none submits none of its triangles and makes no call for it.
+ *
+ * The two share that mesh the way the field fence and the chain-link share
+ * theirs (#1274), by the same taught material: the timber fence is part 0,
+ * the planks' photograph, and the barrier part 1, a colour a vertex with no
+ * relief, and each instance says which it is (`scenery-plan.ts`
+ * §`fenceFoldOf`), the other folded to a point. So an instance submits both,
+ * 216 triangles, under `realistic-budget.ts` §`REALISTIC_TRIANGLES`'
+ * `structure`.
+ *
+ * ⚠️ **Not folded into the FIELD fence's mesh.** Folded there as first
+ * written, every fence instance in every frame submitted 216 triangles more,
+ * and the Delivery village's frame went 1 708 over
+ * `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES` on the pull
+ * request's first CI run.
+ *
+ * `like` is the field fence's shape as the belt draws it. Where that does not
+ * carry the chain-link's part — a world loaded without the chain-link, whose
+ * fence material folds nothing — this is the timber fence alone, and a
+ * barrier is drawn as one.
+ */
+export function builtFenceGeometry(like: BufferGeometry): BufferGeometry {
+  const tile = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES.planks);
+  const timber = projectedInMetres(timberFenceGeometry(), tile, 1, false);
+  if (like.getAttribute(CHAIN_LINK_PART_ATTRIBUTE) === undefined) {
+    timber.computeBoundingSphere();
+    return timber;
+  }
+  const barrier = noiseBarrierParts().map((part) => {
+    const projected = projectedInMetres(part.geometry(), tile, 1, false);
+    const colour = new Color(part.colour);
+    const colours = projected.getAttribute('color');
+    for (let at = 0; at < colours.count; at += 1) {
+      colours.setXYZ(at, colour.r, colour.g, colour.b);
+    }
+    return projected;
+  });
+  const boards = timber.getAttribute('position').count;
+  const geometry = mergeGeometries([timber, ...barrier]);
+  for (const each of [timber, ...barrier]) each.dispose();
+  if (geometry === null) throw new Error('the built fences could not be merged');
+  const parts = new Float32Array(geometry.getAttribute('position').count).fill(1);
+  parts.fill(0, 0, boards);
+  geometry.setAttribute(CHAIN_LINK_PART_ATTRIBUTE, new BufferAttribute(parts, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The wire's cut-out — #1274, two functions {@link withChainLink} declares in
  * the fragment program. `oylChainCut` is the opacity below which a fragment
  * of wire is dropped: one half where a texel of the map covers a pixel or
@@ -22144,6 +22912,10 @@ export class RealisticStructureBelts {
           (shapes[0] as BufferGeometry).dispose();
           shapes[0] = folded;
         }
+        // #3252: the timber fence and the noise barrier, together the
+        // fence's second variant with one mesh of its own, after the fence's
+        // height is read.
+        if (kind === 'fence') shapes.push(builtFenceGeometry(shapes[0] as BufferGeometry));
         models.set(kind, shapes);
       }
       const folds = chainLink !== undefined && models.has('fence');
@@ -22157,7 +22929,8 @@ export class RealisticStructureBelts {
                 kind: 'fence',
                 materials: chainLinkMaterials(surface, textures, chainLink.wire),
                 attribute: CHAIN_LINK_SHAPE_ATTRIBUTE,
-                shapeOf: (item: ScatterItem) => (item.chainLink === true ? 1 : 0),
+                // #3252: and the noise barrier is drawn in its vertices' colours, as the chain-link is.
+                shapeOf: fenceFoldOf,
               },
             }
           : {}),
@@ -22233,6 +23006,13 @@ export interface MappedBuildingStats {
   /** How many are drawn as house models, and their triangles — #1585. */
   readonly modelled: number;
   readonly modelTriangles: number;
+  /**
+   * How many are drawn as wraps of the downtown kit's facade pieces, and
+   * their triangles — #3334: one more draw call between them, inside
+   * `MAPPED_BUILDING_DRAW_CALLS`.
+   */
+  readonly kitted: number;
+  readonly kitTriangles: number;
   /**
    * In reach and inside the budget, but passed over because its surfaces would
    * have opened a seventh — `mapped-buildings.ts` §`selectMappedBuildings`.
@@ -24669,7 +25449,11 @@ export interface DrawnMappedBuilding {
  *
  * - **Rebuilt only at a refill**, which the view runs when the rider's chunk
  *   (`MAPPED_CHUNK_METRES`) changes, or the rung does; never per frame. A
- *   frame that is not a refill reads one number and allocates nothing.
+ *   frame that is not a refill reads one number and allocates nothing — and,
+ *   since #3334, with the downtown kit loaded and a wrap drawn, measures one
+ *   distance, and once a `MAPPED_KIT_STRIDE_METRES` ridden passes over the
+ *   plans once to ask whether the wraps' candidates changed; only where they
+ *   did is the selection run.
  * - **Uploaded in part**: each attribute's update range is what was written.
  * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls,
  *   plinth and roof (#1540's `farTriangleCount`). The parapet and door are
@@ -24697,6 +25481,13 @@ export interface DrawnMappedBuilding {
 export interface MappedBuildingMaterials {
   readonly surfaces: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
   readonly models: MeshStandardMaterial;
+  /**
+   * The downtown kit's — #3334: {@link houseModelMaterial} with the kit's
+   * atlas for its map, so it is the house models' program with another
+   * picture bound, and {@link mappedBuildingWarmUp}'s `models` mesh compiles
+   * it too.
+   */
+  readonly kit: MeshStandardMaterial;
 }
 
 /**
@@ -24726,6 +25517,7 @@ export function mappedBuildingMaterials(
       FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
     ),
     models: houseModelMaterial(houses?.atlas),
+    kit: houseModelMaterial(houses?.kit?.atlas),
   };
 }
 
@@ -24733,6 +25525,7 @@ export function mappedBuildingMaterials(
 export function disposeMappedBuildingMaterials(materials: MappedBuildingMaterials): void {
   for (const material of materials.surfaces.values()) material.dispose();
   materials.models.dispose();
+  materials.kit.dispose();
 }
 
 /**
@@ -24819,6 +25612,15 @@ export class MappedBuildingBelt {
    * draw call whatever their count — refilled with the surfaces.
    */
   readonly modelMesh: Mesh;
+  /**
+   * #3334: the wraps of the downtown kit's facade pieces, one mesh in the
+   * kit's one material — one draw call whatever their count. Its geometry
+   * holds the house models' own attributes, the wraps written after the
+   * models in the one buffer and each mesh drawing its own range of it: the
+   * budget is shared, so a third buffer of the whole capacity would hold
+   * nothing the second cannot.
+   */
+  readonly kitMesh: Mesh;
   readonly #houses: RealisticHouses | undefined;
   readonly #modelPosition: BufferAttribute;
   readonly #modelNormal: BufferAttribute;
@@ -24858,9 +25660,21 @@ export class MappedBuildingBelt {
     passed: 0,
     modelled: 0,
     modelTriangles: 0,
+    kitted: 0,
+    kitTriangles: 0,
   };
   /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
   #chunk: number | undefined;
+  /** #3334: where the rider was when the wraps were last chosen or asked after. */
+  readonly #wrapsAt = new Float64Array(2);
+  /** #3334: the plans the last refill drew as wraps, the first {@link #drawnWraps} of it. */
+  readonly #wrapPlans = new Int32Array(MAPPED_KIT_NEAR_MAX);
+  #drawnWraps = 0;
+  /** #3334: the wraps' candidates when last asked after, the first {@link #candidateCount} of it. */
+  readonly #candidates = new Int32Array(MAPPED_KIT_NEAR_MAX);
+  #candidateCount = 0;
+  /** #3334: scratch for {@link wrapsWouldChange}'s selection. */
+  readonly #probe: MappedSelection;
   #refills = 0;
   #shown = true;
   /** Whether the browser gate has turned the mapped buildings off — its control. */
@@ -24888,6 +25702,7 @@ export class MappedBuildingBelt {
     this.#ownsMaterials = materials === undefined;
     const drawnIn = materials ?? mappedBuildingMaterials(textures, houses);
     this.#selection = new MappedSelection(mappedBuildingCap(buildings));
+    this.#probe = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
@@ -24939,11 +25754,28 @@ export class MappedBuildingBelt {
     this.modelMesh = new Mesh(models, drawnIn.models);
     this.modelMesh.frustumCulled = false;
     this.modelMesh.visible = false;
+    // #3334: the wraps' mesh, over the same attributes.
+    const wraps = new BufferGeometry();
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+      wraps.setAttribute(name, models.getAttribute(name));
+    }
+    wraps.setDrawRange(0, 0);
+    this.kitMesh = new Mesh(wraps, drawnIn.kit);
+    this.kitMesh.frustumCulled = false;
+    this.kitMesh.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.mesh);
     scene.add(this.modelMesh);
+    scene.add(this.kitMesh);
+  }
+
+  /** Takes the belt's meshes out of whatever scene they are in. */
+  removeFromParent(): void {
+    this.mesh.removeFromParent();
+    this.modelMesh.removeFromParent();
+    this.kitMesh.removeFromParent();
   }
 
   /** The set of buildings the belt draws from. @see rebind */
@@ -25016,9 +25848,108 @@ export class MappedBuildingBelt {
     return this.#materials.get(surface);
   }
 
-  /** Whether a frame at `chunk` needs a refill: the rider's chunk changed, or the rung did. */
-  needsRefill(chunk: number): boolean {
-    return chunk !== this.#chunk;
+  /**
+   * Whether a frame at `chunk` needs a refill: the rider's chunk changed, or
+   * the rung did. Or, #3334, whether it must be ASKED whether the wraps would
+   * change ({@link wrapsWouldChange}): with the downtown kit loaded, `view`
+   * given and at least one wrap drawn by the last refill, once the rider is
+   * `realistic-budget.ts` §`MAPPED_KIT_STRIDE_METRES` on from where that was
+   * last asked. So the wraps keep beside the rider and do not wait a chunk.
+   *
+   * ⚠️ **Never between chunks where the last refill drew no wrap** — PR
+   * #3343's review: on a street the house models spend the pool of, the
+   * guard draws none, and asking rewrote the whole belt three times as often
+   * as before for nothing. So a ride that comes on its first wrappable
+   * building mid-chunk draws its extrusion until the chunk's end, 100 m at
+   * the most.
+   *
+   * One distance a frame until the stride is ridden, and nothing allocated;
+   * then one pass over the plans (`mapped-buildings.ts` §`nearWrapsAt`), and
+   * `true` only where the six candidates are other plans than when last
+   * asked. That pass keeps its numbers in typed arrays and writes its list in
+   * place; `mapped-kit-belt.test.ts` holds a moving rider's frames to under
+   * three bytes a frame.
+   */
+  needsRefill(chunk: number, view?: MappedBuildingsInView): boolean {
+    if (chunk !== this.#chunk) return true;
+    if (view === undefined || this.#drawnWraps === 0) return false;
+    const at = this.#wrapsAt;
+    // Squared, and no `Math.hypot`: the engine's allocates on every call.
+    const dx = view.x - (at[0] as number);
+    const dz = view.z - (at[1] as number);
+    if (dx * dx + dz * dz < MAPPED_KIT_STRIDE_METRES * MAPPED_KIT_STRIDE_METRES) return false;
+    // In place: a frame that is not a refill allocates nothing.
+    at[0] = view.x;
+    at[1] = view.z;
+    // The candidates, AS A SET: the same six nearest in another order are no change, and
+    // the selection is not run for them. ⚠️ No closure in this method: one that captured a
+    // local would have the engine allocate a context on every call (`mapped-blobs.test.ts`).
+    const now = nearWrapsAt(this.buildings, view, view.ahead, ASKED);
+    let same = now.length === this.#candidateCount;
+    for (let at = 0; same && at < now.length; at += 1) {
+      let found = false;
+      for (let was = 0; was < this.#candidateCount; was += 1) {
+        if (this.#candidates[was] === now[at]) found = true;
+      }
+      same = found;
+    }
+    this.#remember(now);
+    return !same;
+  }
+
+  /** Keeps `candidates` as the wraps' candidates last asked after — #3334. */
+  #remember(candidates: readonly number[]): void {
+    this.#candidateCount = Math.min(candidates.length, MAPPED_KIT_NEAR_MAX);
+    for (let at = 0; at < this.#candidateCount; at += 1) {
+      this.#candidates[at] = candidates[at] as number;
+    }
+  }
+
+  /** Whether `chunk` is the chunk of the last refill: a refill asked for now is between chunks. */
+  inChunk(chunk: number): boolean {
+    return chunk === this.#chunk;
+  }
+
+  /**
+   * Whether a refill at `(riderX, riderZ)` would draw other plans as wraps
+   * than the last one drew — #3334, PR #3343's review: the selection itself,
+   * run into scratch, and its wraps compared with the drawn ones AS A SET.
+   * The six nearest in another order, or six candidates of which the guard
+   * draws the same four, are no change, and the belt is not rewritten for
+   * them. Run only where the candidates changed ({@link needsRefill}); the
+   * selection's own sort allocates a little, as it does at every refill.
+   */
+  wrapsWouldChange(
+    riderX: number,
+    riderZ: number,
+    triangleBudget: number,
+    rivals: RivalStructures = NO_RIVALS,
+    ahead?: Float32Array,
+  ): boolean {
+    const probe = this.#probe;
+    selectMappedBuildings(
+      this.buildings,
+      riderX,
+      riderZ,
+      Math.min(triangleBudget, MAPPED_BUILDING_TRIANGLES),
+      probe,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
+      this.#houses?.triangles,
+      ahead,
+      this.#houses?.kit !== undefined,
+    );
+    if (probe.kitCount !== this.#drawnWraps) return true;
+    for (let at = 0; at < probe.count; at += 1) {
+      if (probe.kitted[at] !== 1) continue;
+      const plan = probe.plans[at] as number;
+      let drawn = false;
+      for (let wrap = 0; wrap < this.#drawnWraps; wrap += 1) {
+        if (this.#wrapPlans[wrap] === plan) drawn = true;
+      }
+      if (!drawn) return true;
+    }
+    return false;
   }
 
   /** The rung changed: the next frame refills, whatever its chunk. */
@@ -25064,8 +25995,11 @@ export class MappedBuildingBelt {
   }
 
   #applyVisible(): void {
-    this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
+    this.mesh.visible =
+      this.drawing &&
+      this.#stats.triangles - this.#stats.modelTriangles - this.#stats.kitTriangles > 0;
     this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
+    this.kitMesh.visible = this.drawing && this.#stats.kitted > 0;
   }
 
   /**
@@ -25085,6 +26019,11 @@ export class MappedBuildingBelt {
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
+    // #3334: where the wraps were chosen and from which candidates, for `needsRefill` to ask
+    // again a stride on.
+    this.#wrapsAt[0] = riderX;
+    this.#wrapsAt[1] = riderZ;
+    this.#remember(nearWraps(this.buildings, riderX, riderZ, ahead, MAPPED_KIT_NEAR_MAX, ASKED));
     const selection = this.#selection;
     selectMappedBuildings(
       this.buildings,
@@ -25096,7 +26035,15 @@ export class MappedBuildingBelt {
       rivals,
       this.#houses?.triangles,
       ahead,
+      this.#houses?.kit !== undefined,
     );
+    // #3334: which plans are wraps now, for `wrapsWouldChange`.
+    this.#drawnWraps = 0;
+    for (let at = 0; at < selection.count && this.#drawnWraps < MAPPED_KIT_NEAR_MAX; at += 1) {
+      if (selection.kitted[at] !== 1) continue;
+      this.#wrapPlans[this.#drawnWraps] = selection.plans[at] as number;
+      this.#drawnWraps += 1;
+    }
     const surfaces = selection.surfaces;
     let end = 0;
     for (let slot = 0; slot < surfaces.length; slot += 1) {
@@ -25118,6 +26065,18 @@ export class MappedBuildingBelt {
         this.#spireAt[at] = -1;
         modelEnd = this.#appendModel(plan, plan.model, modelEnd);
         this.#modelEnd[at] = modelEnd;
+        continue;
+      }
+      // #3334: a wrapped plan's triangles are written after every model's, below.
+      if (selection.kitted[at] === 1 && plan.kit !== undefined) {
+        this.#wallAt[at] = -1;
+        this.#roofAt[at] = -1;
+        this.#spireAt[at] = -1;
+        // And its paved apron, where the selection counted it: ground, in its wall's surface.
+        if (selection.paved[at] === 1) {
+          const slot = surfaces.indexOf(plan.surfaces.wall);
+          this.#cursors[slot] = this.#append(plan, 'apron', this.#cursors[slot] as number);
+        }
         continue;
       }
       this.#modelAt[at] = -1;
@@ -25161,8 +26120,19 @@ export class MappedBuildingBelt {
         attribute.needsUpdate = true;
       }
     }
+    // #3334: the wraps, after the models in the models' buffer, in the kit's own range.
+    const kitStart = modelEnd;
+    for (let at = 0; at < selection.count; at += 1) {
+      if (selection.kitted[at] !== 1) continue;
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      if (plan.kit === undefined) continue;
+      this.#modelAt[at] = modelEnd;
+      modelEnd = this.#appendKit(plan, plan.kit, modelEnd);
+      this.#modelEnd[at] = modelEnd;
+    }
     const models = this.modelMesh.geometry;
-    models.setDrawRange(0, modelEnd);
+    models.setDrawRange(0, kitStart);
+    this.kitMesh.geometry.setDrawRange(kitStart, modelEnd - kitStart);
     for (const attribute of [
       this.#modelPosition,
       this.#modelNormal,
@@ -25182,10 +26152,15 @@ export class MappedBuildingBelt {
       near: selection.near,
       far: selection.farCount,
       triangles: selection.triangles,
-      drawCalls: geometry.groups.length + (selection.modelCount > 0 ? 1 : 0),
+      drawCalls:
+        geometry.groups.length +
+        (selection.modelCount > 0 ? 1 : 0) +
+        (selection.kitCount > 0 ? 1 : 0),
       passed: selection.passed,
       modelled: selection.modelCount,
       modelTriangles: selection.modelTriangles,
+      kitted: selection.kitCount,
+      kitTriangles: selection.kitTriangles,
     };
     this.#applyVisible();
     return this.#stats;
@@ -25249,6 +26224,31 @@ export class MappedBuildingBelt {
       model,
       placement,
       modelPaint(mappedRolePaint(plan, 'wall')),
+      plan.tint,
+      {
+        position: this.#modelPosition.array as Float32Array,
+        normal: this.#modelNormal.array as Float32Array,
+        uv: this.#modelUv.array as Float32Array,
+        colour: this.#modelColour.array as Float32Array,
+        tint: this.#modelTint.array as Float32Array,
+      },
+      at,
+    );
+  }
+
+  /**
+   * Writes a plan's wrap of facade pieces from vertex `at` of the models'
+   * buffer — #3334 ({@link writeKitWrap}), in the three colours its own paints
+   * choose (`facade-kit.ts` §`kitPaletteOf`) and #621's seeded tint. Returns
+   * the vertex after it.
+   */
+  #appendKit(plan: FootprintPlan, wrap: KitWrap, at: number): number {
+    const kit = this.#houses?.kit;
+    if (kit === undefined) return at;
+    return writeKitWrap(
+      kit,
+      wrap,
+      kitPaletteOf(wrap.style.skin, plan.paint),
       plan.tint,
       {
         position: this.#modelPosition.array as Float32Array,
@@ -25414,6 +26414,9 @@ export class MappedBuildingBelt {
       (this.#modelPosition.array as Float32Array).fill(0, from * 3, to * 3);
     } else if (plan.model !== undefined) {
       this.#appendModel(plan, plan.model, from);
+    } else if (plan.kit !== undefined) {
+      // #3334: a wrap is in the models' buffer too.
+      this.#appendKit(plan, plan.kit, from);
     }
     if (to > from) this.#modelPosition.addUpdateRange(from * 3, (to - from) * 3);
     this.#modelPosition.needsUpdate = true;
@@ -25438,10 +26441,12 @@ export class MappedBuildingBelt {
   dispose(): void {
     this.mesh.geometry.dispose();
     this.modelMesh.geometry.dispose();
+    this.kitMesh.geometry.dispose();
     // #3107: its own materials only. Shared ones are their maker's to dispose of.
     if (this.#ownsMaterials) {
       for (const material of this.#materials.values()) material.dispose();
       (this.modelMesh.material as Material).dispose();
+      (this.kitMesh.material as Material).dispose();
     }
   }
 }
@@ -25854,6 +26859,101 @@ function writeHouseModel(
 }
 
 /**
+ * Writes a footprint's wrap of the downtown kit's facade pieces from vertex
+ * `at` — #3334: every repeat of every run, the piece in relief or its card,
+ * each vertex placed by `facade-kit.ts` §`kitPlacedPoint`, its normal turned
+ * with the wall and taken through the stretch's inverse, and coloured by its
+ * class out of `palette` (a `fixed` vertex is the atlas as it is); then the
+ * flat roof, its texture coordinates laid across the roof piece's cell. One
+ * tint. Returns the vertex after it, `wrap.triangles` triangles on.
+ */
+export function writeKitWrap(
+  kit: RealisticKit,
+  wrap: KitWrap,
+  palette: KitPalette,
+  tint: number,
+  into: HouseModelArrays,
+  at: number,
+): number {
+  /** By a vertex's class: `facade-kit.ts` §`KIT_TINT_CLASSES`' order. */
+  const colours: readonly Rgb[] = [[1, 1, 1], palette.wall, palette.trim, palette.accent];
+  const { runs } = wrap;
+  let to = at;
+  const paint = (colourClass: number): void => {
+    const [red, green, blue] = colours[colourClass] ?? [1, 1, 1];
+    into.colour[to * 3] = red;
+    into.colour[to * 3 + 1] = green;
+    into.colour[to * 3 + 2] = blue;
+    into.tint[to] = tint;
+  };
+  for (let run = 0; run + KIT_RUN_FLOATS <= runs.length; run += KIT_RUN_FLOATS) {
+    const index = runs[run] as number;
+    const geometry = (runs[run + 1] === 1 ? kit.pieces : kit.cards)[index];
+    if (geometry === undefined) continue;
+    const ax = runs[run + 5] as number;
+    const az = runs[run + 6] as number;
+    const stretchX = runs[run + 7] as number;
+    const stretchY = runs[run + 8] as number;
+    const bays = runs[run + 9] as number;
+    const vertices = geometry.triangles * 3;
+    for (let bay = 0; bay < bays; bay += 1) {
+      for (let vertex = 0; vertex < vertices; vertex += 1) {
+        const [x, y, z] = kitPlacedPoint(
+          runs,
+          run,
+          bay,
+          geometry.position[vertex * 3] as number,
+          geometry.position[vertex * 3 + 1] as number,
+          geometry.position[vertex * 3 + 2] as number,
+        );
+        into.position[to * 3] = x;
+        into.position[to * 3 + 1] = y;
+        into.position[to * 3 + 2] = z;
+        const along = (geometry.normal[vertex * 3] as number) / stretchX;
+        const up = (geometry.normal[vertex * 3 + 1] as number) / stretchY;
+        const out = geometry.normal[vertex * 3 + 2] as number;
+        const nx = along * ax - out * az;
+        const nz = along * az + out * ax;
+        const length = Math.hypot(nx, up, nz) || 1;
+        into.normal[to * 3] = nx / length;
+        into.normal[to * 3 + 1] = up / length;
+        into.normal[to * 3 + 2] = nz / length;
+        into.uv[to * 2] = geometry.uv[vertex * 2] as number;
+        into.uv[to * 2 + 1] = geometry.uv[vertex * 2 + 1] as number;
+        paint(geometry.tint[vertex] as number);
+        to += 1;
+      }
+    }
+  }
+  // The roof: flat, facing up, the roof piece's cell laid across its whole extent.
+  const roofPiece = kitPieceIndex('roof');
+  const roof = KIT_PIECES[roofPiece];
+  const [minX, minZ, maxX, maxZ] = wrap.roofBounds;
+  const wide = maxX - minX || 1;
+  const deep = maxZ - minZ || 1;
+  for (let vertex = 0; vertex * 3 < wrap.roof.length; vertex += 1) {
+    const x = wrap.roof[vertex * 3] as number;
+    const z = wrap.roof[vertex * 3 + 2] as number;
+    into.position[to * 3] = x;
+    into.position[to * 3 + 1] = wrap.roof[vertex * 3 + 1] as number;
+    into.position[to * 3 + 2] = z;
+    into.normal[to * 3] = 0;
+    into.normal[to * 3 + 1] = 1;
+    into.normal[to * 3 + 2] = 0;
+    const [u, v] = kitProjectedUv(
+      roofPiece,
+      ((x - minX) / wide - 0.5) * (roof?.width ?? 1),
+      ((z - minZ) / deep) * (roof?.height ?? 1),
+    );
+    into.uv[to * 2] = u;
+    into.uv[to * 2 + 1] = v;
+    paint(0);
+    to += 1;
+  }
+  return to;
+}
+
+/**
  * Copies `from`'s casters onto the end of `into`'s, as far as `into` has room
  * — #1566: the village models' blobs after the procedural structures', in the
  * structures' one list. Allocates nothing.
@@ -25920,7 +27020,11 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * each structure item and billboard counted at `REALISTIC_TRIANGLES.structure`.
  * Returns the most procedural structures may then draw until the next refill,
  * or `undefined` on a frame that is not a refill — which reads one number and
- * allocates nothing.
+ * allocates nothing; since #3334, with the downtown kit loaded and a wrap
+ * drawn, it also measures one distance, and once a stride ridden passes over
+ * the plans to ask after the wraps (`MappedBuildingBelt.needsRefill`). Only where the wraps' candidates are other plans is
+ * the selection run (`wrapsWouldChange`), and the belt rewritten only where
+ * the wraps it would draw are.
  *
  * **The frame's procedural buildings and the mapped buildings are ranked
  * together, under the one cap** — the buildings by the road ahead since #2429,
@@ -25952,7 +27056,9 @@ export function refillMappedBuildings(
   billboards: number,
   structureItems: number,
 ): number | undefined {
-  if (!belt.needsRefill(view.chunk)) return undefined;
+  // Read before `needsRefill`: whether this is a chunk's refill, or the wraps' asking.
+  const between = belt.inChunk(view.chunk);
+  if (!belt.needsRefill(view.chunk, view)) return undefined;
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
   let count = 0;
@@ -25966,20 +27072,28 @@ export function refillMappedBuildings(
     at += 1;
   }
   rivalDistances.subarray(0, count).sort();
-  const stats = belt.refill(
-    view.x,
-    view.z,
-    Math.max(0, items - billboards) * structure,
-    view.chunk,
-    {
-      distances: rivalDistances,
-      count,
-      triangles: structure,
-    },
-    view.ahead,
-  );
+  const budget = Math.max(0, items - billboards) * structure;
+  RIVALS.distances = rivalDistances;
+  RIVALS.count = count;
+  RIVALS.triangles = structure;
+  // #3334: between chunks the belt is rewritten only where the wraps it draws would be
+  // other plans; asked, and nothing written or allocated, where they would not.
+  if (between && !belt.wrapsWouldChange(view.x, view.z, budget, RIVALS, view.ahead)) {
+    return undefined;
+  }
+  const stats = belt.refill(view.x, view.z, budget, view.chunk, RIVALS, view.ahead);
   return items - Math.ceil(stats.triangles / structure);
 }
+
+/** {@link MappedBuildingBelt.needsRefill}'s list of candidates, reused. */
+const ASKED: number[] = [];
+
+/** {@link refillMappedBuildings}' rivals, reused so asking after the wraps allocates nothing. */
+const RIVALS: { distances: Float64Array; count: number; triangles: number } = {
+  distances: new Float64Array(0),
+  count: 0,
+  triangles: 0,
+};
 
 /**
  * Whether a procedural structure is ranked against the mapped buildings —
@@ -26416,7 +27530,8 @@ class RealisticDrawing {
    * set to it ({@link MappedBuildingBelt.rebind}) and refills it, allocating
    * no buffer.
    *
-   * Every other frame reads one number and allocates nothing.
+   * Every other frame reads one number and allocates nothing (and, since
+   * #3334, may ask after the wraps once a stride: `refillMappedBuildings`).
    */
   updateMapped(
     view: MappedBuildingsInView | undefined,
@@ -26447,8 +27562,7 @@ class RealisticDrawing {
         ),
     );
     if (belt !== this.#mapped) {
-      this.#mapped?.mesh.removeFromParent();
-      this.#mapped?.modelMesh.removeFromParent();
+      this.#mapped?.removeFromParent();
       this.#mapped?.dispose();
       this.#mapped = belt;
       this.#mapped.setShown(this.#shown);
@@ -27199,6 +28313,16 @@ export function mappedBuildingsDrawnOf(view: GameView): readonly number[] {
  */
 export function villageModelsShownOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.villageModelsShown(on);
+}
+
+/**
+ * What a view's parked cars' belt drew on its last frame — #3278, for the
+ * browser gate's counts. `undefined` before a realistic frame carried a car.
+ *
+ * @test-facing read by `realistic-harness.ts`; the product reads the stats nowhere
+ */
+export function parkedCarStatsOf(view: GameView): ParkedCarStats | undefined {
+  return view instanceof ThreeGameView ? view.parkedCarStats : undefined;
 }
 
 /**
@@ -27961,6 +29085,8 @@ class ThreeGameView implements GameView {
    * handed none. @see #updateParkDressing
    */
   #parkDressing: ParkDressingBelt | undefined;
+  /** #3278: the parked cars' belt, built on the first realistic frame that carries a car. */
+  #parkedCars: ParkedCarBelt | undefined;
   /** #3052: the open world's street names, once a frame has carried one. */
   #streetNames: StreetNameBelt | undefined;
   /**
@@ -28170,6 +29296,8 @@ class ThreeGameView implements GameView {
     const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;
     this.#terrain.updatePark(park?.ground);
     this.#updateParkDressing(park);
+    // #3278: the parked cars in reach, the realistic world's alone.
+    this.#updateParkedCars(this.#drawing === 'realistic' ? frame.parkedCars : undefined);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -28320,6 +29448,25 @@ class ThreeGameView implements GameView {
       this.#parkDressing.addTo(this.#scene);
     }
     this.#parkDressing?.update(pieces);
+  }
+
+  /**
+   * The parked cars in reach — #3278: the belt built on the first realistic
+   * frame that carries a car, from the cars the realistic world loaded, and
+   * hidden on every frame with none.
+   */
+  #updateParkedCars(view: ParkedCarsInView | undefined): void {
+    const cars = realisticWorld?.deliveryCar;
+    if (this.#parkedCars === undefined && cars !== undefined && (view?.cars.length ?? 0) > 0) {
+      this.#parkedCars = new ParkedCarBelt(cars);
+      this.#parkedCars.addTo(this.#scene);
+    }
+    this.#parkedCars?.update(view);
+  }
+
+  /** @see parkedCarStatsOf */
+  get parkedCarStats(): ParkedCarStats | undefined {
+    return this.#parkedCars?.stats;
   }
 
   /**
@@ -29253,6 +30400,7 @@ class ThreeGameView implements GameView {
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
     this.#parkDressing?.dispose();
+    this.#parkedCars?.dispose();
     this.#streetNames?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();

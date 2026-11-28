@@ -161,6 +161,8 @@ import {
 } from './room-ride';
 import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
+import { routeStreetNameLabels } from './route-street-names';
+import type { StreetNameLabel } from './street-names';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { CaptureRecording } from './capture-recording';
@@ -1299,6 +1301,19 @@ interface RideRoad extends Pick<OpenWorldRoadView, 'profile' | 'origin'> {
   readonly follower?: OpenWorldRoad | undefined;
 }
 
+/**
+ * What the end-of-ride question says after its label — #2381: with no
+ * recording under the ride, nothing is saved or deleted.
+ */
+function endQuestionSentence(trainer: GameTrainerPort | undefined): string {
+  const under = trainer?.rideRecording?.();
+  return under === undefined
+    ? END_RIDE_TEXT.askNotRecorded
+    : under.savable
+      ? END_RIDE_TEXT.ask
+      : END_RIDE_TEXT.askNothingRecorded;
+}
+
 /** Before any ride: no profile has been read, and nothing reads this one. */
 const NO_RIDE_ROAD: RideRoad = {
   profile: {
@@ -1378,6 +1393,15 @@ interface PreviewAsked {
   readonly rider: SimulatedRider;
   readonly routeId: string;
   readonly position: RidingPosition;
+  /**
+   * The corridor the picker had ready for the route at the press — the
+   * tablet check on PR #3261. The preview's screen is a new one, which reads
+   * the corridor again, and it starts as soon as its routes are read: long
+   * before that read ends, so with nothing handed over a preview rode with no
+   * map data at all (no mapped buildings, no street names). As an ordinary
+   * press does (ADR 0054 D-2.4), it rides what was ready when it was pressed.
+   */
+  readonly corridor?: CorridorState | undefined;
 }
 
 /**
@@ -1710,6 +1734,17 @@ function GameScreen({
    * ride: the simulation runs on as it was and nothing is sent to the trainer.
    */
   const [endAsk, setEndAsk] = useState<EndRideStep | undefined>(undefined);
+  /**
+   * Whether the question open now was opened by the finish — #3336: the end of
+   * a point-to-point route, reached. Labelled as the finish, and opened with
+   * no press, so focus stays where it is (`Button.tsx` §`focusOnMount`).
+   */
+  const [endAtFinish, setEndAtFinish] = useState(false);
+  /** {@link endAsk}, for the frame loop, which the question's opening does not re-run. */
+  const endAskRef = useRef<EndRideStep | undefined>(undefined);
+  useEffect(() => {
+    endAskRef.current = endAsk;
+  }, [endAsk]);
   /** How the last game ride was ended, said on the picker — #2349. */
   const [rideEnded, setRideEnded] = useState<RideEndedAs | undefined>(undefined);
   /** Whether a press on *Start the race* is on its way, and what it was told (#785). */
@@ -2573,6 +2608,12 @@ function GameScreen({
   const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
   /** #1550, #1583: the lots' town, built from the same plans as {@link mappedBuildingsRef}, at the press. */
   const mappedTownRef = useRef<MappedTown | undefined>(undefined);
+  /**
+   * #3245: where a saved route ride paints the name of the street it is on,
+   * placed once at the press from {@link worldCorridorRef}'s named streets.
+   * `undefined` with no corridor, or none of the route's streets named.
+   */
+  const routeStreetNamesRef = useRef<readonly StreetNameLabel[] | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -3401,6 +3442,7 @@ function GameScreen({
       setStarting(undefined);
       // #2349: a new ride starts with no question open and nothing said of the last.
       setEndAsk(undefined);
+      setEndAtFinish(false);
       setRideEnded(undefined);
       // #784: the room worked out above, before the race was chosen.
       roomIdRef.current = roomId;
@@ -3448,7 +3490,12 @@ function GameScreen({
       // from what was ready for this route — and never changed during it
       // (ADR 0054 D-2.4). Leaving `choosing` below abandons a read still
       // running; one that ends anyway changes nothing this ride draws.
-      const ready = corridorStateRef.current;
+      // A preview rides the corridor its picker had ready (@see PreviewAsked.corridor)
+      // where its own screen's read has not ended.
+      const ready =
+        corridorStateRef.current?.kind === 'ready'
+          ? corridorStateRef.current
+          : (preview?.corridor ?? corridorStateRef.current);
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
@@ -3473,6 +3520,18 @@ function GameScreen({
         worldCorridorRef.current === undefined || landClassRef.current === undefined
           ? NO_URBAN_CLASS
           : urbanClassMap(worldCorridorRef.current, landClassRef.current, route.profile);
+      // #3245: and the names of the streets a saved route is on, placed ONCE,
+      // here, from the same corridor. None where the world is not drawn from
+      // it, and none on a built-in circuit or level, whose line is ours.
+      const routeLabels =
+        worldCorridorRef.current === undefined || onCircuit || onLevel
+          ? []
+          : routeStreetNameLabels(
+              worldCorridorRef.current.streets,
+              route.profile,
+              corridorOrigin(route.profile),
+            );
+      routeStreetNamesRef.current = routeLabels.length === 0 ? undefined : routeLabels;
       if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
         mappedBuildingsRef.current = undefined;
         mappedTownRef.current = undefined;
@@ -3484,6 +3543,9 @@ function GameScreen({
           corridorOrigin(route.profile),
           FOOTPRINT_MAX_VERTICES,
           urban,
+          // #3334: wraps of the downtown kit's pieces are planned only for a ride that asked
+          // for the realistic world, the one world that draws them.
+          { facadeKit: realistic },
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
         // #1637: carrying the urban class, which the lots and the streets read.
@@ -3674,6 +3736,7 @@ function GameScreen({
       captureSensors,
       inventedSensors,
       level,
+      preview,
     ],
   );
 
@@ -4437,6 +4500,18 @@ function GameScreen({
           : courseLineEvent(course, lapsDoneRef.current, simulation.state.ride.distance);
       if (course !== undefined && crossed !== undefined) {
         lapsDoneRef.current = courseLapsDone(course, simulation.state.ride.distance);
+        // #3336, the owner's ruling of 2026-11-26: the end of a point-to-point
+        // route is a finish, with *End ride* or *Keep riding* — the end-of-ride
+        // question, opened by the line. Asking changes nothing: the ride runs
+        // on, on the road `scene.ts` draws on past the end, until it is
+        // answered. Never over a question the rider has open already.
+        if (!course.loop && endAskRef.current === undefined) {
+          setEndAsk('ask');
+          setEndAtFinish(true);
+          setAnnouncement(
+            `${END_RIDE_TEXT.finishLabel} ${endQuestionSentence(trainerPortRef.current)}`,
+          );
+        }
         // #3153, the review of PR #3160: a capture keeps its laps in memory, as its figures.
         const capture = captureRecordingRef.current;
         const laps =
@@ -4912,6 +4987,10 @@ function GameScreen({
             deliveryRef.current === undefined &&
             drawn.botDistance === undefined &&
             ghostRef.current === undefined,
+          // #3278: parked cars on the mapped driveways, aprons and side
+          // streets, on every ride but a Delivery round, whose parked cars are
+          // its own obstacles. Scenery only: no simulation or trainer reads one.
+          parkedCars: deliveryRef.current === undefined,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is
@@ -4947,6 +5026,11 @@ function GameScreen({
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          // #3245: a saved route's street names, on every frame of a ride that
+          // names one (#3107: so the belt is made ready on its first frame).
+          ...(routeStreetNamesRef.current === undefined
+            ? {}
+            : { streetNames: routeStreetNamesRef.current }),
           // #2902: an open-world ride's mapped buildings, planned round the
           // rider from its tiles as it goes (`open-world/tile-buildings.ts`),
           // and ranked by the ways on from the next junction too.
@@ -5355,19 +5439,13 @@ function GameScreen({
    */
   const askToEnd = (): void => {
     setEndAsk('ask');
-    const under = props.trainer?.rideRecording?.();
-    // #2381: with no recording under the ride, nothing is saved or deleted.
-    const sentence =
-      under === undefined
-        ? END_RIDE_TEXT.askNotRecorded
-        : under.savable
-          ? END_RIDE_TEXT.ask
-          : END_RIDE_TEXT.askNothingRecorded;
-    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${sentence}`);
+    setEndAtFinish(false);
+    setAnnouncement(`${END_RIDE_TEXT.askLabel} ${endQuestionSentence(props.trainer)}`);
   };
   /** *Keep riding*, Escape and back with the question open: close it, and nothing else. */
   const keepRiding = (): void => {
     setEndAsk(undefined);
+    setEndAtFinish(false);
   };
   useRideBack(onTheStage, () => {
     if (endAsk === undefined) {
@@ -5433,6 +5511,7 @@ function GameScreen({
     const recorded = trainerPort?.rideRecording?.() !== undefined;
     teardown();
     setEndAsk(undefined);
+    setEndAtFinish(false);
     // #2392's review: a ride ended while its town loaded has no round waiting.
     setTownLoading(false);
     setPhase('choosing');
@@ -5619,7 +5698,14 @@ function GameScreen({
                   // control, and the preview's new screen would leave a
                   // control granted to this one with nothing to release it.
                   if (startingRef.current) return;
-                  onPreview({ rider, routeId: route.id, position: sitting });
+                  // The tablet check on PR #3261: and what the picker had
+                  // read, which the press holds to this route's own.
+                  onPreview({
+                    rider,
+                    routeId: route.id,
+                    position: sitting,
+                    corridor: corridorStateRef.current,
+                  });
                 }
           }
           // #1221: whether this ride will be saved, said under Ride. The
@@ -6176,12 +6262,15 @@ function GameScreen({
             <EndRideQuestion
               className="oyl-end-ride oyl-end-ride--hud"
               step={endAsk}
+              // #3336: opened by the finish line, so labelled as the finish.
+              finished={endAtFinish}
               canSave={recordedUnder?.savable === true}
               // #2381: with nothing recorded, one step: *End ride* or
               // *Keep riding*, and no deletion to warn of.
               recorded={recordedUnder !== undefined}
-              // Opened by a press — *End ride*, or back — every time.
-              focusOnOpen
+              // Opened by a press — *End ride*, or back — every time but the
+              // finish (#3336), which no press opened.
+              focusOnOpen={!endAtFinish}
               // The HUD's ONE region says it (#445): @see askToEnd
               surface="hud"
               onSave={() => {

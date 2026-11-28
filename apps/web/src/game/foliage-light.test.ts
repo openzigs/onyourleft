@@ -61,9 +61,10 @@ describe('the far band’s light and the breeze — #630', () => {
         }
       }
     }
-    // Non-vacuity: three sets — six generated trees, four generated
-    // broadleaves beside two scanned firs, and four scans.
-    expect(strips).toBe(6 + 6 + 4);
+    // Non-vacuity: two sets — six generated trees, and four generated
+    // broadleaves beside two scanned firs. (Three, with four scans, until
+    // #1293 deleted the scanned broadleaves.)
+    expect(strips).toBe(6 + 6);
   });
 
   it('sways with the ride’s clock, is still when the clock is, and no two phases move alike', () => {

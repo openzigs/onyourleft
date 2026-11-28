@@ -52,7 +52,13 @@ import {
   type Viewport,
 } from './ride-stage';
 import type { StageMeasurement } from './ride-harness';
-import { applyInsets, PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED, resolvedInsets } from './insets';
+import {
+  applyInsets,
+  NO_INSETS,
+  PIXEL_TABLET_LANDSCAPE_INSETS,
+  PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  resolvedInsets,
+} from './insets';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 test.afterAll(releaseSharedPage);
@@ -382,7 +388,7 @@ const STRIP_FIGURES = { 'Avg speed': '20.0 km/h', Energy: '15300 kJ', Climbed: '
 const STRIP_DRAWN = new Set(
   OVERLAY_VIEWPORTS.filter(
     (each) =>
-      (each.width >= 960 && each.height >= 640) ||
+      (each.width >= 960 && each.height >= 768) ||
       (each.width >= 736 && each.width < 816 && each.height >= 1088),
   ).map((each) => each.name),
 );
@@ -420,6 +426,12 @@ function stripPlaceFaults(seen: StageMeasurement, viewport: Viewport): string[] 
       if (strip.box.top < route.box.top) faults.push('strip above the route panel’s top');
     }
     if (strip.box.right > actions.box.right + 1) faults.push('strip past the actions panel');
+    // #2418: its left edge is the actions panel's, not its column's.
+    if (Math.abs(strip.box.left - actions.box.left) > 1) {
+      faults.push(
+        `strip's left edge ${String(Math.round(strip.box.left))} not the actions panel's ${String(Math.round(actions.box.left))}`,
+      );
+    }
   } else {
     if (viewport.height - strip.box.bottom > 16) faults.push('strip not along the bottom');
     if (strip.box.right >= actions.box.left) faults.push('strip not left of the actions panel');
@@ -472,7 +484,64 @@ async function stripCellFaults(page: Page): Promise<string[]> {
   });
 }
 
-/** The route and actions panels' boxes, to compare a ride with the strip and one without. */
+/** The least space between a value and the label under it, upright — #2418. */
+const STRIP_ROW_GAP_PIXELS = 12;
+
+/**
+ * #2418, upright, where the strip is two rows in the actions panel's column:
+ * no empty cell — each row's cells reach from the strip's first column to its
+ * last, so a route ride's five (no Lap) leave no hole after *Climbed* — and a
+ * value at least {@link STRIP_ROW_GAP_PIXELS} above the label under it. By
+ * each `dt` and `dd`'s own box, as the rider reads them.
+ */
+async function stripUprightFaults(page: Page): Promise<string[]> {
+  return page.evaluate((gap) => {
+    const strip = document.querySelector('.oyl-hud__totals');
+    if (strip === null || window.getComputedStyle(strip).display === 'none') return ['no strip'];
+    const cells = [...strip.children].map((cell) => ({
+      name: cell.querySelector('dt')?.textContent ?? '?',
+      box: cell.getBoundingClientRect(),
+      label: cell.querySelector('dt')?.getBoundingClientRect(),
+      value: cell.querySelector('dd')?.getBoundingClientRect(),
+    }));
+    const rows = new Map<number, typeof cells>();
+    for (const cell of cells) {
+      const top = Math.round(cell.box.top);
+      rows.set(top, [...(rows.get(top) ?? []), cell]);
+    }
+    const left = Math.min(...cells.map((each) => each.box.left));
+    const right = Math.max(...cells.map((each) => each.box.right));
+    const faults: string[] = [];
+    if (rows.size < 2) faults.push(`${String(rows.size)} row`);
+    const ordered = [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => row);
+    ordered.forEach((row, index) => {
+      const first = Math.min(...row.map((each) => each.box.left));
+      const last = Math.max(...row.map((each) => each.box.right));
+      if (first > left + 1 || last < right - 1) {
+        faults.push(
+          `row ${String(index + 1)} (${row.map((each) => each.name).join(', ')}) leaves an empty cell: ${String(Math.round(first))}–${String(Math.round(last))} of ${String(Math.round(left))}–${String(Math.round(right))}`,
+        );
+      }
+      const next = ordered[index + 1];
+      if (next === undefined) return;
+      const valueBottom = Math.max(...row.map((each) => each.value?.bottom ?? 0));
+      const labelTop = Math.min(...next.map((each) => each.label?.top ?? Infinity));
+      if (labelTop - valueBottom < gap) {
+        faults.push(
+          `row ${String(index + 2)}'s labels ${String(Math.round(labelTop - valueBottom))} px under row ${String(index + 1)}'s values`,
+        );
+      }
+    });
+    return faults;
+  }, STRIP_ROW_GAP_PIXELS);
+}
+
+/**
+ * The route and actions panels' boxes, to compare a ride with the strip and
+ * one without. Rounded, and compared within a pixel either way by
+ * {@link panelsMoved} (#2418): a sub-pixel difference in rounding is not a
+ * panel moving.
+ */
 function bottomPanels(seen: StageMeasurement): Record<string, readonly number[]> {
   const boxes: Record<string, readonly number[]> = {};
   for (const name of ['oyl-hud__route', 'oyl-hud__actions']) {
@@ -483,6 +552,29 @@ function bottomPanels(seen: StageMeasurement): Record<string, readonly number[]>
     }
   }
   return boxes;
+}
+
+/** Each bottom panel's edge that is more than a pixel from where it is in `plain`. */
+function panelsMoved(seen: StageMeasurement, plain: StageMeasurement): string[] {
+  const now = bottomPanels(seen);
+  const before = bottomPanels(plain);
+  const faults: string[] = [];
+  for (const [name, box] of Object.entries(before)) {
+    const moved = now[name];
+    if (moved === undefined) {
+      faults.push(`${name} gone`);
+      continue;
+    }
+    box.forEach((edge, index) => {
+      const there = moved[index] ?? Number.NaN;
+      if (!(Math.abs(there - edge) <= 1)) {
+        faults.push(
+          `${name} ${['left', 'top', 'right', 'bottom'][index] ?? '?'} ${String(edge)} → ${String(there)}`,
+        );
+      }
+    });
+  }
+  return faults;
 }
 
 for (const arrangement of ['full', 'focus'] as const) {
@@ -526,6 +618,9 @@ for (const arrangement of ['full', 'focus'] as const) {
           // Each cell holds its words wherever the strip is drawn, not only
           // upright: at 1280×800 #2387's one row had no per-cell check.
           expect(await stripCellFaults(page), how).toEqual([]);
+          if (STRIP_UPRIGHT.has(viewport.name)) {
+            expect(await stripUprightFaults(page), how).toEqual([]);
+          }
           // Every reading on it on the stage and uncovered (`layoutFaults`
           // holds each item), with the port's figures.
           const names = seen.items.map((each) => each.name);
@@ -550,6 +645,10 @@ for (const viewport of OVERLAY_VIEWPORTS.filter((each) => STRIP_DRAWN.has(each.n
       expect(seen.totalsValues[0], how).toBe('1');
       expect(stripPanel(seen), how).toBeDefined();
       expect(await stripCellFaults(page), how).toEqual([]);
+      if (STRIP_UPRIGHT.has(viewport.name)) {
+        expect(stripPlaceFaults(seen, viewport), how).toEqual([]);
+        expect(await stripUprightFaults(page), how).toEqual([]);
+      }
     }
   });
 
@@ -604,6 +703,7 @@ test('#2387 upright, the totals strip clears the rider with the tablet’s inset
   expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
   expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
   expect(await stripCellFaults(page)).toEqual([]);
+  expect(await stripUprightFaults(page)).toEqual([]);
 });
 
 /**
@@ -629,7 +729,8 @@ for (const size of ['normal', 'large', 'extra-large'] as const) {
       expect(sizeFaults(seen, UPRIGHT_TABLET).faults).toEqual([]);
       expect(stripPlaceFaults(seen, UPRIGHT_TABLET)).toEqual([]);
       expect(await stripCellFaults(page)).toEqual([]);
-      expect(bottomPanels(seen)).toEqual(bottomPanels(plain));
+      expect(await stripUprightFaults(page)).toEqual([]);
+      expect(panelsMoved(seen, plain)).toEqual([]);
       expect(Object.keys(bottomPanels(seen))).toEqual(['oyl-hud__route', 'oyl-hud__actions']);
     });
   }
@@ -679,6 +780,61 @@ test('#2387 a shorter upright tablet, 768×1024, gives the totals strip way', as
   expect(stripPanel(seen)).toBeUndefined();
   expect(seen.givenWay).toContain('the totals strip');
 });
+
+/**
+ * #2417 — a short tablet on its side. 1024×640 is a common 16:10 Android
+ * tablet, and 960×640 the narrowest the landscape rule takes. Under the first
+ * cut of `theme.css` §"THE TOTALS STRIP" (60 rem wide and 40 rem tall) both
+ * drew the strip in two rows 17 px under the leaning rider with no insets, so
+ * a 24 px gesture bar left 1 px and the Pixel Tablet's 32 px put it 7 px over
+ * the rider. Held with no insets and with that tablet's, which lift the
+ * bottom row towards the rider: the strip is either not drawn, and said so,
+ * or drawn at least {@link STRIP_RIDER_CLEARANCE_PIXELS} under the rider: 1024×704
+ * (44 rem) measured 6 px with the inset, so the rule's edge is 48 rem. Just
+ * under that edge, 1024×752, it is not drawn; at it, 1024×768, it is.
+ */
+const STRIP_RIDER_CLEARANCE_PIXELS = 8;
+
+for (const viewport of [
+  { name: 'a short tablet on its side — 1024×640', width: 1024, height: 640, unstagedFails: true },
+  { name: 'a short tablet on its side — 960×640', width: 960, height: 640, unstagedFails: true },
+  {
+    name: 'just under the strip’s height — 1024×752',
+    width: 1024,
+    height: 752,
+    unstagedFails: true,
+  },
+  { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
+] satisfies Viewport[]) {
+  for (const [how, insets] of [
+    ['no insets', NO_INSETS],
+    ['the Pixel Tablet’s insets', PIXEL_TABLET_LANDSCAPE_INSETS],
+  ] as const) {
+    test(`#2417 ${viewport.name}, ${how}: the totals strip clears the rider or is not drawn`, async ({
+      page,
+    }) => {
+      // Its own page: the insets are the engine's, told before any layout.
+      await applyInsets(page, insets);
+      await openRide(page, viewport, '?totals=strip');
+      expect(await resolvedInsets(page)).toEqual(insets);
+      const seen = await measure(page);
+      const strip = stripPanel(seen);
+      const rider = riderBox(viewport);
+      console.log(
+        `#2417 ${viewport.name} ${how}: strip ${strip === undefined ? 'not drawn' : `${String(Math.round(strip.box.top - rider.bottom))} px under the rider`}; faults ${sizeFaults(seen, viewport).faults.join(' | ')}`,
+      );
+      if (viewport.height < 768) {
+        expect(strip).toBeUndefined();
+        expect(seen.givenWay).toContain('the totals strip');
+        return;
+      }
+      expect(strip).toBeDefined();
+      if (strip === undefined) return;
+      expect(strip.box.top - rider.bottom).toBeGreaterThanOrEqual(STRIP_RIDER_CLEARANCE_PIXELS);
+      expect(await stripCellFaults(page)).toEqual([]);
+    });
+  }
+}
 
 for (const [mode, query] of MODES.filter(([, each]) => hasOwnMode(each))) {
   test(`#2387 ${mode} draws no totals strip with the strip chosen`, async ({ browser }) => {

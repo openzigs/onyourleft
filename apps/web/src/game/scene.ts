@@ -25,6 +25,7 @@ import type { RiderBody, UnitSystem } from '@onyourleft/store';
 
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
+import { clearOfTheRoadOn, drawnPastTheFinish } from './past-the-finish';
 import {
   distanceOnRoute,
   ghostDistanceAt,
@@ -59,6 +60,7 @@ import {
   horizonRelief,
   standingOnGround,
   terrainCorridor,
+  terrainHeightAt,
   type TerrainMesh,
 } from './landform';
 import { poolsInView } from './mapped-pools';
@@ -97,6 +99,7 @@ import {
 } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
+import { drawnScale } from './scenery-plan';
 import {
   gradeCrossingsAt,
   mappedGradeCrossings,
@@ -126,6 +129,7 @@ import {
   corridorOrigin,
   BEND_SMOOTHING_METRES,
   drawnRoadFrame,
+  drawnRoadPosition,
   localGroundPosition,
   roadCorridor,
   VIEW_AHEAD_METRES,
@@ -163,17 +167,20 @@ import {
   type SideRoad,
 } from './cross-streets';
 import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
-import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { NO_PAVEMENT_DATA, pavementSides, type PavementSides } from './footways';
 import { riddenSpanParts, riddenSpans, sideDeckParts } from './mapped-spans';
 import {
+  NEARBY_STREET_LIFT_METRES,
   nearbyStreets,
   nearbyStreetsAt,
+  NO_NEARBY_STREETS,
   routeGround,
+  type NearbyStreets,
   type NearbyStreetScan,
 } from './nearby-streets';
 import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
 import { junctionSurfacesAt, type JunctionSurface, type TurnedJunction } from './junction-surface';
-import { streetNamesInView, type StreetNameLabel } from './street-names';
+import { streetNamesInView, type RouteLabelRoad, type StreetNameLabel } from './street-names';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
@@ -189,10 +196,23 @@ import {
   type WalkKind,
 } from './people';
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
+import {
+  NO_PARKED_CARS,
+  PARKED_CAR_AHEAD_METRES,
+  PARKED_CAR_CELL_METRES,
+  parkedCarsAt,
+  parkedCarsSeenFrom,
+  type ParkedCarsInView,
+} from './parked-cars';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
-import { sceneryAnchor } from './scenery-anchor';
-import { streetsAt, type VillageStreet } from './streets';
+import { routeOf, sceneryAnchor } from './scenery-anchor';
+import {
+  CITY_PAVEMENT_WIDTH_METRES,
+  cityPavementOn,
+  streetsAt,
+  type VillageStreet,
+} from './streets';
 import {
   bridgeParts,
   MAXIMUM_BRIDGE_PARTS,
@@ -221,7 +241,7 @@ import {
   type CyclistInReach,
   type SceneryCyclist,
 } from './scenery-cyclists';
-import { NO_URBAN_CLASS } from './urban-class';
+import { NO_URBAN_CLASS, type UrbanClassMap } from './urban-class';
 import { positionAt, type GeographicPosition, type RouteProfile } from '@onyourleft/domain';
 
 /** One junction of an open-world ride. @see SceneInput.junctionsSeen */
@@ -580,6 +600,19 @@ export interface SceneInput {
    */
   readonly parkDressingOff?: boolean | undefined;
   /**
+   * Whether this ride may stand parked cars on its mapped driveways, aprons
+   * and side streets — #3278 (`parked-cars.ts`): `GameView` says so on every
+   * ride but a Delivery round, whose parked cars are obstacles it places by
+   * its own rules and must not be mistaken for scenery. The realistic page
+   * says so unless its `-parked-cars` lever is off. Scenery only: no
+   * simulation or trainer reads a car.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it has empty streets. `realistic-choice.test.tsx`
+   * §"#3278" reads it back off what `GameView` asked `sceneFrame` for.
+   */
+  readonly parkedCars?: boolean | undefined;
+  /**
    * #2973's nearby streets left undrawn: only the route, its junctions'
    * stubs and its overpasses' roads (`nearby-streets.ts`) — the realistic
    * page's `-nearby-streets` lever, and nothing else. Optional the safe way
@@ -785,8 +818,24 @@ function withWaysPlaced(input: SceneInput): SceneInput {
   return placed === ways ? input : { ...input, waysOut: placed };
 }
 
+/**
+ * `input` drawn on past its route's end where the view reaches it — #3336,
+ * `past-the-finish.ts`: the same object everywhere else.
+ */
+function drawnOnPastTheEnd(input: SceneInput): SceneInput {
+  const odometer = Math.max(input.state.ride.distance, input.riderDistance ?? 0);
+  const profile = drawnPastTheFinish(input.profile, odometer);
+  if (profile === input.profile) return input;
+  // …and no mapped building stands on the road drawn on.
+  return input.mappedBuildings === undefined
+    ? { ...input, profile }
+    : { ...input, profile, mappedBuildings: clearOfTheRoadOn(input.mappedBuildings, profile) };
+}
+
 /** Builds one frame. */
-export function sceneFrame(handed: SceneInput): SceneFrame {
+export function sceneFrame(given: SceneInput): SceneFrame {
+  // #3336: past a route's end, the road and the world go on.
+  const handed = drawnOnPastTheEnd(given);
   // #3119: the ways out whose scenery this frame may place, a few new ones a frame.
   const input = withWaysPlaced(handed);
   // #1998: where the rider is DRAWN — eased off for a sharp bend — which is
@@ -906,14 +955,18 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
   // #2973: and the mapped streets that never touch the route, out to the fog —
   // side roads too, so the same mesh draws them and the scenery keeps off them.
+  const nearbyFound: NearbyStreets =
+    input.worldCorridor === undefined || input.nearbyStreetsOff === true
+      ? NO_NEARBY_STREETS
+      : input.streetScans === undefined
+        ? nearbyStreets(input.worldCorridor, input.profile, input.origin)
+        : // #3107: an open-world ride's, a slice a frame.
+          input.streetScans.nearby.streets(input.worldCorridor, input.profile, input.origin);
   const nearby =
     input.worldCorridor === undefined || input.nearbyStreetsOff === true
       ? NO_SIDE_ROADS
       : nearbyStreetsAt(
-          input.streetScans === undefined
-            ? nearbyStreets(input.worldCorridor, input.profile, input.origin)
-            : // #3107: an open-world ride's, a slice a frame.
-              input.streetScans.nearby.streets(input.worldCorridor, input.profile, input.origin),
+          nearbyFound,
           input.profile,
           input.origin,
           seed,
@@ -1028,12 +1081,20 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
-    world: worldStyle(input.profile),
+    // #3336: a route drawn past its end keeps the route's own.
+    world: worldStyle(routeOf(input.profile)),
     // #2685: the golf courses' and cemeteries' ground and what stands on it,
     // round the camera, stood on this frame's ground as the scenery is.
     ...(input.worldCorridor === undefined || input.parkDressingOff === true
       ? {}
       : { parkDressing: parkDressing(input, input.worldCorridor, seed, camera, ground) }),
+    // #3278: the cars parked on the mapped driveways, aprons and side streets
+    // about the road ahead of the rider — scenery, and none in a Delivery round.
+    ...(input.worldCorridor === undefined || input.parkedCars !== true
+      ? {}
+      : {
+          parkedCars: parkedCars(input, input.worldCorridor, nearbyFound, seed, riderDistance),
+        }),
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
@@ -1057,6 +1118,10 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
             (riders[0] as PlacedRider).marker,
             riderDistance,
             streetSurfaceAt(input, seed),
+            // #3261's tablet checks: a route ride's labels drawn on the
+            // rider's own pass only, on the road's own height at their route
+            // distance, as a nearby street stands.
+            routeLabelRoad(input, seed),
           ),
         }),
     // #2972: the corridor's mapped footways drawn as surfaces round the camera,
@@ -1105,11 +1170,12 @@ export function sceneFrame(handed: SceneInput): SceneFrame {
     // and the mapped pools round the camera.
     water: water(input, corridor, ways, streamBridges, crossings, nearby, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
+    // #3336: at the ROUTE's lines, on a route drawn past its end too.
     lines: linesNear(
-      input.profile,
+      routeOf(input.profile),
       corridor,
       riderDistance,
-      lineStands(input.profile, input.units ?? 'metric'),
+      lineStands(routeOf(input.profile), input.units ?? 'metric'),
     ),
   };
 }
@@ -1233,6 +1299,138 @@ function stood(
 
 /** What a village's street draws its walkers on, at its own top. @see stood */
 const STREET_WALKS: ReadonlySet<WalkKind> = new Set<WalkKind>(['pavement', 'door-path']);
+
+/**
+ * How far behind a city centre's kerb its pavement's back is, and a hand, in
+ * metres: a parked car stands behind it. @see parkedCars
+ */
+const CITY_PAVEMENT_CLEAR_METRES = CITY_PAVEMENT_WIDTH_METRES + 0.2;
+
+/** How much of a parked car's clearance from the road is verge, in metres: **1**. @see parkedCars */
+const PARKED_VERGE_METRES = 1;
+
+/**
+ * How far a place is from the middle of ANY stretch of the ridden road, as a
+ * parked car is kept off it — #3278: the drawn road's own distance, less a
+ * city centre's pavement where one is laid on that side (`streets.ts`
+ * §`cityPavementOn`, #1637), which is 3.5 m against the metre of verge a car
+ * otherwise keeps. So a car stands behind a city's pavement and not on it.
+ * With no urban class there is no city centre, and it is
+ * `road-grid.ts` §`distanceToDrawnRoad` exactly; `sides` is read only with one.
+ */
+export function roadBehindPavements(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  urban: UrbanClassMap | undefined,
+  sides: () => PavementSides,
+): (x: number, z: number, reach: number) => number {
+  if (urban === undefined) {
+    return (x, z, reach) => distanceToDrawnRoad(profile, origin, x, z, reach);
+  }
+  const mapped = sides();
+  return (x, z, reach) => {
+    const beside = nearestOnDrawnRoad(profile, origin, x, z, reach + CITY_PAVEMENT_CLEAR_METRES);
+    if (beside === undefined) return Number.POSITIVE_INFINITY;
+    return cityPavementOn(profile, urban, mapped, beside.along, beside.lateral < 0 ? -1 : 1)
+      ? beside.distance - (CITY_PAVEMENT_CLEAR_METRES - PARKED_VERGE_METRES)
+      : beside.distance;
+  };
+}
+
+/** The last answer {@link parkedCars} gave, and everything it was asked with. */
+let lastParked:
+  | {
+      readonly profile: RouteProfile;
+      readonly corridor: WorldCorridor;
+      readonly buildings: MappedBuildings | undefined;
+      readonly streets: NearbyStreets;
+      readonly seed: number;
+      readonly cellX: number;
+      readonly cellZ: number;
+      readonly view: ParkedCarsInView;
+    }
+  | undefined;
+
+/**
+ * The parked cars in reach — #3278 (`parked-cars.ts`), chosen about the road
+ * {@link PARKED_CAR_AHEAD_METRES} ahead of the rider: the road and not the
+ * camera, so a lane change, the eye's sway and a bend's look-ahead move
+ * nothing. Asked again only when that place enters another
+ * {@link PARKED_CAR_CELL_METRES} cell, or the road, the corridor, the
+ * buildings or the streets read are not the ones it was last asked with;
+ * every frame between is the last answer.
+ *
+ * WHICH of them have their wheels is said every frame, about the rider's own
+ * place on the road (`parked-cars.ts` §`parkedCarsSeenFrom`): the place asked
+ * about is 40 m up the road, and on a street with more cars than the near
+ * cap the wheels went to the cars up there and not to the one beside the
+ * rider. That is a distance a car and no planning; it hands back the list it
+ * was handed until a car's level changes, so every frame between hands the
+ * view the same object and its belt rebuilds nothing.
+ * @see SceneFrame.parkedCars
+ */
+function parkedCars(
+  input: SceneInput,
+  corridor: WorldCorridor,
+  streets: NearbyStreets,
+  seed: number,
+  riderDistance: number,
+): ParkedCarsInView {
+  const buildings = input.mappedBuildings;
+  if ((buildings?.plans.length ?? 0) === 0 && streets.pieces.length === 0) return NO_PARKED_CARS;
+  const about = drawnRoadPosition(
+    input.profile,
+    input.origin,
+    riderDistance + PARKED_CAR_AHEAD_METRES,
+  );
+  const cellX = Math.floor(about.x / PARKED_CAR_CELL_METRES);
+  const cellZ = Math.floor(about.z / PARKED_CAR_CELL_METRES);
+  // The rider's place on the road, and not the camera's: a lane change moves no wheel.
+  const rider = drawnRoadPosition(input.profile, input.origin, riderDistance);
+  const last = lastParked;
+  if (
+    last !== undefined &&
+    last.profile === input.profile &&
+    last.corridor === corridor &&
+    last.buildings === buildings &&
+    last.streets === streets &&
+    last.seed === seed &&
+    last.cellX === cellX &&
+    last.cellZ === cellZ
+  ) {
+    const seen = parkedCarsSeenFrom(last.view, rider.x, rider.z);
+    if (seen !== last.view) lastParked = { ...last, view: seen };
+    return seen;
+  }
+  const { profile, origin } = input;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const ground = routeGround(profile, origin, seed, land);
+  const planned = parkedCarsAt(
+    {
+      seed,
+      plots: buildings?.plans ?? [],
+      radii: buildings?.radii ?? [],
+      pieces: streets.pieces,
+      streets: corridor.streets,
+      paths: corridor.paths,
+      // An open-world ride may ride any street next: no car at a kerb there.
+      kerbs: sceneryAnchor(profile) === undefined,
+      road: roadBehindPavements(
+        profile,
+        origin,
+        // #1637: fixed at the press, so a lookup — as `streetsAt` is handed it.
+        urbanOfTown(input.mappedTown, profile),
+        (): PavementSides => pavementSides(corridor, profile, origin),
+      ),
+      ground: (x, z) => ground.about(x, z),
+    },
+    about.x,
+    about.z,
+  );
+  const view = parkedCarsSeenFrom(planned, rider.x, rider.z);
+  lastParked = { profile, corridor, buildings, streets, seed, cellX, cellZ, view };
+  return view;
+}
 
 /** The golf courses and cemeteries in reach — #2685. @see SceneFrame.parkDressing */
 function parkDressing(
@@ -1486,7 +1684,8 @@ export function sideRoadNaturalMargin(item: ScatterItem): number {
     sceneryPlanRadius(item.kind, 'stylised'),
   );
   const sway = item.kind === 'rock' ? 0 : FOLIAGE_SWAY_METRES;
-  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * item.scale + sway);
+  // #3252's review: by the size it is DRAWN at, as the renderer sizes it.
+  return Math.max(SIDE_ROAD_SCENERY_MARGIN_METRES, reach * drawnScale(item).across + sway);
 }
 
 /**
@@ -2747,6 +2946,22 @@ function drawnRider(input: SceneInput): EasedPlace {
  * (`nearby-streets.ts` §`routeGround`) — #3052's names are painted on it —
  * or `undefined` off the drawn ground.
  */
+/** A route ride's road as its street names are laid on it — #3261. @see RouteLabelRoad */
+function routeLabelRoad(input: SceneInput, seed: number): RouteLabelRoad {
+  const profile = input.profile;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  return {
+    heightAt: (metres) =>
+      terrainHeightAt(profile, input.origin, seed, metres, 0, land) + NEARBY_STREET_LIFT_METRES,
+    // The rider's distance is an odometer, so on a loop it is read round the lap.
+    gap: (from, to) => {
+      if (!profile.loop || !(profile.totalDistance > 0)) return Math.abs(to - from);
+      const apart = Math.abs(to - from) % profile.totalDistance;
+      return Math.min(apart, profile.totalDistance - apart);
+    },
+  };
+}
+
 function streetSurfaceAt(
   input: SceneInput,
   seed: number,

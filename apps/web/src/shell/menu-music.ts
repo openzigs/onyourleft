@@ -122,11 +122,14 @@
  * `undefined` still means nothing here does anything, which the tests use.
  */
 
+import type * as Mobile from '@onyourleft/mobile';
+
 import type { AudioMix } from '../game/audio-mix';
 import type { CueOutput } from '../game/audio-port';
 import { MUSIC_FADE_MS } from '../game/web-audio';
 import type { RideWorkoutSnapshot } from '../ride/controller';
 
+import { isAndroidShell, type CapacitorGlobal } from '../support/capacitor';
 import { quiet, type PressContext } from './menu-sounds';
 
 /**
@@ -235,6 +238,30 @@ export interface MenuMusicDeps {
    * Until it answers, and for any answer but `true`, only a press starts it.
    */
   readonly autoplay: Promise<boolean> | undefined;
+}
+
+/** The two things {@link shellMenuMusicAutoplay} needs from `@onyourleft/mobile`. */
+export type ShellAutoplayModule = Pick<
+  typeof Mobile,
+  'capacitorAutoplayPlugin' | 'capacitorAutoplayAllowed'
+>;
+
+/**
+ * {@link MenuMusicDeps.autoplay}, from the shell that can answer it — #1755.
+ *
+ * `AutoplayPlugin.java` is registered in Android's `MainActivity`, and only
+ * there: the iOS app has no `Autoplay` plugin, so outside the Android shell
+ * none is made and the answer is `undefined`, the browser's first-press rule.
+ * A native shell that names no known platform is not Android either
+ * (`support/capacitor.ts` §`shellKind`).
+ */
+export function shellMenuMusicAutoplay(
+  capacitor: CapacitorGlobal | undefined,
+  mobile: ShellAutoplayModule,
+): Promise<boolean> | undefined {
+  return isAndroidShell(capacitor)
+    ? mobile.capacitorAutoplayAllowed(mobile.capacitorAutoplayPlugin())
+    : undefined;
 }
 
 export interface MenuMusic {

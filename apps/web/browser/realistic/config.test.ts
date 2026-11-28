@@ -24,10 +24,12 @@ import {
   inferredOutbuildingsWithLevers,
   mappedPaintWithLevers,
   landmarkChurchesWithLevers,
+  houseStylesWithLevers,
   landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   shopApronsWithLevers,
+  facadeKitWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -250,10 +252,10 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     // #1274's, the steep bank's rock face against the scree it wore before.
     expect(LEVERS).toContain('crag');
     expect(parseConfig('?levers=-crag,-air').leversOff).toEqual(['air', 'crag']);
-    // #1283's, the generated trees against the scans they replaced.
-    expect(LEVERS).toContain('generated-trees');
-    expect(parseConfig('?levers=-texture-bias,-generated-trees').leversOff).toEqual([
-      'generated-trees',
+    // #1294's, the generated firs against the scans they replaced.
+    expect(LEVERS).toContain('generated-conifers');
+    expect(parseConfig('?levers=-texture-bias,-generated-conifers').leversOff).toEqual([
+      'generated-conifers',
       'texture-bias',
     ]);
     // #1534's, the villages' ground left wooded.
@@ -671,6 +673,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
   });
 
+  it('chooses each footprint’s house model by its setting, as the product does, unless #3251’s lever takes it out', () => {
+    expect(LEVERS).toContain('house-styles');
+    expect(houseStylesWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(houseStylesWithLevers(LEVERS.filter((lever) => lever !== 'house-styles'))).toBe(true);
+    expect(houseStylesWithLevers(parseConfig('?levers=-house-styles').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=richmond&levers=-house-styles'))).toBe(
+      `?levers=${encodeURIComponent('-house-styles')}&town=richmond`,
+    );
+  });
+
+  it('wraps a town’s shops, offices and terraces in the downtown kit, as the product does, unless #3334’s lever takes it out', () => {
+    expect(LEVERS).toContain('facade-kit');
+    expect(facadeKitWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(facadeKitWithLevers(LEVERS.filter((lever) => lever !== 'facade-kit'))).toBe(true);
+    expect(facadeKitWithLevers(parseConfig('?levers=-facade-kit').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=terrace&levers=-facade-kit'))).toBe(
+      `?levers=${encodeURIComponent('-facade-kit')}&town=terrace`,
+    );
+  });
+
   it('draws each mapped town hall and school as itself, as the product does, unless #1795’s lever takes it out', () => {
     expect(LEVERS).toContain('landmark-civic');
     expect(landmarkCivicWithLevers([])).toBe(true);
@@ -781,7 +805,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     // No lever is the product, and no OTHER lever touches the fade.
     expect(nearTreeFadeWithLevers([])).toBe('fade');
     expect(
-      nearTreeFadeWithLevers(parseConfig('?levers=-fir-prepass,-generated-trees').leversOff),
+      nearTreeFadeWithLevers(parseConfig('?levers=-fir-prepass,-generated-conifers').leversOff),
     ).toBe('fade');
     expect(nearTreeFadeWithLevers(parseConfig('?levers=-near-tree-fade').leversOff)).toBe('off');
     // The gate's pop control is never a URL's to ask for.
@@ -833,19 +857,22 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(harness).toMatch(/townWithChainLink\(mappedTown\(/);
   });
 
-  it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {
+  it('loads the trees the product loads with no tree lever off, and has no lever for a scanned broadleaf — #1283, #1293', () => {
     // No lever is the product: the page must not draw a set a ride does not.
     expect(treesWithLevers([])).toBe(REALISTIC_TREES_DEFAULT);
     expect(treesWithLevers(parseConfig('?levers=-air,-crag').leversOff)).toBe(
       REALISTIC_TREES_DEFAULT,
     );
-    // Off is the OTHER set, whichever the product's is, and not the same one.
-    const off = treesWithLevers(parseConfig('?levers=-generated-trees').leversOff);
-    expect(off).toBe('scanned');
-    expect(off).not.toBe(REALISTIC_TREES_DEFAULT);
-    expect(REALISTIC_TREE_SETS).toContain(off);
-    // And the URL round-trips, so a soak's row names the set it measured.
-    expect(configQuery(parseConfig('?levers=-generated-trees'))).toBe('?levers=-generated-trees');
+    // #1293: #1283's lever went with the scanned broadleaves it loaded. A URL
+    // that still names it is REFUSED — never read as the product's trees
+    // under the name of a set that no longer exists.
+    expect(LEVERS).not.toContain('generated-trees');
+    expect(() => parseConfig('?levers=-generated-trees')).toThrow(
+      /levers is a comma-separated list/,
+    );
+    expect(() => parseConfig('?levers=-generated-conifers,-generated-trees')).toThrow(
+      /levers is a comma-separated list/,
+    );
   });
 
   it('loads the scanned firs beside the generated broadleaves with the fir’s own lever off — #1294', () => {
@@ -854,15 +881,6 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(firs).toBe('scanned-conifers');
     expect(firs).not.toBe(REALISTIC_TREES_DEFAULT);
     expect(REALISTIC_TREE_SETS).toContain(firs);
-    // Every tree's scan with the trees' lever off, whether or not the fir's is
-    // off too: scanned broadleaves beside generated firs is no set at all.
-    for (const query of [
-      '?levers=-generated-trees',
-      '?levers=-generated-trees,-generated-conifers',
-      '?levers=-generated-conifers,-generated-trees',
-    ]) {
-      expect(treesWithLevers(parseConfig(query).leversOff), query).toBe('scanned');
-    }
     // Another lever beside it changes nothing about the trees.
     expect(treesWithLevers(parseConfig('?levers=-air,-generated-conifers').leversOff)).toBe(
       'scanned-conifers',
@@ -872,7 +890,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     // Every set the renderer can load has a URL that loads it.
     expect(
-      ['', '?levers=-generated-conifers', '?levers=-generated-trees'].map((query) =>
+      ['', '?levers=-generated-conifers'].map((query) =>
         treesWithLevers(parseConfig(query).leversOff),
       ),
     ).toEqual([...REALISTIC_TREE_SETS]);

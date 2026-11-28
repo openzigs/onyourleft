@@ -9762,6 +9762,51 @@ html:has(.oyl-open-world__go) {
   }
 }
 
+/*
+ * A ROOM WITH SOUNDS ON AND A SIDE CAMERA, IN A WINDOW UNDER 40 REM TALL —
+ * #2284.
+ *
+ * In a 1024×600 window the actions panel can carry the room's row with
+ * *Report*'s reasons open, the side camera's row and the sound row together.
+ * Measured in the pinned Chromium on `main`, that panel was 336 px tall. It
+ * started 16 px under the secondary tier and ran 17 px past the HUD's bottom
+ * padding (9 px off the stage), and the route panel in the same row ran off
+ * with it. In that window the pacer, the ghost and the wind have already
+ * given way (§"What gives way").
+ *
+ * ⚠️ #419 asks that what gives way be recorded, so: **in a window under
+ * 40 rem tall, while the actions panel carries the room's row, the side
+ * camera's row and the sound row, the trainer line is not shown.** It is
+ * #1358's give-way on a phone on its side, for the same line and for the same
+ * reason: it is a status line, not a control, and the gradient it repeats is
+ * the primary panel's *Gradient*. A trainer that refuses the road still puts
+ * its notice on the HUD. The line is hidden by clip, so a screen reader still
+ * reaches it. That gives back 32 px on a Mac's fonts (the panel 304 px tall,
+ * its bottom on the HUD's padding), more where the line wraps. *Report*'s reasons are not part of the condition, so opening them
+ * does not take the line away mid-ride. No control is hidden or moved to
+ * another panel: `ride-conditions.browser.spec.ts` §"#2034" holds every panel
+ * whole and every reading and control on the stage in this state at
+ * 1024×600, and §"#2284" puts the line back as its control. ⚠️ The room's
+ * row is named LAST in the selector: `ride-room.browser.spec.ts` §"#1409"'s
+ * control finds that section's rules by the room's row named before the
+ * sound row or the side camera's, and counts them.
+ */
+@media (min-width: 46rem) and (height > 30rem) and (height < 40rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__side-camera-row):has(> .oyl-sound):has(> .oyl-hud__room-row)
+    > .oyl-hud__trainer {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 .oyl-hud__control {
   flex: 1;
   background: var(--oyl-color-hud-surface);
@@ -14544,9 +14589,17 @@ html:has(.oyl-open-world__go) {
  * - **78 rem wide and over 30 rem tall** (the owner's 1280×800): one row of
  *   six, 624 px between the panels at 1280, 59 px tall and 94 px under the
  *   leaning rider's box.
- * - **60 rem wide and 40 rem tall** (the 4:3 tablet, 1024×768): three
+ * - **60 rem wide and 48 rem tall** (the 4:3 tablet, 1024×768): three
  *   columns in two rows, 368 px between the panels, 104 px tall and 43 px
- *   under the rider.
+ *   under the rider, 19 px with the Pixel Tablet's 32 px bottom inset.
+ *   Not 40 rem (#2417): the two rows are a fixed 104 px tall while the room
+ *   under the rider's feet is a fifth of the height, so a short 16:10 tablet,
+ *   1024×640 or 960×640, had them 17 px under the rider with no insets and
+ *   7 px over it with that inset; 44 rem (1024×704) left 6 px, less than the
+ *   HUD's 8 px gap and within a runner's fonts of the rider. One row of five
+ *   needs 464 px (five 5 rem cells and their gaps), more than the road
+ *   between the panels under 78 rem, so a tablet that short gives the strip
+ *   way.
  * - **A tablet held upright** (the owner's 800×1280, under 51 rem wide and
  *   68 rem tall or more):
  *   on the actions panel, in its column, by the rule after these
@@ -14585,7 +14638,7 @@ html:has(.oyl-open-world__go) {
   }
 }
 
-@media (min-width: 60rem) and (min-height: 40rem), (min-width: 78rem) and (height > 30rem) {
+@media (min-width: 60rem) and (min-height: 48rem), (min-width: 78rem) and (height > 30rem) {
   .oyl-game--riding .oyl-hud__totals {
     display: grid;
     position: absolute;
@@ -14634,12 +14687,13 @@ html:has(.oyl-open-world__go) {
  * SIZE") — and only where a strip is drawn (`:has`), so every other ride's
  * grid is what it was.
  *
- * Measured (`ride-hud-layout.browser.spec.ts` §"#2387"): at 800×1280 three
- * columns in two rows across the actions panel's column, 392 × 104 px, from
- * 1010 px down (1026 in a workout, whose actions panel is shorter): 102 px
- * under the leaning rider's box and 35 px over *Pause* and *End ride*, and
- * 70 px under the rider with the Pixel Tablet's 36 and 32 px insets. No other
- * panel moves. 68 rem tall or more, because the rider's feet are 71 % of the
+ * Measured (`ride-hud-layout.browser.spec.ts` §"#2387", §"#2418"): at
+ * 800×1280 three cells over two (a route ride) or three over three (a loop),
+ * the actions panel's own 320 px wide and its left edge, 116 px tall with
+ * 16 px between a value and the label under it, from 1004 px down (1020 in a
+ * workout, whose actions panel is shorter): 97 px under the leaning rider's
+ * box and 29 px over *Pause* and *End ride*, and 73 px under the rider with
+ * the Pixel Tablet's 36 and 32 px insets. No other panel moves. 68 rem tall or more, because the rider's feet are 71 % of the
  * way down an upright frame and the strip is about 270 px up from the bottom:
  * at 768×1024 it measured 13 px under the rider with no insets, which a
  * gesture bar's inset would take, so a tablet that short keeps it hidden.
@@ -14670,7 +14724,26 @@ html:has(.oyl-open-world__go) {
     display: grid;
     grid-area: actions;
     align-self: end;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* #2418: the actions panel's own width and edge, so the two panels'
+       left edges line up (§"the corners layout": `justify-self: end`, at
+       most 20 rem); the column is 72 px wider than the panel at 800×1280. */
+    justify-self: end;
+    width: min(100%, 20rem);
+    /* #2418: two cells to a row's third, so a row of two (a route ride's
+       second row: five cells, no Lap) shares the width in halves and the
+       grid has no empty cell; a loop's six are three and three. */
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    /* #2418: a value and the label under it, a gap apart that reads. */
+    row-gap: var(--oyl-space-md);
+  }
+
+  .oyl-game--riding .oyl-hud__totals > * {
+    grid-column: span 2;
+  }
+
+  .oyl-game--riding .oyl-hud__totals > :nth-child(4):nth-last-child(2),
+  .oyl-game--riding .oyl-hud__totals > :nth-child(5):last-child {
+    grid-column: span 3;
   }
 
   /* The tablet's own sizes are set on every value here too (§"#2130"). */

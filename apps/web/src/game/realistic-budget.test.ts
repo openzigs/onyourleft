@@ -16,7 +16,8 @@
 import { BANNER_CELL_HEIGHT, BANNER_CELL_WIDTH, BANNER_CELLS } from './banner-atlas';
 import { standBoxes } from './gantry';
 import { logoBoxes } from './logo-board';
-import { statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -45,6 +46,10 @@ import {
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
+  REALISTIC_HOUSE_MODEL_IDS,
+  houseModelFile,
+  REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_BODIES,
   TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
@@ -65,6 +70,7 @@ import {
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_BUILDING_MODEL_TRIANGLES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -73,7 +79,11 @@ import {
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_PARK_DRESSING_TRIANGLES,
   REALISTIC_PARK_FIELD_TRIANGLES,
+  REALISTIC_PARKED_CAR_DRAW_CALLS,
+  REALISTIC_PARKED_CAR_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_VILLAGE_DRAW_CALLS,
+  REALISTIC_WOODED_DRAW_CALLS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_RIDER_SILHOUETTE_BYTES,
@@ -86,8 +96,10 @@ import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
 import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
+import { PARKED_CARS_MAX, PARKED_CARS_NEAR_MAX } from './parked-cars';
 import {
   chainLinkFacts,
+  deliveryCarFacts,
   fileImageSize,
   fileKtx2Facts,
   modelFacts,
@@ -101,6 +113,7 @@ import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
 import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
+import { HOUSE_MODELS } from './house-models';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { ScatterItem } from './scatter';
 import { drawnRoadFrame } from './terrain';
@@ -126,6 +139,18 @@ import { MAXIMUM_DRAWN_RIDERS } from '../net/interest';
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
+
+/** The transcoder's bytes, which count against the build ceiling too — #618. */
+const transcoderBytes = (): number =>
+  TRANSCODER_FILES.reduce((sum, file) => sum + statSync(transcoderSource(WEB, file)).size, 0);
+
+/** What a set of files costs the build, read off disk, with the transcoder. */
+const buildBytesOf = (paths: readonly string[]): number =>
+  paths.reduce((sum, path) => sum + statSync(path).size, 0) + transcoderBytes();
+
+/** Whether a set of files is inside {@link REALISTIC_BUILD_BYTES}. */
+const fitsTheBuildCeiling = (paths: readonly string[]): boolean =>
+  buildBytesOf(paths) <= REALISTIC_BUILD_BYTES;
 
 const riderTriangles = modelFacts(at(REALISTIC_RIDER)).triangles;
 
@@ -222,10 +247,10 @@ const STYLISED_LAMP_TRIANGLES = ((): number => {
 
 describe('each committed file inside its class’s budget — ADR 0026 D-6', () => {
   it('keeps every model at or under its kind’s triangles', () => {
-    // Non-vacuity for #1283: both sets' broadleaves are read, eight files.
-    expect(everyModel('tree-broadleaf')).toHaveLength(
-      REALISTIC_BROADLEAVES.generated.length + REALISTIC_BROADLEAVES.scanned.length,
-    );
+    // Non-vacuity for #1283: every broadleaf is read — the four generated,
+    // and since #1293 no scan beside them.
+    expect(everyModel('tree-broadleaf')).toEqual(REALISTIC_BROADLEAVES.generated);
+    expect(everyModel('tree-broadleaf')).toHaveLength(4);
     // And for #1294: both makings' conifers, four files.
     expect(everyModel('tree-conifer')).toHaveLength(
       REALISTIC_CONIFERS.generated.length + REALISTIC_CONIFERS.scanned.length,
@@ -240,6 +265,33 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     }
     expect(riderTriangles).toBeGreaterThan(0);
     expect(riderTriangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.rider);
+  });
+
+  it('keeps every building model at or under one building’s triangles — #3251, ADR 0099 D-4.2', () => {
+    // Read off the committed bytes, never off `house-models.ts`' table: a heavier
+    // file with an unchanged row is the defect this is for.
+    const counted = REALISTIC_HOUSE_MODEL_IDS.map((id) => ({
+      file: houseModelFile(id),
+      triangles: modelFacts(at(houseModelFile(id))).triangles,
+    }));
+    expect(counted.length).toBe(HOUSE_MODELS.length);
+    for (const { file, triangles } of counted) {
+      expect(triangles, file).toBeGreaterThan(0);
+      expect(triangles, file).toBeLessThanOrEqual(REALISTIC_BUILDING_MODEL_TRIANGLES);
+    }
+    // ADR 0099 D-4.2's own words: no heavier than the heaviest house committed when it was
+    // set, 2 946. So the ceiling is that house's, to the next round figure and no further.
+    const heaviest = Math.max(...counted.map((model) => model.triangles));
+    expect(REALISTIC_BUILDING_MODEL_TRIANGLES).toBe(3_000);
+    expect(heaviest).toBeGreaterThan(REALISTIC_BUILDING_MODEL_TRIANGLES - 100);
+    // And the table the fit and the frame's ranking read says what the files do.
+    for (const model of HOUSE_MODELS) {
+      expect(model.triangles, model.id).toBe(
+        counted.find((each) => each.file === houseModelFile(model.id))?.triangles,
+      );
+    }
+    // Seven of the heaviest building the ceiling allows still fit the term every structure shares.
+    expect(REALISTIC_BUILDING_MODEL_TRIANGLES * 7).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
   });
 
   it('keeps every roadside model under its class, with no picture and a colour a vertex — #1274', () => {
@@ -567,7 +619,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         lamps +
         PARK_DRESSING_TRIANGLES,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
-    // #1283: with EITHER set's trees, since the owner's page can load both —
+    // #1283: with EVERY set's trees, since the owner's page can load each —
     // at every structure's ceiling, the heaviest frame the budget prices.
     for (const trees of REALISTIC_TREE_SETS) {
       const frame = worstFrame(trees);
@@ -689,6 +741,99 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     // Non-vacuity: a real share — room for an item of eight boxes on each of
     // two full villages' 116 anchors.
     expect(REALISTIC_DECORATION_TRIANGLES).toBeGreaterThanOrEqual(116 * 8 * 12);
+  });
+
+  it('holds it with a street of parked cars at their ceiling too, in the fullest frame the caps allow — #3278', () => {
+    // The cars' row, priced off the committed file and not off the renderer:
+    // each body's own triangles, and its four wheels'.
+    const cars = deliveryCarFacts(join(SHIPPED, REALISTIC_DELIVERY_CAR));
+    const trianglesOf = (name: string): number => {
+      const node = cars.nodes.find((each) => each.name === name);
+      if (node === undefined) throw new Error(`the cars have no ${name}`);
+      return node.geometry.position.length / 9;
+    };
+    const bodies = REALISTIC_DELIVERY_CAR_BODIES.map((name) => ({
+      far: trianglesOf(`${name}-body`),
+      near:
+        trianglesOf(`${name}-body`) +
+        ['front-left', 'front-right', 'back-left', 'back-right'].reduce(
+          (sum, wheel) => sum + trianglesOf(`${name}-wheel-${wheel}`),
+          0,
+        ),
+    }));
+    const parked =
+      PARKED_CARS_NEAR_MAX * Math.max(...bodies.map((body) => body.near)) +
+      (PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX) * Math.max(...bodies.map((body) => body.far));
+    console.log(
+      `#3278: parked cars at their caps ${String(parked)} triangles ` +
+        `(${String(PARKED_CARS_NEAR_MAX)} near, ${String(PARKED_CARS_MAX - PARKED_CARS_NEAR_MAX)} far), ` +
+        `ceiling ${String(REALISTIC_PARKED_CAR_TRIANGLES)}`,
+    );
+    // The ceiling is the caps' worst, exactly: a body re-cut heavier, or a cap
+    // raised, is a red test and not a quiet rise.
+    expect(parked).toBe(REALISTIC_PARKED_CAR_TRIANGLES);
+    // Non-vacuity: a real term — a street's worth of whole bodies.
+    expect(parked).toBeGreaterThan(10_000);
+    expect(Math.min(...bodies.map((body) => body.far))).toBeGreaterThanOrEqual(200);
+    // The fullest frame the product can draw, with its own trees: every
+    // structure at its ceiling, a room's remote riders at THEIR ceiling, a
+    // full belt of park pieces, a holiday's decorations at theirs — none of
+    // which excludes a street of cars — and the cars.
+    const frame = worstFrame();
+    const base =
+      frame.vegetation +
+      frame.riders +
+      frame.structureItems * REALISTIC_TRIANGLES.structure +
+      frame.blobs +
+      frame.gantries +
+      frame.lamps;
+    const fullest =
+      base +
+      REALISTIC_REMOTE_TRIANGLES +
+      PARK_DRESSING_TRIANGLES +
+      PARK_FIELD_TRIANGLES +
+      REALISTIC_DECORATION_TRIANGLES;
+    console.log(
+      `#3278: the fullest frame ${String(fullest)} triangles before the cars, ` +
+        `${String(fullest + REALISTIC_PARKED_CAR_TRIANGLES)} with them, of ` +
+        `${String(REALISTIC_FRAME_TRIANGLES)}`,
+    );
+    expect(fullest + REALISTIC_PARKED_CAR_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // And at every structure's heaviest shape as built, the #506 case.
+    expect(
+      frame.vegetation +
+        frame.riders +
+        frame.structureItems * frame.heaviestStructure +
+        frame.blobs +
+        frame.gantries +
+        frame.lamps +
+        PARK_DRESSING_TRIANGLES +
+        REALISTIC_PARKED_CAR_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #1283: with EITHER set's trees, since the owner's page can load both —
+    // the frame #1283's own case prices, and the cars with it.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const loaded = worstFrame(trees);
+      expect(
+        loaded.vegetation +
+          loaded.riders +
+          loaded.structureItems * REALISTIC_TRIANGLES.structure +
+          loaded.blobs +
+          loaded.gantries +
+          loaded.lamps +
+          REALISTIC_PARKED_CAR_TRIANGLES,
+        trees,
+      ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    }
+    // Non-vacuity: the sum is the frame's and not a term of it — without the
+    // cars' row it is under the frame by less than three streets of them.
+    expect(REALISTIC_FRAME_TRIANGLES - fullest).toBeLessThan(3 * REALISTIC_PARKED_CAR_TRIANGLES);
+    // No ceiling was raised to make the room.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    expect(REALISTIC_VILLAGE_DRAW_CALLS).toBe(50);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
+    // One call of their own, and none on the village's frozen frame, which has no car.
+    expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
@@ -823,30 +968,43 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     );
   });
 
-  it('falls by at least 60 000 triangles with the trees’ middle level — #617', () => {
-    // ⚠️ **Of the SCANS** (#1283): #617's figure is what the middle level
-    // saved the trees it was made for, and those are still committed. With
-    // the generated broadleaves the worst tree is a conifer and there is far
-    // less to save — the case below prices that.
+  it('falls with the trees’ middle level by at least 9 000 triangles, in every set that ships — #617, #1293', () => {
+    // ⚠️ **This held 60 000 until #1293, and a reviewer who remembers that is
+    // reading the scans' figure.** 60 000 is what the middle level took off
+    // the SCANNED trees it was made for, 24 000 to 28 000 triangles each:
+    // 64 000 by #617's own sum, read off the committed files for the last
+    // time on 2026-11-26 (232 692 before, 168 692 after). The scanned
+    // broadleaves are deleted (the owner's ruling of 2026-11-26), so that sum
+    // was of a set nothing can draw. What is held now is each set that still
+    // ships, against the control the browser gate draws: the six nearest
+    // trees full and no middle level, a hard swap.
     //
-    // The worst frame as it was summed before #617: the nearest THREE of each
-    // tree kind as full meshes, a hard swap, no middle level.
-    const before =
-      3 * heaviestNear('tree-broadleaf', 'scanned') +
-      3 * heaviestNear('tree-conifer', 'scanned') +
-      REALISTIC_NEAR_MESHES.shrub * heaviestNear('shrub', 'scanned') +
-      REALISTIC_NEAR_MESHES.rock * heaviestNear('rock', 'scanned');
-    const now = worstVegetation(REALISTIC_TREE_LEVELS, 'scanned');
-    console.log(
-      `#617: worst vegetation ${String(now)} triangles, ${String(before)} before — ` +
-        `${String(before - now)} fewer; the heaviest middle tree ${String(heaviestMiddle('scanned'))}`,
+    // The floor is the browser gate's own (`game.browser.spec.ts`
+    // §`TRIANGLES_FALL_AT_LEAST`, 9 000, measured on the frame a ride draws),
+    // so the two are one figure: a middle level that stopped being lighter
+    // than its tree — or a band that grew — is under it in both.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const now = worstVegetation(REALISTIC_TREE_LEVELS, trees);
+      const hardSwap = worstVegetation(HARD_SWAP_TREE_LEVELS, trees);
+      console.log(
+        `#617 (${trees}): worst vegetation ${String(now)} triangles, ${String(hardSwap)} with the ` +
+          `hard swap — ${String(hardSwap - now)} fewer; the heaviest tree ` +
+          `${String(Math.max(...TREE_KINDS.map((kind) => heaviestNear(kind, trees))))}, ` +
+          `the heaviest middle tree ${String(heaviestMiddle(trees))}`,
+      );
+      expect(hardSwap - now, trees).toBeGreaterThanOrEqual(9_000);
+    }
+    // Measured 2026-11-26, off the committed files: 13 520 with the trees a
+    // ride draws, and 59 996 with the scanned firs, each 23 996 triangles.
+    expect(
+      worstVegetation(HARD_SWAP_TREE_LEVELS, 'scanned-conifers') -
+        worstVegetation(REALISTIC_TREE_LEVELS, 'scanned-conifers'),
+    ).toBeGreaterThan(
+      worstVegetation(HARD_SWAP_TREE_LEVELS, 'generated') -
+        worstVegetation(REALISTIC_TREE_LEVELS, 'generated'),
     );
-    expect(before - now).toBeGreaterThanOrEqual(60_000);
     // The frame's figure is unchanged: what fell is the worst case under it.
     expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
-    // And the hard swap the browser gate draws as its control is no lighter
-    // than what it replaced, so a green control is not a lighter frame.
-    expect(worstVegetation(HARD_SWAP_TREE_LEVELS, 'scanned') - now).toBeGreaterThanOrEqual(60_000);
   });
 
   it('counts a band tree at BOTH its levels in that worst case — #617', () => {
@@ -861,33 +1019,39 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     }
   });
 
-  it('draws fewer triangles with the generated trees than with the scans, slot for slot — #1283', () => {
-    const scanned = worstVegetation(REALISTIC_TREE_LEVELS, 'scanned');
+  it('spends under a third of what the scanned broadleaves did, slot for slot — #1283', () => {
+    // ⚠️ **Until #1293 this read the scans off disk beside the generated
+    // trees.** They are deleted (the owner's ruling of 2026-11-26), so their
+    // side of the comparison is the figures they last measured, read off the
+    // committed files on 2026-11-26 before they went: a scan at its ceiling,
+    // 28 000 triangles; a broadleaf wood's tree slots, 91 940; and the worst
+    // vegetation with every tree a scan, 168 692.
+    const SCANNED_BROADLEAF_WOOD = 91_940;
+    const SCANNED_WORST_VEGETATION = 168_692;
     const generated = worstVegetation(REALISTIC_TREE_LEVELS, 'generated');
     const slots = treeSlots(REALISTIC_TREE_LEVELS);
-    // Every tree slot filled with a BROADLEAF, which is where the two differ:
-    // the frame a rider sees in a broadleaf wood.
-    const broadleafWood = (trees: RealisticTrees): number =>
-      slots.full * heaviestNear('tree-broadleaf', trees) +
+    // Every tree slot filled with a BROADLEAF: the frame a rider sees in a
+    // broadleaf wood.
+    const broadleafWood =
+      slots.full * heaviestNear('tree-broadleaf', 'generated') +
       slots.middle *
         Math.max(
-          ...realisticVegetation(trees)['tree-broadleaf'].map((model) =>
+          ...REALISTIC_BROADLEAVES.generated.map((model) =>
             model.middle === undefined ? Infinity : modelFacts(at(model.middle)).triangles,
           ),
         );
     console.log(
-      `#1283: worst vegetation ${String(generated)} triangles generated, ${String(scanned)} scanned ` +
-        `(since #1294 the worst tree is a broadleaf in both); ` +
-        `a broadleaf wood's trees ${String(broadleafWood('generated'))} generated, ${String(broadleafWood('scanned'))} scanned; ` +
-        `the heaviest generated tree ${String(heaviestNear('tree-broadleaf', 'generated'))}, ` +
-        `the heaviest scanned ${String(heaviestNear('tree-broadleaf', 'scanned'))}`,
+      `#1283: worst vegetation ${String(generated)} triangles ` +
+        `(since #1294 the worst tree is a broadleaf); ` +
+        `a broadleaf wood's trees ${String(broadleafWood)}; ` +
+        `the heaviest generated tree ${String(heaviestNear('tree-broadleaf', 'generated'))}`,
     );
-    // The worst frame does not rise — no budget is raised to make room…
-    expect(generated).toBeLessThanOrEqual(scanned);
-    // …and where the trees ARE broadleaves it falls to under a third.
-    expect(broadleafWood('generated')).toBeLessThan(broadleafWood('scanned') / 3);
-    // Non-vacuity: the scans' figure is the one #617 left, a real one.
-    expect(broadleafWood('scanned')).toBeGreaterThan(80_000);
+    // The worst frame did not rise — no budget was raised to make room…
+    expect(generated).toBeLessThanOrEqual(SCANNED_WORST_VEGETATION);
+    // …and where the trees ARE broadleaves it is under a third.
+    expect(broadleafWood).toBeLessThan(SCANNED_BROADLEAF_WOOD / 3);
+    // Non-vacuity: real trees at real levels, not a wood of nothing.
+    expect(broadleafWood).toBeGreaterThan(20_000);
     // A generated tree is asked for well under the class's ceiling, which did
     // not move: what is spent fell, the ceiling on what may be spent did not.
     expect(heaviestNear('tree-broadleaf', 'generated')).toBeLessThan(
@@ -942,8 +1106,9 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       realisticVegetation('generated')['tree-broadleaf'],
     );
     expect(realisticVegetation('scanned-conifers')['tree-conifer']).toBe(
-      realisticVegetation('scanned')['tree-conifer'],
+      REALISTIC_CONIFERS.scanned,
     );
+    expect(realisticVegetation('generated')['tree-conifer']).toBe(REALISTIC_CONIFERS.generated);
   });
 
   /**
@@ -991,8 +1156,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         facts: fileKtx2Facts(at(file)),
       }));
     }),
-    // #1283: ONE set's trees — a load holds the generated broadleaves or the
-    // scans, never both, so each set is its own estimate.
+    // #1283: ONE set's trees — a load holds the generated firs or the
+    // scanned ones, never both, so each set is its own estimate.
     ...REALISTIC_VEGETATION_KINDS.flatMap((kind) =>
       realisticVegetation(trees)[kind].flatMap((model) => [
         ...modelFacts(at(model.file)).ktx2.map((facts) => ({ role: 'model' as const, facts })),
@@ -1030,7 +1195,7 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
   };
 
   it('commits every texture but the sky as KTX2, a full mipmap chain each — #618', () => {
-    // #1283: of BOTH sets, since both are committed.
+    // #1283: of EVERY set, since each is committed.
     for (const trees of REALISTIC_TREE_SETS) {
       const all = textures(trees);
       // Non-vacuity: the whole set, read — eight surface maps, fourteen structure
@@ -1073,9 +1238,14 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     );
   };
 
-  it('asks for less texture memory with the generated trees than with the scans — #1283', () => {
+  it('asks for less texture memory with the generated trees than with the scans — #1283, #1294', () => {
+    // ⚠️ **Until #1293 this priced every tree a scan as well** — 78.40 MiB,
+    // read off the committed files for the last time on 2026-11-26. The
+    // scanned broadleaves are deleted, so the scans' side is the scanned firs
+    // beside the generated broadleaves, the one other set that ships.
+    const SCANNED_SET_BYTES = 78.4 * 2 ** 20;
     const generated = estimatedMemory('generated');
-    const scanned = estimatedMemory('scanned');
+    const scannedFirs = estimatedMemory('scanned-conifers');
     const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(2);
     const trees = (which: RealisticTrees): number =>
       textures(which)
@@ -1090,44 +1260,39 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
           0,
         );
     console.log(
-      `#1283: texture memory estimated ${mib(generated)} MiB with the generated trees, ` +
-        `${mib(scanned)} MiB with the scans — ${mib(scanned - generated)} MiB less; ` +
-        `models, impostors, rider and bicycle ${mib(trees('generated'))} against ${mib(trees('scanned'))}`,
+      `#1283, #1294: texture memory estimated ${mib(generated)} MiB with the generated trees, ` +
+        `${mib(scannedFirs)} MiB with the scanned firs — ${mib(scannedFirs - generated)} MiB less; ` +
+        `models, impostors, rider and bicycle ${mib(trees('generated'))} against ` +
+        `${mib(trees('scanned-conifers'))}`,
     );
     // Either set alone, inside the ceiling — which did not move.
     expect(generated).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
-    expect(scanned).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
-    expect(REALISTIC_TEXTURE_MEMORY_BYTES).toBe(160 * 2 ** 20);
-    // Four trees for two, and still less: smaller maps and smaller strips.
-    expect(generated).toBeLessThan(scanned);
-    // Non-vacuity: every generated tree is read — since #1294 the two firs
-    // with the four broadleaves — each with four maps and two strips.
-    const scannedTextures = (models: readonly RealisticModel[]): number =>
-      models.reduce((sum, model) => sum + modelFacts(at(model.file)).ktx2.length + 2, 0);
-    const generatedTextures = textures('generated').length - textures('scanned').length;
-    expect(generatedTextures).toBe(
-      (REALISTIC_BROADLEAVES.generated.length + REALISTIC_CONIFERS.generated.length) * 6 -
-        scannedTextures([...REALISTIC_BROADLEAVES.scanned, ...REALISTIC_CONIFERS.scanned]),
-    );
-    // #1294: and the firs alone, against the scanned firs beside the same broadleaves.
-    const scannedFirs = estimatedMemory('scanned-conifers');
-    console.log(
-      `#1294: texture memory estimated ${mib(generated)} MiB with the generated firs, ` +
-        `${mib(scannedFirs)} MiB with the scanned ones — ${mib(scannedFirs - generated)} MiB less`,
-    );
     expect(scannedFirs).toBeLessThanOrEqual(REALISTIC_TEXTURE_MEMORY_BYTES);
+    expect(REALISTIC_TEXTURE_MEMORY_BYTES).toBe(160 * 2 ** 20);
+    // Each step toward generated asks for less: smaller maps and smaller strips.
     expect(generated).toBeLessThan(scannedFirs);
-    expect(scannedFirs).toBeLessThan(scanned);
+    expect(scannedFirs).toBeLessThan(SCANNED_SET_BYTES);
+    // Non-vacuity: every generated fir is read, each with four maps and two
+    // strips, against every map and both strips of each scanned one.
+    const treeTextures = (models: readonly RealisticModel[]): number =>
+      models.reduce((sum, model) => sum + modelFacts(at(model.file)).ktx2.length + 2, 0);
     expect(textures('generated').length - textures('scanned-conifers').length).toBe(
-      REALISTIC_CONIFERS.generated.length * 6 - scannedTextures(REALISTIC_CONIFERS.scanned),
+      REALISTIC_CONIFERS.generated.length * 6 - treeTextures(REALISTIC_CONIFERS.scanned),
+    );
+    // And every generated broadleaf, the same six, which both sets hold.
+    expect(treeTextures(REALISTIC_BROADLEAVES.generated)).toBe(
+      REALISTIC_BROADLEAVES.generated.length * 6,
     );
   });
 
   it('holds the estimated texture memory under its ceiling, as the tablet is handed it — #618', () => {
-    // ⚠️ **Of the SCANS** (#1283): #618's before and after are those of the
-    // set it compressed, which is still committed and still loadable. The
-    // generated set is the case above, and asks for less.
-    const all = textures('scanned');
+    // ⚠️ **Of the set a ride draws, since #1293.** Until then this priced
+    // every tree a scan — the set #618 compressed, 78.4 MiB on the tablet's
+    // formats against 217.1 MiB as RGBA8, read off the committed files for
+    // the last time on 2026-11-26. The scanned broadleaves are deleted, so
+    // that set cannot be read; what #618 bought is held on the trees that
+    // ship, and the case above holds the scanned firs' set under the ceiling.
+    const all = textures(REALISTIC_TREES_DEFAULT);
     const compressed = all.reduce(
       (sum, { facts }) =>
         sum +
@@ -1310,6 +1475,60 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(files + transcoder).toBeLessThanOrEqual(REALISTIC_BUILD_BYTES);
     expect(files).toBeGreaterThan(REALISTIC_BUILD_BYTES / 4);
   });
+
+  it('holds the build ceiling at the owner’s 100 MiB, and the committed set is under it — #3337', () => {
+    // The owner's ruling of 2026-11-26: a figure to read back, not to re-derive.
+    expect(REALISTIC_BUILD_BYTES).toBe(100 * 1024 * 1024);
+    const committed = realisticFiles().map(at);
+    const total = buildBytesOf(committed);
+    console.log(
+      `#3337: the realistic set and its transcoder are ${String(total)} bytes, ` +
+        `${String(REALISTIC_BUILD_BYTES - total)} under the ${String(REALISTIC_BUILD_BYTES)} ceiling`,
+    );
+    expect(fitsTheBuildCeiling(committed)).toBe(true);
+  });
+
+  it('states the build after the scanned broadleaves went against the 100 MiB it landed under — #1293', () => {
+    // #1293 was measured under 47 MiB and merged after #3337 raised the
+    // ceiling, so its two statements are read back: the set then, and the room
+    // under the ceiling it landed under, not under the one it was written for.
+    const after = 38_435_384;
+    const under = 100 * 1024 * 1024 - after;
+    const spaced = (bytes: number): string => String(bytes).replace(/\B(?=(\d{3})+$)/g, ' ');
+    expect(spaced(under)).toBe('66 422 216');
+    for (const file of [
+      join(WEB, 'src/game/realistic-budget.ts'),
+      join(WEB, '../../docs/validation/0002-android-shell-and-game.md'),
+    ]) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, file).toContain(`**${spaced(after)}**`);
+      expect(text, file).toContain(spaced(under));
+      // What it was under 47 MiB, which no ceiling is any longer.
+      expect(text, file).not.toContain(spaced(47 * 1024 * 1024 - after));
+    }
+  });
+
+  it('still refuses a set over the ceiling: a file one byte past it, read off disk, is over — #3337', () => {
+    // Sparse files, so the fixtures cost no disk: `statSync` reads the length
+    // the way it reads every committed file above, which is the point.
+    const directory = mkdtempSync(join(tmpdir(), 'realistic-budget-'));
+    try {
+      const exactly = join(directory, 'exactly.bin');
+      const oneOver = join(directory, 'one-over.bin');
+      writeFileSync(exactly, '');
+      writeFileSync(oneOver, '');
+      truncateSync(exactly, REALISTIC_BUILD_BYTES - transcoderBytes());
+      truncateSync(oneOver, REALISTIC_BUILD_BYTES - transcoderBytes() + 1);
+      expect(fitsTheBuildCeiling([exactly])).toBe(true);
+      expect(fitsTheBuildCeiling([oneOver])).toBe(false);
+      // The committed set plus a file that tips it over.
+      const tipped = realisticFiles().map(at);
+      expect(fitsTheBuildCeiling(tipped)).toBe(true);
+      expect(fitsTheBuildCeiling([...tipped, exactly])).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
@@ -1386,6 +1605,18 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
           ? Math.min(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))
           : lightestPackedHouse();
       expect(lightestStylised, kind).toBeGreaterThan(0);
+      if (kind === 'wall') {
+        // #3252: the one structure the realistic world builds heavier than
+        // the stylised one — a drystone wall, battered and coped, where the
+        // stylised wall is a block of 12. What bounds it is the structure
+        // class, which the frame's structures term prices every slot at.
+        expect(lightestStylised).toBe(12);
+        expect(realisticStructureTriangles(kind)).toBe(168);
+        expect(realisticStructureTriangles(kind)).toBeLessThanOrEqual(
+          REALISTIC_TRIANGLES.structure,
+        );
+        continue;
+      }
       expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(
         packed === undefined
           ? Math.max(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))

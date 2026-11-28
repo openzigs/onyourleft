@@ -1668,55 +1668,48 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     for (const url of reading.asked) expect(url).toMatch(/^\/realistic\//);
   });
 
-  it('asks for the generated broadleaves, or the scans when told to, and never both — #1283', async () => {
+  it('asks for the generated broadleaves, and for the scanned firs only when told to — #1283, #1294', async () => {
     const urlsOf = (models: readonly RealisticModel[]): string[] =>
       models
         .flatMap((model) => [model.file, model.middle, model.impostor, model.impostorNormals])
         .filter((file): file is string => file !== undefined)
         .map(realisticUrl);
-    const filesOf = (trees: 'generated' | 'scanned'): string[] =>
-      urlsOf(REALISTIC_BROADLEAVES[trees]);
-    // #1294: and the firs, generated or scanned.
+    const broadleaves = urlsOf(REALISTIC_BROADLEAVES.generated);
+    // #1294: the firs, generated or scanned.
     const firsOf = (trees: 'generated' | 'scanned'): string[] => urlsOf(REALISTIC_CONIFERS[trees]);
-    // Non-vacuity: four files a tree, four trees and two; two firs of each making.
-    expect(filesOf('generated')).toHaveLength(16);
-    expect(filesOf('scanned')).toHaveLength(8);
+    // #1293: no load asks for a scanned broadleaf — by the names the deleted
+    // files had, since no table lists them to be asked.
+    const deleted = (asked: readonly string[]): string[] =>
+      asked.filter((url) => /\/(island_tree_02|tree_small_02)/.test(url));
+    // Non-vacuity: four files a tree, four broadleaves; two firs of each making.
+    expect(broadleaves).toHaveLength(16);
     expect(firsOf('generated')).toHaveLength(8);
     expect(firsOf('scanned')).toHaveLength(8);
     expect(firsOf('generated').some((url) => firsOf('scanned').includes(url))).toBe(false);
+    expect(deleted([realisticUrl('island_tree_02-middle.glb'), ...broadleaves])).toHaveLength(1);
 
     // What a ride loads, asked nothing: the generated trees, and no scan.
     const product = loaders();
     await expect(loadRealisticWorld(product)).resolves.toEqual({ loaded: true });
-    for (const url of filesOf('generated')) expect(product.asked, url).toContain(url);
-    for (const url of filesOf('scanned')) expect(product.asked, url).not.toContain(url);
+    for (const url of broadleaves) expect(product.asked, url).toContain(url);
     for (const url of firsOf('generated')) expect(product.asked, url).toContain(url);
     for (const url of firsOf('scanned')) expect(product.asked, url).not.toContain(url);
+    expect(deleted(product.asked)).toEqual([]);
 
     try {
-      // The owner's page with the lever off: the scans, and no generated tree.
-      setRealisticTrees('scanned');
-      const scans = loaders();
-      await expect(loadRealisticWorld(scans)).resolves.toEqual({ loaded: true });
-      for (const url of filesOf('scanned')) expect(scans.asked, url).toContain(url);
-      for (const url of filesOf('generated')) expect(scans.asked, url).not.toContain(url);
-      // Since #1294 the firs are scans in that set too, and no generated one.
-      for (const url of firsOf('scanned')) expect(scans.asked, url).toContain(url);
-      for (const url of firsOf('generated')) expect(scans.asked, url).not.toContain(url);
       // #1294's own lever: the scanned firs beside the GENERATED broadleaves.
       setRealisticTrees('scanned-conifers');
       const firs = loaders();
       await expect(loadRealisticWorld(firs)).resolves.toEqual({ loaded: true });
       for (const url of firsOf('scanned')) expect(firs.asked, url).toContain(url);
       for (const url of firsOf('generated')) expect(firs.asked, url).not.toContain(url);
-      for (const url of filesOf('generated')) expect(firs.asked, url).toContain(url);
-      for (const url of filesOf('scanned')) expect(firs.asked, url).not.toContain(url);
+      for (const url of broadleaves) expect(firs.asked, url).toContain(url);
+      expect(deleted(firs.asked)).toEqual([]);
       // The choice is the NEXT load's, and stays until it is changed back.
       setRealisticTrees('generated');
       const again = loaders();
       await expect(loadRealisticWorld(again)).resolves.toEqual({ loaded: true });
-      for (const url of filesOf('generated')) expect(again.asked, url).toContain(url);
-      for (const url of filesOf('scanned')) expect(again.asked, url).not.toContain(url);
+      for (const url of broadleaves) expect(again.asked, url).toContain(url);
       for (const url of firsOf('generated')) expect(again.asked, url).toContain(url);
       for (const url of firsOf('scanned')) expect(again.asked, url).not.toContain(url);
     } finally {

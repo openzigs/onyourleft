@@ -2045,12 +2045,14 @@ export type WorldCorridorTileState =
  * (#2688, proposed); water polygons; water lines
  * with `kind`, a river, a stream, a canal (#2659, proposed), a ditch or a
  * drain (#2974, proposed); footway lines
- * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
- * whether each is a bridge or a tunnel; railway lines with `kind_detail` and
- * whether each is a bridge or a tunnel (#2660, proposed); place points with
+ * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail`,
+ * whether each is a bridge or a tunnel and, where the glyph atlas can paint
+ * it, the street's mapped name (#3245, ADR 0100, proposed); railway lines
+ * with `kind_detail` and whether each is a bridge or a tunnel (#2660,
+ * proposed); place points with
  * `kind`, `kind_detail` and `population_rank` (ADR 0055 D-6.1, #1632); and
  * which tiles were read and
- * when — no OSM identifier, no name, no address.
+ * when — no OSM identifier, no address, and no name but a street's.
  *
  * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
  * sync, no instance call. That is the only thing keeping ODbL §4.4
