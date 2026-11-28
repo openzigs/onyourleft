@@ -204,6 +204,13 @@ import {
   parkedCarsSeenFrom,
   type ParkedCarsInView,
 } from './parked-cars';
+import {
+  FIELD_LIFE_AHEAD_METRES,
+  FIELD_LIFE_CELL_METRES,
+  NO_FIELD_LIFE,
+  fieldLifeAt,
+  type FieldLifeInView,
+} from './field-life';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { routeOf, sceneryAnchor } from './scenery-anchor';
@@ -599,6 +606,12 @@ export interface SceneInput {
    * nothing else. Optional the safe way round, for {@link centreline}'s reason.
    */
   readonly parkDressingOff?: boolean | undefined;
+  /**
+   * #3286's cows, sheep and bales left out of the fields (`field-life.ts`) —
+   * the realistic page's `-field-life` lever, and nothing else. Optional the
+   * safe way round, for {@link centreline}'s reason.
+   */
+  readonly fieldLifeOff?: boolean | undefined;
   /**
    * Whether this ride may stand parked cars on its mapped driveways, aprons
    * and side streets — #3278 (`parked-cars.ts`): `GameView` says so on every
@@ -1095,6 +1108,11 @@ export function sceneFrame(given: SceneInput): SceneFrame {
       : {
           parkedCars: parkedCars(input, input.worldCorridor, nearbyFound, seed, riderDistance),
         }),
+    // #3286: the cows and sheep on the mapped meadows and the bales on the
+    // mapped farmland about the road ahead — scenery, stood on this frame's ground.
+    ...(input.worldCorridor === undefined || input.fieldLifeOff === true
+      ? {}
+      : { fieldLife: fieldLife(input, input.worldCorridor, seed, riderDistance, ground) }),
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
@@ -1429,6 +1447,75 @@ function parkedCars(
   );
   const view = parkedCarsSeenFrom(planned, rider.x, rider.z);
   lastParked = { profile, corridor, buildings, streets, seed, cellX, cellZ, view };
+  return view;
+}
+
+/** The last answer {@link fieldLife} gave, and everything it was asked with. */
+let lastFieldLife:
+  | {
+      readonly profile: RouteProfile;
+      readonly corridor: WorldCorridor;
+      readonly land: LandClassMask;
+      readonly seed: number;
+      readonly cellX: number;
+      readonly cellZ: number;
+      readonly view: FieldLifeInView;
+    }
+  | undefined;
+
+/**
+ * The cows, sheep and bales in reach — #3286 (`field-life.ts`), chosen about
+ * the road {@link FIELD_LIFE_AHEAD_METRES} ahead of the rider, its animals'
+ * levels from the rider's own place on the road, and each stood on the
+ * frame's drawn ground (none where it has none). Asked again only when that
+ * place enters another {@link FIELD_LIFE_CELL_METRES} cell, or the road, the
+ * corridor or the land mask are not the ones it was last asked with; every
+ * frame between hands the view the same answer, so its belt rebuilds nothing.
+ * @see SceneFrame.fieldLife
+ */
+function fieldLife(
+  input: SceneInput,
+  corridor: WorldCorridor,
+  seed: number,
+  riderDistance: number,
+  ground: TerrainMesh,
+): FieldLifeInView {
+  const { profile, origin } = input;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const about = drawnRoadPosition(profile, origin, riderDistance + FIELD_LIFE_AHEAD_METRES);
+  const cellX = Math.floor(about.x / FIELD_LIFE_CELL_METRES);
+  const cellZ = Math.floor(about.z / FIELD_LIFE_CELL_METRES);
+  const last = lastFieldLife;
+  if (
+    last !== undefined &&
+    last.profile === profile &&
+    last.corridor === corridor &&
+    last.land === land &&
+    last.seed === seed &&
+    last.cellX === cellX &&
+    last.cellZ === cellZ
+  ) {
+    return last.view;
+  }
+  const rider = drawnRoadPosition(profile, origin, riderDistance);
+  const planned = fieldLifeAt(
+    {
+      seed,
+      landUse: corridor.landUse,
+      land,
+      streets: corridor.streets,
+      paths: corridor.paths,
+      road: (x, z, reach) => distanceToDrawnRoad(profile, origin, x, z, reach),
+    },
+    about.x,
+    about.z,
+    rider.x,
+    rider.z,
+  );
+  const stood =
+    planned.pieces.length === 0 ? planned.pieces : standingOnGround(planned.pieces, ground);
+  const view = stood.length === 0 ? NO_FIELD_LIFE : { pieces: stood };
+  lastFieldLife = { profile, corridor, land, seed, cellX, cellZ, view };
   return view;
 }
 

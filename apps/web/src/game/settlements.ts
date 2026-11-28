@@ -1894,7 +1894,10 @@ function fieldEdgesAt(
           }
           // The owner's ruling of 2026-10-24: low and broken, not a solid
           // head-high hedge. Admitted on `along`, as every piece is.
-          const chosen = roadsidePiece(seed, wrappedField, side, index, pieces, piece, gate);
+          // #3286: and the field's gate where its boundary meets the road.
+          const chosen = atFieldMouth(profile, origin, land, along, piece, side)
+            ? FIELD_GATE_PIECE
+            : roadsidePiece(seed, wrappedField, side, index, pieces, piece, gate);
           if (chosen === undefined) continue;
           const placed =
             chosen.shift === 0
@@ -2038,6 +2041,40 @@ export const LOW_HEDGE_SCALE = [0.6, 0.8] as const;
 export const FIELD_GATE_SCALE = 0.75;
 
 const ROADSIDE_KEY = 0x9_0000;
+
+/** A field's gate: the fence's own shape at {@link FIELD_GATE_SCALE}, on the piece's centre. */
+const FIELD_GATE_PIECE: RoadsidePiece = Object.freeze({
+  kind: 'fence',
+  scale: FIELD_GATE_SCALE,
+  shift: 0,
+});
+
+/**
+ * Whether the roadside piece of mapped farmland at `along`, on `side`, is where
+ * its field's boundary meets the road — #3286: the piece one `piece` back
+ * along the road, at the same lateral, is mapped land that is not farmland,
+ * so {@link landEdgesAt} runs the field's boundary out from the road there.
+ * Its piece is the field's gate, whatever its stretch would have been, so
+ * every mapped field has its way in at the road where it starts. The map's
+ * end (`unknown`) is not a field's end, as {@link farmlandEdge} says.
+ */
+function atFieldMouth(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+  along: number,
+  piece: number,
+  side: 1 | -1,
+): boolean {
+  const before = frameAt(profile, origin, distanceOnRoute(profile, along - piece));
+  if (before === undefined) return false;
+  const lateral = FIELD_EDGE_LATERAL_METRES * side;
+  const there = land.classAt(
+    before.x + before.normalX * lateral,
+    before.z + before.normalZ * lateral,
+  );
+  return there !== 'farmland' && there !== 'unknown';
+}
 
 /** What stands on one roadside piece of a mapped field. @see roadsidePiece */
 export interface RoadsidePiece {

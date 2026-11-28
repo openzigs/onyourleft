@@ -632,6 +632,16 @@ import {
   type ParkedCarsInView,
 } from './parked-cars';
 import {
+  FIELD_ANIMALS_MAX,
+  FIELD_ANIMALS_NEAR_MAX,
+  FIELD_BALES_MAX,
+  balesInSeason,
+  fieldLifeLook,
+  type FieldLife,
+  type FieldLifeInView,
+} from './field-life';
+import { COW_COATS, fieldLifeShape, type FieldLifeShape } from './field-life-shapes';
+import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
   gateLogoPlaces,
@@ -18402,6 +18412,205 @@ export class ParkedCarBelt {
 /** No cars: a frame that carries none. @see ParkedCarBelt.update */
 const NO_CARS: readonly ParkedCar[] = [];
 
+/** The shape one piece of field life is drawn as — #3286: its own kind, pose, level and coat. */
+function fieldLifeShapeOf(piece: FieldLife): FieldLifeShape {
+  return fieldLifeShape(
+    piece.kind,
+    piece.pose,
+    piece.level,
+    fieldLifeLook(piece, COW_COATS.length),
+  );
+}
+
+/**
+ * The most triangles a frame's field life can be — #3286: `field-life.ts`
+ * §`FIELD_ANIMALS_NEAR_MAX` animals each the heaviest near shape, the rest of
+ * §`FIELD_ANIMALS_MAX` each the heaviest far one, and §`FIELD_BALES_MAX`
+ * bales. A hard bound: the belt draws no more of either, and none past the
+ * near cap at its near level.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_FIELD_LIFE_TRIANGLES`
+ * by `field-life-belt.test.ts` and `realistic-budget.test.ts`
+ */
+export function fieldLifeWorstTriangles(): number {
+  const heaviest = (kind: 'cow' | 'sheep' | 'bale', level: 'near' | 'far'): number =>
+    Math.max(
+      ...(['grazing', 'head-up', 'lying'] as const).flatMap((pose) =>
+        COW_COATS.map((_, coat) => fieldLifeShape(kind, pose, level, coat).triangles),
+      ),
+    );
+  const animal = (level: 'near' | 'far'): number =>
+    Math.max(heaviest('cow', level), heaviest('sheep', level));
+  return (
+    FIELD_ANIMALS_NEAR_MAX * animal('near') +
+    (FIELD_ANIMALS_MAX - FIELD_ANIMALS_NEAR_MAX) * animal('far') +
+    FIELD_BALES_MAX * Math.max(heaviest('bale', 'near'), heaviest('bale', 'far'))
+  );
+}
+
+/** What the field life's belt drew on its last frame — #3286. */
+export interface FieldLifeStats {
+  readonly animals: number;
+  /** How many of them at their near level. */
+  readonly near: number;
+  readonly bales: number;
+  readonly triangles: number;
+  /** How many times the one mesh has been rebuilt. */
+  readonly rebuilds: number;
+}
+
+/**
+ * The cows, sheep and bales in reach — #3286 (`field-life.ts`): **one merged
+ * mesh and ONE draw call of its own**, and none on a frame that carries no
+ * piece. Merged rather than instanced for {@link ParkedCarBelt}'s reason: a
+ * cow, a sheep and a bale at two levels and three poses are many shapes, and
+ * an instanced draw is one. Nothing moves, so each piece's place, heading and
+ * colours are baked into the mesh's corners, and the mesh is rebuilt only when
+ * the frame's pieces are not the last frame's — `scene.ts` hands the same list
+ * until the road ahead of the rider enters another
+ * `field-life.ts` §`FIELD_LIFE_CELL_METRES` cell — or the season says the bales
+ * have come or gone.
+ *
+ * ⚠️ **The season is this belt's, not the scene's**: the bales are drawn only
+ * while `field-life.ts` §`balesInSeason` says so of the season the view was
+ * last told (`port.ts` §`GameView.setSeason`), so a ride in spring passes no
+ * bale and an autumn ride the same fields baled.
+ *
+ * Held to `realistic-budget.ts` §`REALISTIC_FIELD_LIFE_TRIANGLES` and
+ * §`REALISTIC_FIELD_LIFE_DRAW_CALLS`. No texture, no shadow caster, nothing
+ * transparent, no new pass.
+ */
+export class FieldLifeBelt {
+  readonly #mesh: Mesh;
+  readonly #matrix = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #at = new Vector3();
+  readonly #one = new Vector3(1, 1, 1);
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #corner = new Vector3();
+  readonly #paint = new Color();
+  #held: readonly FieldLife[] | undefined;
+  #heldBales = false;
+  #stats: FieldLifeStats = { animals: 0, near: 0, bales: 0, triangles: 0, rebuilds: 0 };
+
+  constructor() {
+    this.#mesh = new Mesh(
+      new BufferGeometry(),
+      withAtmosphere(
+        constructed(
+          new MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.9,
+            metalness: 0,
+            vertexColors: true,
+          }),
+        ),
+      ),
+    );
+    // Spread over the fields: a sphere about them all culls nothing, and it is one call.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** What the last frame drew. */
+  get stats(): FieldLifeStats {
+    return this.#stats;
+  }
+
+  /**
+   * This frame's field life in `season`: the mesh is rebuilt only when the
+   * pieces are not the last frame's or the bales come into or go out of
+   * season; none hides it.
+   */
+  update(view: FieldLifeInView | undefined, season: Season): void {
+    const pieces = view?.pieces ?? NO_FIELD_PIECES;
+    const bales = balesInSeason(season);
+    if (pieces !== this.#held || bales !== this.#heldBales) {
+      this.#held = pieces;
+      this.#heldBales = bales;
+      this.#rebuild(pieces, bales);
+    }
+    this.#mesh.visible = this.#stats.triangles > 0;
+  }
+
+  #rebuild(pieces: readonly FieldLife[], bales: boolean): void {
+    let animals = 0;
+    let nearLeft = FIELD_ANIMALS_NEAR_MAX;
+    let baleCount = 0;
+    const drawn: { readonly piece: FieldLife; readonly shape: FieldLifeShape }[] = [];
+    for (const piece of pieces) {
+      if (piece.kind === 'bale') {
+        if (!bales || baleCount >= FIELD_BALES_MAX) continue;
+        baleCount += 1;
+        drawn.push({ piece, shape: fieldLifeShapeOf(piece) });
+        continue;
+      }
+      if (animals >= FIELD_ANIMALS_MAX) continue;
+      animals += 1;
+      // No animal past the near cap is drawn at its near level, whatever the list says.
+      const near = piece.level === 'near' && nearLeft > 0;
+      if (near) nearLeft -= 1;
+      const shown = near || piece.level === 'far' ? piece : { ...piece, level: 'far' as const };
+      drawn.push({ piece: shown, shape: fieldLifeShapeOf(shown) });
+    }
+    const corners = drawn.reduce((sum, each) => sum + each.shape.triangles * 3, 0);
+    const position = new Float32Array(corners * 3);
+    const normal = new Float32Array(corners * 3);
+    const colour = new Float32Array(corners * 3);
+    let at = 0;
+    for (const { piece, shape } of drawn) {
+      this.#turn.setFromAxisAngle(this.#up, piece.heading);
+      this.#matrix.compose(this.#at.set(piece.x, piece.y, piece.z), this.#turn, this.#one);
+      for (let corner = 0; corner < shape.triangles * 3; corner += 1) {
+        const to = (at + corner) * 3;
+        this.#corner
+          .fromArray(shape.position, corner * 3)
+          .applyMatrix4(this.#matrix)
+          .toArray(position, to);
+        this.#corner
+          .fromArray(shape.normal, corner * 3)
+          .applyQuaternion(this.#turn)
+          .toArray(normal, to);
+        this.#paint.setHex(shape.colour[corner] as number);
+        colour[to] = this.#paint.r;
+        colour[to + 1] = this.#paint.g;
+        colour[to + 2] = this.#paint.b;
+      }
+      at += shape.triangles * 3;
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(position, 3));
+    geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+    geometry.setAttribute('color', new BufferAttribute(colour, 3));
+    this.#mesh.geometry.dispose();
+    this.#mesh.geometry = geometry;
+    this.#stats = {
+      animals,
+      near: FIELD_ANIMALS_NEAR_MAX - nearLeft,
+      bales: baleCount,
+      triangles: corners / 3,
+      rebuilds: this.#stats.rebuilds + 1,
+    };
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
+  }
+}
+
+/** No field life: a frame that carries none. @see FieldLifeBelt.update */
+const NO_FIELD_PIECES: readonly FieldLife[] = [];
+
 /**
  * The ground's photographic material — #425.
  *
@@ -29087,6 +29296,8 @@ class ThreeGameView implements GameView {
   #parkDressing: ParkDressingBelt | undefined;
   /** #3278: the parked cars' belt, built on the first realistic frame that carries a car. */
   #parkedCars: ParkedCarBelt | undefined;
+  /** #3286: the cows, sheep and bales' belt, built on the first realistic frame that carries one. */
+  #fieldLife: FieldLifeBelt | undefined;
   /** #3052: the open world's street names, once a frame has carried one. */
   #streetNames: StreetNameBelt | undefined;
   /**
@@ -29298,6 +29509,8 @@ class ThreeGameView implements GameView {
     this.#updateParkDressing(park);
     // #3278: the parked cars in reach, the realistic world's alone.
     this.#updateParkedCars(this.#drawing === 'realistic' ? frame.parkedCars : undefined);
+    // #3286: and the life in the fields, its bales by the season the view was told.
+    this.#updateFieldLife(this.#drawing === 'realistic' ? frame.fieldLife : undefined);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -29467,6 +29680,19 @@ class ThreeGameView implements GameView {
   /** @see parkedCarStatsOf */
   get parkedCarStats(): ParkedCarStats | undefined {
     return this.#parkedCars?.stats;
+  }
+
+  /**
+   * The cows, sheep and bales in reach — #3286: the belt built on the first
+   * realistic frame that carries a piece, and handed the season this view was
+   * last told ({@link setSeason}); hidden on every frame with none.
+   */
+  #updateFieldLife(view: FieldLifeInView | undefined): void {
+    if (this.#fieldLife === undefined && (view?.pieces.length ?? 0) > 0) {
+      this.#fieldLife = new FieldLifeBelt();
+      this.#fieldLife.addTo(this.#scene);
+    }
+    this.#fieldLife?.update(view, this.#season);
   }
 
   /**
@@ -30401,6 +30627,7 @@ class ThreeGameView implements GameView {
     this.#lapRace?.dispose();
     this.#parkDressing?.dispose();
     this.#parkedCars?.dispose();
+    this.#fieldLife?.dispose();
     this.#streetNames?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();

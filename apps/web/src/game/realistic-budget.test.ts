@@ -79,6 +79,8 @@ import {
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_PARK_DRESSING_TRIANGLES,
   REALISTIC_PARK_FIELD_TRIANGLES,
+  REALISTIC_FIELD_LIFE_DRAW_CALLS,
+  REALISTIC_FIELD_LIFE_TRIANGLES,
   REALISTIC_PARKED_CAR_DRAW_CALLS,
   REALISTIC_PARKED_CAR_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
@@ -97,6 +99,7 @@ import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
 import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
 import { PARKED_CARS_MAX, PARKED_CARS_NEAR_MAX } from './parked-cars';
+import { FIELD_ANIMALS_MAX, FIELD_ANIMALS_NEAR_MAX, FIELD_BALES_MAX } from './field-life';
 import {
   chainLinkFacts,
   deliveryCarFacts,
@@ -126,6 +129,7 @@ import {
   PARK_DRESSING_TRIANGLES,
   PARK_FIELD_TRIANGLES,
   FurnitureBelt,
+  fieldLifeWorstTriangles,
   MappedBuildingBelt,
   realisticBicycleTriangles,
   realisticStructureTriangles,
@@ -834,6 +838,74 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
     // One call of their own, and none on the village's frozen frame, which has no car.
     expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
+  });
+
+  it('holds it with the field life at its ceiling too, beside a street of parked cars — #3286', () => {
+    // The fullest frame the #3278 case above prices — every structure at its
+    // ceiling, a room's remote riders at theirs, a full belt of park pieces,
+    // a holiday's decorations and a street of parked cars — and the fields.
+    const frame = worstFrame();
+    const fullest =
+      frame.vegetation +
+      frame.riders +
+      frame.structureItems * REALISTIC_TRIANGLES.structure +
+      frame.blobs +
+      frame.gantries +
+      frame.lamps +
+      REALISTIC_REMOTE_TRIANGLES +
+      PARK_DRESSING_TRIANGLES +
+      PARK_FIELD_TRIANGLES +
+      REALISTIC_DECORATION_TRIANGLES +
+      REALISTIC_PARKED_CAR_TRIANGLES;
+    console.log(
+      `#3286: field life at its ceiling ${String(REALISTIC_FIELD_LIFE_TRIANGLES)} triangles ` +
+        `(${String(fieldLifeWorstTriangles())} as built); the fullest frame ` +
+        `${String(fullest)} before it, ${String(fullest + REALISTIC_FIELD_LIFE_TRIANGLES)} with it, ` +
+        `of ${String(REALISTIC_FRAME_TRIANGLES)}`,
+    );
+    expect(fullest + REALISTIC_FIELD_LIFE_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // And at every structure's heaviest shape as built, the #506 case.
+    expect(
+      frame.vegetation +
+        frame.riders +
+        frame.structureItems * frame.heaviestStructure +
+        frame.blobs +
+        frame.gantries +
+        frame.lamps +
+        PARK_DRESSING_TRIANGLES +
+        REALISTIC_PARKED_CAR_TRIANGLES +
+        REALISTIC_FIELD_LIFE_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // With either set's trees, since the owner's page can load both.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const loaded = worstFrame(trees);
+      expect(
+        loaded.vegetation +
+          loaded.riders +
+          loaded.structureItems * REALISTIC_TRIANGLES.structure +
+          loaded.blobs +
+          loaded.gantries +
+          loaded.lamps +
+          REALISTIC_PARKED_CAR_TRIANGLES +
+          REALISTIC_FIELD_LIFE_TRIANGLES,
+        trees,
+      ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    }
+    // What is built is inside the ceiling the frame prices, which is the caps
+    // at their classes' ceilings: a cow may grow to 600 without either moving.
+    expect(fieldLifeWorstTriangles()).toBeLessThanOrEqual(REALISTIC_FIELD_LIFE_TRIANGLES);
+    expect(REALISTIC_FIELD_LIFE_TRIANGLES).toBe(
+      FIELD_ANIMALS_NEAR_MAX * REALISTIC_TRIANGLES.animal +
+        (FIELD_ANIMALS_MAX - FIELD_ANIMALS_NEAR_MAX) * REALISTIC_TRIANGLES['animal-far'] +
+        FIELD_BALES_MAX * REALISTIC_TRIANGLES.bale,
+    );
+    // Non-vacuity: a real term, a herd's worth of the class's ceiling.
+    expect(REALISTIC_FIELD_LIFE_TRIANGLES).toBeGreaterThan(5 * REALISTIC_TRIANGLES.animal);
+    // No ceiling was raised to make the room, and one call of its own.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
+    expect(REALISTIC_VILLAGE_DRAW_CALLS).toBe(50);
+    expect(REALISTIC_FIELD_LIFE_DRAW_CALLS).toBe(1);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {

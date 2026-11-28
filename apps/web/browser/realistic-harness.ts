@@ -85,6 +85,7 @@ import {
   railFixture,
   fieldsFixture,
   sceneryFixture,
+  pastureFixture,
   tracksFixture,
   yardsFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
@@ -635,7 +636,10 @@ async function run(): Promise<void> {
                                                         : // #3252: every scenery setting, and the fences.
                                                           config.town === 'scenery'
                                                           ? sceneryFixture(latitude)
-                                                          : undefined;
+                                                          : // #3286: pasture and arable fields.
+                                                            config.town === 'pasture'
+                                                            ? pastureFixture(latitude)
+                                                            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -849,6 +853,8 @@ async function run(): Promise<void> {
       parkDressingOff: config.leversOff.includes('park-dressing'),
       // #3278's pair: no parked car — and none in a Delivery round, whatever the lever.
       parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
+      // #3286's pair: no cow, sheep or bale in the mapped fields.
+      fieldLifeOff: config.leversOff.includes('field-life'),
       // #2973's pair: the mapped streets off the route undrawn.
       nearbyStreetsOff: !nearbyStreetsWithLevers(config.leversOff),
       // #2972's pair: the mapped footways and zebras undrawn.

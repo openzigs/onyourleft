@@ -1544,6 +1544,51 @@ export function sceneryFixture(latitude = FIXTURE_LATITUDE): {
 }
 
 /**
+ * #3286's fixture: a rural road between pasture and arable fields, for the
+ * owner's by-eye frames (`?town=pasture`, whose before is
+ * `levers=-field-life`; a `date=` in September or October for the bales).
+ * No real place, no building.
+ *
+ * - **Right, 900–1 500 m**: a meadow from 8 m back to 300 m.
+ * - **Right, 1 500–1 600 m**: a wood, from 4 m back.
+ * - **Right, 1 600–2 200 m**: grassland, the same shape.
+ * - **Left, 900–1 450 m**: farmland from 8 m back, then a wood to 1 550 m,
+ *   then farmland again to 2 200 m — where each field starts past the wood,
+ *   its gate is in the roadside.
+ */
+export function pastureFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'pasture',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('meadow', 900, 1_500, 8, 300),
+        land('wood', 1_500, 1_600, 4, 300),
+        land('grassland', 1_600, 2_200, 8, 300),
+        land('farmland', 900, 1_450, -300, -8),
+        land('wood', 1_450, 1_550, -300, -4),
+        land('farmland', 1_550, 2_200, -300, -8),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
  * #2688's fixture: pitches and a playground beside 3 km of level road, for
  * the owner's by-eye frames (`?town=fields`, whose before is
  * `levers=-park-dressing`). **Rectangles from arithmetic, no real place.**
