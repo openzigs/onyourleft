@@ -36,12 +36,16 @@
  *    through `scene.ts` §`sceneFrame` onto a real view; what comes back is
  *    every rider the frame drew and where, and the draw calls it made. The
  *    lap race's page, because the group ride draws its bots as a race's.
+ * 8. **`groupCameraShot(id, moment, camera)`** — #3371: the same scripted line
+ *    on a wheel, on the front, and passing the rider after their pull-off, at
+ *    1280×800 through the solo camera or the group ride's, for the owner.
  */
 
 import { createItemRace, metres, raceCourse, type Hazard } from '@onyourleft/domain';
 
+import { groupRidePose } from '../src/game/camera';
 import { rideLine } from '../src/game/group-ride/line-testing';
-import { groupRideDrawing } from '../src/game/group-ride/ride-group';
+import { GROUP_RIDE_RIDER_ID, groupRideDrawing } from '../src/game/group-ride/ride-group';
 import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { GameView, RaceHitLook, SceneFrame } from '../src/game/port';
 import { qualitySettings, RIDER_SHADOW_MAP_RUNG } from '../src/game/quality';
@@ -108,6 +112,11 @@ declare global {
       fadeSeen(shadows: 'contact' | 'map'): RiderFadeReading;
       fadeShot(id: string, back: number, across: number, fade: 'fade' | 'off'): void;
       groupRideLine(): GroupRideLineRead;
+      groupCameraShot(
+        id: string,
+        moment: 'wheel' | 'front' | 'aside',
+        camera: 'solo' | 'group',
+      ): number | undefined;
     };
   }
 }
@@ -409,9 +418,71 @@ function groupRideLine(): GroupRideLineRead {
   return { riders, phase: session.phase, aside: session.state.rotation.aside, calls };
 }
 
+/** #3371: how long the scripted line is ridden for the camera's photographs: past the rider's own pull. */
+const GROUP_CAMERA_SECONDS = 220;
+/** #3371: how long after the rider pulls off the "passing" photograph is taken, seconds. */
+const GROUP_CAMERA_ASIDE_SECONDS = 2;
+
+/**
+ * #3371: a group ride's frame at `moment` — the rider on a wheel at
+ * {@link GROUP_RIDE_SECONDS}, on the front, or {@link GROUP_CAMERA_ASIDE_SECONDS}
+ * after pulling off with the line coming past — drawn at 1280×800 through the
+ * solo camera or the group ride's (`camera.ts` §`groupRidePose`, as `GameView`
+ * hands it the renderer), on a canvas the spec photographs for the owner.
+ * Returns the ride time of the frame, or `undefined` where the script never
+ * reached the moment.
+ */
+function groupCameraShot(
+  id: string,
+  moment: 'wheel' | 'front' | 'aside',
+  camera: 'solo' | 'group',
+): number | undefined {
+  const frames = rideLine({ seconds: GROUP_CAMERA_SECONDS });
+  const onFront = (frame: (typeof frames)[number]): boolean =>
+    frame.session.state.rotation.order[0] === GROUP_RIDE_RIDER_ID &&
+    frame.session.state.rotation.aside === null;
+  const asideFrom = frames.findIndex(
+    (frame) => frame.session.state.rotation.aside === GROUP_RIDE_RIDER_ID,
+  );
+  const chosen =
+    moment === 'wheel'
+      ? frames.find((frame) => frame.at >= GROUP_RIDE_SECONDS)
+      : moment === 'front'
+        ? frames.find(onFront)
+        : asideFrom < 0
+          ? undefined
+          : frames.find(
+              (frame) =>
+                frame.at >= (frames[asideFrom]?.at ?? 0) + GROUP_CAMERA_ASIDE_SECONDS &&
+                frame.session.state.rotation.aside === GROUP_RIDE_RIDER_ID,
+            );
+  if (chosen === undefined) return undefined;
+  const { session } = chosen;
+  const drawing = groupRideDrawing(session, session.rider.distanceM, 0);
+  const course = session.road.course;
+  const start = atStartLine(course);
+  const frame = sceneFrame({
+    profile: course,
+    origin: corridorOrigin(course),
+    state: { ...start, ride: { ...start.ride, distance: metres(session.rider.distanceM) } },
+    raceBots: drawing.raceBots,
+    steeredLateral: drawing.steeredLateral,
+  });
+  const shown = canvas(1280, 800);
+  shown.id = id;
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  view.render({
+    ...frame,
+    camera: camera === 'group' ? groupRidePose(frame.camera, 1) : frame.camera,
+  });
+  return chosen.at;
+}
+
 window.__oylLapRace = {
   ready: true,
   groupRideLine,
+  groupCameraShot,
   viewCalls,
   probeCalls,
   showcase,

@@ -38,7 +38,8 @@ import { ANNOUNCEMENTS_STORAGE_KEY } from '../hud/announce-preference';
 import type { PadSnapshot } from '../gamepad-port';
 import { PULL_OFF_BUTTON_LABEL, SIT_IN_BUTTON_LABEL } from '../hud/GroupRideControls';
 import { LANE_OFFSETS_METRES } from '../lanes';
-import type { GameRenderer } from '../port';
+import { CAMERA_ABOVE_METRES, CAMERA_BEHIND_METRES, cameraRig, GROUP_RIDE_CAMERA } from '../camera';
+import type { GameRenderer, SceneFrame } from '../port';
 import { DEFAULT_LAP_RACE_CHOICE } from '../lap-race/choice';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import type { SceneInput } from '../scene';
@@ -60,6 +61,8 @@ const seen = vi.hoisted(() => ({
   frames: [] as Pick<SceneInput, 'raceBots' | 'steeredLateral' | 'botDistance' | 'state'>[],
   /** The group's session as the ride's newest step left it (#3307): read, never called. */
   session: undefined as GroupRideSession | undefined,
+  /** Every frame the renderer was handed, in order (#3371): its camera and its riders. */
+  drawn: [] as Pick<SceneFrame, 'camera' | 'markers'>[],
 }));
 
 vi.mock('./ride-group', async (importOriginal) => {
@@ -135,7 +138,14 @@ const renderer: GameRenderer = {
   create: () => ({
     hasContext: true,
     prepare: () => Promise.resolve(),
-    render: () => undefined,
+    render: (frame) => {
+      // Only the camera and the rider: a whole frame kept for every step of a
+      // long ride is memory this file's slowest cases do not need to carry.
+      seen.drawn.push({
+        camera: frame.camera,
+        markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+      });
+    },
     setQuality: () => undefined,
     setRiderKit: () => undefined,
     setSeason: () => undefined,
@@ -182,6 +192,7 @@ beforeEach(() => {
   seen.simulations.length = 0;
   seen.frames.length = 0;
   seen.session = undefined;
+  seen.drawn.length = 0;
   pending = [];
   nowMs = 1_000_000;
   facts = [];
@@ -648,6 +659,71 @@ describe('the group ride ends at the finish — the review of PR #3364', () => {
     expect(kept).toBeGreaterThan(0);
     await frames(20);
     expect(facts).toHaveLength(kept);
+  });
+});
+
+describe('the camera shows the line — #3371', () => {
+  /**
+   * How far behind the drawn rider, along the camera's heading, and how far
+   * above them the eye of the camera the renderer was handed stands. The road
+   * is level, so above the rider is above the road under the eye.
+   */
+  function eyeFromRider(frame: Pick<SceneFrame, 'camera' | 'markers'>): {
+    readonly back: number;
+    readonly up: number;
+  } {
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) throw new Error('no rider on the frame');
+    const { eye } = cameraRig(frame.camera);
+    return {
+      back: (rider.x - eye.x) * frame.camera.headingX + (rider.z - eye.z) * frame.camera.headingZ,
+      up: eye.y - rider.y,
+    };
+  }
+  const GROUP_BACK = CAMERA_BEHIND_METRES + GROUP_RIDE_CAMERA.backMetres;
+  const GROUP_UP = CAMERA_ABOVE_METRES + GROUP_RIDE_CAMERA.upMetres;
+
+  it('stands the camera back and up from the first drawn frame of a group ride to the last', async () => {
+    await ride({ group: true, port: ridePort() }, 40);
+    expect(seen.drawn.length).toBeGreaterThan(30);
+    for (const frame of seen.drawn) {
+      const { back, up } = eyeFromRider(frame);
+      expect(back).toBeCloseTo(GROUP_BACK, 1);
+      expect(up).toBeCloseTo(GROUP_UP, 1);
+    }
+  });
+
+  it('keeps the solo camera on the same press without the switch', async () => {
+    await ride({ port: ridePort() }, 40);
+    expect(seen.drawn.length).toBeGreaterThan(30);
+    for (const frame of seen.drawn) {
+      const { back, up } = eyeFromRider(frame);
+      expect(back).toBeCloseTo(CAMERA_BEHIND_METRES, 1);
+      expect(up).toBeCloseTo(CAMERA_ABOVE_METRES, 1);
+    }
+  });
+
+  it('eases back to the solo camera over a second and a half once the group is gone at the finish', async () => {
+    await ride({ group: true, route: SHORT, port: ridePort() }, 240);
+    // The first scene with no bots on it: the group ended a step before.
+    const ended = seen.frames.findIndex(
+      (frame, index) => index > 0 && frame.raceBots === undefined,
+    );
+    expect(ended).toBeGreaterThan(0);
+    // Every scene after the first was drawn: the first is the one the view
+    // prepares where nobody sees it (#547). So the two line up one apart.
+    expect(seen.drawn).toHaveLength(seen.frames.length - 1);
+    const backs = [Number.NaN, ...seen.drawn.map((frame) => eyeFromRider(frame).back)];
+    expect(backs[ended - 1]).toBeCloseTo(GROUP_BACK, 1);
+    // Part of the way in, and never a cut: a quarter-second frame moves it a
+    // sixth of the way, eased, so no frame moves it more than 1.5 m.
+    expect(backs[ended]).toBeLessThan(GROUP_BACK);
+    expect(backs[ended]).toBeGreaterThan(CAMERA_BEHIND_METRES + 0.5);
+    for (let index = ended; index < ended + 8; index += 1) {
+      expect(Math.abs((backs[index] ?? 0) - (backs[index - 1] ?? 0))).toBeLessThan(1.5);
+    }
+    // Home by 1.5 s, six frames, and there from then on.
+    for (const back of backs.slice(ended + 5)) expect(back).toBeCloseTo(CAMERA_BEHIND_METRES, 1);
   });
 });
 

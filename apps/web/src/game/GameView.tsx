@@ -129,6 +129,8 @@ import { drawnLine } from './drawn-line';
 import {
   dampedHeading,
   dampedLookAhead,
+  easedGroupRideShare,
+  groupRidePose,
   pivotDuringUTurn,
   turnedPose,
   type GroundHeading,
@@ -4062,6 +4064,10 @@ function GameScreen({
     // #3045: and how far ahead it looked, which `camera.ts` §`dampedLookAhead`
     // eases toward the frame's, so a turnaround's exit does not pitch the view.
     let cameraLookAhead: number | undefined;
+    // #3371: how far toward the group ride's camera, further back and higher,
+    // the chase camera is, which `camera.ts` §`easedGroupRideShare` eases
+    // toward one on a group ride and nought on every other.
+    let cameraGroupShare: number | undefined;
     // #3066: how far the point the camera turned about stood from the drawn
     // rider on the frame before, and, from a U-turn pressed in an open-world
     // ride until `camera.ts` §`pivotDuringUTurn` hands that point back, how
@@ -5406,6 +5412,14 @@ function GameScreen({
           unturned.camera.targetAheadMetres,
           (at - cameraHeadingAt) / 1000,
         );
+        // #3371: a group ride's camera stands back and up, so the rider sees
+        // the line ahead and the bots coming past; it eases back to the solo
+        // camera when the group is gone. By the same clock.
+        cameraGroupShare = easedGroupRideShare(
+          cameraGroupShare,
+          grouping === undefined ? 0 : 1,
+          (at - cameraHeadingAt) / 1000,
+        );
         cameraHeadingAt = at;
         // #3066: across a pressed U-turn, the camera turns about the drawn
         // rider, who moves smoothly through it, rather than about a point
@@ -5427,7 +5441,12 @@ function GameScreen({
             : { x: carried.x - riderMarker.x, z: carried.z - riderMarker.z };
         const scene = {
           ...unturned,
-          camera: turnedPose(carried, cameraHeading, cameraLookAhead),
+          // #3371: moved back and up last, after the turn, so the heading and
+          // the look-ahead are damped about the point they always were.
+          camera: groupRidePose(
+            turnedPose(carried, cameraHeading, cameraLookAhead),
+            cameraGroupShare,
+          ),
         };
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
