@@ -63,7 +63,7 @@
 import { metresPerSecond, type CueKind } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { formatSmallDistance, formatSpeed } from '../../units/format';
+import { formatSmallDistance, formatSpeed, smallDistanceUnit } from '../../units/format';
 
 import type { AnnouncementEvent } from './announce';
 import { NO_READING, type HudReading } from './fields';
@@ -141,7 +141,7 @@ export interface GroupRideHud {
 
 /** The gap to the wheel ahead: tenths of a metre, or whole feet. */
 function gapText(gapMetres: number, units: UnitSystem): string {
-  if (units === 'metric') return `${gapMetres.toFixed(1)} m`;
+  if (units === 'metric') return `${gapMetres.toFixed(1)} ${smallDistanceUnit(units)}`;
   const feet = formatSmallDistance(gapMetres, units);
   return `${feet.value} ${feet.unit}`;
 }
