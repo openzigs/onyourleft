@@ -10832,6 +10832,68 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
   });
 
+  it('saves the group ride with the ride, and that it was drafted, read back from the store — #3303, ADR 0101', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    const first = { at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 } as const;
+    const fact = {
+      version: 1,
+      seed: 99,
+      startedAt: 0,
+      targetSpeed: 30 / 3.6,
+      bots: 5,
+      log: [first],
+    };
+    // A group stepped before the recording began is not kept.
+    rig.controller.noteGroupRide({ ...fact, seed: 1 });
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGroupRide(fact);
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 0, riddenMetres: 0 });
+    await ride(rig, 2);
+    // The newest replaces the last: the log as the ride left it.
+    const grown = {
+      ...fact,
+      log: [first, { at: 2, phase: 'steady', role: 'in-line', groupSpeed: 8.3 } as const],
+    };
+    rig.controller.noteGroupRide(grown);
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 30, riddenMetres: 30 });
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(saved).toBeDefined();
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.groupRide).toStrictEqual(grown);
+    // ADR 0101 Q14: a group ride ridden in the line's draft is marked as any drafted ride is.
+    expect(read?.rideFacts?.drafted).toBe(true);
+
+    // The next ride had no group, and must not inherit the last one's.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(next).not.toBe(saved);
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.rideFacts?.groupRide).toBeUndefined();
+
+    // A group stepped with nothing recording is not kept for the ride that follows.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    rig.controller.noteGroupRide(fact);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const third = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(third).not.toBe(next);
+    const idle = await harness.read(async (store) => store.getActivity(ATHLETE_A, third!));
+    expect(idle?.rideFacts?.groupRide).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('saves the AI pacer’s decision log with the ride, read back from the store — #2712, ADR 0072 D-5', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');

@@ -368,6 +368,25 @@ import {
 } from './lap-race/ride-race';
 import { raceLapToKeep } from './lap-race/best-lap';
 import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
+import {
+  GROUP_RIDE_UNAVAILABLE_TEXT,
+  groupRideAsked,
+  groupRideUnavailable,
+  groupSpeedText,
+  groupSpeedTyped,
+  readGroupRideKept,
+  writeGroupRideKept,
+  type GroupRideChoice,
+} from './group-ride/choice';
+import {
+  groupRideDrawing,
+  groupRideFact,
+  groupRideFinished,
+  groupRideTimed,
+  startGroupRideSession,
+  stepGroupRideSession,
+  type GroupRideSession,
+} from './group-ride/ride-group';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
 import {
   askRoomItem,
@@ -1675,14 +1694,97 @@ function GameScreen({
   tacticsRef.current = props.tactics;
   /** The trace of the last race with AI bots whose record was kept, so a second teardown keeps none. */
   const lapRaceKeptRef = useRef<object | undefined>(undefined);
-  const chooseDelivery = useCallback((value: boolean) => {
-    setWithDelivery(value);
-    if (value) setWithLapRace(false);
-  }, []);
-  const chooseLapRace = useCallback((value: boolean) => {
-    setWithLapRace(value);
-    if (value) setWithDelivery(false);
-  }, []);
+  /**
+   * The group ride's setup — #3303, ADR 0101 D-1: the switch, the average
+   * speed as typed in the rider's units, and the size of the group, as this
+   * device kept them (`group-ride/choice.ts`). Read once, on mount, by the
+   * path that writes it; one mode a ride, so a course opened for a game
+   * starts with the group off, and switching the group on switches the race,
+   * the round and the pacer off, as each of those switches the group off.
+   */
+  const [groupSetup, setGroupSetup] = useState(() => {
+    const kept = readGroupRideKept(keptStorage());
+    return {
+      on: kept.on && played === undefined,
+      speed: groupSpeedText(kept.targetSpeed, units),
+      bots: kept.bots,
+      targetSpeed: kept.targetSpeed,
+    };
+  });
+  const groupSetupRef = useRef(groupSetup);
+  /** The rider's units now, for a speed typed after they changed. */
+  const unitsOfGroupRef = useRef(units);
+  unitsOfGroupRef.current = units;
+  /** Change the setup and keep it on the device: a speed that does not read keeps the last that did. */
+  const changeGroup = useCallback(
+    (change: { readonly on?: boolean; readonly speed?: string; readonly bots?: number }) => {
+      const before = groupSetupRef.current;
+      const speed = change.speed ?? before.speed;
+      const next = {
+        on: change.on ?? before.on,
+        speed,
+        bots: change.bots ?? before.bots,
+        targetSpeed: groupSpeedTyped(speed, unitsOfGroupRef.current) ?? before.targetSpeed,
+      };
+      if (next.on === before.on && next.speed === before.speed && next.bots === before.bots) {
+        return;
+      }
+      groupSetupRef.current = next;
+      setGroupSetup(next);
+      writeGroupRideKept(keptStorage(), next);
+    },
+    [keptStorage],
+  );
+  const chooseDelivery = useCallback(
+    (value: boolean) => {
+      setWithDelivery(value);
+      if (value) {
+        setWithLapRace(false);
+        changeGroup({ on: false });
+      }
+    },
+    [changeGroup],
+  );
+  const chooseLapRace = useCallback(
+    (value: boolean) => {
+      setWithLapRace(value);
+      if (value) {
+        setWithDelivery(false);
+        changeGroup({ on: false });
+      }
+    },
+    [changeGroup],
+  );
+  const choosePacer = useCallback(
+    (value: boolean) => {
+      setWithPacer(value);
+      if (value) changeGroup({ on: false });
+    },
+    [changeGroup],
+  );
+  const chooseGroup = useCallback(
+    (value: boolean) => {
+      changeGroup({ on: value });
+      if (value) {
+        setWithLapRace(false);
+        setWithDelivery(false);
+        setWithPacer(false);
+      }
+    },
+    [changeGroup],
+  );
+  const chooseGroupSpeed = useCallback(
+    (speed: string) => {
+      changeGroup({ speed });
+    },
+    [changeGroup],
+  );
+  const chooseGroupBots = useCallback(
+    (bots: number) => {
+      changeGroup({ bots });
+    },
+    [changeGroup],
+  );
   const [intensity, setIntensity] = useState(
     String(captureScene?.pacer?.wattsPerKilogram ?? DEFAULT_PACER_INTENSITY),
   );
@@ -2405,6 +2507,12 @@ function GameScreen({
    */
   const lapRaceRef = useRef<LapRaceRide | undefined>(undefined);
   /**
+   * The group this ride is ridden in — #3303, ADR 0101: stepped on the
+   * simulation's own steps, read for the rider's draft and the drawing.
+   * `undefined` on every other ride. @see GroupRideSession
+   */
+  const groupRideRef = useRef<GroupRideSession | undefined>(undefined);
+  /**
    * The lap race this ride runs IN A ROOM, while it runs one — #1911: from
    * the room's first frame of a room whose welcome says it is a lap race, to
    * the end of the ride. The room decides it (`lap-race/room-race.ts`); this
@@ -2884,6 +2992,13 @@ function GameScreen({
         ) ??
         routes[0] ??
         circuits[0]);
+  // #3303: the group asked for on the route chosen, or why it cannot be made
+  // there. The plan is solved here, once per choice, and never in a press.
+  const groupCourse = corridorRoute?.profile;
+  const groupAsked = useMemo(
+    () => groupRideAsked(groupSetup.on, groupSetup.speed, groupSetup.bots, units, groupCourse),
+    [groupSetup.on, groupSetup.speed, groupSetup.bots, units, groupCourse],
+  );
   useEffect(() => {
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
@@ -2989,6 +3104,7 @@ function GameScreen({
       riderGhost = false,
       delivery = false,
       lapRace: LapRaceChoice | undefined = undefined,
+      groupRide: GroupRideChoice | undefined = undefined,
     ): Promise<void> => {
       // #2982: an open-world ride rides a rolling route of its own from the
       // session's snapped start, whose first view is the card's, and follows
@@ -3132,6 +3248,14 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
+      // #3303, ADR 0101 D-1: a group ride is a solo ride and one mode of
+      // one: never beside a race or a round, and never in a room, whose road
+      // and whose `k` are the room's. The chooser hands none on a circuit, a
+      // level or the open world, with a workout holding the trainer, or with
+      // the draft switched off (`StageChooser.tsx` §`GroupRideControl`), and
+      // it switches the pacer off with the group on.
+      const groupChoice =
+        raceChoice === undefined && !deliveryWanted && roomId === undefined ? groupRide : undefined;
       // #2381, the owner's ruling of 2026-11-08: a game ride is RECORDED by
       // default, through the one way the game starts a recording
       // (`trainer-port.ts` §`recordGameRide`, the ride controller's
@@ -3244,11 +3368,14 @@ function GameScreen({
         // state for the Draft field and the mark (D-3.7). With the switch off,
         // or with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
+        // #3303, ADR 0101 D-3.2: and in a group ride the `k` is the line's
+        // own, from the one call its bots are ridden at
+        // (`stepGroupRideSession`), handed in as a race's is.
         ...soloDraftOf(
           roomId === undefined && readSoloDraftChoice(deviceStorage()),
           pacer !== undefined && raceChoice === undefined,
           ghostRiderRef.current === undefined ? ghostRef.current : undefined,
-          raceChoice !== undefined,
+          raceChoice !== undefined || groupChoice !== undefined,
         ),
       });
       simulationRef.current = simulation;
@@ -3675,6 +3802,18 @@ function GameScreen({
               // last said this rider's consent names its model (D-5.2).
               model: raceChoice.aiBots === true && aiBotsConsented(tacticsStatusRef.current),
             });
+      // #3303, ADR 0101: a group ride's line, formed up around the rider at
+      // the press, on the road this ride reads. Its seed is drawn inside and
+      // kept with the ride. Nothing of it is asked of the trainer.
+      groupRideRef.current =
+        groupChoice === undefined
+          ? undefined
+          : startGroupRideSession({
+              choice: groupChoice,
+              profile,
+              riderDistance: simulation.state.ride.distance,
+              riderSpeed: simulation.state.ride.speed,
+            });
       // #3153: the field a capture's seed dealt, for its log.
       const dealt = lapRaceRef.current;
       if (dealt !== undefined && captureScene !== undefined) {
@@ -3750,6 +3889,7 @@ function GameScreen({
       riderGhost?: boolean,
       delivery?: boolean,
       lapRace?: LapRaceChoice,
+      groupRide?: GroupRideChoice,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -3771,6 +3911,7 @@ function GameScreen({
           riderGhost === true && !alone,
           delivery === true && !alone,
           lapRace,
+          alone ? undefined : groupRide,
         );
       } finally {
         startingRef.current = false;
@@ -4844,6 +4985,39 @@ function GameScreen({
         // sees it. `1` with the switch off: the ride before #2461.
         simulation.draftWith(raced.riderDraft);
       }
+      // #3303, ADR 0101: the group, stepped on exactly the simulation steps
+      // that ran, as the race above: AFTER the grade is sampled, from the
+      // simulation's own odometer and speed, which it reads and never writes
+      // (D-4.5). The rider has stopped, for the line, while the recording
+      // under the ride is paused (the rider's pause or the recorder's
+      // auto-pause) or the power reading is not live (D-4.4, D-6.11).
+      const grouped = groupRideRef.current;
+      if (grouped !== undefined && stepsRun > 0) {
+        const ridden = stepGroupRideSession(grouped, {
+          ticks: stepsRun,
+          rider: {
+            distanceM: simulation.state.ride.distance,
+            speedMps: simulation.state.ride.speed,
+          },
+          riderStopped: !sensors.rider.live || trainerPortRef.current?.recordingPaused?.() === true,
+        });
+        // Tied to the recording's timeline from the first frame one is read.
+        const timed = groupRideTimed(ridden, trainerPortRef.current?.rideElapsedSeconds?.());
+        // The review of PR #3364: the group ride ends at the finish of a
+        // route with one, as the plan does. *Keep riding* rides on alone.
+        const finished = groupRideFinished(timed);
+        groupRideRef.current = finished ? undefined : timed;
+        // D-3.2: the rider's draft from the line, ridden from the next step
+        // on as a race's is: a multiplier on the rider's drag in the
+        // simulation and nothing else. After the grade above was sampled, so
+        // this frame's write never sees it. `1` once the group ride ended.
+        simulation.draftWith(finished ? 1 : timed.riderDraft);
+        // What the ride keeps of its group, to the recording under it: every
+        // frame, so a recording begun part-way through the ride has it too,
+        // the frame it ended at the finish included.
+        const fact = groupRideFact(timed);
+        if (fact !== undefined) trainerPortRef.current?.groupRideStepped?.(fact);
+      }
       // #1911: a room's lap race, on the same steps and after the same grade:
       // the rider's inputs sent, what the room's newest frame covers dropped,
       // and the drawn offset eased toward the room's. It reads the room and
@@ -4889,16 +5063,25 @@ function GameScreen({
         // #1906: a lap race draws the rider at their race position, effort
         // distance plus race offset (ADR 0060 D-3.3), and its bots beside
         // them. The drawing only: the grade above was read at the odometer.
+        // #3303: a group ride draws its bots through the same pack layout,
+        // and the rider where the ride has them. One mode a ride.
         const racing = lapRaceRef.current;
+        const grouping = groupRideRef.current;
         const raceDrawn =
-          racing === undefined
-            ? undefined
-            : lapRaceDrawing(
+          racing !== undefined
+            ? lapRaceDrawing(
                 racing,
                 drawn.riderDistance,
                 SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
                 reducedMotionRef.current,
-              );
+              )
+            : grouping !== undefined
+              ? groupRideDrawing(
+                  grouping,
+                  drawn.riderDistance,
+                  SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
+                )
+              : undefined;
         // #1911: a room's lap race draws the rider at their effort distance
         // plus the offset the room gave them (eased), and every other rider at
         // theirs. The drawing only: the grade above was read at the odometer.
@@ -5616,7 +5799,7 @@ function GameScreen({
           riderGhostOffered={port?.riderGhostOffered?.() === true}
           riderGhostProblem={riderGhostProblem}
           withPacer={withPacer}
-          onPacer={setWithPacer}
+          onPacer={choosePacer}
           // #2712: the AI pacer, offered only where this device's instance can
           // be sealed to; absent, never drawn and nothing sent.
           aiPacer={
@@ -5658,6 +5841,28 @@ function GameScreen({
             // either world.
             courses,
           }}
+          // #3303, ADR 0101 D-1: a group ride, beside the pacer. Whether it is
+          // offered is read here, as the trainer notice is: a workout started
+          // on the Ride screen, or the draft switched off in Settings, is seen
+          // at once.
+          groupRide={((unavailable) => ({
+            chosen: groupSetup.on,
+            onChoose: chooseGroup,
+            speed: groupSetup.speed,
+            onSpeed: chooseGroupSpeed,
+            bots: groupSetup.bots,
+            onBots: chooseGroupBots,
+            speedUnit: speedUnit(units),
+            asked: unavailable === undefined ? groupAsked : { ride: undefined, problem: undefined },
+            unavailable:
+              unavailable === undefined ? undefined : GROUP_RIDE_UNAVAILABLE_TEXT[unavailable],
+          }))(
+            groupRideUnavailable(
+              trainerNow?.kind === 'workout',
+              readSoloDraftChoice(deviceStorage()),
+              groupCourse?.loop === true,
+            ),
+          )}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
           lapRace={{
