@@ -94,7 +94,12 @@
  * - the give grows with how far off the wheel the rider is, whole at
  *   {@link NO_DROP_PACE_GAP_SECONDS} of their own speed (and never nearer
  *   than {@link NO_DROP_GAPPED_METRES}), so the line comes back to a rider
- *   who is slipping off long before the reach.
+ *   who is slipping off long before the reach;
+ * - **while the line holds, there is no give** (#3415): a held line rides §4's
+ *   ease, never above `plan's speed × pace × (1 + margin)`. A wait begins
+ *   beyond the reach, where the give is always whole, so with it every wait
+ *   after its first window was asked for nothing: the line stood still on the
+ *   road while the rider rode back to it, and the rider rolled through it.
  *
  * **How the pace moves.** A rider with the line rides the line's own speed,
  * so their speed says nothing of what they can hold, and a mean fed on it
@@ -472,11 +477,13 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
       asked = Math.min(asked, rider.speedMps * (1 - share));
     }
     // The pace as it was remembered before this window: the wait that seeds
-    // it is ridden as a wait.
+    // it is ridden as a wait, and so is every window of every hold. A held
+    // line gives nothing back, as the hold's ease is already the share of the
+    // gap, and only the margin over the pace caps it (#3415).
     if (state.paceShare !== null) {
       const off = Math.max(0, behindM - BOT_TACTIC_WHEEL_GAP_METRES);
       const whole = Math.max(rider.speedMps * NO_DROP_PACE_GAP_SECONDS, NO_DROP_GAPPED_METRES);
-      const give = off >= whole ? 1 : off / whole;
+      const give = hold !== null ? 0 : off >= whole ? 1 : off / whole;
       asked = Math.min(asked, planMps * state.paceShare * (1 + NO_DROP_PACE_MARGIN) * (1 - give));
     }
   }

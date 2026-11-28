@@ -415,6 +415,30 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
     expect(far).toMatchObject({ standing: 'gapped', hold: null, easedSpeedMps: 0 });
   });
 
+  it('rides every later window of a wait as a wait, not at the give: a riding rider’s line never stands still (#3415)', () => {
+    // A second into the seeding wait. The sweep, b3, is back with the rider,
+    // so they are measured from b2: 30.65 m at 6 m/s, 5.1 s of the 10 s.
+    const later = next(waited, 1_000, 30, 6).state;
+    expect(later).toMatchObject({ hold: 'waiting', standing: 'off-the-back', sweep: 'b3' });
+    expect(later.easedSpeedMps).toBeCloseTo(6 * (1 - 30.65 / 60), 9);
+    // Inside the reach and still waiting: 10.65 m, 1.8 s. The give would be whole here.
+    const inside = next(later, 2_000, 10, 6).state;
+    expect(inside).toMatchObject({ hold: 'waiting', standing: 'gapped' });
+    expect(inside.easedSpeedMps).toBeCloseTo(6 * (1 - 10.65 / 60), 9);
+    // A regroup over the top is a hold too: 15.65 m at 5 m/s, 3.1 s of the 10 s.
+    const regroup = next({ ...waited, hold: 'regrouping', insideSinceMs: 1_000 }, 1_000, 15, 5);
+    expect(regroup.state.hold).toBe('regrouping');
+    expect(regroup.state.easedSpeedMps).toBeCloseTo(5 * (1 - 15.65 / 50), 9);
+  });
+
+  it('holds a waiting line under the pace’s margin, for a rider coming back faster than they can hold', () => {
+    // 12 m/s, 30.65 m back: the hold's own ease is 8.9 m/s, over the plan's 8;
+    // the pace's margin, 8 × 0.75 × 1.05, is under both.
+    const coming = next(waited, 1_000, 30, 12).state;
+    expect(coming.hold).toBe('waiting');
+    expect(coming.easedSpeedMps).toBeCloseTo(PLAN_MPS * 0.75 * 1.05, 9);
+  });
+
   /** The released line, eased, with the rider `wasM` behind b3 at the last window. */
   const paced = (wasM: number): NoDropState => ({
     ...released,
