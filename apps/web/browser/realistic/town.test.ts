@@ -858,6 +858,41 @@ describe('the realistic page’s `parked-cars` lever — #3278', () => {
   });
 });
 
+describe('the realistic page’s `pacer` lever — #3283', () => {
+  const town = neighbourhoodFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  // The lever changes no plan, so the town is planned once for every frame here.
+  let planned: ReturnType<typeof plannedTown> | undefined;
+  /** The moving cars and the pacer of the page's frame for `query` at `distance`, as `realistic-harness.ts` builds it. */
+  const frameAt = (query: string, distance: number) => {
+    const config = parseConfig(query);
+    planned ??= plannedTown(town, []);
+    const { land, plans, urban } = planned;
+    return rideFrame({
+      profile: town.profile,
+      origin: town.origin,
+      distance,
+      elapsed: 1,
+      rung: top,
+      pacerOff: config.leversOff.includes('pacer'),
+      town: {
+        corridor: town.corridor,
+        land,
+        buildings: mappedBuildingsOf(plans),
+        lots: mappedTown(town.corridor, plans, urban),
+      },
+    });
+  };
+  const places = Array.from({ length: 60 }, (_, index) => 900 + index * 20);
+
+  it('draws no moving car beside the pacer, and with the lever off the free ride’s traffic in its place', () => {
+    const withPacer = places.map((at) => frameAt('?town=streets', at));
+    const without = places.map((at) => frameAt('?town=streets&levers=-pacer', at));
+    expect(withPacer.every((frame) => frame.movingCars === undefined)).toBe(true);
+    expect(without.some((frame) => (frame.movingCars?.length ?? 0) > 0)).toBe(true);
+  });
+});
+
 describe('which parked cars of the page’s commercial street have their wheels — #3278', () => {
   const street = commercialStreetFixture();
   const top = REALISTIC_LADDER[0] as QualitySettings;

@@ -13,13 +13,15 @@
  * minor cross street square over it every 300 m.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft/domain';
 import type { StreetFeature } from '@onyourleft/map-features';
 
-import { ringBeside } from './footprint-fixtures-testing';
+import { footprintPlans } from './footprint-buildings';
+import { buildingBeside, rectangleBeside, ringBeside } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
+import { mappedBuildingsOf } from './mapped-buildings';
 import {
   MOVING_CAR_CLEAR_METRES,
   MOVING_CARS_MAX,
@@ -28,7 +30,7 @@ import {
   poseOfCar,
 } from './moving-cars';
 import type { MovingCar } from './moving-car-frame';
-import { PARKED_CAR_BOX } from './parked-cars';
+import { PARKED_CAR_BOX, type ParkedCar, type ParkedCarsInView } from './parked-cars';
 import { PEOPLE_NEAR_MAX } from './people';
 import { nearestOnDrawnRoad } from './road-grid';
 import { windingRoute } from './route-fixtures-testing';
@@ -45,6 +47,25 @@ import type { SceneryCyclist } from './scenery-cyclists';
 import { atStartLine, type GameState } from './simulation';
 import { corridorOrigin, roadCorridor, type CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
+
+/**
+ * The parked cars the planner answers with when a test says so. Standing a
+ * parked car in a crossing car's lane takes a kerb or a driveway beside a
+ * crossing street, which no fixture here has, so the frame's own wiring
+ * (`sceneFrame` keeping the moving cars off the parked cars it draws) is read
+ * back with the planner's answer stood in.
+ */
+const planted = vi.hoisted(() => ({ cars: undefined as readonly unknown[] | undefined }));
+vi.mock('./parked-cars', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./parked-cars')>();
+  return {
+    ...actual,
+    parkedCarsAt: (...args: Parameters<typeof actual.parkedCarsAt>): ParkedCarsInView =>
+      planted.cars === undefined
+        ? actual.parkedCarsAt(...args)
+        : { cars: planted.cars as readonly ParkedCar[] },
+  };
+});
 
 /** How long the winding road is, metres. */
 const LENGTH = 4_000;
@@ -272,5 +293,68 @@ describe('moving cars on an ordinary ride — #3283', () => {
       ['an open-world ride', () => ({}), ride(true)],
     ];
     for (const [name, more, on] of off) expect(carsOn(on ?? ROAD, more), name).toBe(0);
+  });
+});
+
+describe('moving cars kept off the parked cars a frame draws — #3283', () => {
+  /** The ride with one building far off the road, so the frame asks the planner for parked cars. */
+  function withBuilding(): Ride & { readonly mapped: ReturnType<typeof mappedBuildingsOf> } {
+    const on = ride();
+    const corridor: WorldCorridor = {
+      ...on.corridor,
+      buildings: [buildingBeside(on.profile, on.origin, [rectangleBeside(2_000, 300, 13, 8)], 6)],
+    };
+    const land = landClassMask(corridor);
+    const mapped = mappedBuildingsOf(footprintPlans(corridor, land, on.profile, on.origin).plans);
+    return { ...on, corridor, land, mapped };
+  }
+
+  it('drops the crossing car a parked car stands in the way of, from the frame the renderer is handed', () => {
+    const at = Array.from({ length: 190 }, (_, index) => 100 + index * 5).find((each) =>
+      placedAt(freeRide(ROAD, each)).cars.some((car) => car.kind === 'crossing'),
+    );
+    if (at === undefined) throw new Error('no frame with a crossing car');
+    const asked = (): readonly MovingCar[] => {
+      const on = withBuilding();
+      return (
+        sceneFrame(freeRide(on, at, { parkedCars: true, mappedBuildings: on.mapped })).movingCars ??
+        []
+      );
+    };
+    try {
+      planted.cars = undefined;
+      const free = asked();
+      const crossing = free.find((car) => car.kind === 'crossing');
+      if (crossing === undefined) throw new Error('the frame lost its crossing car');
+      // A parked car in the crossing car's place, nose the same way.
+      planted.cars = [
+        {
+          x: crossing.x,
+          y: 0,
+          z: crossing.z,
+          heading: crossing.heading,
+          pitch: 0,
+          spot: 'kerb',
+          level: 'far',
+          look: 1,
+        } satisfies ParkedCar,
+      ];
+      const kept = asked();
+      expect(kept).not.toContainEqual(crossing);
+      // Only what the parked car is within the gap of goes: the rest stand as they did.
+      for (const car of free) {
+        const apart = outsideMovingCar(
+          poseOfCar(car),
+          crossing.x,
+          crossing.z,
+          PARKED_CAR_BOX.halfLength,
+          PARKED_CAR_BOX.halfWidth,
+        );
+        if (apart >= MOVING_CAR_CLEAR_METRES) expect(kept).toContainEqual(car);
+      }
+      expect(kept.length).toBeLessThan(free.length);
+    } finally {
+      planted.cars = undefined;
+    }
   });
 });
