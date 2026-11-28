@@ -19,6 +19,7 @@ import {
   CUE_CORRECTION_KINDS,
   CUE_EVENT_KINDS,
   CUE_KINDS,
+  CUE_PAST_FRONT_DWELL_MS,
   startCues,
   stepCues,
   type Cue,
@@ -231,6 +232,23 @@ describe('the same correction at most twice in a row, then a quiet mark', () => 
     );
     expect(corrections.slice(0, 4)).toEqual(['surging', 'surging', 'shorter-pull', 'surging']);
     expect(said.filter((each) => each.mark !== null)).toEqual([]);
+  });
+});
+
+describe('a rider no-drop names off the front (#3301)', () => {
+  it('is told past-front after its dwell: `off-the-front` is the same fact, and no wheel role is left to read it by', () => {
+    const windows = ride({ rider: CLEAN, seconds: 200 });
+    // From 130 s `stepGroupRide` names the rider off the front, in place of their seat's role.
+    const step = (window: LineWindow): RotationStep =>
+      window.step.roles['you'] === 'in-line' && window.atMs >= 130_000 && window.atMs < 170_000
+        ? { ...window.step, roles: { ...window.step.roles, you: 'off-the-front' } }
+        : window.step;
+    const { said } = cuesOver(windows, { step });
+    const corrections = said.filter((each) => each.cue?.family === 'correction');
+    expect(corrections.map((each) => [each.atMs, each.cue?.kind])).toEqual([
+      [130_000 + CUE_PAST_FRONT_DWELL_MS, 'past-front'],
+      [130_000 + CUE_PAST_FRONT_DWELL_MS + CUE_CORRECTION_GAP_MS, 'past-front'],
+    ]);
   });
 });
 

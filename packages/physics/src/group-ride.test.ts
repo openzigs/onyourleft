@@ -163,11 +163,15 @@ describe('the line stays together over the hilly fixture (criterion 1)', () => {
   });
 });
 
+// With the no-drop rule left out: with it, the bot ahead of the rider drops
+// back as their sweep, so they are never this far off a wheel (#3301,
+// `group-no-drop.test.ts`).
 describe("the bot behind the rider follows the rider's wheel (criterion 2)", () => {
   const ride = rideGroup({
     course: FLAT,
     targetKmh: TARGET_KMH,
     seconds: 40,
+    noDrop: false,
     rider: { slow: { fromSeconds: 5, toSeconds: 25, kmh: 2 } },
   });
   const during = ride.frames.filter((frame) => frame.atMs >= 5_000);
@@ -273,6 +277,8 @@ describe("the rider's physics is never tethered (criterion 4)", () => {
     expect(drafts[1]).not.toEqual(drafts[2]);
   });
 
+  // With the no-drop rule left out, so the group rides on and the rider stays
+  // beyond the reach; with it on, `group-no-drop.test.ts` holds the same fact.
   it('gives a rider beyond the draft reach the same ride whatever the group does', () => {
     const line = [bot('b1'), bot('b2'), bot('b3'), bot('b4'), bot('b5'), RIDER];
     const rides = speeds.map((targetKmh) =>
@@ -281,6 +287,7 @@ describe("the rider's physics is never tethered (criterion 4)", () => {
         targetKmh,
         line,
         seconds: 60,
+        noDrop: false,
         rider: { watts: WATTS, start: { distanceM: -200, speedMps: 6 } },
       }),
     );
