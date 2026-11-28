@@ -19,7 +19,11 @@ import {
 import { distanceToDrawnRoad } from './road-grid';
 import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
+import { standingOnGround } from './landform';
+import type { FootprintPlan } from './footprint-buildings';
+import { mappedBuildingsOf } from './mapped-buildings';
 import { sceneFrame } from './scene';
+import { APRON } from './shop-aprons';
 import { atStartLine } from './simulation';
 import {
   SHOP_GROUP_MOST,
@@ -136,6 +140,22 @@ describe('sitters on the benches — #3285', () => {
       expect(Math.abs(local.along)).toBeLessThan(seat.half - PERSON_HALF_WIDTH_METRES / 2);
       // Facing the road, as the bench does.
       expect(sitter.yaw).toBe(bench.rotation);
+    }
+  });
+
+  it('draws the sitters in the frame at the bench’s own y, the pavement it stands on', () => {
+    // A frame stood where a sitter is: `z` runs along this road, as `along`.
+    const sitter = sitters[0] as StillSpot;
+    const frame = frameAt(FARMLAND, Math.abs(sitter.z), 30);
+    const people = frame.people as { near: readonly Person[]; far: readonly Person[] };
+    const seated = [...people.near, ...people.far].filter((person) => person.on === 'bench');
+    expect(seated.length).toBeGreaterThan(0);
+    for (const person of seated) {
+      const bench = benches.find(
+        (each) => Math.hypot(person.x - each.x, person.z - each.z) < 1,
+      ) as FurnitureItem;
+      expect(bench).toBeDefined();
+      expect(person.y).toBe(bench.y);
     }
   });
 
@@ -287,6 +307,37 @@ describe('standers at the shop fronts — #3285', () => {
       Math.max(...[...per].filter(([plan]) => plan % 2 === kind).map(([, count]) => count));
     expect(most(0)).toBe(1);
     expect(most(1)).toBe(SHOP_GROUP_MOST);
+  });
+
+  it('draws a stander in the frame on the apron, which is laid APRON.lift over the ground', () => {
+    const origin = corridorOrigin(FARMLAND);
+    const start = atStartLine(FARMLAND);
+    // Many fronts, either side of the road and of the camera, so some draw a stander.
+    const plans = Array.from({ length: 40 }, (_, at) => {
+      const front = shopFront((at % 2 === 0 ? 1 : -1) * (14 + 4 * (at >> 1)), 12, 4, awning);
+      // Only what the frame reads of a plan: where it is, and its apron.
+      return {
+        ...front,
+        centroid: { x: 0, z: 10 },
+        footprint: new Float32Array(0),
+        driveway: new Float32Array(0),
+      };
+    });
+    const frame = sceneFrame({
+      profile: FARMLAND,
+      origin,
+      state: start,
+      people: PEOPLE_NEAR_MAX,
+      mappedBuildings: mappedBuildingsOf(plans as unknown as FootprintPlan[]),
+    });
+    const people = frame.people as { near: readonly Person[]; far: readonly Person[] };
+    const stood = [...people.near, ...people.far].filter((person) => person.on === 'shop-front');
+    expect(stood.length).toBeGreaterThan(0);
+    for (const person of stood) {
+      const ground = standingOnGround([{ x: person.x, y: 0, z: person.z }], frame.terrain.mesh);
+      expect(ground.length).toBe(1);
+      expect(person.y).toBeCloseTo((ground[0] as { y: number }).y + APRON.lift, 6);
+    }
   });
 
   it('stands nobody where there is no shop front or no apron, and nobody nearer a shallow kerb', () => {
