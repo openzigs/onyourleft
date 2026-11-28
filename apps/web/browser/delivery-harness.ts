@@ -85,6 +85,7 @@ import {
 } from '../src/game/delivery/throw';
 import type { DeliveryInView, GameView, SceneFrame } from '../src/game/port';
 import { qualitySettings } from '../src/game/quality';
+import { RIDE_LOOKS, rideWeatherOf, type RideLook } from '../src/game/ride-sky';
 import { northRoute } from '../src/game/route-fixtures-testing';
 import { sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
@@ -144,6 +145,8 @@ declare global {
       weatherLook(): Readonly<Record<WeatherName, WeatherLook>>;
       weatherShowcase(weather: WeatherName): void;
       weatherReadback(): Readonly<Record<WeatherName, DeliveryWeatherReadback | undefined>>;
+      rideLooks(): RideLooksReading;
+      rideLookShowcase(look: RideLook): void;
       kinds(world: 'stylised' | 'realistic'): Readonly<Record<ProbedKind, readonly boolean[]>>;
       pullingOut(world: 'stylised' | 'realistic'): PullingOutReading;
       showcase(): void;
@@ -434,6 +437,63 @@ function weatherReadback(): Record<WeatherName, DeliveryWeatherReadback | undefi
   };
   view.destroy();
   return back;
+}
+
+/** #3281: one ordinary ride's frame, drawn in one look, as the view drew it. */
+export interface RideLookReading {
+  /** Draw calls, counted at WebGL's entry points, the frame drawn a second time. */
+  readonly calls: number;
+  /** Triangles, counted the same way. */
+  readonly triangles: number;
+  /** What the frame was drawn with, read back off the view's materials. */
+  readonly readback: DeliveryWeatherReadback | undefined;
+  /** Whether the view drew falling rain. */
+  readonly rainShown: boolean;
+}
+
+/**
+ * #3281: the same ordinary ride's frame with no `weather` at all (today's),
+ * in each look the setup offers, and the same frame carrying a Delivery
+ * round's rain — the control whose haze does thicken.
+ */
+export type RideLooksReading = Readonly<
+  Record<'none' | RideLook | 'deliveryRain', RideLookReading>
+>;
+
+/** #3281: {@link RideLooksReading}, through one real stylised view. */
+function rideLooks(): RideLooksReading {
+  const view = threeGameRenderer.create(canvas(640, 400), qualitySettings(0));
+  view.resize(640, 400);
+  const frame = frameAt(RIDER);
+  const read = (drawn: SceneFrame): RideLookReading => {
+    const calls = callsOf(view, drawn);
+    // `callsOf` drew it twice and took the second's calls; the triangles too.
+    view.render(drawn);
+    counter.takeCalls();
+    const triangles = counter.takeTriangles();
+    const weather = deliveryWeatherOf(view);
+    return { calls, triangles, readback: weather.readback, rainShown: weather.rain };
+  };
+  counter.takeTriangles();
+  const none = read(frame);
+  const looks = Object.fromEntries(
+    RIDE_LOOKS.map((look) => [look, read({ ...frame, weather: rideWeatherOf(look) })]),
+  ) as Record<RideLook, RideLookReading>;
+  const deliveryRain = read({
+    ...frame,
+    delivery: { parcels: [], markers: [], obstacles: [], weather: { rain: true, dusk: false } },
+  });
+  view.destroy();
+  return { none, ...looks, deliveryRain };
+}
+
+/** #3281's photographs for the owner: an ordinary ride on the tablet's 1280×800, in `look`. */
+function rideLookShowcase(look: RideLook): void {
+  const shown = canvas(1280, 800);
+  shown.id = `ride-look-${look}`;
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(1280, 800);
+  view.render({ ...frameAt(RIDER), weather: rideWeatherOf(look) });
 }
 
 /** #2508's photographs for the owner: {@link weatherFrame} on the tablet's 1280×800, in `weather`. */
@@ -1120,6 +1180,8 @@ window.__oylDelivery = {
   weatherLook,
   weatherShowcase,
   weatherReadback,
+  rideLooks,
+  rideLookShowcase,
   kinds,
   pullingOut,
   showcase,

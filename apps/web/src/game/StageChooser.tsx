@@ -85,6 +85,7 @@ import type { PacerStatus } from '../instance/pacer-port';
 import type { PacerChoice } from './pacer-choice';
 import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
+import { RIDE_SKY_CHOICES, type RideSkyChoice } from './ride-sky';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
 import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './delivery/round';
 import { corridorStateText, type CorridorState } from './world-data/corridor';
@@ -586,6 +587,12 @@ interface RoutePickerProps {
   /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
   readonly lapRace?: LapRaceOffer | undefined;
   /**
+   * The ride's light and weather — #3281. Not drawn on a built-in level or
+   * with a Delivery round chosen, which ride in the round's own weather;
+   * `undefined` draws nothing. @see RideSkyOffer
+   */
+  readonly sky?: RideSkyOffer | undefined;
+  /**
    * The built-in circuits — #2293. Drawn only beside {@link lapRace};
    * `undefined`, or none, draws nothing. @see CircuitsOffer
    */
@@ -615,6 +622,32 @@ interface RoutePickerProps {
     groupRide?: GroupRideChoice,
   ) => Promise<void>;
 }
+
+/**
+ * The ride's light and weather, as the setup offers it — #3281: the device's
+ * choice (`ride-sky.ts`) and the way to change it, which keeps it.
+ */
+export interface RideSkyOffer {
+  readonly chosen: RideSkyChoice;
+  readonly onChoose: (choice: RideSkyChoice) => void;
+}
+
+/**
+ * The words of the light and weather choice — #3281, for the owner's
+ * approval: the project's own.
+ */
+export const RIDE_SKY_TEXT = {
+  legend: 'Light and weather',
+  clear: 'Clear',
+  overcast: 'Overcast',
+  rain: 'Rain',
+  dusk: 'Dusk',
+  surprise: 'Surprise me',
+  hint: 'Changes only how the ride looks. Nothing is looked up, and your trainer is not affected.',
+} as const satisfies Record<RideSkyChoice | 'legend' | 'hint', string>;
+
+/** The light and weather choice's hint — #3281. One chooser a page, so a fixed id. */
+export const RIDE_SKY_HINT_ID = 'oyl-chooser-ride-sky-hint';
 
 /**
  * A route's length, at the scale a route is discussed in. The Routes screen's
@@ -1047,6 +1080,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
           problem={props.air.problem}
           field={props.air.field}
         />
+        {/*
+          #3281: the ride's light and weather, on every card but a level's,
+          and not while a Delivery round is chosen: a round rides in its own.
+        */}
+        {props.sky === undefined || onLevel || deliveryOffer?.chosen === true ? null : (
+          <RideSkyControl offer={props.sky} />
+        )}
         {deliveryOffer === undefined || onCircuit || onOpenWorld ? null : (
           <DeliveryControl
             offer={deliveryOffer}
@@ -2411,6 +2451,42 @@ function PositionControl(props: {
           ))}
         </div>
       </fieldset>
+    </div>
+  );
+}
+
+/**
+ * The ride's light and weather — #3281: five options, so chips, as the lap
+ * race's bot tiers are (`theme.css` §`.oyl-segmented` stops at three). The
+ * hint says what it does not do.
+ */
+function RideSkyControl(props: { readonly offer: RideSkyOffer }): JSX.Element {
+  return (
+    <div className="oyl-game__sky tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <fieldset className="oyl-chips tw:mb-0">
+        <legend>{RIDE_SKY_TEXT.legend}</legend>
+        <div className="oyl-chips__options">
+          {RIDE_SKY_CHOICES.map((choice) => (
+            <label key={choice} htmlFor={`oyl-ride-sky-${choice}`}>
+              <input
+                type="radio"
+                id={`oyl-ride-sky-${choice}`}
+                name="oyl-ride-sky"
+                value={choice}
+                checked={props.offer.chosen === choice}
+                aria-describedby={RIDE_SKY_HINT_ID}
+                onChange={() => {
+                  props.offer.onChoose(choice);
+                }}
+              />
+              {RIDE_SKY_TEXT[choice]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p id={RIDE_SKY_HINT_ID} className="tw:m-0">
+        {RIDE_SKY_TEXT.hint}
+      </p>
     </div>
   );
 }

@@ -70,6 +70,18 @@ describe('weatheredSkyOf', () => {
     expect(dusk.upward).toBe(sky.upward);
   });
 
+  it('greys an overcast sky as rain’s, sharing its one graded copy — #3281', () => {
+    const sky = skyOf();
+    const overcast = weatheredSkyOf(sky, { dusk: false, rain: false, overcast: true });
+    expect(overcast).not.toBe(sky);
+    expect(texels(overcast)).not.toEqual(texels(sky));
+    expect(weatheredSkyOf(sky, { dusk: false, rain: true })).toBe(overcast);
+    // At dusk too: the dusk's grade, then the grey.
+    const duskOvercast = weatheredSkyOf(sky, { dusk: true, rain: false, overcast: true });
+    expect(duskOvercast).toBe(weatheredSkyOf(sky, { dusk: true, rain: true }));
+    expect(duskOvercast).not.toBe(weatheredSkyOf(sky, { dusk: true, rain: false }));
+  });
+
   it('lets go of every graded copy, and grades afresh after', () => {
     const sky = skyOf();
     const dusk = weatheredSkyOf(sky, { dusk: true, rain: false });

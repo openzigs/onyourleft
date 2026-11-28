@@ -839,7 +839,13 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
+import {
+  greysTheSky,
+  roadTintIn,
+  WeatherShading,
+  sunColourIn,
+  weatheredWorld,
+} from './weather-look';
 import { BARE_SURFACES, type BareSurface } from './land-class';
 import {
   bareSurfaceColourIn,
@@ -8759,9 +8765,12 @@ function skyPixelsOf(texture: DataTexture): SkyPixels {
 /** Each loaded sky's weathers, each graded once, by {@link weatherKey}. @see weatheredSkyOf */
 const WEATHERED_SKIES = new WeakMap<RealisticSky, Map<string, RealisticSky>>();
 
-/** Which grade a weather asks of the sky: `dusk`, `rain` or both. */
+/**
+ * Which grade a weather asks of the sky: `dusk`, `grey` or both. Since #3281
+ * an overcast is graded as rain is, so the two share one graded sky.
+ */
 function weatherKey(weather: DeliveryWeatherFrame): string {
-  return `${weather.dusk ? 'dusk' : ''}|${weather.rain ? 'rain' : ''}`;
+  return `${weather.dusk ? 'dusk' : ''}|${greysTheSky(weather) ? 'grey' : ''}`;
 }
 
 /**
@@ -8780,8 +8789,9 @@ export function weatheredSkyOf(
   sky: RealisticSky,
   weather: DeliveryWeatherFrame | undefined,
 ): RealisticSky {
-  if (weather === undefined || (!weather.dusk && !weather.rain)) return sky;
+  if (weather === undefined || (!weather.dusk && !greysTheSky(weather))) return sky;
   const key = weatherKey(weather);
+  const grey = greysTheSky(weather);
   const made = WEATHERED_SKIES.get(sky)?.get(key);
   if (made !== undefined) return made;
   const source = sky.texture;
@@ -8799,7 +8809,7 @@ export function weatheredSkyOf(
       const at = (row * width + column) * 4;
       let [r, g, b] = [read(at), read(at + 1), read(at + 2)];
       if (weather.dusk) [r, g, b] = duskSkyTexel(r, g, b, elevation, sky.upward);
-      if (weather.rain) [r, g, b] = rainSkyTexel(r, g, b);
+      if (grey) [r, g, b] = rainSkyTexel(r, g, b);
       graded[at] = half ? DataUtils.toHalfFloat(r) : r;
       graded[at + 1] = half ? DataUtils.toHalfFloat(g) : g;
       graded[at + 2] = half ? DataUtils.toHalfFloat(b) : b;
@@ -28808,6 +28818,12 @@ export interface DeliveryWeatherReadback {
   readonly rainColour: readonly [number, number, number] | undefined;
   /** The nearest any streak stands to the camera across the ground, metres; absent with no rain drawn. */
   readonly rainClearance: number | undefined;
+  /** #3281: the haze's density the frame was drawn with — the depth an ordinary ride's rain must not shorten. */
+  readonly fogDensity: number;
+  /** #3281: the sky's colour the frame was drawn with, sRGB. */
+  readonly skyColour: number;
+  /** #3281: the stylised road's paint, linear, its material's colour. */
+  readonly roadTint: readonly [number, number, number];
 }
 
 /**
@@ -29135,7 +29151,10 @@ class ThreeGameView implements GameView {
   #realistic: RealisticDrawing | undefined;
   /** Which world the last frame was drawn in. Never `'realistic'` without {@link #realistic}. */
   #drawing: QualitySettings['world'] = 'stylised';
-  /** This frame's Delivery weather, if its round has any — #2508. @see render */
+  /**
+   * This frame's Delivery weather, if its round has any — #2508 — and since
+   * #3281 an ordinary ride's look otherwise. @see render
+   */
   #weather: DeliveryWeatherFrame | undefined;
   /** PR #2522: this frame's shade of the scenery and share of the route's light. @see WeatherShading */
   readonly #weatherShading = new WeatherShading();
@@ -29249,11 +29268,15 @@ class ThreeGameView implements GameView {
     // #2508: a Delivery level's dusk and rain re-light the world the frame is
     // drawn in — the sky, the haze, the sun and the ground — in both worlds,
     // for no draw call. `weather-look.ts` has the colours.
-    this.#weather = given.delivery?.weather;
+    // #3281: and an ordinary ride's look, the rider's choice, the same way —
+    // a round's own weather first. Only a round's rain thickens the haze:
+    // no look shortens how far ahead an ordinary ride sees its road.
+    const round = given.delivery?.weather;
+    this.#weather = round ?? given.weather;
     const frame =
       this.#weather === undefined
         ? given
-        : { ...given, world: weatheredWorld(given.world, this.#weather) };
+        : { ...given, world: weatheredWorld(given.world, this.#weather, round !== undefined) };
     // And the stylised road, whose colours are unlit, painted down with it.
     this.#roadMaterial.color.setRGB(...roadTintIn(this.#weather));
     // PR #2522: the scenery goes down at dusk with the ground it stands on,
@@ -29534,9 +29557,10 @@ class ThreeGameView implements GameView {
     this.#delivery?.setRainShare(this.#weatherShading.share);
     this.#delivery?.update(view, eye, seconds);
     // #2366: a level at dusk is drawn dimmer, in the realistic world's exposure: no call.
+    // #3281: and an ordinary ride's dusk alike (this frame's weather, the round's first).
     if (this.#renderer !== undefined && this.#drawing === 'realistic') {
       this.#renderer.toneMappingExposure =
-        REALISTIC_EXPOSURE * (view?.weather?.dusk === true ? REALISTIC_DUSK_EXPOSURE_SHARE : 1);
+        REALISTIC_EXPOSURE * (this.#weather?.dusk === true ? REALISTIC_DUSK_EXPOSURE_SHARE : 1);
     }
   }
 
@@ -29577,6 +29601,9 @@ class ThreeGameView implements GameView {
         this.#delivery?.rainShown() === true
           ? this.#delivery.rainClearanceFrom(this.#camera.position)
           : undefined,
+      fogDensity: this.#fog.density,
+      skyColour: this.#sky.getHex(),
+      roadTint: this.#roadMaterial.color.toArray() as [number, number, number],
     };
   }
 
@@ -30507,8 +30534,7 @@ class ThreeGameView implements GameView {
       this.#scene.environmentIntensity = intensity;
       // #2508: in a level's dusk or rain the photograph graded to it, and in its rain darker.
       const sky = this.#drawnSky() ?? loaded.sky;
-      const skyIntensity =
-        intensity * (this.#weather?.rain === true ? REALISTIC_RAIN_SKY_SHARE : 1);
+      const skyIntensity = intensity * (greysTheSky(this.#weather) ? REALISTIC_RAIN_SKY_SHARE : 1);
       this.#scene.background = sky.texture;
       this.#scene.backgroundIntensity = skyIntensity;
       const turn = skyRotation(loaded.sky.sunU, world.sun.x, world.sun.z);

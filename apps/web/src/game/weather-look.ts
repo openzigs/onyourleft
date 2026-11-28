@@ -27,8 +27,20 @@
  * still show inside `delivery/in-view.ts` §`LOW_LIGHT_REVEAL_METRES`, and each
  * marker still glows, whatever the light.
  *
+ * ## Any ride, since #3281
+ *
+ * An ordinary ride carries a look too (`port.ts` §`SceneFrame.weather`, the
+ * rider's choice in `ride-sky.ts`), drawn through these same functions, with
+ * one look a level never states — **overcast**: the rain's grey sky, a
+ * lighter grey and a less dull sun, with a dry road. ⚠️ **An ordinary ride's
+ * rain keeps the haze** ({@link weatheredWorld}'s `thickensHaze`): no look
+ * shortens how far ahead the rider sees the road there, and the 40 m reveal
+ * is Delivery's alone. Nor does it draw the falling rain, which is a
+ * Delivery round's one call (`three-renderer.ts` §`DeliveryBelt`): an
+ * ordinary ride's look costs no draw call and no triangle.
+ *
  * This project's own numbers, for the owner's approval in #2508's pull
- * request. Pure: no three, no DOM.
+ * request, and the overcast's in #3281's. Pure: no three, no DOM.
  */
 
 import type { DeliveryWeatherFrame } from './port';
@@ -73,6 +85,24 @@ export const RAIN_DIRECT_SHARE = 0.5;
 /** What share of its light the sky gives under rain cloud. */
 export const RAIN_AMBIENT_SHARE = 0.8;
 
+/** How far toward {@link RAIN_SKY_GREY} the sky and the horizon are drawn when overcast — #3281: less than rain's. */
+export const OVERCAST_GREY_SHARE = 0.4;
+
+/** What share of its light the sun gives through an overcast — #3281: more than through rain cloud. */
+export const OVERCAST_DIRECT_SHARE = 0.65;
+
+/** What share of its light the sky gives under an overcast — #3281. */
+export const OVERCAST_AMBIENT_SHARE = 0.9;
+
+/**
+ * Whether `weather` greys the sky — #3281: rain does, and so does an
+ * overcast. The realistic world grades its photograph once for both
+ * (`three-renderer.ts` §`weatheredSkyOf`).
+ */
+export function greysTheSky(weather?: DeliveryWeatherFrame): boolean {
+  return weather?.rain === true || weather?.overcast === true;
+}
+
 /** `from` moved `share` of the way to `to`, each sRGB channel. */
 function mixed(from: number, to: number, share: number): number {
   let out = 0;
@@ -113,10 +143,18 @@ function duskSun(sun: SunStyle): SunStyle {
 
 /**
  * The world a frame is drawn in, under `weather` — #2508. Clear daylight, or
- * no weather, is `world` itself. Dusk and rain together are dusk, then rain.
+ * no weather, is `world` itself. Dusk and rain together are dusk, then rain;
+ * an overcast (#3281) is drawn only without rain, which already greys the
+ * sky more. `thickensHaze` is a Delivery round's (#3281): rain thickens the
+ * haze there, beside its markers' 40 m reveal, and on an ordinary ride it
+ * does not, so no look shortens how far ahead the road is seen.
  */
-export function weatheredWorld(world: WorldStyle, weather?: DeliveryWeatherFrame): WorldStyle {
-  if (weather === undefined || (!weather.dusk && !weather.rain)) return world;
+export function weatheredWorld(
+  world: WorldStyle,
+  weather?: DeliveryWeatherFrame,
+  thickensHaze = true,
+): WorldStyle {
+  if (weather === undefined || (!weather.dusk && !greysTheSky(weather))) return world;
   let out = world;
   if (weather.dusk) {
     out = {
@@ -132,11 +170,23 @@ export function weatheredWorld(world: WorldStyle, weather?: DeliveryWeatherFrame
       ...out,
       skyColour: mixed(out.skyColour, RAIN_SKY_GREY, RAIN_GREY_SHARE),
       horizonColour: mixed(out.horizonColour, RAIN_SKY_GREY, RAIN_GREY_SHARE),
-      fogDensity: out.fogDensity * RAIN_FOG_SHARE,
+      fogDensity: thickensHaze ? out.fogDensity * RAIN_FOG_SHARE : out.fogDensity,
       sun: {
         ...out.sun,
         ambient: out.sun.ambient * RAIN_AMBIENT_SHARE,
         direct: out.sun.direct * RAIN_DIRECT_SHARE,
+      },
+    };
+  } else if (weather.overcast === true) {
+    // #3281: the rain's grey, lighter, and its haze untouched.
+    out = {
+      ...out,
+      skyColour: mixed(out.skyColour, RAIN_SKY_GREY, OVERCAST_GREY_SHARE),
+      horizonColour: mixed(out.horizonColour, RAIN_SKY_GREY, OVERCAST_GREY_SHARE),
+      sun: {
+        ...out.sun,
+        ambient: out.sun.ambient * OVERCAST_AMBIENT_SHARE,
+        direct: out.sun.direct * OVERCAST_DIRECT_SHARE,
       },
     };
   }
@@ -260,11 +310,13 @@ export class WeatherShading {
   #direct = Number.NaN;
   #dusk = false;
   #rain = false;
+  #overcast = false;
 
   /** This frame's, for `world` (the route's own, before the weather) under `weather`. */
   update(world: WorldStyle, weather?: DeliveryWeatherFrame): void {
     const dusk = weather?.dusk === true;
     const rain = weather?.rain === true;
+    const overcast = weather?.overcast === true;
     // The drawn sun's light follows from the route's and the weather alone,
     // and only its ambient and direct reach the share.
     if (
@@ -272,7 +324,8 @@ export class WeatherShading {
       world.sun.ambient === this.#ambient &&
       world.sun.direct === this.#direct &&
       dusk === this.#dusk &&
-      rain === this.#rain
+      rain === this.#rain &&
+      overcast === this.#overcast
     ) {
       return;
     }
@@ -281,6 +334,7 @@ export class WeatherShading {
     this.#direct = world.sun.direct;
     this.#dusk = dusk;
     this.#rain = rain;
+    this.#overcast = overcast;
     sceneryShadeIn(world, weather, this.shade);
     sunShareIn(world.sun, weatheredWorld(world, weather).sun, weather, this.share);
   }

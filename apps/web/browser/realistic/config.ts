@@ -30,6 +30,7 @@
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame); since #1996 `out-and-back`, `route-fixtures-testing.ts` §`outAndBackRoute`, a road ridden out and back again, turning at half its length (`at=1475` holds the turning point 30 m ahead, `at=1512` just past it). Refused beside `town`, which is a road of its own | `village`, `out-and-back`; default none |
  * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
  * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles (`realistic/lap-race.ts`), drawn by the product's own belt. With `world=stylised`, in the scenery-free STYLISED frame, and REFUSED beside `route`; since #1971 in the realistic world too, on the route's own frame with its scenery (`route=village` is #1689's hold), held to §`LAP_RACE_VILLAGE_DRAW_CALLS`. REFUSED beside `delivery` and `town` in both | `worst`; default none |
+ * | `look` | #3281: an ordinary ride's light and weather on every frame (`port.ts` §`SceneFrame.weather`, `ride-sky.ts` §`rideWeatherOf`), the rider's choice before the ride, for the owner's photographs of each look and the frame check in rain at dusk: drawn as a re-lighting, no call and no triangle. A frame carrying a round (`delivery`) draws the round's weather instead, as the product does | `overcast`, `rain`, `dusk`, `rain-dusk`; default none, clear daylight |
  * | `cityfar` | #1638: a CANDIDATE for a city centre's far-level cap (`realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`, off in the product): a refill draws up to this many mapped buildings, every one past `MAPPED_BUILDING_MAX`'s 36 a `city-centre` building at its far level, for validation 0002 AE5's third row. A candidate to measure, never the cap: the cap is the number the tablet's rows support, which the owner rules on #1638. REFUSED unless `town=city`, the one town with a city-centre run | a whole number from 37 to 144 (`CITY_FAR_MOST`); default none, the product's cap |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -707,6 +708,12 @@ export interface RealisticPageConfig {
    */
   readonly weather: 'rain' | 'dusk' | 'rain-dusk' | undefined;
   /**
+   * #3281: an ordinary ride's light and weather on every frame — the look the
+   * rider chose before the ride. `undefined` is clear daylight, the frame
+   * carrying no weather at all.
+   */
+  readonly look: 'overcast' | 'rain' | 'dusk' | 'rain-dusk' | undefined;
+  /**
    * #1638: a candidate city centre's far-level cap, handed to
    * `mapped-buildings.ts` §`mappedBuildingsOf` with the town's plans.
    * `undefined` is the product's own (`realistic-budget.ts`
@@ -735,6 +742,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   delivery: undefined,
   race: undefined,
   weather: undefined,
+  look: undefined,
   cityFar: undefined,
 };
 
@@ -756,6 +764,7 @@ const KNOWN = new Set([
   'place',
   'delivery',
   'weather',
+  'look',
   'race',
   'cityfar',
 ]);
@@ -1262,6 +1271,9 @@ export function parseConfig(search: string): RealisticPageConfig {
     weather: params.has('weather')
       ? oneOf('weather', ['rain', 'dusk', 'rain-dusk'] as const, 'rain')
       : undefined,
+    look: params.has('look')
+      ? oneOf('look', ['overcast', 'rain', 'dusk', 'rain-dusk'] as const, 'dusk')
+      : undefined,
     cityFar: params.has('cityfar') ? cityFarFrom(params) : undefined,
   };
 }
@@ -1443,6 +1455,7 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.delivery !== undefined) params.set('delivery', String(config.delivery));
   if (config.race !== undefined) params.set('race', config.race);
   if (config.weather !== undefined) params.set('weather', config.weather);
+  if (config.look !== undefined) params.set('look', config.look);
   if (config.cityFar !== undefined) params.set('cityfar', String(config.cityFar));
   const query = params.toString();
   return query === '' ? '' : `?${query}`;

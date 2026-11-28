@@ -21,6 +21,10 @@ import {
   DUSK_SKY_COLOUR,
   DUSK_SUN_COLOUR,
   DUSK_SUN_ELEVATION_DEGREES,
+  greysTheSky,
+  OVERCAST_AMBIENT_SHARE,
+  OVERCAST_DIRECT_SHARE,
+  OVERCAST_GREY_SHARE,
   RAIN_AMBIENT_SHARE,
   RAIN_DIRECT_SHARE,
   RAIN_FOG_SHARE,
@@ -403,5 +407,64 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
     expectAsGiven(DAY);
     expect(light.shade).toBe(shade);
     expect(light.share).toBe(share);
+  });
+});
+
+describe('an ordinary ride’s looks, drawn through the same world — #3281', () => {
+  it('pins the overcast’s numbers, for the owner’s approval', () => {
+    expect(OVERCAST_GREY_SHARE).toBe(0.4);
+    expect(OVERCAST_DIRECT_SHARE).toBe(0.65);
+    expect(OVERCAST_AMBIENT_SHARE).toBe(0.9);
+  });
+
+  it('draws an overcast greyer and duller than the day, lighter than rain, with the haze and the road as they are', () => {
+    const overcast = { rain: false, dusk: false, overcast: true };
+    const drawn = weatheredWorld(DAY, overcast);
+    const rain = weatheredWorld(DAY, { rain: true, dusk: false }, false);
+    expect(greysTheSky(overcast)).toBe(true);
+    // Greyer: the sky's channels closer together than the day's, and not as close as rain's.
+    const spread = (colour: number): number =>
+      Math.max(...channels(colour)) - Math.min(...channels(colour));
+    expect(spread(drawn.skyColour)).toBeLessThan(spread(DAY.skyColour));
+    expect(spread(drawn.skyColour)).toBeGreaterThan(spread(rain.skyColour));
+    expect(drawn.sun.direct).toBeCloseTo(DAY.sun.direct * OVERCAST_DIRECT_SHARE, 12);
+    expect(drawn.sun.ambient).toBeCloseTo(DAY.sun.ambient * OVERCAST_AMBIENT_SHARE, 12);
+    expect(drawn.sun.direct).toBeGreaterThan(rain.sun.direct);
+    // Dry, and the distance as clear as the day's.
+    expect(drawn.fogDensity).toBe(DAY.fogDensity);
+    expect(drawn.groundColour).toBe(DAY.groundColour);
+    expect(roadTintIn(overcast)).toEqual([1, 1, 1]);
+    expect(sceneryShadeIn(DAY, overcast)).toEqual([1, 1, 1]);
+    // Rain already greys the sky more, so rain with an overcast is rain.
+    expect(weatheredWorld(DAY, { rain: true, dusk: false, overcast: true })).toEqual(
+      weatheredWorld(DAY, { rain: true, dusk: false }),
+    );
+  });
+
+  it('keeps the haze in an ordinary ride’s rain, where a Delivery round’s thickens it', () => {
+    for (const dusk of [false, true]) {
+      const weather = { rain: true, dusk };
+      const ordinary = weatheredWorld(DAY, weather, false);
+      const round = weatheredWorld(DAY, weather);
+      expect(ordinary.fogDensity).toBe(DAY.fogDensity);
+      expect(round.fogDensity).toBeCloseTo(DAY.fogDensity * RAIN_FOG_SHARE, 12);
+      // Everything else the rain re-lights is the same in both.
+      expect({ ...ordinary, fogDensity: 0 }).toEqual({ ...round, fogDensity: 0 });
+    }
+  });
+
+  it('hands a ride with no look the world itself', () => {
+    expect(weatheredWorld(DAY, undefined, false)).toBe(DAY);
+    expect(weatheredWorld(DAY, { rain: false, dusk: false }, false)).toBe(DAY);
+  });
+
+  it('works the shading out again when only the overcast changes', () => {
+    const light = new WeatherShading();
+    light.update(DAY, { rain: false, dusk: false });
+    expect(light.share).toEqual([1, 1, 1]);
+    const overcast = { rain: false, dusk: false, overcast: true };
+    light.update(DAY, overcast);
+    expect(light.share).toEqual(sunShareIn(DAY.sun, weatheredWorld(DAY, overcast).sun, overcast));
+    expect(light.share[0]).toBeLessThan(1);
   });
 });
