@@ -163,8 +163,9 @@ describe('the line stays together over the hilly fixture (criterion 1)', () => {
   });
 });
 
-// With the no-drop rule left out: with it, a rider this far off the wheel
-// gives up their seat and the bots come round (#3301, `group-no-drop.test.ts`).
+// With the no-drop rule left out: with it, the bot ahead of the rider drops
+// back as their sweep, so they are never this far off a wheel (#3301,
+// `group-no-drop.test.ts`).
 describe("the bot behind the rider follows the rider's wheel (criterion 2)", () => {
   const ride = rideGroup({
     course: FLAT,

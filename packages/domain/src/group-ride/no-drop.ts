@@ -103,8 +103,8 @@
  *
  * | The rider | The pace |
  * |---|---|
- * | with the line, which is eased, and keeping their gap (it is no further back than {@link NoDropState.worstM} plus {@link NO_DROP_PACE_SLIP_METRES}) | rises, by the margin over {@link NO_DROP_PACE_SECONDS} |
- * | with the line, which is eased, and losing ground (a new furthest gap) | comes down, {@link NO_DROP_PACE_SLIP_STEP} times as fast |
+ * | with the line, which is eased, and keeping their gap (its mean over {@link NO_DROP_PACE_SECONDS} is no more than {@link NO_DROP_PACE_SLIP_METRES} over its mean over {@link NO_DROP_PACE_MEMORY_SECONDS}) | rises, by the margin over {@link NO_DROP_PACE_SECONDS} |
+ * | with the line, which is eased, and losing ground (a sustained loss: more than that) | comes down, {@link NO_DROP_PACE_SLIP_STEP} times as fast |
  * | with the line at the plan's speed | stays |
  * | `gapped` or `off-the-back` | follows their own speed, a running mean over {@link NO_DROP_PACE_SECONDS} |
  *
@@ -187,19 +187,24 @@ export const NO_DROP_PACE_MARGIN = 0.05;
 export const NO_DROP_PACE_GAP_SECONDS = 2;
 
 /**
- * How long the rider's furthest recent gap takes to come in to their gap,
- * seconds: **120**, six times the pace's own. Shorter, and the line's surging
- * as it speeds up reads as losing ground.
+ * The time constant of the long running mean of the rider's gap
+ * ({@link NoDropState.longGapM}), seconds: **120**, six times the pace's own.
+ * The short mean ({@link NoDropState.shortGapM}) is over
+ * {@link NO_DROP_PACE_SECONDS}. A gap that swings out and back within a
+ * minute or so moves the long mean hardly at all and the short one by less
+ * than its swing, so it is a wander about a steady gap and not a loss.
  */
 export const NO_DROP_PACE_MEMORY_SECONDS = 120;
 
 /**
- * A rider with a paced line keeps their gap if it is no further back than
- * their furthest recent gap ({@link NoDropState.worstM}) by more than this,
- * metres: **1 cm**. A gap that wanders about a steady value grows in about
- * half the windows, and one window's growth is not losing ground.
+ * A rider with a paced line is losing ground when the short mean of their gap
+ * is more than this over its long mean, metres: **0.5 m**. A gap that wanders
+ * about a steady value grows in about half the windows, so one window's
+ * growth, or a new furthest gap, is not losing ground: a sustained loss is.
+ * A gap that keeps growing passes it once it has grown by 0.5 cm a second
+ * for long enough: the two means lag it by 20 s and 120 s of its growth.
  */
-export const NO_DROP_PACE_SLIP_METRES = 0.01;
+export const NO_DROP_PACE_SLIP_METRES = 0.5;
 
 /**
  * A rider losing ground brings the remembered pace down this many times as
@@ -241,19 +246,26 @@ export interface NoDropState {
    */
   readonly easedSpeedMps: number | null;
   /**
-   * The rider's remembered pace, as a share of the plan's speed, at most 1.
-   * `null` until the first wait.
+   * The rider's remembered pace, as a share of the plan's speed, at most
+   * {@link NO_DROP_PACE_MOST}: over 1 where the line gives speed away to a
+   * rider who follows well back. `null` until the first wait.
    */
   readonly paceShare: number | null;
   /** How far the rider was behind the line at the last decision, metres; 0 when not behind it. */
   readonly behindM: number;
   /**
-   * The furthest the rider has been behind the line lately, metres: it follows
-   * the rider's gap out at once and back in over {@link NO_DROP_PACE_MEMORY_SECONDS}.
-   * A rider is losing ground when they pass it, not when one window's gap is
-   * longer than the last.
+   * The running mean of how far the rider has been behind the line over
+   * {@link NO_DROP_PACE_SECONDS}, metres; off the wheel, the gap itself.
    */
-  readonly worstM: number;
+  readonly shortGapM: number;
+  /**
+   * The same over {@link NO_DROP_PACE_MEMORY_SECONDS}, metres; off the wheel,
+   * the gap itself, so a rider back on from a gap settles at their own
+   * distance without that reading as a loss. A rider with the line is losing
+   * ground when {@link shortGapM} is more than
+   * {@link NO_DROP_PACE_SLIP_METRES} over it.
+   */
+  readonly longGapM: number;
   /** Since when a regrouping line's rider has been inside the reach, or `null`. */
   readonly insideSinceMs: number | null;
   /** Whether the front was over the top of a climb at the last window. */
@@ -293,7 +305,8 @@ export function startNoDrop(atMs: number): NoDropState {
     easedSpeedMps: null,
     paceShare: null,
     behindM: 0,
-    worstM: 0,
+    shortGapM: 0,
+    longGapM: 0,
     insideSinceMs: null,
     overTheTop: false,
   };
@@ -317,6 +330,11 @@ export function noDropRole(standing: RiderStanding, role: RiderRole): RiderRole 
     default:
       return unknownValue(standing);
   }
+}
+
+/** `mean` a decision window's share of the way to `value`, over `seconds`. */
+function meanOf(mean: number, value: number, seconds: number): number {
+  return mean + (value - mean) * (ROTATION_WINDOW_MS / (1_000 * seconds));
 }
 
 /**
@@ -414,6 +432,11 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     hold = waits ? 'waiting' : null;
   }
 
+  // The gap's two running means. Off the wheel each is the gap: the rider's
+  // pace is read from their speed there, and coming back on is not losing ground.
+  const shortGapM = behind ? behindM : meanOf(state.shortGapM, behindM, NO_DROP_PACE_SECONDS);
+  const longGapM = behind ? behindM : meanOf(state.longGapM, behindM, NO_DROP_PACE_MEMORY_SECONDS);
+
   // The rider's pace, remembered from the first wait on. A stop is not a pace,
   // and a plan that asks no speed has no share to take.
   const planMps = view.groupSpeedMps;
@@ -428,24 +451,14 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
     } else if (state.easedSpeedMps !== null) {
       // With the line while it is eased for them. Their speed is the line's
       // own there, so it says nothing of what they can hold: read whether
-      // they keep the gap. Keeping it, the pace rises by its margin; losing
-      // ground, it comes down by half as much again.
-      const keeping = behindM <= state.worstM + NO_DROP_PACE_SLIP_METRES;
+      // they keep the gap, over more than one window. Keeping it, the pace
+      // rises by its margin; losing ground, it comes down by half as much again.
+      const keeping = shortGapM <= longGapM + NO_DROP_PACE_SLIP_METRES;
       const moved =
         paceShare * (1 + (keeping ? step : -step * NO_DROP_PACE_SLIP_STEP) * NO_DROP_PACE_MARGIN);
       paceShare = Math.min(NO_DROP_PACE_MOST, moved);
     }
   }
-
-  // The furthest gap, out at once and back in over the pace's own time. Off the
-  // wheel it is the gap: the rider's pace is read from their speed there.
-  const worstM = behind
-    ? behindM
-    : Math.max(
-        behindM,
-        state.worstM -
-          (state.worstM - behindM) * (ROTATION_WINDOW_MS / (1_000 * NO_DROP_PACE_MEMORY_SECONDS)),
-      );
 
   // How fast the line rides where that is under the plan's speed. Held: under
   // the rider's own speed while they are behind, by a share that grows with
@@ -485,7 +498,8 @@ export function stepNoDrop(state: NoDropState, view: NoDropView): NoDropStep {
       easedSpeedMps,
       paceShare,
       behindM,
-      worstM,
+      shortGapM,
+      longGapM,
       insideSinceMs,
       overTheTop,
     },

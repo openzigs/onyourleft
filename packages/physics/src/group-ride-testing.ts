@@ -188,6 +188,9 @@ export function rideGroup(script: GroupScript): GroupRide {
   const line = script.line ?? SIX;
   const riding = script.rider ?? {};
   const total = course.totalDistance as number;
+  // A ride to the end of the course that takes ten times the plan's time has
+  // stalled: it throws, naming where the front was, in place of hanging the suite.
+  const mostSeconds = (10 * total) / (script.targetKmh / 3.6);
 
   // The bots form up at the route's start at the group's speed; so does the
   // rider, unless the script starts them somewhere else.
@@ -325,6 +328,11 @@ export function rideGroup(script: GroupScript): GroupRide {
     if (script.seconds === undefined && frontM >= total) {
       finishSeconds = seconds + TICK_SECONDS;
       break;
+    }
+    if (script.seconds === undefined && seconds + TICK_SECONDS >= mostSeconds) {
+      throw new Error(
+        `the ride stalled: after ${String(Math.round(mostSeconds))} s, ten times the plan's time, the front is at ${frontM.toFixed(1)} m of ${String(total)} m`,
+      );
     }
   }
   return { plan, frames, finishSeconds, state };

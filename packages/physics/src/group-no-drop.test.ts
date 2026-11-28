@@ -726,18 +726,49 @@ describe('deterministic for a seed (criterion 9)', () => {
   });
 });
 
+/** A seeded draw in [0, 1): mulberry32, so a wandering rider rides the same every run. */
+function draws(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** A gap that swings `swingM` either side of `centreM` and back every `periodS`. */
+const swung =
+  (centreM: number, swingM: number, periodS: number) =>
+  (seconds: number): number =>
+    centreM + swingM * Math.sin((2 * Math.PI * seconds) / periodS);
+
+/** A gap that walks at random about `centreM`, a step a second, never more than `swingM` from it. */
+function walked(centreM: number, swingM: number, seed: number): (seconds: number) => number {
+  const draw = draws(seed);
+  const steps: number[] = [];
+  let off = 0;
+  for (let second = 0; second < 1_000; second += 1) {
+    off = Math.max(-swingM, Math.min(swingM, off + (draw() - 0.5) * swingM * 0.5));
+    steps.push(centreM + off);
+  }
+  return (seconds) => steps[Math.floor(seconds)] as number;
+}
+
 describe.each([
-  { name: '1.86 to 2.17 m', low: 1.86, high: 2.17 },
-  { name: '2.5 to 3.37 m', low: 2.5, high: 3.37 },
-  { name: '0.95 to 1.04 m', low: 0.95, high: 1.04 },
+  { name: '1 m ± 0.3 m, swung over 30 s', gapM: swung(1, 0.3, 30) },
+  { name: '2 m ± 0.6 m, swung over 45 s', gapM: swung(2, 0.6, 45) },
+  { name: '3 m ± 0.9 m, swung over 60 s', gapM: swung(3, 0.9, 60) },
+  { name: '1 m ± 0.3 m, a random walk (seed 1)', gapM: walked(1, 0.3, 1) },
+  { name: '2 m ± 0.6 m, a random walk (seed 2)', gapM: walked(2, 0.6, 2) },
+  { name: '3 m ± 0.9 m, a random walk (seed 3)', gapM: walked(3, 0.9, 3) },
 ])(
-  'a rider whose gap wanders from $name behind the wheel has the group back at the plan’s speed after one wait',
-  ({ low, high }) => {
+  'a rider whose gap wanders $name behind the wheel has the group back at the plan’s speed after one wait',
+  ({ gapM }) => {
     const RECOVERY_SECONDS = 360;
-    // The gap swings up and down in about half the windows: a rider is not
-    // losing ground because it grew in one of them.
-    const wander = (seconds: number): number =>
-      low + ((high - low) * (1 + Math.sin((seconds * 2 * Math.PI) / 7))) / 2;
+    // The one-off gap of `oneGap`, then a gap that grows in about half the
+    // windows: a rider who keeps up, though never to the centimetre.
     const ride = ridden(() =>
       rideGroup({
         course: FLAT,
@@ -746,23 +777,85 @@ describe.each([
         seconds: 600,
         bendRadiusM: 20,
         rider: {
-          gapM: (seconds) => (seconds < 50 ? 2 : wander(seconds)),
+          gapM: (seconds) => (seconds < 50 ? 2 : gapM(seconds)),
           slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 },
         },
       }),
     );
-
-    it('rides the plan again within the recovery time', () => {
-      const { frames, plan } = ride();
+    const released = (): number => {
+      const { frames } = ride();
       const began = frames.findIndex((frame) => hold(frame) !== null);
-      const from = frames.findIndex((frame, index) => index > began && hold(frame) === null);
-      expect(from).toBeGreaterThan(0);
-      const end = frames.slice(from + RECOVERY_SECONDS / TICK_SECONDS);
+      return frames.findIndex((frame, index) => index > began && hold(frame) === null);
+    };
+
+    it('keeps up after the one wait, and the remembered pace never falls', () => {
+      const { frames } = ride();
+      expect(holdsBegun(frames)).toBe(1);
+      const after = windowsOf(frames.slice(released()));
+      let pace = 0;
+      for (const frame of after) {
+        expect(standing(frame)).toBe('with');
+        const now = frame.tick.state.noDrop.paceShare as number;
+        expect(now).toBeGreaterThanOrEqual(pace);
+        pace = now;
+      }
+    });
+
+    it('rides the plan again within the recovery time, but for what the line gives back as the gap swings out', () => {
+      const { frames, plan } = ride();
+      const end = frames.slice(released() + RECOVERY_SECONDS / TICK_SECONDS);
       expect(end.length * TICK_SECONDS).toBeGreaterThan(30);
       for (const frame of end) {
-        expect(eased(frame)).toBe(false);
-        expect(frame.groupSpeedMps).toBe(plan.speedNowAt(at(frame, 'b1').distanceM));
+        expect(frame.groupSpeedMps).toBeGreaterThan(
+          0.99 * plan.speedNowAt(at(frame, 'b1').distanceM),
+        );
       }
     });
   },
 );
+
+describe('a rider who really is losing ground inside the wheel band brings the remembered pace down', () => {
+  // The one-off gap, then 1 m behind the wheel until 300 s, then 3 cm further
+  // back every second: 4.6 m at 420 s, still with the line.
+  const GROWS_FROM = 300;
+  const ride = ridden(() =>
+    rideGroup({
+      course: FLAT,
+      targetKmh: TARGET_KMH,
+      line: RIDER_LAST,
+      seconds: 420,
+      bendRadiusM: 20,
+      rider: {
+        gapM: (seconds) =>
+          seconds < 50 ? 2 : seconds < GROWS_FROM ? 1 : 1 + 0.03 * (seconds - GROWS_FROM),
+        slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 },
+      },
+    }),
+  );
+
+  it('with the line throughout, and the pace lower at the end than when the gap began to grow, and a tenth under its top', () => {
+    const { frames } = ride();
+    const growing = frames.slice(GROWS_FROM / TICK_SECONDS);
+    const pace = (frame: Frame): number => frame.tick.state.noDrop.paceShare as number;
+    for (const frame of growing) expect(standing(frame)).toBe('with');
+    const last = pace(growing[growing.length - 1] as Frame);
+    expect(last).toBeLessThan(pace(growing[0] as Frame));
+    expect(last).toBeLessThan(Math.max(...growing.map(pace)) - 0.1);
+  });
+});
+
+describe('a ride that stalls', () => {
+  it('throws, naming where the front is, in place of hanging the suite', () => {
+    // A rider stopped in the line from the start: the no-drop line stands still with them.
+    expect(() =>
+      rideGroup({
+        course: courseOf([[1_000, 0]]),
+        targetKmh: TARGET_KMH,
+        line: RIDER_LAST,
+        rider: { stop: { fromSeconds: 0, toSeconds: Number.POSITIVE_INFINITY } },
+      }),
+    ).toThrow(
+      /^the ride stalled: after 1200 s, ten times the plan's time, the front is at \d+\.\d m of 1000 m$/,
+    );
+  });
+});
