@@ -265,6 +265,33 @@ const TRAINER_COMMAND_SEAM = [
   'packages/sensors/protocol/src/trainer-control-choice.ts',
 ];
 
+/**
+ * Directories whose modules may not import the trainer: `WIRE005` (#3308).
+ *
+ * The AI group ride (ADR 0101 D-6.1, the owner's ruling 4 of 2026-11-26):
+ * *nothing in the mode writes to the trainer*. A smart trainer applies
+ * resistance to a person who is pedalling (CLAUDE.md §6), so a module of the
+ * mode that imports a {@link TRAINER_COMMAND_SEAM} module, or one of
+ * {@link GAME_TRAINER_MODULES}, fails this gate on every run, directly or by a
+ * name taken through a workspace barrel (`@onyourleft/sensors/protocol`'s
+ * `createErgWriter`). ⚠️ **One hop, not the chain**: an import of a module that
+ * itself imports the seam is
+ * `apps/web/src/game/group-ride/group-ride-imports-cannot-reach-trainer.test.ts`'s
+ * to find, on the transitive walk the lap race and Delivery share. ⚠️ A
+ * type-only import is not refused: a type cannot write to a trainer.
+ *
+ * Asserted to exist, as {@link WATCHED_PREFIXES} is: a sealed directory
+ * renamed away would leave the rule green over nothing.
+ */
+const TRAINER_SEALED_PREFIXES = ['apps/web/src/game/group-ride/'];
+
+/** What a sealed module may not import beside the seam: what the game holds to drive a trainer. */
+const GAME_TRAINER_MODULES = [
+  'apps/web/src/game/trainer-port.ts',
+  'apps/web/src/game/gradient.ts',
+  'apps/web/src/ride/trainer.ts',
+];
+
 const SOURCE_EXTENSIONS = ['.ts', '.tsx'];
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.git', 'android']);
 
@@ -804,6 +831,143 @@ export function missingSeamFiles(root) {
   });
 }
 
+/** The entries of {@link TRAINER_SEALED_PREFIXES} that name no directory in `root`: {@link missingPrefixes}' reason. */
+export function missingSealedPrefixes(root) {
+  return TRAINER_SEALED_PREFIXES.filter((prefix) => {
+    const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
+    return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
+/** Every non-test source file under a {@link TRAINER_SEALED_PREFIXES} directory. */
+export function sealedFiles(root) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRECTORIES.has(entry.name)) walk(full);
+      } else if (
+        SOURCE_EXTENSIONS.some((extension) => entry.name.endsWith(extension)) &&
+        !entry.name.endsWith('.d.ts') &&
+        !isTestSupport(slash(relative(root, full)))
+      ) {
+        found.push(full);
+      }
+    }
+  };
+  for (const prefix of TRAINER_SEALED_PREFIXES) {
+    walk(join(root, ...prefix.split('/').filter((part) => part.length > 0)));
+  }
+  return found.sort();
+}
+
+/**
+ * Every value import a module makes, with the names it takes: a type-only
+ * import is left out (it is erased before anything runs), and so is a
+ * type-only name inside braces. `names` is `undefined` for an import that
+ * takes the whole module — a namespace, a default, `export *`, a bare or a
+ * dynamic `import()` — so only the module it names is checked.
+ */
+export function valueImportsOf(source) {
+  const found = [];
+  const visit = (node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.importClause?.isTypeOnly !== true
+    ) {
+      const bindings = node.importClause?.namedBindings;
+      const named =
+        node.importClause !== undefined &&
+        node.importClause.name === undefined &&
+        bindings !== undefined &&
+        ts.isNamedImports(bindings);
+      found.push({
+        node,
+        specifier: node.moduleSpecifier.text,
+        names: named
+          ? bindings.elements
+              .filter((element) => !element.isTypeOnly)
+              .map((element) => (element.propertyName ?? element.name).text)
+          : undefined,
+      });
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      !node.isTypeOnly
+    ) {
+      const clause = node.exportClause;
+      found.push({
+        node,
+        specifier: node.moduleSpecifier.text,
+        names:
+          clause !== undefined && ts.isNamedExports(clause)
+            ? clause.elements
+                .filter((element) => !element.isTypeOnly)
+                .map((element) => (element.propertyName ?? element.name).text)
+            : undefined,
+      });
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      found.push({ node, specifier: node.arguments[0].text, names: undefined });
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(source, visit);
+  return found;
+}
+
+/**
+ * The module that provides `name` to a module importing it from `file`:
+ * `file` itself where it declares it, else whichever module its re-exports
+ * take it from, followed through barrels. `file` where it cannot tell.
+ */
+export function providerOf(file, name, packages, seen = new Set()) {
+  if (seen.has(file)) return file;
+  seen.add(file);
+  const source = parseFile(file);
+  for (const statement of source.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.isTypeOnly ||
+      statement.moduleSpecifier === undefined ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+    const target = resolveSpecifier(file, statement.moduleSpecifier.text, packages);
+    if (target === undefined) continue;
+    const clause = statement.exportClause;
+    if (clause !== undefined && ts.isNamedExports(clause)) {
+      const element = clause.elements.find((each) => each.name.text === name && !each.isTypeOnly);
+      if (element !== undefined) {
+        return providerOf(target, (element.propertyName ?? element.name).text, packages, seen);
+      }
+    } else if (clause === undefined) {
+      const provider = providerOf(target, name, packages, seen);
+      if (provider !== target || declaresExport(parseFile(target), name)) return provider;
+    }
+  }
+  return file;
+}
+
+/** Whether `source` declares an export named `name` itself. */
+function declaresExport(source, name) {
+  return exportedDeclarations(source).some((declaration) => declaration.name === name);
+}
+
 /** Every watched source file on disk, whether or not anything reaches it. */
 export function watchedFiles(root) {
   const found = [];
@@ -1054,6 +1218,14 @@ export function wiringProblems(root) {
         'population. Move the path with the file.',
     );
   }
+  const missingSealed = missingSealedPrefixes(root);
+  if (missingSealed.length > 0) {
+    throw new Error(
+      `sealed directory missing: ${missingSealed.join(', ')}. TRAINER_SEALED_PREFIXES names it ` +
+        'and nothing on disk does, so WIRE005 would pass over an empty population — the failure ' +
+        'mode #142 shipped. Move the prefix with the directory.',
+    );
+  }
   const entries = entryPoints(root);
   if (entries.length === 0) {
     throw new Error(
@@ -1210,8 +1382,35 @@ export function wiringProblems(root) {
     );
   }
 
+  // WIRE005 (#3308): a sealed module importing the trainer, by its path or by
+  // a name a workspace barrel re-exports from it. Every file on disk under the
+  // sealed directories, reached or not: an unreached one ships nothing today,
+  // and is one import away from shipping.
+  const trainerModules = new Set([...TRAINER_COMMAND_SEAM, ...GAME_TRAINER_MODULES]);
+  const sealed = sealedFiles(root);
+  for (const file of sealed) {
+    const rel = slash(relative(root, file));
+    const source = parsed.get(file) ?? parseFile(file);
+    for (const taken of valueImportsOf(source)) {
+      const target = resolveSpecifier(file, taken.specifier, packages);
+      if (target === undefined) continue;
+      const reached = [
+        target,
+        ...(taken.names ?? []).map((name) => providerOf(target, name, packages)),
+      ].map((each) => slash(relative(root, each)));
+      for (const forbidden of new Set(reached.filter((each) => trainerModules.has(each)))) {
+        problems.push(
+          `WIRE005 ${rel}:${lineOf(source, taken.node)} — imports \`${forbidden}\` ` +
+            `(as \`${taken.specifier}\`). Nothing in a sealed mode may reach the trainer ` +
+            '(ADR 0101 D-6.1): a smart trainer applies resistance to a person who is pedalling.',
+        );
+      }
+    }
+  }
+
   return {
     problems,
+    sealed: sealed.length,
     modules: modules.size,
     watched: watched.length,
     exemptions,
@@ -1260,6 +1459,7 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
     'check-wiring: every watched seam is reachable from the client’s entry point ' +
       `(${String(result.watched)} watched files, ${String(result.seam)} of ` +
       `${String(TRAINER_COMMAND_SEAM.length)} trainer-command seam modules, ` +
+      `${String(result.sealed)} modules sealed from the trainer, ` +
       `${String(result.modules)} production modules; ` +
       // #438: the two exemption populations, counted apart, so growth in the
       // one a test holds is not mistaken for growth in the one nothing does.

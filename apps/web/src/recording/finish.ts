@@ -74,6 +74,7 @@ import type {
   LapId,
   NewActivity,
   NewFinishedRide,
+  GroupRideFact,
   PacerModelFact,
   RecordedCourseLap,
   RecordedWorkoutBlock,
@@ -181,6 +182,12 @@ export interface RideToSaveInput {
    */
   readonly pacerModel?: PacerModelFact | undefined;
   /**
+   * The AI group ride this ride was ridden in — #3303, ADR 0101: known only
+   * while riding, like {@link pacerModel}. Absent for every other ride, and
+   * for one recovered after a crash.
+   */
+  readonly groupRide?: GroupRideFact | undefined;
+  /**
    * Whether some of this ride was ridden in the trainer game's open world —
    * #3088, as the recorder kept it (`recorder.ts` §`openWorld`), so a ride
    * recovered after a crash says so too. Saved as `RideFacts.openWorld`,
@@ -278,6 +285,8 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         : { draftSpans: input.draft.draftSpans }),
       // #2712: known only to the ride that rode it, like the draft above.
       ...(input.pacerModel === undefined ? {} : { pacerModel: input.pacerModel }),
+      // #3303: and its group ride, known only to the ride that rode it.
+      ...(input.groupRide === undefined ? {} : { groupRide: input.groupRide }),
       // #3088: and of the open world, which keeps the ride off every segment.
       ...(input.openWorld === true ? { openWorld: true } : {}),
     },

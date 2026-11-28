@@ -31,6 +31,13 @@ well typed.**
 | `WIRE002` | an exported symbol in a watched module that no production declaration names |
 | `WIRE003` | a method declared on a `*-port.ts` interface — or on one in the **trainer-command seam** — that no production declaration calls |
 | `WIRE004` | an export marked `@test-facing` that no test, spec or browser harness reads (nor any held `@test-facing` export one does) — it is dead; **or** either tag on an export production DOES name — the exemption is stale ([#438](https://github.com/openzigs/onyourleft/issues/438)) |
+| `WIRE005` | a module under a `TRAINER_SEALED_PREFIXES` directory (`apps/web/src/game/group-ride/`) makes a value import of a trainer-command seam module or of `game/trainer-port.ts`, `game/gradient.ts` or `ride/trainer.ts`, by its path or by a name a workspace barrel re-exports from it ([#3308](https://github.com/openzigs/onyourleft/issues/3308), ADR 0101 D-6.1) |
+
+⚠️ **`WIRE005` is one hop, not the chain**, and it is the one rule here that refuses an import
+rather than asking for one. A sealed module importing a module that itself imports the seam is
+`group-ride/group-ride-imports-cannot-reach-trainer.test.ts`'s to find, on the transitive walk the
+lap race and Delivery share; a type-only import passes, being erased. The sealed directory is
+asserted to exist, as a watched one is, and the success line counts the modules it sealed.
 
 **The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
 rather than a path written down twice — **or, for an app with no page, out of its `package.json`'s
