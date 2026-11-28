@@ -19,7 +19,7 @@
  * | `steady` | `changing` | a bot's pull timer ends or it is tired; the rider presses pull off; the rider fades on the front |
  * | `changing` | `latching` | the old front rider is behind the last wheel |
  * | `latching` | `steady` | the old front rider's gap to the last wheel is inside the wheel band |
- * | `waiting`, `regrouping` | — | declared; their transitions are #3301's, and here they hold |
+ * | `waiting`, `regrouping` | — | `no-drop.ts` (#3301) moves the line into and out of them; here they hold |
  *
  * ## A bot's pull
  *
@@ -553,7 +553,7 @@ function decide(state: RotationState, view: RotationView, signal: boolean): Deci
       }
       return { ...same('steady'), order: [...order, aside], aside: null };
     }
-    // #3301 moves the line into and out of these; here they hold.
+    // `no-drop.ts` (#3301) moves the line into and out of these; here they hold.
     case 'waiting':
     case 'regrouping':
       return same(state.phase);

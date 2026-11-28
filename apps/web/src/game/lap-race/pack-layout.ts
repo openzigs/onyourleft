@@ -109,6 +109,26 @@
  * place across (#2636). And a row step counts an item's push toward its own
  * {@link PACK_CLOSE_UP_METRES_PER_SECOND} and give-way, never on top of them
  * (§`shiftToward`).
+ *
+ * ## In single file, for a group ride
+ *
+ * A group ride's line (#3304, ADR 0101 D-3.3) is laid out by the same step
+ * with `singleFile` set, and a race's layout is exactly as it was without it.
+ * Every racer of the line is a row of its own, so the line is drawn nose to
+ * tail in one lane, each a bike length and its wheel gap behind the one
+ * ahead. Two of the line change order only once one is
+ * {@link LINE_PASS_METRES} past the other, so a rider who rides a little over
+ * the wheel ahead is not dealt a new row each tick; while they overlap, the
+ * bot is laid out a place beside the rider, as a race's is.
+ *
+ * A racer **beside** the line ({@link PackRacer.beside}: the one who has
+ * pulled off) is no row. It is drawn level with the racer of the line it is
+ * level with on the road, and between two of them as far along as it is
+ * between them on the road, so it drifts back smoothly past a line that
+ * keeps its shape; ahead of the front or behind the last it is a whole row
+ * clear once it is {@link LINE_CLEAR_METRES} clear on the road, which is
+ * where it left the line and where it rejoins it. When the rider is the one
+ * beside, the rider is still never moved: the line is laid out about them.
  */
 
 import { SIDEWAYS_METRES_PER_SECOND } from '../lanes';
@@ -234,6 +254,22 @@ const PACK_MAKE_WAY_SECONDS = secondsAcross(2 * PACK_ABREAST_METRES);
 /** What is added to that look-ahead, metres: **0.5**, a frame's drawing and a row's closing-up. */
 const PACK_MAKE_WAY_MARGIN_METRES = 0.5;
 
+/**
+ * In single file, how far past another of the line a racer is on the road
+ * before the two change rows, metres: **0.5**, a wheel gap. Under it they
+ * keep the order they were drawn in (#3304). Proposed; a feel parameter.
+ */
+export const LINE_PASS_METRES = 0.5;
+
+/**
+ * In single file, how far ahead of the line's front, or behind its last
+ * racer, a racer beside the line is on the road when it is drawn a whole row
+ * clear of it, metres: **0.3**, the nearest a bot holds a wheel
+ * (`@onyourleft/domain` §`BOT_TACTIC_WHEEL_NEAREST_METRES`), so a bot that
+ * pulls off the front of a held wheel starts a whole row ahead (#3304).
+ */
+export const LINE_CLEAR_METRES = 0.3;
+
 /** One racer as the layout reads it. */
 export interface PackRacer {
   readonly id: string;
@@ -273,6 +309,12 @@ export interface PackRacer {
    * Absent, nought, as with items off.
    */
   readonly offsetRate?: number | undefined;
+  /**
+   * In single file only (#3304): whether it rides beside the line and not in
+   * it, as the one who has pulled off does. It is no row of the line's.
+   * Absent, in the line.
+   */
+  readonly beside?: boolean | undefined;
 }
 
 /** Where the layout draws one bot, against where the race has it. */
@@ -571,7 +613,9 @@ function targets(
   previous: PackLayout,
   grid: boolean,
   lap?: number,
+  singleFile = false,
 ): Map<string, Target> {
+  if (singleFile) return lineTargets(racers, riderId, previous);
   const built = rows(racers, riderId, previous);
   const riderRow = built.findIndex((row) => row.some((racer) => racer.id === riderId));
   const rider = built[riderRow]?.find((racer) => racer.id === riderId);
@@ -598,6 +642,105 @@ function targets(
     }
   });
   if (lap !== undefined) aLapApart(racers, riderId, previous, lap, found);
+  return found;
+}
+
+/**
+ * A line's racers, front first, in single file (#3304): as they are on the
+ * road, except that two who were drawn in an order keep it until one is
+ * {@link LINE_PASS_METRES} past the other. Level, the rider is last.
+ */
+function lineOrder(line: readonly PackRacer[], riderId: string, previous: PackLayout): PackRacer[] {
+  const last = (racer: PackRacer): number => (racer.id === riderId ? 1 : 0);
+  // How far ahead of the rider's row each was laid out on the tick before.
+  const was = (racer: PackRacer): number | undefined =>
+    racer.id === riderId ? 0 : previous.get(racer.id)?.rowShift;
+  const ordered = [...line].sort(
+    (a, b) => b.along - a.along || last(a) - last(b) || (a.id < b.id ? -1 : 1),
+  );
+  for (let pass = 0; pass < ordered.length; pass += 1) {
+    let swapped = false;
+    for (let at = 0; at + 1 < ordered.length; at += 1) {
+      const ahead = ordered[at] as PackRacer;
+      const behind = ordered[at + 1] as PackRacer;
+      const aheadWas = was(ahead);
+      const behindWas = was(behind);
+      if (
+        aheadWas !== undefined &&
+        behindWas !== undefined &&
+        behindWas - aheadWas >= BIKE_LENGTH_METRES / 2 &&
+        ahead.along - behind.along < LINE_PASS_METRES
+      ) {
+        ordered[at] = behind;
+        ordered[at + 1] = ahead;
+        swapped = true;
+      }
+    }
+    if (!swapped) break;
+  }
+  return ordered;
+}
+
+/**
+ * Where a racer beside the line is against its rows, front row nought
+ * (#3304): level with the racer of the line it is level with on the road,
+ * between two rows as far as it is between them on the road, and a whole row
+ * clear of either end once it is {@link LINE_CLEAR_METRES} clear of it.
+ */
+function besideRow(racer: PackRacer, line: readonly PackRacer[]): number {
+  const front = line[0];
+  if (front === undefined) return 0;
+  if (racer.along >= front.along) {
+    return -Math.min(1, (racer.along - front.along) / LINE_CLEAR_METRES);
+  }
+  let at = 0;
+  while (at + 1 < line.length && (line[at + 1] as PackRacer).along > racer.along) at += 1;
+  const ahead = line[at] as PackRacer;
+  const behind = line[at + 1];
+  const span = behind === undefined ? LINE_CLEAR_METRES : ahead.along - behind.along;
+  const back = ahead.along - racer.along;
+  return at + (span > 0 ? Math.min(1, Math.max(0, back / span)) : 1);
+}
+
+/**
+ * Every racer's target in single file (#3304): a row to each racer of the
+ * line, the rider's place the anchor whether they are in the line or beside
+ * it, and a racer beside the line at {@link besideRow}. A bot of the line
+ * drawn overlapping the rider along the road, in the rider's place across,
+ * is laid out a place beside them, as a race's row making way is.
+ */
+function lineTargets(
+  racers: readonly PackRacer[],
+  riderId: string,
+  previous: PackLayout,
+): Map<string, Target> {
+  const line = lineOrder(
+    racers.filter((racer) => racer.beside !== true),
+    riderId,
+    previous,
+  );
+  const row = new Map<string, number>();
+  line.forEach((racer, at) => row.set(racer.id, at));
+  for (const racer of racers) {
+    if (racer.beside === true) row.set(racer.id, besideRow(racer, line));
+  }
+  const rider = racers.find((racer) => racer.id === riderId);
+  const anchor = row.get(riderId) ?? 0;
+  const found = new Map<string, Target>();
+  for (const racer of racers) {
+    const shift = (anchor - (row.get(racer.id) as number)) * BIKE_LENGTH_METRES;
+    const drawn = racer.along + (previous.get(racer.id)?.shift ?? shift);
+    const makingWay =
+      rider !== undefined &&
+      racer.id !== riderId &&
+      racer.beside !== true &&
+      Math.abs(racer.lateral - rider.lateral) < PACK_ABREAST_METRES &&
+      Math.abs(drawn - rider.along) < BIKE_LENGTH_METRES - PACK_BETWEEN_SLACK_METRES;
+    const lateral = makingWay
+      ? (across([racer, rider], riderId, previous, racer.lateral).get(racer.id) as number)
+      : racer.lateral;
+    found.set(racer.id, { shift, lateral, makingWay });
+  }
   return found;
 }
 
@@ -694,6 +837,8 @@ export function gridPackLayout(racers: readonly PackRacer[], riderId: string): P
  * @param racers - the field, the rider among them.
  * @param lapMetres - the loop's lap, metres, on which a racer a lap apart is
  *   drawn beside the others and kept clear of them (#2516); absent, none is.
+ * @param singleFile - whether the field is a group ride's line, a row to each
+ *   racer (#3304, the header's §"In single file"); absent, a race's pack.
  * @throws {RangeError} for an elapsed time that is not finite or is below
  *   zero, or a lap that is not a finite number of metres above zero.
  */
@@ -703,6 +848,7 @@ export function stepPackLayout(
   previous: PackLayout,
   elapsedSeconds: number,
   lapMetres?: number,
+  singleFile = false,
 ): PackLayout {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
     throw new RangeError('a pack layout steps a finite number of seconds, 0 or more');
@@ -710,7 +856,7 @@ export function stepPackLayout(
   if (lapMetres !== undefined && !(Number.isFinite(lapMetres) && lapMetres > 0)) {
     throw new RangeError('a pack layout’s lap is a finite number of metres above zero');
   }
-  const wanted = targets(racers, riderId, previous, false, lapMetres);
+  const wanted = targets(racers, riderId, previous, false, lapMetres, singleFile);
   const rider = racers.find((racer) => racer.id === riderId);
   const next = new Map<string, PackPlace>();
   for (const racer of racers) {
@@ -729,8 +875,10 @@ export function stepPackLayout(
       was !== undefined &&
       Math.abs(was.lateral - rider.lateral) < PACK_ABREAST_METRES &&
       Math.abs(wants.lateral - rider.lateral) > Math.abs(was.lateral - rider.lateral);
+    // A line in single file has no grid to keep: its order holds by itself
+    // (§`lineOrder`), and a line that waits for its rider still rotates.
     const target =
-      was !== undefined && racer.speed < PACK_ROLLING_METRES_PER_SECOND
+      !singleFile && was !== undefined && racer.speed < PACK_ROLLING_METRES_PER_SECOND
         ? { shift: was.shift, lateral: easesAside ? wants.lateral : was.lateral }
         : wants;
     if (was === undefined) {

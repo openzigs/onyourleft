@@ -18,7 +18,13 @@
 
 import { act } from 'react';
 
-import { metres, seconds, unixSeconds } from '@onyourleft/domain';
+import {
+  kilometresPerHour,
+  kilometresPerHourToMetresPerSecond,
+  metres,
+  seconds,
+  unixSeconds,
+} from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   DEFAULT_VISIBILITY,
@@ -26,6 +32,7 @@ import {
   type ActivityId,
   type ActivityRecord,
   type AthleteId,
+  type GroupRideFact,
   type LapRecord,
   type PrivacyZoneRecord,
   type RideWriteUpRecord,
@@ -290,3 +297,41 @@ export function installFakeIntersectionObserver(): FakeIntersectionObservers {
     },
   };
 }
+
+/**
+ * A scripted group ride the group waited in — #3310: ten minutes of a 30 km/h
+ * line, two pulls, one gap that the group waited for, and its answers worked
+ * by hand. Draft: 20 + 40 + 60 + 30 + 60 + 60 + 60 = 330 s on a wheel; front
+ * 120 + 60 = 180 s; with the group, all but the 20 s gapped and the 40 s off
+ * the back, 540 s. Ridden at {@link GROUP_RIDE_WAITED_RIDE}'s 27 km/h.
+ */
+export const GROUP_RIDE_WAITED: GroupRideFact = {
+  version: 2,
+  seed: 3_310,
+  startedAt: 0,
+  ridden: 600,
+  targetSpeed: kilometresPerHourToMetresPerSecond(kilometresPerHour(30)),
+  bots: 5,
+  log: [
+    { at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 },
+    { at: 20, phase: 'steady', role: 'last-wheel', groupSpeed: 8.3 },
+    { at: 60, phase: 'steady', role: 'in-line', groupSpeed: 8.3 },
+    { at: 120, phase: 'steady', role: 'second-wheel', groupSpeed: 8.3 },
+    { at: 150, phase: 'changing', role: 'on-front', groupSpeed: 8.3 },
+    { at: 270, phase: 'changing', role: 'drifting-back', groupSpeed: 8.3 },
+    { at: 290, phase: 'latching', role: 'latching', groupSpeed: 8.3 },
+    { at: 300, phase: 'steady', role: 'last-wheel', groupSpeed: 8.3 },
+    { at: 360, phase: 'steady', role: 'gapped', groupSpeed: 8.3 },
+    { at: 380, phase: 'waiting', role: 'off-the-back', groupSpeed: 4.1 },
+    { at: 420, phase: 'regrouping', role: 'last-wheel', groupSpeed: 6 },
+    { at: 480, phase: 'steady', role: 'on-front', groupSpeed: 8.3 },
+    { at: 540, phase: 'steady', role: 'sitting-in', groupSpeed: 8.3 },
+  ],
+};
+
+/** {@link GROUP_RIDE_WAITED}'s ride's totals: 4.5 km in ten minutes, 27 km/h. */
+export const GROUP_RIDE_WAITED_RIDE = {
+  distance: metres(4_500),
+  movingTime: seconds(600),
+  elapsedTime: seconds(600),
+} as const satisfies Pick<ActivityRecord, 'distance' | 'movingTime' | 'elapsedTime'>;

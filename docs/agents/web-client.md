@@ -447,7 +447,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         (`axis.ts`), and the page draws a power curve
                         (`curve.ts`, `PowerCurveChart.tsx`) beside the
                         all-time one Analysis reads — from the power chart's
-                        own decode, never a second one
+                        own decode, never a second one. Since #3310 a group
+                        ride's DEBRIEF (`GroupRideDebriefSection.tsx`,
+                        `group-ride-debrief.ts`): counts and durations from
+                        `RideFacts.groupRide` on the group's own clock, to
+                        its `ridden`, never the recording's; nothing for a
+                        ride in no group ride
     src/instance/       the client half of signing in to an instance (#772) and
                         of linking this device to an athlete (#773): the local
                         athlete first, then the device key, then challenge →
