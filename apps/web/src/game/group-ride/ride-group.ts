@@ -71,14 +71,14 @@
  *
  * - **Pull off**, {@link pressGroupPullOff}: a discrete press, taken only
  *   while the rider's role is `on-front`. It is handed to the rotation as
- *   `riderSignal` on the next simulation step and to nothing else, and it
- *   moves the rider's **drawn** lane one lane to
- *   `rider-input.ts` §`GROUP_RIDE_PULL_OFF_SIDE` through `lanes.ts`, the lap
- *   race's steer.
- *   The press is one flag, so a held key or a mashed button is one pull-off,
- *   never a queue; in any other role it changes nothing. The drawn lane comes
- *   back to the line's once the rider is neither on the front nor drifting
- *   back. A drawing only: the simulation has no lateral field.
+ *   `riderSignal` on the next frame's simulation steps and to nothing else,
+ *   and it moves the rider's **drawn** lane one lane to `rider-input.ts`
+ *   §`GROUP_RIDE_PULL_OFF_SIDE` through `lanes.ts`, the lap race's steer. The
+ *   press is one flag here and one in the rotation, so a held key or a
+ *   mashed button is one pull-off, never a queue; in any other role it
+ *   changes nothing. The drawn lane comes back to the line's once the rider
+ *   is neither on the front nor drifting back. A drawing only: the
+ *   simulation has no lateral field.
  * - **Sit in**, {@link setGroupSitIn}: a choice held for as long as it is on,
  *   handed to the rotation as `riderSittingIn` on every step, so the rider is
  *   never given the front; off again, they take their turn as it comes round.
@@ -385,8 +385,9 @@ export function stepGroupRideSession(
         elapsedSeconds: SIMULATION_STEP_SECONDS,
         rider,
         riderStopped: step.riderStopped,
-        // #3307: a press since the last step, once; the choice, for as long as it is on.
-        riderSignal: session.pullOffPressed && tick === 0,
+        // #3307: a press since the last frame's steps, which the rotation
+        // holds as one flag; the choice, for as long as it is on.
+        riderSignal: session.pullOffPressed,
         riderSittingIn: session.sittingIn,
       },
       session.road,
