@@ -77,12 +77,14 @@ import type { PacerDoing } from './pacer-doing';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
+  capRenderScale,
   INITIAL_QUALITY,
   keepsShadowMap,
   nextWorldQuality,
   qualitySettings,
   realisticArrivalLapsed,
   realisticWorldArrived,
+  readRenderScaleCap,
   readShadowMapChoice,
   rungFor,
   worldRung,
@@ -1239,9 +1241,20 @@ function beginWaitingRound(waiting: { current: (() => void) | undefined }): void
  * where the rider shadow map lives. ONE function for the view's first rung,
  * every rung change and the swap once the realistic world has loaded, so the
  * three cannot disagree about which world a ride is in.
+ *
+ * #3358: and with the device's render-scale ceiling applied on every one of
+ * them, so a measurement at 0.83 is 0.83 from the first frame to the last.
+ * `quality.ts` §`RENDER_SCALE_STORAGE_KEY`.
  */
-function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
-  return world.realistic ? worldRung(world) : rungFor(world.quality.level, shadowMap);
+function rungOf(
+  world: WorldQualityState,
+  shadowMap: boolean,
+  renderScaleCap: number | undefined,
+): QualitySettings {
+  return capRenderScale(
+    world.realistic ? worldRung(world) : rungFor(world.quality.level, shadowMap),
+    renderScaleCap,
+  );
 }
 
 /**
@@ -2020,6 +2033,12 @@ function GameScreen({
    * step down clears it for the rest of the ride. @see rungFor
    */
   const shadowMapRef = useRef(false);
+  /**
+   * The render-scale ceiling THIS device stored for a measurement, read at the
+   * start of each ride like {@link shadowMapRef} — #3358. `undefined`, which is
+   * every rider's device, is no ceiling. @see quality.ts RENDER_SCALE_STORAGE_KEY
+   */
+  const renderScaleCapRef = useRef<number | undefined>(undefined);
   const gradientFaultRef = useRef<string | undefined>(undefined);
   /**
    * The running workout's eased sentence last seen, so one is said once — #585.
@@ -3201,6 +3220,7 @@ function GameScreen({
       setRealisticRung(realistic);
       setWorldNotice(undefined);
       shadowMapRef.current = !realistic && readShadowMapChoice(deviceStorage());
+      renderScaleCapRef.current = readRenderScaleCap(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
@@ -3894,7 +3914,10 @@ function GameScreen({
             return;
           }
           if (viewRef.current === undefined) {
-            const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
+            const view = renderer.create(
+              canvas,
+              rungOf(qualityRef.current, shadowMapRef.current, renderScaleCapRef.current),
+            );
             viewRef.current = view;
             // #623: dressed before its first frame. @see kitColourRef
             view.setRiderKit(kitColourRef.current);
@@ -3918,7 +3941,9 @@ function GameScreen({
                 if (outcome.loaded) {
                   // #2289: the next frames upload the world; they are not counted.
                   qualityRef.current = realisticWorldArrived(qualityRef.current);
-                  view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  view.setQuality(
+                    rungOf(qualityRef.current, shadowMapRef.current, renderScaleCapRef.current),
+                  );
                   // #2663: and the view is PREPARED again before it draws the
                   // world it now holds, as it was for the ride's first frame
                   // (#547). Drawn at once, its programs linked and its
@@ -5396,6 +5421,7 @@ function GameScreen({
     const settings = rungOf(
       { realistic: realisticRung, quality: { level: qualityLevel, pressure: 0 } },
       shadowMapRef.current,
+      renderScaleCapRef.current,
     );
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and

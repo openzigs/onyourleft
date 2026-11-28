@@ -28,16 +28,19 @@ import {
   REALISTIC_LADDER,
   REALISTIC_ARRIVAL_LIMIT_MS,
   REALISTIC_SETTLING_SAMPLES,
+  RENDER_SCALE_STORAGE_KEY,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SHADOW_MAP_OFF,
   SUSTAINED_SAMPLES,
   TARGET_FRAMES_PER_SECOND,
+  capRenderScale,
   frameTimeHot,
   keepsShadowMap,
   nextQuality,
   nextWorldQuality,
   qualitySettings,
+  readRenderScaleCap,
   readShadowMapChoice,
   realisticArrivalLapsed,
   realisticWorldArrived,
@@ -1016,5 +1019,45 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
     expect(RIDER_SHADOW_MAP_RUNG.presence).toBe(true);
     // The realistic ladder inherits it from the two stylised rungs it is built on.
     expect(REALISTIC_LADDER.map((rung) => rung.presence)).toStrictEqual([true, false]);
+  });
+});
+
+describe('a render-scale ceiling a device stores for a measurement — #3358', () => {
+  const storing = (value: string | null) => ({ getItem: () => value });
+
+  it('reads a number in (0, 1] off this device, and anything else is no ceiling', () => {
+    expect(RENDER_SCALE_STORAGE_KEY).toBe('oyl.game.renderScale');
+    expect(readRenderScaleCap(storing('0.83'))).toBe(0.83);
+    expect(readRenderScaleCap(storing('0.67'))).toBe(0.67);
+    expect(readRenderScaleCap(storing(' 0.5 '))).toBe(0.5);
+    expect(readRenderScaleCap(storing('1'))).toBe(1);
+    // A stray value must neither blur the world nor ask it for more pixels.
+    for (const stray of [null, '', '  ', 'off', '0', '-0.5', '1.5', 'NaN', 'Infinity']) {
+      expect(readRenderScaleCap(storing(stray))).toBeUndefined();
+    }
+    expect(readRenderScaleCap(undefined)).toBeUndefined();
+    expect(
+      readRenderScaleCap({
+        getItem: () => {
+          throw new Error('blocked');
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('holds a rung to the ceiling, and leaves a rung at or under it as the ladder says', () => {
+    const full = qualitySettings(0);
+    const capped = capRenderScale(full, 0.67);
+    expect(capped.renderScale).toBe(0.67);
+    // Only the render scale: every other figure on the rung is the ladder's.
+    expect({ ...capped, renderScale: full.renderScale }).toEqual(full);
+    // A ceiling, not a multiplier: level 1 (0.83) under a 0.83 ceiling is 0.83,
+    // and the floor rung (0.5) under a 0.67 ceiling is still 0.5.
+    expect(capRenderScale(qualitySettings(1), 0.83)).toBe(qualitySettings(1));
+    expect(capRenderScale(qualitySettings(1), 0.67).renderScale).toBe(0.67);
+    expect(capRenderScale(qualitySettings(4), 0.67)).toBe(qualitySettings(4));
+    // No ceiling is the rung itself, the same object.
+    expect(capRenderScale(full, undefined)).toBe(full);
+    expect(capRenderScale(REALISTIC_LADDER[0] as QualitySettings, 0.83).renderScale).toBe(0.83);
   });
 });
