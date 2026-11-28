@@ -493,7 +493,7 @@ import {
   type TerrainMesh,
 } from './landform';
 import type { QualitySettings } from './quality';
-import { GAITS, gaitPose } from './gait';
+import { MOTIONS, motionPose } from './gait';
 import {
   ANIMATION_BYTES_PER_TEXEL,
   GAIT_ROWS,
@@ -587,6 +587,7 @@ import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
 import {
+  BENCH_SEAT_TOP_METRES,
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
   FURNITURE_SURFACES,
@@ -2338,7 +2339,8 @@ const FURNITURE_STYLE: Readonly<
       // Three seat slats, the sitter facing the road (+z).
       ...[0.13, -0.01, -0.15].map((z) => ({
         colour: BENCH_WOOD,
-        geometry: () => block(1.8, 0.04, 0.12, 0, 0.43, z),
+        // #3285: its top is the seat a sitter's hips meet (`streets.ts`).
+        geometry: () => block(1.8, 0.04, 0.12, 0, BENCH_SEAT_TOP_METRES - 0.04, z),
       })),
       // Two back slats, behind the seat.
       ...[0.58, 0.74].map((y) => ({
@@ -20382,7 +20384,7 @@ export class PeopleBelt {
         person.look.bottoms,
         person.look.shoes,
       );
-      const pose = gaitPose(person.gait, person.phase);
+      const pose = motionPose(person.gait, person.phase);
       this.#farMotion.setXYZW(index, person.yaw, pose.left.hip, pose.right.hip, person.look.hair);
     });
     riding.forEach((cyclist, at) => {
@@ -20718,14 +20720,15 @@ function bakedPeople(scene: Object3D, ride: (crankAngle: number) => SkinnedMesh)
     const bent = { L: restElbow('L'), R: restElbow('R') };
     const posed = new Float32Array(person.columns * 3);
     const base = layout.base[body] ?? 0;
-    GAITS.forEach((gait, gaitAt) => {
+    // #3285: and each still pose after the gaits, in `gait.ts` §`MOTIONS`' order.
+    MOTIONS.forEach((gait, gaitAt) => {
       for (let phase = 0; phase < PHASES[gait]; phase += 1) {
         ordered.forEach((bone, at) => {
           bone.quaternion.copy(restQuaternions[at] as Quaternion);
           bone.position.copy(restPositions[at] as Vector3);
         });
         scene.updateMatrixWorld(true);
-        const pose = gaitPose(gait, phase / PHASES[gait]);
+        const pose = motionPose(gait, phase / PHASES[gait]);
         for (const [side, limb, sign] of [
           ['L', pose.left, -1],
           ['R', pose.right, 1],
@@ -20951,7 +20954,7 @@ vec3 oylNormalOf(float packed) {
 
 /** Which gait's phases an instance's `oylGait` has, as a GLSL expression. */
 function gaitChoiceGlsl(of: (gaitAt: number) => number, otherwise: number): string {
-  return GAITS.reduceRight(
+  return MOTIONS.reduceRight(
     (rest, _gait, gaitAt) => `(oylGait == ${String(gaitAt)} ? ${String(of(gaitAt))} : ${rest})`,
     String(otherwise),
   );
@@ -21002,7 +21005,7 @@ int oylColumn = int(oylColumnOf(oylCorner.r));
 vOylUv = oylCorner.ba;
 int oylGait = int(oylMotion.x + 0.5);
 // #2722: a scenery cyclist's ride is the rows after every block, the first body's alone.
-int oylPhases = ${gaitChoiceGlsl((gaitAt) => PHASES[GAITS[gaitAt] as (typeof GAITS)[number]], RIDE_PHASES)};
+int oylPhases = ${gaitChoiceGlsl((gaitAt) => PHASES[MOTIONS[gaitAt] as (typeof MOTIONS)[number]], RIDE_PHASES)};
 int oylBase = oylGait == ${String(RIDE_GAIT_INDEX)}
   ? ${String(baked.layout.blocks * GAIT_ROWS)}
   : oylBlock * ${String(GAIT_ROWS)} + ${gaitChoiceGlsl(gaitRow, 0)};

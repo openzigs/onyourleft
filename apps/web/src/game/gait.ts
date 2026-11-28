@@ -51,7 +51,7 @@
  * Pure, and names no rendering library.
  */
 
-/** A walk or a run. */
+/** A walk or a run. #3285's still poses are §"Still poses", after {@link STRIDE_PER_HEIGHT}. */
 export type Gait = 'walk' | 'run';
 
 /** Every {@link Gait}, in the order the animation texture holds them. */
@@ -189,3 +189,177 @@ export function gaitPose(gait: Gait, phase: number): GaitPose {
  * this, so a foot does not slide.
  */
 export const STRIDE_PER_HEIGHT: Readonly<Record<Gait, number>> = { walk: 0.8, run: 1.25 };
+
+/*
+ * ## Still poses — #3285
+ *
+ * A person who is not going anywhere: standing with a small idle sway,
+ * sitting, and clapping. Written in code as the gaits are (the owner's ruling
+ * of 2026-10-24), on the same joints, and baked into the same animation
+ * texture after the gaits (`people-body.ts` §`PHASES`), each at **two**
+ * phases. The shader blends phase 0 into phase ½ and back, so a pose whose
+ * phase runs on with the clock rocks between its two rows: a stander's weight
+ * shifting, a spectator's hands meeting and parting.
+ *
+ * A sitter's phase is not a clock. It says how far between its two rows the
+ * pose is ({@link sitBlend}): a deep seat, the thigh level, for the tallest,
+ * and a perch on the seat's front, the thigh sloping down to a vertical shin,
+ * for the shortest — so every sitter's feet are on the pavement and their
+ * hips on the bench, whatever their height ({@link sitSeatShare}).
+ *
+ * No pose depicts harm, and none is a real person's.
+ */
+
+/** A pose that stays where it is: standing, sitting or clapping. */
+export type StillPose = 'stand' | 'sit' | 'clap';
+
+/** Every {@link StillPose}, in the order the animation texture holds them after the {@link GAITS}. */
+export const STILL_POSES: readonly StillPose[] = ['stand', 'sit', 'clap'];
+
+/** A gait or a still pose: what one instance of the people's draw is doing. */
+export type Motion = Gait | StillPose;
+
+/** Every {@link Motion}, in the animation texture's order: the gaits, then the still poses. */
+export const MOTIONS: readonly Motion[] = [...GAITS, ...STILL_POSES];
+
+/** Whether `motion` is a gait — a walk or a run — rather than a still pose. */
+export function isGait(motion: Motion): motion is Gait {
+  return motion === 'walk' || motion === 'run';
+}
+
+/**
+ * How far between a still pose's two rows `phase` is: 0 at phase 0, 1 at
+ * phase ½, and back to 0 at 1 — what the shader's blend of a two-row pose
+ * draws.
+ */
+export function stillBlend(phase: number): number {
+  const at = wrappedPhase(phase);
+  return at <= 0.5 ? 2 * at : 2 - 2 * at;
+}
+
+/**
+ * Body segments as shares of standing height — D. A. Winter, *Biomechanics
+ * and Motor Control of Human Movement* (4th ed., 2009), §4.1: the ankle joint
+ * **0.039** above the sole, the shank **0.246** and the thigh **0.245**
+ * (hip 0.530, knee 0.285). `under` is this file's own figure: how far below
+ * the hip joint a seated person's weight meets the seat, **0.035** — the
+ * knee's height less the popliteal height of about a quarter of stature
+ * that seat design is laid out by (S. Pheasant, *Bodyspace*, 1986).
+ */
+export const BODY_SHARE = { ankle: 0.039, shank: 0.246, thigh: 0.245, under: 0.035 } as const;
+
+/**
+ * A sitter's two rows, as the hip's flexion in degrees with the shin held
+ * vertical (the knee bent as far as the hip): **90**, the thigh level, a deep
+ * seat; and **70**, the thigh sloping down, perched on the seat's front.
+ */
+export const SIT_HIP_DEGREES = [90, 70] as const;
+
+/**
+ * How far the seat is below the hip joint and above the soles, as a share of
+ * standing height, with the hip flexed `hipDegrees` and the shin vertical.
+ */
+function seatShareAt(hipDegrees: number): number {
+  return (
+    BODY_SHARE.ankle +
+    BODY_SHARE.shank +
+    BODY_SHARE.thigh * Math.cos(hipDegrees * DEGREE) -
+    BODY_SHARE.under
+  );
+}
+
+/**
+ * Where a sitter's hips meet the seat, above their soles, as a share of their
+ * height, at `phase` of the sit pose: the two rows' figures blended as the
+ * shader blends their positions ({@link stillBlend}) — about **0.25** deep in
+ * the seat and **0.33** perched.
+ *
+ * @test-facing `still-people.test.ts` holds a sitter's hips to the drawn
+ * bench's seat by it; production places sitters by {@link sitBlend}, its inverse
+ */
+export function sitSeatShare(phase: number): number {
+  const deep = seatShareAt(SIT_HIP_DEGREES[0]);
+  const perched = seatShareAt(SIT_HIP_DEGREES[1]);
+  return deep + (perched - deep) * stillBlend(phase);
+}
+
+/**
+ * The sit pose's phase that puts a sitter `height` tall with their soles on
+ * the ground and their hips on a seat `seat` metres above it: in `[0, ½]`,
+ * and held there for a sitter too tall or too short to meet it exactly.
+ */
+export function sitBlend(height: number, seat: number): number {
+  const deep = seatShareAt(SIT_HIP_DEGREES[0]);
+  const perched = seatShareAt(SIT_HIP_DEGREES[1]);
+  const share = (seat / height - deep) / (perched - deep);
+  return Math.min(1, Math.max(0, share)) / 2;
+}
+
+/** How a stander's weight shifts: the hip, degrees, either way. */
+const STAND_SWAY_DEGREES = 2;
+
+/** How far a clapper's upper arm turns in with the hands apart and together, degrees. */
+const CLAP_CARRY_DEGREES = [25, 55] as const;
+
+function stillLimbs(
+  pose: StillPose,
+  phase: number,
+): { readonly left: LimbAngles; readonly right: LimbAngles } {
+  const blend = stillBlend(phase);
+  if (pose === 'sit') {
+    const hip = SIT_HIP_DEGREES[0] + (SIT_HIP_DEGREES[1] - SIT_HIP_DEGREES[0]) * blend;
+    // The shin vertical, the foot flat; the hands resting on the thighs.
+    const limb: LimbAngles = {
+      hip: hip * DEGREE,
+      knee: hip * DEGREE,
+      ankle: 0,
+      shoulder: 20 * DEGREE,
+      elbow: 60 * DEGREE,
+      carry: 15 * DEGREE,
+    };
+    return { left: limb, right: limb };
+  }
+  if (pose === 'clap') {
+    // Forearms raised before the chest, turned in until the hands meet.
+    const carry = CLAP_CARRY_DEGREES[0] + (CLAP_CARRY_DEGREES[1] - CLAP_CARRY_DEGREES[0]) * blend;
+    const limb: LimbAngles = {
+      hip: 0,
+      knee: 3 * DEGREE,
+      ankle: 0,
+      shoulder: 45 * DEGREE,
+      elbow: 95 * DEGREE,
+      carry: carry * DEGREE,
+    };
+    return { left: limb, right: limb };
+  }
+  // Standing: the weight on one leg and then the other, the arms hanging.
+  const shift = STAND_SWAY_DEGREES * (1 - 2 * blend);
+  const side = (sign: number): LimbAngles => ({
+    hip: sign * shift * DEGREE,
+    knee: (3 + Math.max(0, -sign * shift)) * DEGREE,
+    ankle: 0,
+    shoulder: 0,
+    elbow: 12 * DEGREE,
+    carry: WALK_CARRY_DEGREES * DEGREE,
+  });
+  return { left: side(1), right: side(-1) };
+}
+
+/** The body's pose in a still pose at `phase`. Never lifted: the soles are on the ground. */
+export function stillPose(pose: StillPose, phase: number): GaitPose {
+  const { left, right } = stillLimbs(pose, phase);
+  const blend = stillBlend(phase);
+  return {
+    left,
+    right,
+    // A sitter leans a little into the seat's back; a stander barely.
+    lean: (pose === 'sit' ? -4 : 1) * DEGREE,
+    pelvisTurn: pose === 'stand' ? (1 - 2 * blend) * 1.5 * DEGREE : 0,
+    lift: 0,
+  };
+}
+
+/** The pose of any {@link Motion} at `phase`: {@link gaitPose} or {@link stillPose}. */
+export function motionPose(motion: Motion, phase: number): GaitPose {
+  return isGait(motion) ? gaitPose(motion, phase) : stillPose(motion, phase);
+}

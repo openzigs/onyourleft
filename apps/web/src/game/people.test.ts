@@ -15,7 +15,7 @@ import type { LandUseFeature, PathFeature, StreetFeature } from '@onyourleft/map
 import { mappedJunctions, type Junction } from './cross-streets';
 
 import { HOUSE_KIT } from './bicycle';
-import { STRIDE_PER_HEIGHT } from './gait';
+import { STRIDE_PER_HEIGHT, isGait } from './gait';
 import {
   CLOTHES,
   NO_PEOPLE,
@@ -172,6 +172,7 @@ describe('where each person is at a second of the ride — #1541', () => {
     }
     if (a === undefined || b === undefined) throw new Error('nobody walked the line');
     const covered = Math.abs(b.z - a.z);
+    if (!isGait(a.gait)) throw new Error('a walker who was not walking');
     const stride = STRIDE_PER_HEIGHT[a.gait] * a.height;
     const advanced = (b.phase - a.phase + 1) % 1;
     expect(advanced).toBeCloseTo((covered / stride) % 1, 4);

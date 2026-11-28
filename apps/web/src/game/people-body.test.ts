@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { GAITS } from './gait';
+import { GAITS, MOTIONS, STILL_POSES } from './gait';
 import { GlslProgram } from './glsl-program-testing';
 import { readGlb, type GlbFile } from './model-bytes-testing';
 import {
@@ -280,6 +280,12 @@ describe('the people are models — the owner’s request of 2026-11-18', () => 
     const triangles = PEOPLE.map((person) => person.triangles);
     const bytes = peopleTextureBytes(columns, triangles);
     expect(bytes).toBeLessThanOrEqual(PERSON_ANIMATION_MAX_BYTES);
+    // #3285: with the still poses' six rows a block, 1 714 × 64 texels of
+    // animation and 256 × 66 of slots — 1 012 736 bytes, where the gaits and
+    // the ride alone were 1 714 × 52, 848 192. A seventh still row a block
+    // would leave 8 416; an eighth is over the ceiling.
+    expect(animationLayout(columns)).toMatchObject({ width: 1714, blocks: 2, height: 64 });
+    expect(bytes).toBe(1_012_736);
     expect(bytes).toBeGreaterThan(PERSON_ANIMATION_MAX_BYTES / 2);
     // Welded: a vertex the file repeats for a seam is one column.
     PEOPLE.forEach((person, at) => {
@@ -447,10 +453,15 @@ describe('the people’s animation texture', () => {
 
   it('gives every column, gait and phase a texel of its own, the ride after every block', () => {
     const layout = animationLayout([1000, 1200, 1300]);
-    expect(GAIT_ROWS).toBe(PHASES.walk + PHASES.run);
+    // #3285: the still poses' rows after the gaits', two a pose.
+    expect(GAIT_ROWS).toBe(PHASES.walk + PHASES.run + PHASES.stand + PHASES.sit + PHASES.clap);
+    expect(MOTIONS.slice(0, GAITS.length)).toEqual(GAITS);
+    expect(MOTIONS.slice(GAITS.length)).toEqual(STILL_POSES);
+    for (const pose of STILL_POSES) expect(PHASES[pose]).toBe(2);
     expect(gaitRow(0)).toBe(0);
     expect(gaitRow(1)).toBe(PHASES.walk);
-    expect(RIDE_GAIT_INDEX).toBe(GAITS.length);
+    expect(gaitRow(MOTIONS.indexOf('clap'))).toBe(GAIT_ROWS - PHASES.clap);
+    expect(RIDE_GAIT_INDEX).toBe(MOTIONS.length);
     const seen = new Set<string>();
     const take = (column: number, gait: number, phase: number): void => {
       const texel = animationTexel(layout, column, gait, phase);
@@ -461,7 +472,7 @@ describe('the people’s animation texture', () => {
       seen.add(key);
     };
     for (const column of [0, 999, 1000, 1749, 1750, 3499]) {
-      GAITS.forEach((gait, gaitAt) => {
+      MOTIONS.forEach((gait, gaitAt) => {
         for (let phase = 0; phase < PHASES[gait]; phase += 1) take(column, gaitAt, phase);
       });
     }
