@@ -684,6 +684,33 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     }).not.toThrow();
   });
 
+  it('hands each stepped group ride to the ride controller, and to nothing without one — #3303', () => {
+    const noted: unknown[] = [];
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      noteGroupRide: (fact) => {
+        noted.push(fact);
+      },
+      subscribe: () => () => undefined,
+    });
+    const fact = {
+      version: 1,
+      seed: 5,
+      startedAt: 0,
+      targetSpeed: 8,
+      bots: 5,
+      log: [{ at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 }],
+    } as const;
+    port.groupRideStepped?.(fact);
+    expect(noted).toEqual([fact]);
+    expect(() => {
+      gameTrainerPortOver(undefined).groupRideStepped?.(fact);
+    }).not.toThrow();
+  });
+
   it('hands each stepped solo draft to the ride controller, and to nothing without one — #2451', () => {
     const noted: unknown[] = [];
     const port = gameTrainerPortOver({
