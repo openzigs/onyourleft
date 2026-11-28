@@ -353,6 +353,11 @@ describe('the pipeline’s own table', () => {
         expect(output.from, output.file).toBe(DRAWN_FROM);
         continue;
       }
+      // #3279: the road signs' atlas is drawn here too.
+      if (output.recipe.how === 'signs') {
+        expect(output.from, output.file).toBe(DRAWN_FROM);
+        continue;
+      }
       // #966: the wordmark is made from the owner's artwork, committed here.
       if (output.recipe.how === 'wordmark') {
         expect(output.from, output.file).toBe(WORDMARK_FROM);
@@ -378,6 +383,7 @@ describe('the pipeline’s own table', () => {
     // Non-vacuity: the four bicycle maps, and only they, are drawn.
     expect(OUTPUTS.filter((output) => output.recipe.how === 'drawn')).toHaveLength(4);
     expect(OUTPUTS.filter((output) => output.recipe.how === 'wordmark')).toHaveLength(1);
+    expect(OUTPUTS.filter((output) => output.recipe.how === 'signs')).toHaveLength(1);
   });
 
   it('downloads nothing it does not use', () => {
@@ -553,6 +559,8 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       // #624: a drawn map is drawn the way its coordinates read it, row 0 at
       // v = 0, and never went through TextureLoader — so it is not flipped.
       if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
+      // #3279: and so is the signs' atlas, whose cells the shader reads by row from the top.
+      if (recipe.how === 'signs') expect(recipe.ktx2.origin, output.file).toBe('top-left');
       if (recipe.how === 'blender') {
         // #1585: the house models' atlas is read at their GLBs' own texture
         // coordinates, which `GLTFLoader` never flips, and Blender writes it
@@ -609,7 +617,8 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       // #966: the wordmark is a cut-out over its board, so it keeps its alpha.
       // #1274: the chain-link's wire opacity is data too, a number a texel.
       expect(step.encoding, output.file).toBe(
-        recipe.how === 'wordmark'
+        // #3279: the signs' atlas is cut out by its alpha.
+        recipe.how === 'wordmark' || recipe.how === 'signs'
           ? 'colour-alpha'
           : output.file.includes('_nor_gl_')
             ? 'normal'

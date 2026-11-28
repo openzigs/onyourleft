@@ -206,6 +206,7 @@ import {
 } from './parked-cars';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
+import { nearestSigns, roadSignsAt, signsClearOf } from './road-signs';
 import { routeOf, sceneryAnchor } from './scenery-anchor';
 import {
   CITY_PAVEMENT_WIDTH_METRES,
@@ -1102,6 +1103,25 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     scatter: standingOnGround(items, ground, groundedFootprintOf),
     // #966: the billboards in view, out of the structures' budget.
     billboards,
+    // #3279: the road signs placed from the route along this frame's road,
+    // off its side roads, its driveways and its village pavements.
+    signs: nearestSigns(
+      signsClearOf(
+        roadSignsAt(
+          input.profile,
+          input.origin,
+          seed,
+          (corridor.centre[0] as CorridorPoint).along,
+          (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+          input.landClass ?? NO_LAND_CLASS,
+        ),
+        sideRoads,
+        SCENERY_CLEARANCE,
+        streets,
+        input.mappedBuildings,
+      ),
+      riderDistance,
+    ),
     sideRoads,
     streets,
     // #3052: an open-world ride's street names, on their streets' surfaces.

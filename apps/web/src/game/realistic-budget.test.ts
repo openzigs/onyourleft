@@ -82,6 +82,7 @@ import {
   REALISTIC_PARKED_CAR_DRAW_CALLS,
   REALISTIC_PARKED_CAR_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_ROAD_SIGN_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
   REALISTIC_WOODED_DRAW_CALLS,
   REALISTIC_STRUCTURE_ITEMS,
@@ -131,9 +132,11 @@ import {
   realisticStructureTriangles,
   realisticStructureTrianglesOf,
   refillMappedBuildings,
+  roadSignGeometry,
   ScatterBelt,
   stylisedRiderTriangles,
 } from './three-renderer';
+import { SIGNS_PER_FRAME } from './road-signs';
 import { MAXIMUM_DRAWN_RIDERS } from '../net/interest';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
@@ -834,6 +837,44 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
     // One call of their own, and none on the village's frozen frame, which has no car.
     expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
+  });
+
+  it('holds it with a full belt of road signs too, each inside the roadside class — #3279', () => {
+    // One sign as the renderer builds it, priced off its geometry.
+    const geometry = roadSignGeometry();
+    const sign = geometry.getAttribute('position').count / 3;
+    geometry.dispose();
+    expect(sign).toBe(18);
+    // A sign is a roadside model: held to the class's 240 a model.
+    expect(sign).toBeLessThanOrEqual(REALISTIC_TRIANGLES.roadside);
+    expect(REALISTIC_TRIANGLES.roadside).toBe(240);
+    // The belt's room, exactly: a sign re-cut heavier, or a bigger belt, is red here.
+    expect(SIGNS_PER_FRAME * sign).toBe(REALISTIC_ROAD_SIGN_TRIANGLES);
+    // The fullest frame the caps allow — the #3278 case's, the parked cars
+    // with it — and a full belt of signs inside the same frame.
+    const frame = worstFrame();
+    const fullest =
+      frame.vegetation +
+      frame.riders +
+      frame.structureItems * REALISTIC_TRIANGLES.structure +
+      frame.blobs +
+      frame.gantries +
+      frame.lamps +
+      REALISTIC_REMOTE_TRIANGLES +
+      PARK_DRESSING_TRIANGLES +
+      PARK_FIELD_TRIANGLES +
+      REALISTIC_DECORATION_TRIANGLES +
+      REALISTIC_PARKED_CAR_TRIANGLES;
+    console.log(
+      `#3279: the fullest frame ${String(fullest)} triangles before the signs, ` +
+        `${String(fullest + REALISTIC_ROAD_SIGN_TRIANGLES)} with them, of ` +
+        `${String(REALISTIC_FRAME_TRIANGLES)}`,
+    );
+    expect(fullest + REALISTIC_ROAD_SIGN_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // No ceiling was raised to make the room.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    expect(REALISTIC_VILLAGE_DRAW_CALLS).toBe(50);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {

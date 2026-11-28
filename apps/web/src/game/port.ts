@@ -49,6 +49,7 @@ import type { PeopleInView } from './people';
 import type { SceneryCyclist } from './scenery-cyclists';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
+import type { RoadSign } from './road-signs';
 import type { ScatterItem } from './scatter';
 import type { Season } from './season';
 import type { SideRoad } from './cross-streets';
@@ -496,6 +497,14 @@ export interface SceneFrame {
    * gate's wordmark board, by one instanced mesh.
    */
   readonly billboards: readonly Billboard[];
+  /**
+   * The road signs in reach — #3279 (`road-signs.ts`): a climb's, a
+   * descent's, a bend's chevrons and a summit's board, placed from the route
+   * and kept off the road, the side roads, the driveways and the pavements.
+   * Drawn by the realistic world alone (`three-renderer.ts` §`RoadSignBelt`).
+   * Absent, or empty, where none is in reach.
+   */
+  readonly signs?: readonly RoadSign[] | undefined;
   /**
    * The village streets in view — #1535 (`streets.ts`): each village's kerbed
    * pavements, the same objects every frame while the same villages are in

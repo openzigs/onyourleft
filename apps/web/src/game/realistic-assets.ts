@@ -777,6 +777,17 @@ export const REALISTIC_BICYCLE_MAP_NAMES: readonly RealisticBicycleMap[] = [
 export const REALISTIC_WORDMARK = 'game-wordmark.ktx2';
 
 /**
+ * The road signs' one atlas — #3279: every plate of the sign kit, each
+ * plate's back and the numerals a gradient is written in, drawn from
+ * arithmetic by `tools/realistic/draw-sign-atlas.ts` to the layout
+ * `road-signs.ts` states, dedicated `CC0-1.0`, and encoded as KTX2 (ETC1S
+ * with alpha). The realistic world's alone: the stylised world uploads one
+ * texture, the wordmark (`game.browser.spec.ts` §"uploads only the logo
+ * texture"), so it draws no road signs.
+ */
+export const REALISTIC_SIGN_ATLAS = 'road_signs_atlas.ktx2';
+
+/**
  * The house models a mapped footprint may be drawn as — #1585: GildedAge's
  * RVA set and Orzechu's brick building with shop, CC-BY-4.0, each a GLB of
  * geometry alone (`<id>.glb`), every one mapped into the one colour atlas,
@@ -970,6 +981,7 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_RIDER_PACK.vat,
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
     REALISTIC_WORDMARK,
+    REALISTIC_SIGN_ATLAS,
     ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
     REALISTIC_HOUSE_ATLAS,
     REALISTIC_DOWNTOWN_KIT.model,

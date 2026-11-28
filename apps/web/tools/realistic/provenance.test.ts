@@ -24,8 +24,10 @@ import { parseAssetManifest } from '../../src/credits/manifest';
 import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
+  REALISTIC_SIGN_ATLAS,
   REALISTIC_WORDMARK,
 } from '../../src/game/realistic-assets';
+import { SIGN_ATLAS_PIXELS } from '../../src/game/road-sign-atlas';
 import { fileKtx2Facts } from '../../src/game/realistic-bytes-testing';
 import {
   WORDMARK_CREATOR,
@@ -36,6 +38,7 @@ import {
 } from '../brand/game-wordmark';
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
+import { drawSignAtlas, signAtlasDigest } from './draw-sign-atlas';
 import { GENERATED_TREES, speciesOf } from './generated-trees';
 import {
   AMBIENTCG_TECHNIQUES_KEPT,
@@ -58,6 +61,8 @@ import {
   PINNED_KTX,
   PIPELINE_DIRECTORY,
   RIDER_KIT,
+  SIGN_ATLAS_SCRIPT,
+  SIGNS_DRAWN_ON,
   RIDER_SCRIPT,
   shippedFiles,
   SOURCES,
@@ -120,6 +125,8 @@ describe('the realistic files and the pipeline that makes them', () => {
       if (
         output.recipe.how === 'verbatim' ||
         output.recipe.how === 'drawn' ||
+        // #3279: nor has the road signs' atlas: §"the road signs' atlas".
+        output.recipe.how === 'signs' ||
         output.recipe.how === 'wordmark' ||
         // #1283: a generated tree's input is its numbers, held below.
         output.recipe.how === 'generated'
@@ -221,9 +228,11 @@ describe('the realistic files and the pipeline that makes them', () => {
             ? KTX2_SCRIPT
             : recipe.how === 'drawn'
               ? DRAW_SCRIPT
-              : recipe.how === 'generated'
-                ? GENERATED_TREE_SCRIPT
-                : recipe.script;
+              : recipe.how === 'signs'
+                ? SIGN_ATLAS_SCRIPT
+                : recipe.how === 'generated'
+                  ? GENERATED_TREE_SCRIPT
+                  : recipe.script;
       const script = readFileSync(join(REPOSITORY, 'apps/web/tools/realistic', name), 'utf8');
       expect(script.split('\n').slice(0, 5).join('\n'), name).toContain(
         'SPDX-License-Identifier: AGPL-3.0-or-later',
@@ -494,6 +503,48 @@ describe('the generated trees — #1283, ADR 0049 D-1', () => {
       }
       expect(source.licencePage, source.id).not.toMatch(/dgreenheck|ez-tree/i);
     }
+  });
+});
+
+describe('the road signs’ atlas — #3279', () => {
+  const row = (manifest.entries.find(
+    (each) => each.path === `${OUTPUT_DIRECTORY}/${REALISTIC_SIGN_ATLAS}`,
+  ) ?? {}) as Readonly<Record<string, string | undefined>>;
+
+  it('records, as its input, the digest of the pixels the drawing script draws TODAY', () => {
+    // The bicycle maps' check, for the atlas: a drawing changed without the
+    // atlas being made again is red here; its KTX2 bytes are `--check`'s.
+    expect(row['inputsha256']).toBe(signAtlasDigest(drawSignAtlas()));
+    expect(row['input']).toBe(`${PIPELINE_DIRECTORY}${SIGN_ATLAS_SCRIPT}`);
+    expect(row['script']).toBe(`${PIPELINE_DIRECTORY}${SIGN_ATLAS_SCRIPT}`);
+    expect(row['tool']).toBe(DRAWN_TOOL);
+    expect(row['read']).toBe(SIGNS_DRAWN_ON);
+    expect(row['licence']).toBe('CC0-1.0');
+    expect(row['modified']).toContain(KTX2_SCRIPT_PATH);
+    expect(row['modified']).toContain(PINNED_KTX);
+    // …and that nothing was fetched, traced or copied (ADR 0009, D-4).
+    expect(row['source']).toContain('Nothing was downloaded');
+    expect(row['source']).toContain('no national sign design was copied');
+  });
+
+  it('commits the atlas at 512 px, ETC1S with alpha and sRGB, with its whole mipmap chain', () => {
+    const facts = fileKtx2Facts(join(REPOSITORY, OUTPUT_DIRECTORY, REALISTIC_SIGN_ATLAS));
+    expect(SIGN_ATLAS_PIXELS).toBeLessThanOrEqual(512);
+    expect(facts).toMatchObject({
+      width: SIGN_ATLAS_PIXELS,
+      height: SIGN_ATLAS_PIXELS,
+      scheme: 'etc1s',
+      alpha: true,
+      transfer: 'srgb',
+      levels: Math.log2(SIGN_ATLAS_PIXELS) + 1,
+    });
+  });
+
+  it('is in no source and no lock: nothing was downloaded for it', () => {
+    const output = OUTPUTS.find((each) => each.file === REALISTIC_SIGN_ATLAS);
+    expect(output?.recipe.how).toBe('signs');
+    expect(SOURCES.map((source) => source.id)).not.toContain(output?.from);
+    expect(lock.sources.map((source) => source.id)).not.toContain(output?.from);
   });
 });
 
