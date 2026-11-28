@@ -685,10 +685,12 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_GUARD_RAIL_BOXES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
+import type { GuardRailPart } from './roadside-safety';
 import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import {
   FOLIAGE_TINT,
@@ -2247,6 +2249,13 @@ export const OVERPASS_COLOURS: Readonly<Record<BridgeFinish, number>> = {
   road: ROAD_COLOUR,
   concrete: PAVEMENT_COLOUR,
 };
+
+/**
+ * A guard rail's galvanised steel — #3284, its beam's and its posts'
+ * (`roadside-safety.ts` §`guardRailParts`). This repository's own, drawn in
+ * the overpass box (@see BridgeBelt), so no texture and no byte of the build.
+ */
+export const GUARD_RAIL_COLOUR = 0x9aa0a3;
 
 /** One coloured solid of a piece of street furniture — #1536. */
 interface FurniturePart {
@@ -6915,6 +6924,13 @@ function environmentScaleFor(zenith: LinearColour, target: number): number {
  * submit here are what they were; the second box costs a draw call on a
  * frame with an overpass in view, and none on any other.
  *
+ * ⚠️ **Since #3284 the overpass box also draws the guard rails**
+ * (`roadside-safety.ts`), after the overpasses' blocks, in
+ * {@link GUARD_RAIL_COLOUR}, up to `realistic-budget.ts`
+ * §`REALISTIC_GUARD_RAIL_BOXES` more instances — in the REALISTIC world only.
+ * The stylised world's scenery-free frame is held to exactly
+ * `STYLISED_SCENE_DRAW_CALLS`, so the stylised world draws no rail.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class BridgeBelt {
@@ -6950,6 +6966,8 @@ export class BridgeBelt {
     road: new Color(OVERPASS_COLOURS.road),
     concrete: new Color(OVERPASS_COLOURS.concrete),
   };
+  /** #3284: the guard rails' steel. */
+  readonly #steel = new Color(GUARD_RAIL_COLOUR);
   readonly #along = new Vector3();
   readonly #across = new Vector3();
   readonly #up = new Vector3();
@@ -6965,7 +6983,12 @@ export class BridgeBelt {
     this.#mesh.visible = false;
     const plain = new BoxGeometry(1, 1, 1);
     paintEveryVertex(plain, 0xffffff);
-    this.#overpass = new InstancedMesh(plain, this.#overpassMaterials.lit, MAXIMUM_BRIDGE_PARTS);
+    // #3284: and room for the guard rails after the overpasses' blocks.
+    this.#overpass = new InstancedMesh(
+      plain,
+      this.#overpassMaterials.lit,
+      MAXIMUM_BRIDGE_PARTS + REALISTIC_GUARD_RAIL_BOXES,
+    );
     this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
     // The colour buffer from the start, so the mesh's program is the same every frame.
     this.#overpass.setColorAt(0, this.#finishes.concrete);
@@ -7052,27 +7075,33 @@ export class BridgeBelt {
   /**
    * One box a part: `length` along its axis, `width` across it level, and
    * `height` up. Allocates nothing.
+   *
+   * @param rails #3284: the guard rails' boxes, drawn as overpass instances
+   * after the overpasses' own — in the realistic world only.
    */
-  update(parts: readonly BridgePart[]): void {
+  update(parts: readonly BridgePart[], rails: readonly GuardRailPart[] = NO_RAILS): void {
     let stone = 0;
     let overpass = 0;
     for (const part of parts) {
       const finish = part.finish;
       if ((finish === undefined ? stone : overpass) >= MAXIMUM_BRIDGE_PARTS) continue;
-      this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
-      this.#across.crossVectors(this.#vertical, this.#along).normalize();
-      this.#up.crossVectors(this.#along, this.#across).normalize();
-      this.#across.multiplyScalar(part.width);
-      this.#up.multiplyScalar(part.height);
-      this.#along.multiplyScalar(part.length);
-      this.#matrix.makeBasis(this.#across, this.#up, this.#along);
-      this.#matrix.setPosition(part.x, part.y, part.z);
+      this.#basis(part);
       if (finish === undefined) {
         this.#mesh.setMatrixAt(stone, this.#matrix);
         stone += 1;
       } else {
         this.#overpass.setMatrixAt(overpass, this.#matrix);
         this.#overpass.setColorAt(overpass, this.#finishes[finish]);
+        overpass += 1;
+      }
+    }
+    if (this.#world === 'realistic') {
+      const room = Math.min(rails.length, REALISTIC_GUARD_RAIL_BOXES);
+      for (let index = 0; index < room; index += 1) {
+        const part = rails[index] as GuardRailPart;
+        this.#basis(part);
+        this.#overpass.setMatrixAt(overpass, this.#matrix);
+        this.#overpass.setColorAt(overpass, this.#steel);
         overpass += 1;
       }
     }
@@ -7085,6 +7114,23 @@ export class BridgeBelt {
       this.#overpass.instanceColor.needsUpdate = overpass > 0;
     }
     this.#overpass.visible = overpass > 0;
+  }
+
+  /** {@link #matrix} as `part`'s box. */
+  #basis(
+    part: Pick<
+      BridgePart,
+      'x' | 'y' | 'z' | 'axisX' | 'axisY' | 'axisZ' | 'length' | 'width' | 'height'
+    >,
+  ): void {
+    this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
+    this.#across.crossVectors(this.#vertical, this.#along).normalize();
+    this.#up.crossVectors(this.#along, this.#across).normalize();
+    this.#across.multiplyScalar(part.width);
+    this.#up.multiplyScalar(part.height);
+    this.#along.multiplyScalar(part.length);
+    this.#matrix.makeBasis(this.#across, this.#up, this.#along);
+    this.#matrix.setPosition(part.x, part.y, part.z);
   }
 
   dispose(): void {
@@ -7100,6 +7146,26 @@ export class BridgeBelt {
     this.#overpassPhysical.dispose();
     this.#stone?.material.dispose();
   }
+}
+
+/** No guard rail: a frame that carries none. @see BridgeBelt.update */
+const NO_RAILS: readonly GuardRailPart[] = [];
+
+/**
+ * The scenery a frame's belts are handed — #3284: its scatter, and in the
+ * realistic world its marker posts after it (`roadside-safety.ts`
+ * §`markerPostItems`), so a rung's scenery budget spends them last and they
+ * are drawn in the `post` kind's mesh, the one the scatter's bend posts are.
+ * The scatter itself, the same array, wherever there is no post to add: the
+ * stylised world, whose scenery-free frame is held to exactly
+ * `realistic-budget.ts` §`STYLISED_SCENE_DRAW_CALLS`, draws none.
+ */
+export function withMarkerPosts(
+  frame: Pick<SceneFrame, 'scatter' | 'markerPosts'>,
+  drawing: QualitySettings['world'],
+): readonly ScatterItem[] {
+  const posts = drawing === 'realistic' ? (frame.markerPosts ?? []) : [];
+  return posts.length === 0 ? frame.scatter : [...frame.scatter, ...posts];
 }
 
 /** A photographed surface's two maps. @see RealisticWorld.structures */
@@ -29325,7 +29391,8 @@ class ThreeGameView implements GameView {
       // #475: on the realistic rungs the water reflects the realistic sky; #2508, the one drawn.
       this.#drawnSky(),
     );
-    this.#bridges.update(frame.water.bridges);
+    // #3284: and the guard rails, in the overpass box.
+    this.#bridges.update(frame.water.bridges, frame.guardRails);
     this.#updateRoad(frame);
     // #1565: the cross streets, in whatever the road wears this frame.
     this.#sideRoads.setMaterial(this.#road.material as Material);
@@ -29339,9 +29406,11 @@ class ThreeGameView implements GameView {
     // #545: and neither is handed an item the near plane would cut, for THIS
     // frame's aspect and THIS world's shapes. `near-field.ts` says what that is,
     // and why it asks the triangles rather than a box.
+    // #3284: and, in the realistic world, the marker posts. @see withMarkerPosts
+    const placed = withMarkerPosts(frame, this.#drawing);
     const scenery = this.#clearOfTheCamera
       ? clearOfTheCamera(
-          frame.scatter,
+          placed,
           rig,
           this.#camera.aspect,
           this.#drawing,
@@ -29349,7 +29418,7 @@ class ThreeGameView implements GameView {
           // #630: the realistic foliage sways, so it is cleared by its sway too.
           this.#drawing === 'realistic' ? FOLIAGE_SWAY_METRES : 0,
         )
-      : frame.scatter;
+      : placed;
     this.#scatter.update(scenery, frame.camera);
     // #1835: the near pyramid the people and the mapped buildings are cleared
     // of — only in the realistic world, the one that draws them, and only with

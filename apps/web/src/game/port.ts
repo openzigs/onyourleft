@@ -55,6 +55,7 @@ import type { SideRoad } from './cross-streets';
 import type { StreetNamesInView } from './street-names';
 import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
+import type { GuardRailPart } from './roadside-safety';
 import type { BridgePart, WaterSurface } from './waterways';
 import type { WorldStyle } from './world';
 
@@ -614,6 +615,25 @@ export interface SceneFrame {
    * `parked-car-belt.test.ts` off the belt it fills.
    */
   readonly parkedCars?: ParkedCarsInView | undefined;
+  /**
+   * The guard rails beside the road in view — #3284 (`roadside-safety.ts`
+   * §`guardRailParts`): boxes drawn as instances of the overpass box
+   * (`three-renderer.ts` §`BridgeBelt`), so no mesh of their own. Realistic
+   * world only. Scenery only.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `roadside-safety.test.ts` reads it back off `sceneFrame`, and off the
+   * belt it fills.
+   */
+  readonly guardRails?: readonly GuardRailPart[] | undefined;
+  /**
+   * The marker posts along the open road in view — #3284
+   * (`roadside-safety.ts` §`markerPostItems`): `post` scenery items, drawn
+   * after {@link scatter} in that kind's mesh. ⚠️ **Not in {@link scatter}**,
+   * whose arrangement is pinned (`arrangement-unchanged.test.ts`). Realistic
+   * world only. Optional, as {@link guardRails} is, and read back the same way.
+   */
+  readonly markerPosts?: readonly ScatterItem[] | undefined;
 }
 
 /**

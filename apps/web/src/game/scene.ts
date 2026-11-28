@@ -206,6 +206,7 @@ import {
 } from './parked-cars';
 import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
+import { roadsideInView } from './roadside-safety';
 import { routeOf, sceneryAnchor } from './scenery-anchor';
 import {
   CITY_PAVEMENT_WIDTH_METRES,
@@ -215,6 +216,7 @@ import {
 } from './streets';
 import {
   bridgeParts,
+  bridgeSpans,
   MAXIMUM_BRIDGE_PARTS,
   onOpenWater,
   waterSurface,
@@ -1060,6 +1062,32 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     seed,
     input.landClass ?? NO_LAND_CLASS,
   );
+  const footways =
+    input.worldCorridor === undefined || input.footwaysOff === true
+      ? NO_FOOTWAYS
+      : footwaysInView(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+          camera.x,
+          camera.z,
+          streets,
+        );
+  const roadside = roadsideInView({
+    profile: input.profile,
+    origin: input.origin,
+    seed,
+    land: input.landClass ?? NO_LAND_CLASS,
+    corridor,
+    riderDistance,
+    bridges: bridgeSpans(input.profile, corridor, ways),
+    sideRoads,
+    footways,
+    streets,
+    scenery: items,
+  });
   return {
     // #1549: the ride's mapped buildings, and where the rider is among them.
     ...(input.mappedBuildings === undefined
@@ -1126,19 +1154,11 @@ export function sceneFrame(given: SceneInput): SceneFrame {
         }),
     // #2972: the corridor's mapped footways drawn as surfaces round the camera,
     // off those streets' pavements (#1620), and a zebra where one crosses the road.
-    footways:
-      input.worldCorridor === undefined || input.footwaysOff === true
-        ? NO_FOOTWAYS
-        : footwaysInView(
-            input.worldCorridor,
-            input.profile,
-            input.origin,
-            seed,
-            input.landClass ?? NO_LAND_CLASS,
-            camera.x,
-            camera.z,
-            streets,
-          ),
+    footways,
+    // #3284: the guard rails and marker posts on the open road, broken at
+    // every side road, footway and field gate, and none along a kerb.
+    guardRails: roadside.rails,
+    markerPosts: roadside.posts,
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
