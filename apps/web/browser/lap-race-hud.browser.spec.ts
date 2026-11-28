@@ -51,8 +51,10 @@ import {
   type Viewport,
 } from './ride-stage';
 
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { HUD_CONTROLS_FADE_MS, MOTION_DURATION_MS } from '../src/design/tokens';
 import { CONTROLS_HIDE_MILLISECONDS } from '../src/game/hud/controls-reveal';
+import { PULL_OFF_BUTTON_LABEL } from '../src/game/hud/GroupRideControls';
 import { STANDINGS_RETURN_MS } from '../src/game/hud/standings-follow';
 
 import { applyInsets, NO_INSETS, PIXEL_TABLET_LANDSCAPE_INSETS, type Insets } from './insets';
@@ -1188,4 +1190,83 @@ test('#3305 the group ride measurement can fail: with the give-way rule undone, 
   const undone = stageOf(await remeasure(page), 'group-wheel');
   const added = rows(undone) > rows(none);
   expect(added || groupFaults(undone, viewport).length > 0).toBe(true);
+});
+
+/** #3371: a computed `rgb(r, g, b)` as the six-digit hex `contrastRatio` reads. */
+function hexOfComputed(rgb: string): string {
+  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+test.describe('#3371 the pull-off button says whether it can be used', () => {
+  /** The pull-off button on `stage` as the browser drew it. */
+  async function pullOffOn(
+    page: Page,
+    stage: string,
+  ): Promise<{
+    readonly fill: string;
+    readonly ink: string;
+    readonly edge: string;
+    readonly disabled: string | null;
+    readonly width: number;
+    readonly height: number;
+  }> {
+    return page
+      .locator(`[data-oyl-lap-race-stage="${stage}"]`)
+      .getByRole('button', { name: PULL_OFF_BUTTON_LABEL, exact: true })
+      .evaluate((button) => {
+        const style = getComputedStyle(button);
+        const box = button.getBoundingClientRect();
+        return {
+          fill: style.backgroundColor,
+          ink: style.color,
+          edge: style.borderTopStyle,
+          disabled: button.getAttribute('aria-disabled'),
+          width: box.width,
+          height: box.height,
+        };
+      });
+  }
+
+  test('is lit on the front, and muted with a dashed edge off it, at 1280×800 — photographed for the owner', async ({
+    page,
+  }, testInfo) => {
+    await open(page, tablet('1280×800'), '?group=controls');
+    const on = await pullOffOn(page, 'pull-off-on-front');
+    const off = await pullOffOn(page, 'pull-off-off-front');
+    console.log(
+      `#3371 pull off — on the front ${JSON.stringify(on)}, off it ${JSON.stringify(off)}`,
+    );
+    expect(on.disabled).toBeNull();
+    expect(off.disabled).toBe('true');
+    // A different fill, and a different edge: told apart by shape as well as colour.
+    expect(on.edge).toBe('solid');
+    expect(off.edge).toBe('dashed');
+    // The lit fill stands out from the unlit one as a non-text difference must (SC 1.4.11).
+    expect(contrastRatio(hexOfComputed(on.fill), hexOfComputed(off.fill))).toBeGreaterThanOrEqual(
+      AA_LARGE_TEXT_OR_NON_TEXT,
+    );
+    // Its words AA on its own fill either way.
+    expect(contrastRatio(hexOfComputed(on.ink), hexOfComputed(on.fill))).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+    expect(contrastRatio(hexOfComputed(off.ink), hexOfComputed(off.fill))).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+    // The ride-time target, 48 px at the least each way, in both states.
+    for (const each of [on, off]) {
+      expect(each.width).toBeGreaterThanOrEqual(48);
+      expect(each.height).toBeGreaterThanOrEqual(48);
+    }
+    for (const stage of ['pull-off-on-front', 'pull-off-off-front']) {
+      // Written to the test's output too, so a local run leaves the files.
+      const path = testInfo.outputPath(`3371-${stage}-1280x800.png`);
+      await page.locator(`[data-oyl-lap-race-stage="${stage}"]`).screenshot({ path });
+      await testInfo.attach(`3371-${stage}-1280x800`, { path, contentType: 'image/png' });
+    }
+  });
 });

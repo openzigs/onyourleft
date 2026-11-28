@@ -20,6 +20,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { BOT_TACTIC_WHEEL_GAP_METRES } from '@onyourleft/domain';
+
 import {
   BICYCLE_REAR_CONTACT_METRES,
   RIDER_HALF_WIDTH_METRES,
@@ -49,6 +51,9 @@ import {
   cameraRig,
   dampedHeading,
   dampedLookAhead,
+  easedGroupRideShare,
+  GROUP_RIDE_CAMERA,
+  groupRidePose,
   pivotDuringUTurn,
   turnedPose,
   U_TURN_PIVOT_METRES,
@@ -61,6 +66,8 @@ import {
   type CameraRig,
   type GroundHeading,
 } from './camera';
+import { BIKE_LENGTH_METRES } from './lap-race/pack-layout';
+import { LANE_OFFSETS_METRES } from './lanes';
 import type { CameraPose } from './port';
 import { MAXIMUM_LEAN_RADIANS } from './racing-line';
 import { VIEW_AHEAD_METRES } from './terrain';
@@ -873,5 +880,153 @@ describe('the point the camera turns about across a pressed U-turn — #3066', (
     expect(Math.hypot(nearly.x - pose.x, nearly.z - pose.z)).toBeLessThan(1e-6);
     expect(pivotDuringUTurn(pose, rider, held, hold + handedBack)).toBe(pose);
     expect(pivotDuringUTurn(pose, rider, held, Number.NaN)).toBe(pose);
+  });
+});
+
+describe('the group ride’s camera — #3371', () => {
+  const ASPECTS = [REFERENCE_ASPECT, 16 / 10, 4 / 3, 10 / 16, 9 / 19.5, WORST_CASE_ASPECT];
+  const TABLET = 16 / 10;
+  /** The line's wheels apart: a bicycle and the gap a bot holding a wheel steers for. */
+  const SPACING = BIKE_LENGTH_METRES + BOT_TACTIC_WHEEL_GAP_METRES;
+  const grouped = (grade: number, share = 1): CameraRig =>
+    cameraRig(groupRidePose(poseOn(grade), share));
+
+  /** How far up a rider `ahead` metres up a level road the sight line over the rider's helmet passes. */
+  const overHelmet = (rig: CameraRig, ahead: number): number =>
+    rig.eye.y +
+    ((RIDER_HEIGHT_METRES - rig.eye.y) * (ahead - rig.eye.z)) /
+      (RIDER_HELMET_AHEAD_METRES - rig.eye.z);
+
+  /** The furthest behind the rider, to 5 cm, that a bot a lane to their right has its middle in the frame. */
+  const passingInShotFrom = (rig: CameraRig, aspect: number): number => {
+    let behind = 0;
+    for (;;) {
+      const next = behind + 0.05;
+      // Heading +z, the rider's right is −x (#583).
+      const seen = projectToFrame(rig, aspect, {
+        x: -(LANE_OFFSETS_METRES[2] as number),
+        y: RIDER_HEIGHT_METRES / 2,
+        z: -next,
+      });
+      if (seen === undefined || seen.left > 1) return behind;
+      behind = next;
+    }
+  };
+
+  it('is the pose itself at nought, so every ride that is not a group ride draws the camera it drew', () => {
+    const pose = poseOn(0.08);
+    expect(groupRidePose(pose, 0)).toBe(pose);
+    expect(groupRidePose(pose, -1)).toBe(pose);
+    expect(groupRidePose(pose, Number.NaN)).toBe(pose);
+  });
+
+  it('stands the eye 8.5 m back and 3.5 m over the road under it, on every grade, looking where it looked', () => {
+    expect(CAMERA_BEHIND_METRES + GROUP_RIDE_CAMERA.backMetres).toBe(8.5);
+    expect(CAMERA_ABOVE_METRES + GROUP_RIDE_CAMERA.upMetres).toBe(3.5);
+    for (const grade of [-0.2, -0.12, 0, 0.12, 0.2]) {
+      const rig = grouped(grade);
+      expect(rig.eye.z).toBeCloseTo(-8.5, 9);
+      expect(rig.eye.x).toBeCloseTo(0, 9);
+      expect(rig.eye.y - grade * -8.5).toBeCloseTo(3.5, 9);
+      const solo = cameraRig(poseOn(grade)).target;
+      expect(rig.target.x).toBeCloseTo(solo.x, 9);
+      expect(rig.target.y).toBeCloseTo(solo.y, 9);
+      expect(rig.target.z).toBeCloseTo(solo.z, 9);
+    }
+  });
+
+  it('moves the point the eye stands behind, so every cull that puts the eye behind that point puts it here', () => {
+    const pose = groupRidePose({ ...poseOn(0), headingX: 0.6, headingZ: 0.8 }, 1);
+    const rig = cameraRig(pose);
+    expect(pose.x - pose.headingX * CAMERA_BEHIND_METRES).toBeCloseTo(rig.eye.x, 9);
+    expect(pose.z - pose.headingZ * CAMERA_BEHIND_METRES).toBeCloseTo(rig.eye.z, 9);
+    expect(Math.hypot(rig.eye.x, rig.eye.z)).toBeCloseTo(8.5, 9);
+  });
+
+  it('shows the line ahead over the rider’s helmet: the road from about 7 m, the wheel in front from a metre up', () => {
+    const solo = cameraRig(poseOn(0));
+    const rig = grouped(0);
+    // The road shows over the helmet where the sight line meets it.
+    const roadFrom = (each: CameraRig): number => {
+      let ahead = RIDER_HELMET_AHEAD_METRES;
+      while (overHelmet(each, ahead) > 0) ahead += 0.01;
+      return ahead;
+    };
+    expect(roadFrom(solo)).toBeCloseTo(14.8, 0);
+    expect(roadFrom(rig)).toBeCloseTo(6.8, 0);
+    expect(SPACING).toBeCloseTo(2.4, 9);
+    // Under the solo camera only the helmet of the wheel in front shows, and
+    // the fourth is hidden to half a metre up.
+    expect(overHelmet(solo, SPACING)).toBeGreaterThan(RIDER_HEIGHT_METRES - 0.25);
+    expect(overHelmet(solo, 4 * SPACING)).toBeGreaterThan(0.5);
+    // Under this one the wheel in front shows from a metre up, the next from
+    // under half a metre, and the third to its tyres.
+    expect(overHelmet(rig, SPACING)).toBeCloseTo(1, 1);
+    expect(overHelmet(rig, 2 * SPACING)).toBeCloseTo(0.46, 1);
+    expect(overHelmet(rig, 3 * SPACING)).toBeLessThan(0);
+  });
+
+  it('keeps a bot passing a lane to the side in the tablet’s frame from about 7 m behind the rider, where the solo camera lost it at 3', () => {
+    expect(passingInShotFrom(cameraRig(poseOn(0)), TABLET)).toBeCloseTo(3, 0);
+    expect(passingInShotFrom(grouped(0), TABLET)).toBeCloseTo(7, 0);
+  });
+
+  it('draws the rider inside the box a solo ride’s HUD is kept off, at every aspect, and smaller', () => {
+    const rig = grouped(0);
+    for (const aspect of ASPECTS) {
+      const box = riderFrameBox(aspect);
+      const helmet = projectToFrame(rig, aspect, {
+        x: 0,
+        y: RIDER_HEIGHT_METRES,
+        z: RIDER_HELMET_AHEAD_METRES,
+      });
+      const tyre = projectToFrame(rig, aspect, { x: 0, y: 0, z: BICYCLE_REAR_CONTACT_METRES });
+      const side = projectToFrame(rig, aspect, {
+        x: -RIDER_HALF_WIDTH_METRES,
+        y: 0,
+        z: BICYCLE_REAR_CONTACT_METRES,
+      });
+      expect(helmet?.top, String(aspect)).toBeGreaterThan(box.top);
+      expect(tyre?.top, String(aspect)).toBeLessThan(box.bottom);
+      expect(side?.left, String(aspect)).toBeLessThan(box.right);
+      expect((tyre?.top ?? 1) - (helmet?.top ?? 0)).toBeLessThan((box.bottom - box.top) * 0.6);
+    }
+  });
+
+  it('stays higher over a dip between two 10 % grades than a solo camera stands', () => {
+    // The rider at the foot, the road falling to them behind and climbing ahead.
+    const dip: CameraPose = {
+      ...poseOn(0),
+      eyeRoadY: 0.1 * CAMERA_BEHIND_METRES,
+      targetRoadY: 0.1 * CAMERA_TARGET_AHEAD_METRES,
+    };
+    const rig = cameraRig(groupRidePose(dip, 1));
+    const road = 0.1 * -rig.eye.z;
+    expect(rig.eye.y - road).toBeGreaterThan(2.8);
+    expect(rig.eye.y - road).toBeGreaterThan(CAMERA_ABOVE_METRES);
+  });
+
+  it('eases there and back at a steady rate, the whole way in 1.5 s, whatever the frame rate', () => {
+    expect(easedGroupRideShare(undefined, 1, 0.016)).toBe(1);
+    expect(easedGroupRideShare(undefined, 0, 0.016)).toBe(0);
+    expect(easedGroupRideShare(0, 1, 0.75)).toBeCloseTo(0.5, 9);
+    expect(easedGroupRideShare(1, 0, 0.75)).toBeCloseTo(0.5, 9);
+    expect(easedGroupRideShare(0, 1, 5)).toBe(1);
+    expect(easedGroupRideShare(1, 0, 5)).toBe(0);
+    let held = 0;
+    for (let frame = 0; frame < 45; frame += 1) held = easedGroupRideShare(held, 1, 1 / 60);
+    expect(held).toBeCloseTo(easedGroupRideShare(0, 1, 45 / 60), 9);
+    expect(easedGroupRideShare(0.3, 1, Number.NaN)).toBe(0.3);
+    expect(easedGroupRideShare(0.3, 1, -1)).toBe(0.3);
+    // Half way there in time is half way there in place: the ease is symmetric.
+    const half = cameraRig(groupRidePose(poseOn(0), 0.5));
+    expect(half.eye.z).toBeCloseTo(-(CAMERA_BEHIND_METRES + GROUP_RIDE_CAMERA.backMetres / 2), 9);
+    // And eased in: a quarter of the time moves it under a quarter of the way,
+    // so the camera starts to move gently rather than at its full rate.
+    const quarter = cameraRig(groupRidePose(poseOn(0), 0.25));
+    expect(quarter.eye.z).toBeGreaterThan(
+      -(CAMERA_BEHIND_METRES + GROUP_RIDE_CAMERA.backMetres / 4),
+    );
+    expect(quarter.eye.z).toBeLessThan(-CAMERA_BEHIND_METRES);
   });
 });

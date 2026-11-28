@@ -222,6 +222,32 @@ describe('the group-ride controls on the HUD — #3307', () => {
     }
   });
 
+  it('lights the button on the front and dashes its edge off it, its words AA either way — #3371', async () => {
+    const lit = `.oyl-hud__item .oyl-hud__pull-off:not([aria-disabled='true'])`;
+    const unlit = `.oyl-hud__item .oyl-hud__pull-off[aria-disabled='true']`;
+    // On the front: the HUD's own pair turned round, ink as the fill.
+    expect(declared(lit, 'background')).toEqual(['var(--oyl-color-hud-ink)']);
+    expect(declared(lit, 'color')).toEqual(['var(--oyl-color-hud-surface)']);
+    expect(declared(lit, 'border-color')).toEqual(['var(--oyl-color-hud-ink)']);
+    // Off it: a dashed edge, beside the muted ink on the surface the case above holds.
+    expect(declared(unlit, 'border-style')).toEqual(['dashed']);
+    expect(declared(unlit, 'background')).toEqual([]);
+    for (const theme of THEMES) {
+      const palette = paletteColours(theme);
+      expect(contrastRatio(palette.hudSurface, palette.hudInk)).toBeGreaterThanOrEqual(AA_TEXT);
+    }
+
+    // Both rules are the pull-off button's, in both states, and *Sit in* is not it.
+    for (const onFront of [true, false]) {
+      mounted = await mount(hud(onFront));
+      expect(named(PULL_OFF_BUTTON_LABEL)?.classList.contains('oyl-hud__pull-off')).toBe(true);
+      expect(named(SIT_IN_BUTTON_LABEL)?.classList.contains('oyl-hud__pull-off')).toBe(false);
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+      mounted.unmount();
+      mounted = undefined;
+    }
+  });
+
   it('wraps both in the item control’s own box, so the rules above are theirs', async () => {
     mounted = await mount(hud(false));
 

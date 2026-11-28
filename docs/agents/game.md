@@ -1073,7 +1073,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         only. A drawing only: nothing reads it back
                         (`line-drawing.test.ts`, every step of a scripted
                         rotation from `line-testing.ts`; the browser case
-                        is `lap-race.browser.spec.ts` §"#3304"). What
+                        is `lap-race.browser.spec.ts` §"#3304"). ⚠️ **The
+                        camera stands back and up** on a group ride
+                        (#3371: `camera.ts` §`GROUP_RIDE_CAMERA`, 8.5 m
+                        back and 3.5 m up, eased by `GameView` over 1.5 s
+                        and back at the finish), applied by `groupRidePose`
+                        to the pose's x/z, so every cull that stands the
+                        eye behind x/z sees it; the solo camera is
+                        untouched. What
                         the ride keeps goes through the port's
                         `groupRideStepped` to the controller's
                         `noteGroupRide` and is saved as

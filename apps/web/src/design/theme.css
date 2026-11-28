@@ -9138,6 +9138,24 @@ html:has(.oyl-open-world__go) {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #3371: a group ride's *Pull off left* says whether it can be used by more
+   than its ink. The owner's tablet check found the muted ink alone too close
+   to the ink to read at a glance on the bars. On the front it is LIT: the
+   HUD's ink as its fill and the surface as its words, the HUD's own pair
+   turned round (17.44:1, `GroupRideControls.a11y.test.tsx`), unlike any other
+   control on the panel and unlike *Sit in* pressed. Off the front it keeps the
+   surface and the muted ink, and its edge is dashed, a difference of shape
+   that survives forced colours and needs no colour vision. */
+.oyl-hud__item .oyl-hud__pull-off:not([aria-disabled='true']) {
+  background: var(--oyl-color-hud-ink);
+  color: var(--oyl-color-hud-surface);
+  border-color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__item .oyl-hud__pull-off[aria-disabled='true'] {
+  border-style: dashed;
+}
+
 /* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT: every way on from the next
    junction as a ride-time control at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own

@@ -500,6 +500,95 @@ export function turnedPose(
 }
 
 /**
+ * How far the chase camera stands further back and higher up on a group ride,
+ * in metres, and over how long it eases there and back — #3371: **4** back,
+ * **1.5** up, over **1.5 s**.
+ *
+ * So the eye is 8.5 m behind the rider and 3.5 m over the road, where a solo
+ * ride's is {@link CAMERA_BEHIND_METRES} and {@link CAMERA_ABOVE_METRES}. The
+ * owner's tablet check of the group ride (2026-11-27) found the single-file
+ * line hidden behind the rider's own back, nobody in view on the front, and
+ * after a pull-off the line passing out of shot with a bot clipped at the
+ * frame's edge. The reasons, in {@link roadAppearsOverRiderMetres}' terms:
+ *
+ * - **The line ahead.** The solo camera shows the road over the rider's helmet
+ *   only from about 15 m ahead of them, and the line's wheels are 2.4 m apart:
+ *   of the wheel in front only the helmet shows, and the fourth is hidden to
+ *   half a metre up. From this eye the road shows over the helmet from about
+ *   **7 m** ahead: the sight line is a metre up the wheel in front, under half
+ *   a metre up the next, and the third is in view to its tyres
+ *   (`camera.test.ts` §"#3371").
+ * - **The bots coming past.** After a pull-off the line passes a lane
+ *   (1.75 m) to the side. The frame's edge on the owner's 16 : 10 tablet is
+ *   1.12 m out per metre of depth, so the solo eye loses a bot once it is about
+ *   3 m behind the rider; this one keeps it in shot to about 7 m behind.
+ *
+ * ⚠️ **What it costs.** The rider is about half the share of the frame
+ * {@link MINIMUM_RIDER_FRAME_SHARE} holds a solo ride to — that bound is a solo
+ * ride's, and the group ride's purpose is the line. They are drawn inside the
+ * box {@link riderFrameBox} gives a solo ride, so no HUD panel the browser gate
+ * keeps off that box covers them (`camera.test.ts` holds it). Feel numbers, for
+ * the owner's tablet check, not measured optima.
+ *
+ * @see groupRidePose
+ */
+export const GROUP_RIDE_CAMERA = { backMetres: 4, upMetres: 1.5, easeSeconds: 1.5 } as const;
+
+/**
+ * How much of the way to the group ride's camera the chase camera is, nought to
+ * one, after `seconds` more of following `wanted` from `held` — #3371: at a
+ * steady rate, the whole way in {@link GROUP_RIDE_CAMERA}'s `easeSeconds`, so
+ * no frame rate changes it. `held` undefined is a ride's first frame, which
+ * takes `wanted`: a group ride starts with the camera already back.
+ */
+export function easedGroupRideShare(
+  held: number | undefined,
+  wanted: number,
+  seconds: number,
+): number {
+  if (held === undefined || !Number.isFinite(held)) return wanted;
+  const step = Math.max(0, Number.isFinite(seconds) ? seconds : 0) / GROUP_RIDE_CAMERA.easeSeconds;
+  return wanted > held ? Math.min(wanted, held + step) : Math.max(wanted, held - step);
+}
+
+/**
+ * `pose` with its eye moved back and up toward the group ride's camera by
+ * `share` of the way, eased in and out — #3371, @see GROUP_RIDE_CAMERA. At
+ * nought it is `pose` itself, so every ride that is not a group ride draws the
+ * camera it drew before.
+ *
+ * ⚠️ **It moves the pose's `x`/`z` back along its heading, and not only the
+ * eye.** Every cull in `three-renderer.ts` (`inView`, `treeCanBeSeen`), and
+ * `near-tree-fade.ts`, puts the eye {@link CAMERA_BEHIND_METRES} behind
+ * `x`/`z` along the heading, and {@link cameraRig} does too; so moved here, the
+ * eye they cull for is the eye that is drawn. The target is where it was:
+ * `targetAheadMetres` grows by what `x`/`z` moved.
+ *
+ * ⚠️ **The height rides `eyeRoadY`**, which `cameraRig` and `treeCanBeSeen`
+ * both stand the eye {@link CAMERA_ABOVE_METRES} over, so the two cannot
+ * disagree. It is the road the pose's eye stands over, carried back along the
+ * line from there to the target — the road's own slope, so on a steady grade
+ * it is the road under the moved eye and the gaze stays parallel to the road
+ * as {@link cameraRig} has it — plus the lift. Where the grade changes under
+ * the 4 m it is a few centimetres off that road; at the foot of a dip between
+ * two 10 % grades the eye is still 2.8 m over it, above a solo ride's 2 m.
+ */
+export function groupRidePose(pose: CameraPose, share: number): CameraPose {
+  const eased = smoothstep(share);
+  if (!(eased > 0)) return pose;
+  const back = GROUP_RIDE_CAMERA.backMetres * eased;
+  const slope =
+    (pose.targetRoadY - pose.eyeRoadY) / (CAMERA_BEHIND_METRES + pose.targetAheadMetres);
+  return {
+    ...pose,
+    x: pose.x - pose.headingX * back,
+    z: pose.z - pose.headingZ * back,
+    targetAheadMetres: pose.targetAheadMetres + back,
+    eyeRoadY: pose.eyeRoadY - slope * back + GROUP_RIDE_CAMERA.upMetres * eased,
+  };
+}
+
+/**
  * Over how much of the ride after a U-turn pressed in an open-world ride the
  * chase camera turns about the drawn rider, in metres — #3066: brought onto
  * them over the first **5**, held there to **45**, and handed back to the
