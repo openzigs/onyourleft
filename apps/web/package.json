@@ -15,6 +15,7 @@
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
     "basemap:compare": "node tools/basemap/run-compare.mjs",
     "circuits:author": "node tools/circuits/run-author.mjs",
+    "group-ride:harness": "node tools/group-ride-harness/run.mjs",
     "levels:author": "node tools/delivery-levels/run-author.mjs",
     "terrain:check": "node tools/terrain/run-check.mjs",
     "valhalla:graph": "bash tools/valhalla/build-graph.sh",

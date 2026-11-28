@@ -131,6 +131,26 @@ timings only between runs on one machine, and score the bots on the instance PC:
 answers a seven-bot call past the race's 8 s limit (the development Mac took 10.6 s on 2026-11-18)
 rides the seeded race and fails on late answers.
 
+⚠️ **Before any change to the AI group ride's rules, run the group-ride harness**
+([#3309](https://github.com/openzigs/onyourleft/issues/3309)), and again before the owner's tablet
+ride: `pnpm run group-ride:harness` from `apps/web` (`node tools/group-ride-harness/run.mjs`;
+`-- --rider <name>,… --course <name>,…` rides only those). "The rules" are everything the session
+rides: `packages/domain/src/group-ride/` (plan, rotation, no-drop, cues, step), the draft and the
+group physics, and `src/game/group-ride/ride-group.ts`. It rides seven scripted riders (`steady`,
+`surger`, `gap-opener`, `weak` at 60 %, `absent` for three minutes, `never-presses`, and the owner's
+`fixed-power` at 120 W) over three synthetic 6 km courses (flat, hilly, rolling) through the shipped
+session, one call of `stepGroupRideSession` per simulation step as `GameView` makes it, on one seed
+fixed in the harness. It prints a score table, numbers only (cohesion, rotations, cues a minute,
+corrections, time beyond the draft reach, the average made, and the four of the owner's note on the
+issue: the slip after a rejoin, cohesion at a crawl, `past-front` a minute, the group's speed swing),
+then each pass mark with its reason beside it, writes the scores, numbers and seeds only, under
+`tools/group-ride-harness/results/` (ignored by git), and **exits 1 below a pass mark**. It needs no
+model and no network, so **two runs write the same bytes**, and unlike the model harness **its marks
+are a CI gate**: `marks.flat.test.ts`, `marks.hilly.test.ts` and `marks.rolling.test.ts` ride every
+marked rider in `pnpm run test`. The marks and their reasons are in `tools/group-ride-harness/marks.ts`; a change that
+moves a mark on purpose moves it there, in the same pull request, with the reason. A stop on a climb
+is not ridden yet: #3405 and #3406 are what it found (`riders.ts` §`ABSENT_FROM_SECONDS`).
+
 From the layout tree of CLAUDE.md §2, under `apps/web/`:
 
 ```
