@@ -93,8 +93,9 @@ an FTMS Reset", is reading an old file. On the owner's trainer an acknowledged `
 (2026-09-21) — while also revoking control. The owner **accepted end-of-ride retention** on the
 condition, measured and met, that the app can take control again. So `TrainerControl.letGo()` in
 `packages/sensors/protocol` sends a **Stop** and keeps control, and every release goes through
-`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, and a game
-ride ending by button or by navigating away. What survives from #442 is structural: one release; it
+`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, a game
+ride ending by button or by navigating away, and (#3404) a game-ride frame that throws with no
+optional mode left to end (`game/ride-fault.ts`; `ride-loop-fault.test.tsx`). What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
 ⚠️ **Since [#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout writes the
