@@ -10,9 +10,10 @@
  * - on, with the two controls;
  * - refused, where the reason is an alert **and** travels with the speed box
  *   and with *Ride* (`aria-describedby`, #255's rule);
- * - **not offered**, with a workout holding the trainer at a set power or the
- *   draft switched off: the switch is disabled and **its accessible
- *   description is the reason**, so a rider who reaches it hears why.
+ * - **not offered**, with a workout holding the trainer at a set power, the
+ *   draft switched off, or a loop chosen (#3369): the switch is disabled and
+ *   **its accessible description is the reason**, so a rider who reaches it
+ *   hears why.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,7 +30,7 @@ import {
   type Mounted,
 } from '../../testing/mount';
 import { GameView, type GamePort, type RidableRoute } from '../GameView';
-import { northRoute } from '../route-fixtures-testing';
+import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import { SOLO_DRAFT_STORAGE_KEY } from '../solo-draft-preference';
 import { NO_GAME_TRAINER, type GameTrainerPort } from '../trainer-port';
 
@@ -42,15 +43,23 @@ const ROUTE: RidableRoute = {
   attempts: 0,
 };
 
-const port: GamePort = {
-  listRoutes: () => Promise.resolve([ROUTE]),
+/** A loop of the rider's own, on which a group ride is not offered yet (#3369). */
+const LOOP: RidableRoute = {
+  id: 'loop',
+  name: 'Loop',
+  profile: circuitRoute(40, () => 0),
+  attempts: 0,
+};
+
+const portFor = (route: RidableRoute): GamePort => ({
+  listRoutes: () => Promise.resolve([route]),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
     rider: { power: watts(0), live: false, paired: false },
     cadence: { value: undefined, live: false, paired: false },
     heartRate: { value: undefined, live: false, paired: false },
   }),
-};
+});
 
 /** The game's port to the ride, with a workout holding the trainer or with none. */
 function trainer(workout: boolean): GameTrainerPort {
@@ -73,11 +82,11 @@ afterEach(() => {
   localStorage.clear();
 });
 
-async function picker(workout = false): Promise<Mounted> {
+async function picker(workout = false, route: RidableRoute = ROUTE): Promise<Mounted> {
   const tree = await mount(
     <main>
       <h1>Trainer game</h1>
-      <GameView port={port} trainer={trainer(workout)} />
+      <GameView port={portFor(route)} trainer={trainer(workout)} />
     </main>,
   );
   await settle();
@@ -195,6 +204,21 @@ describe('the group ride on the picker — #3303', () => {
     const control = groupSwitch(mounted.container);
     expect(control.disabled).toBe(true);
     expect(description(control)).toBe(GROUP_RIDE_UNAVAILABLE_TEXT['draft-off']);
+    expectClean();
+  });
+
+  it('on a loop, is unavailable and described by that reason, and audits clean', async () => {
+    localStorage.setItem(
+      GROUP_RIDE_STORAGE_KEY,
+      JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
+    );
+    mounted = await picker(false, LOOP);
+    const control = groupSwitch(mounted.container);
+    expect(control.disabled).toBe(true);
+    expect(control.checked).toBe(false);
+    expect(description(control)).toBe(GROUP_RIDE_UNAVAILABLE_TEXT.loop);
+    expect(labelled(mounted.container, 'Group average speed, km/h')).toBeUndefined();
+    expect(description(rideButton(mounted.container))).not.toContain('group');
     expectClean();
   });
 });

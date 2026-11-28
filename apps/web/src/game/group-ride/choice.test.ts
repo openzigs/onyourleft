@@ -104,11 +104,15 @@ describe('the speed box', () => {
 });
 
 describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
-  it('a workout holding the trainer, first, then the draft switched off', () => {
-    expect(groupRideUnavailable(false, true)).toBeUndefined();
-    expect(groupRideUnavailable(true, true)).toBe('workout');
-    expect(groupRideUnavailable(false, false)).toBe('draft-off');
-    expect(groupRideUnavailable(true, false)).toBe('workout');
+  it('a workout holding the trainer, first, then the draft switched off, then a loop', () => {
+    expect(groupRideUnavailable(false, true, false)).toBeUndefined();
+    expect(groupRideUnavailable(true, true, false)).toBe('workout');
+    expect(groupRideUnavailable(false, false, false)).toBe('draft-off');
+    expect(groupRideUnavailable(true, false, false)).toBe('workout');
+    // The review of PR #3364: the plan is one pass of the route, so not on a loop (#3369).
+    expect(groupRideUnavailable(false, true, true)).toBe('loop');
+    expect(groupRideUnavailable(false, false, true)).toBe('draft-off');
+    expect(groupRideUnavailable(true, true, true)).toBe('workout');
   });
 
   it('has one sentence for each reason, naming no place and no number', () => {
@@ -118,6 +122,7 @@ describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
     }
     expect(GROUP_RIDE_UNAVAILABLE_TEXT.workout).toContain('workout');
     expect(GROUP_RIDE_UNAVAILABLE_TEXT['draft-off']).toContain('draft');
+    expect(GROUP_RIDE_UNAVAILABLE_TEXT.loop).toContain('loop');
   });
 });
 

@@ -57,6 +57,7 @@ async function behindTheStore<T>(
 const FACT: GroupRideFact = {
   version: 1,
   seed: 4_021_337,
+  startedAt: 2.5,
   targetSpeed: 30 / 3.6,
   bots: 5,
   log: [
@@ -78,6 +79,11 @@ const BAD: readonly unknown[] = [
   { ...FACT, version: 1.5 },
   { ...FACT, seed: -1 },
   { ...FACT, seed: 'seven' },
+  // The review of PR #3364: a fact with no start offset cannot be lined up with its recording.
+  Object.fromEntries(Object.entries(FACT).filter(([key]) => key !== 'startedAt')),
+  { ...FACT, startedAt: Number.NaN },
+  { ...FACT, startedAt: Number.POSITIVE_INFINITY },
+  { ...FACT, startedAt: '2.5' },
   { ...FACT, targetSpeed: 0 },
   { ...FACT, targetSpeed: Number.NaN },
   { ...FACT, bots: 0 },
@@ -114,6 +120,19 @@ describe('the group ride kept with its ride — #3303', () => {
     expect(read.theirs).toBeUndefined();
     // The history's "Drafted" mark reads this, for a group ride as for any other.
     expect(read.listed.find((each) => each.id === ride.id)?.rideFacts?.drafted).toBe(true);
+  });
+
+  it('keeps where the group began on the recording, below nought too — the review of PR #3364', async () => {
+    const open = await opened();
+    // A recording begun 40 s into the group ride: its log begins before the recording does.
+    const late: GroupRideFact = { ...FACT, startedAt: -40.25 };
+    const ride = rideFor(ATHLETE_A, { rideFacts: { groupRide: late } });
+    const read = await open.roundTrip(
+      async (store) => store.putActivity(ride),
+      async (store) => store.getActivity(ATHLETE_A, ride.id),
+    );
+    expect(read?.rideFacts?.groupRide?.startedAt).toBe(-40.25);
+    expect(read?.rideFacts?.groupRide).toStrictEqual(late);
   });
 
   it('keeps a log that was cut short, and says so', async () => {

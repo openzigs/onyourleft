@@ -218,6 +218,7 @@ export interface PersistedRideFacts {
   groupRide?: {
     version: unknown;
     seed: unknown;
+    startedAt: unknown;
     targetSpeed: unknown;
     bots: unknown;
     log: unknown[];
@@ -739,6 +740,7 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
     row.groupRide = {
       version: group.version,
       seed: group.seed,
+      startedAt: group.startedAt,
       targetSpeed: group.targetSpeed,
       bots: group.bots,
       log: group.log.map(({ at, phase, role, groupSpeed }) => ({ at, phase, role, groupSpeed })),
@@ -880,9 +882,10 @@ export function lapRacesOf(value: unknown): readonly LapRaceModelRecord[] | unde
  */
 export function groupRideOf(value: unknown): GroupRideFact | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { version, seed, targetSpeed, bots, log, logCut } = value as {
+  const { version, seed, startedAt, targetSpeed, bots, log, logCut } = value as {
     version?: unknown;
     seed?: unknown;
+    startedAt?: unknown;
     targetSpeed?: unknown;
     bots?: unknown;
     log?: unknown;
@@ -891,6 +894,8 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1)
     return undefined;
   if (typeof seed !== 'number' || !Number.isSafeInteger(seed) || seed < 0) return undefined;
+  // Any sign: below nought for a recording begun part-way through the group ride.
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return undefined;
   if (typeof targetSpeed !== 'number' || !Number.isFinite(targetSpeed) || !(targetSpeed > 0))
     return undefined;
   // A line holds the rider and its bots.
@@ -922,6 +927,7 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
   return {
     version,
     seed,
+    startedAt,
     targetSpeed,
     bots,
     log: read,

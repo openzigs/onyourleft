@@ -699,6 +699,7 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     const fact = {
       version: 1,
       seed: 5,
+      startedAt: 0,
       targetSpeed: 8,
       bots: 5,
       log: [{ at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 }],

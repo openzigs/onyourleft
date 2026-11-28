@@ -47,6 +47,7 @@ const SAMPLES = 600;
 const FACT: GroupRideFact = {
   version: 1,
   seed: 20_261_127,
+  startedAt: 0,
   targetSpeed: 30 / 3.6,
   bots: 5,
   log: [

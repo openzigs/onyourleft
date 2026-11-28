@@ -24,7 +24,7 @@ import { riderMassFor } from '../../athlete/mass';
 import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from '../lap-race/pack-layout';
 import { rideConditionsFor } from '../rider';
 import { seededRiderBody } from '../rider-body';
-import { northRoute } from '../route-fixtures-testing';
+import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import { GameSimulation, SIMULATION_STEP_SECONDS } from '../simulation';
 
 import { groupRidePlan } from './choice';
@@ -35,6 +35,8 @@ import {
   groupLine,
   groupRideDrawing,
   groupRideFact,
+  groupRideFinished,
+  groupRideTimed,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
@@ -306,11 +308,15 @@ describe('where the group is drawn', () => {
 
 describe('what the ride keeps of its group', () => {
   it('is the seed, the average, the size, the rules’ version and the log so far', () => {
-    const end = last(ride(started({ seed: 4242, bots: 4 }), 60, 120).frames);
+    const ridden = last(ride(started({ seed: 4242, bots: 4 }), 60, 120).frames);
+    // A recording begun at the press, read as the group's own clock reads.
+    const end = groupRideTimed(ridden, ridden.state.atMs / 1_000);
     const fact = groupRideFact(end);
+    if (fact === undefined) throw new Error('a timed group ride keeps a fact');
     expect(fact).toStrictEqual({
       version: GROUP_RIDE_CODE_VERSION,
       seed: 4242,
+      startedAt: 0,
       targetSpeed: THIRTY,
       bots: 4,
       log: end.log,
@@ -339,7 +345,49 @@ describe('what the ride keeps of its group', () => {
     const end = last(ride(full, 30, 120).frames);
     expect(end.log).toHaveLength(GROUP_RIDE_LOG_MOST);
     expect(end.logCut).toBe(true);
-    expect(groupRideFact(end).logCut).toBe(true);
-    expect(groupRideFact(session)).not.toHaveProperty('logCut');
+    expect(groupRideFact(groupRideTimed(end, 30))?.logCut).toBe(true);
+    expect(groupRideFact(groupRideTimed(session, 0))).not.toHaveProperty('logCut');
+  });
+});
+
+describe('where the group began on the recording — the review of PR #3364', () => {
+  it('keeps nothing until a recording is read: there is nothing to keep it with', () => {
+    const end = last(ride(started(), 10, 120).frames);
+    expect(end.startedAt).toBeUndefined();
+    expect(groupRideFact(end)).toBeUndefined();
+    expect(groupRideTimed(end, undefined)).toBe(end);
+  });
+
+  it('is the recording’s seconds when the group’s clock read nought, fixed once read', () => {
+    // A recording begun 25 s after the press: 25 s less on its clock than on the group's.
+    const end = last(ride(started(), 30, 120).frames);
+    expect(end.state.atMs).toBeGreaterThan(25_000);
+    const timed = groupRideTimed(end, end.state.atMs / 1_000 - 25);
+    expect(timed.startedAt).toBeCloseTo(-25, 9);
+    expect(groupRideFact(timed)?.startedAt).toBeCloseTo(-25, 9);
+    // Read again later, on a recording clock that ran on: never moved.
+    const later = groupRideTimed(last(ride(timed, 10, 120).frames), 99);
+    expect(later.startedAt).toBe(timed.startedAt);
+  });
+});
+
+describe('the group ride ends at the finish — the review of PR #3364', () => {
+  it('on a route with a finish, once the rider reaches it, and not before', () => {
+    const short = northRoute(300, () => 0);
+    const { frames } = ride(started({ profile: short }), 60, 250);
+    const ends = frames.findIndex(groupRideFinished);
+    expect(ends).toBeGreaterThan(0);
+    expect(frames[ends]?.rider.distanceM).toBeGreaterThanOrEqual(short.totalDistance);
+    expect(frames[ends - 1]?.rider.distanceM).toBeLessThan(short.totalDistance);
+  });
+
+  it('never on a loop, which has no finish', () => {
+    const loop = circuitRoute(40, () => 0);
+    const session = started({ profile: loop });
+    const past: GroupRideSession = {
+      ...session,
+      rider: { distanceM: 3 * loop.totalDistance, speedMps: 8 },
+    };
+    expect(groupRideFinished(past)).toBe(false);
   });
 });

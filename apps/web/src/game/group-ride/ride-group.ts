@@ -60,10 +60,18 @@
  * ## What the ride keeps
  *
  * {@link groupRideFact}: the seed, the average chosen, the size, the rules'
- * version and a log with an entry each time the line's phase or the rider's
- * role changed, each with the group's speed then (`@onyourleft/store`
- * §`GroupRideFact`). Numbers and words from closed lists: no place, no
- * coordinate, no text.
+ * version, where the group's clock begins on the recording's
+ * ({@link groupRideTimed}), and a log with an entry each time the line's
+ * phase or the rider's role changed, each with the group's speed then
+ * (`@onyourleft/store` §`GroupRideFact`). Numbers and words from closed
+ * lists: no place, no coordinate, no text.
+ *
+ * ## The group ride ends at the finish
+ *
+ * The plan is one pass of the route ({@link groupRideFinished}): on a route
+ * with a finish, the group ride ends when the rider reaches it, and a rider
+ * who answers *Keep riding* rides on alone. A loop is not offered a group
+ * (`choice.ts` §`groupRideUnavailable`; laps are #3369's).
  *
  * ## Nothing here reaches a trainer
  *
@@ -187,6 +195,11 @@ export interface GroupRideSession {
   readonly log: readonly GroupRideLogEntry[];
   /** Whether a change was left out of {@link log} because it was full. */
   readonly logCut: boolean;
+  /**
+   * The recording's elapsed seconds when the group's clock read nought, or
+   * `undefined` until a recording has been read. @see groupRideTimed
+   */
+  readonly startedAt: number | undefined;
 }
 
 /** What {@link startGroupRideSession} reads. */
@@ -266,7 +279,40 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     pack: gridPackLayout(packField({ botIds }, state, rider), GROUP_RIDE_RIDER_ID),
     log: [{ at: 0, phase, role, groupSpeed: groupSpeedMps }],
     logCut: false,
+    startedAt: undefined,
   };
+}
+
+/**
+ * The session with where its clock begins on the recording's — the review of
+ * PR #3364: the log's `at` is the group's own seconds from the press, and
+ * this ties them to the recording's timeline, pauses included on both, so
+ * the debrief (#3310) can line the log up with the samples. Fixed from the
+ * first frame a recording's elapsed time is read and never moved after, to
+ * within the recording's own tick. Usually about nought, as the recording
+ * starts at the press; less than nought for a recording begun part-way
+ * through the ride.
+ *
+ * @param recordingElapsedSeconds - the recording's elapsed time now
+ *   (`trainer-port.ts` §`rideElapsedSeconds`), or `undefined` with none.
+ */
+export function groupRideTimed(
+  session: GroupRideSession,
+  recordingElapsedSeconds: number | undefined,
+): GroupRideSession {
+  if (session.startedAt !== undefined || recordingElapsedSeconds === undefined) return session;
+  return { ...session, startedAt: recordingElapsedSeconds - session.state.atMs / 1_000 };
+}
+
+/**
+ * Whether the rider has reached the finish of the route the group rides —
+ * the review of PR #3364: the plan is one pass of the route, and past its
+ * end it would read the last cell for ever, so the group ride ends there.
+ * Never on a loop, which has no finish (and is offered no group).
+ */
+export function groupRideFinished(session: GroupRideSession): boolean {
+  const { course } = session.road;
+  return !course.loop && session.rider.distanceM >= course.totalDistance;
 }
 
 /** One frame's steps of the group. */
@@ -409,11 +455,17 @@ export function groupRideDrawing(
   };
 }
 
-/** What the ride keeps of its group: `@onyourleft/store` §`RideFacts.groupRide`. */
-export function groupRideFact(session: GroupRideSession): GroupRideFact {
+/**
+ * What the ride keeps of its group: `@onyourleft/store` §`RideFacts.groupRide`.
+ * `undefined` until the session is tied to a recording ({@link groupRideTimed}):
+ * a group with no recording under it has nothing to be kept with.
+ */
+export function groupRideFact(session: GroupRideSession): GroupRideFact | undefined {
+  if (session.startedAt === undefined) return undefined;
   return {
     version: GROUP_RIDE_CODE_VERSION,
     seed: session.seed,
+    startedAt: session.startedAt,
     targetSpeed: session.choice.targetSpeed,
     bots: session.choice.bots,
     log: session.log,

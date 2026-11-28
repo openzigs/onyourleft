@@ -1033,8 +1033,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the race and the round switch each other off). Not
                         offered on a circuit, a level or the open world, and
                         **unavailable, with the reason as the switch's
-                        description**, while a workout holds the trainer or
-                        the draft is switched off. A target the plan refuses
+                        description**, while a workout holds the trainer,
+                        the draft is switched off, or the route is a loop
+                        (the plan is one pass; laps are #3369). It ends at
+                        a finish: past it, *Keep riding* rides alone. A
+                        target the plan refuses
                         on the chosen route blocks *Ride* with the most (or
                         least) the group can average there. Solo only, never
                         beside a race or a round. Started at the press (the
@@ -1060,7 +1063,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `groupRideStepped` to the controller's
                         `noteGroupRide` and is saved as
                         `RideFacts.groupRide` (seed, average, size, rules'
-                        version, a log of phase and role changes).
+                        version, `startedAt` on the recording's clock, a
+                        log of phase and role changes); no fact is handed
+                        until a recording's elapsed time has been read.
                         `group-ride-wiring.test.tsx` drives the real picker
                         and reads the simulation's own draft factor, the
                         frame's bots and what the recording is handed. ⚠️

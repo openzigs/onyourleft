@@ -381,6 +381,8 @@ import {
 import {
   groupRideDrawing,
   groupRideFact,
+  groupRideFinished,
+  groupRideTimed,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
@@ -4999,15 +5001,22 @@ function GameScreen({
           },
           riderStopped: !sensors.rider.live || trainerPortRef.current?.recordingPaused?.() === true,
         });
-        groupRideRef.current = ridden;
+        // Tied to the recording's timeline from the first frame one is read.
+        const timed = groupRideTimed(ridden, trainerPortRef.current?.rideElapsedSeconds?.());
+        // The review of PR #3364: the group ride ends at the finish of a
+        // route with one, as the plan does. *Keep riding* rides on alone.
+        const finished = groupRideFinished(timed);
+        groupRideRef.current = finished ? undefined : timed;
         // D-3.2: the rider's draft from the line, ridden from the next step
         // on as a race's is: a multiplier on the rider's drag in the
         // simulation and nothing else. After the grade above was sampled, so
-        // this frame's write never sees it.
-        simulation.draftWith(ridden.riderDraft);
+        // this frame's write never sees it. `1` once the group ride ended.
+        simulation.draftWith(finished ? 1 : timed.riderDraft);
         // What the ride keeps of its group, to the recording under it: every
-        // frame, so a recording begun part-way through the ride has it too.
-        trainerPortRef.current?.groupRideStepped?.(groupRideFact(ridden));
+        // frame, so a recording begun part-way through the ride has it too,
+        // the frame it ended at the finish included.
+        const fact = groupRideFact(timed);
+        if (fact !== undefined) trainerPortRef.current?.groupRideStepped?.(fact);
       }
       // #1911: a room's lap race, on the same steps and after the same grade:
       // the rider's inputs sent, what the room's newest frame covers dropped,
@@ -5851,6 +5860,7 @@ function GameScreen({
             groupRideUnavailable(
               trainerNow?.kind === 'workout',
               readSoloDraftChoice(deviceStorage()),
+              groupCourse?.loop === true,
             ),
           )}
           // #1907: a lap race, offered on a loop; the assisted setting read

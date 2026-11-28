@@ -86,11 +86,19 @@ const ROUTE: RidableRoute = {
   attempts: 0,
 };
 
-/** A loop of about 250 m of the rider's own, where a lap race is offered too. */
+/** A loop of about 250 m of the rider's own, where a lap race is offered and a group is not (#3369). */
 const LOOP: RidableRoute = {
   id: 'route-loop',
   name: 'Loop',
   profile: circuitRoute(40, () => 0),
+  attempts: 0,
+};
+
+/** A short level road with a finish, reached inside a minute: where the group ride ends. */
+const SHORT: RidableRoute = {
+  id: 'route-short',
+  name: 'Short',
+  profile: northRoute(300, () => 0),
   attempts: 0,
 };
 
@@ -147,6 +155,8 @@ function ridePort(
     },
     ...(options.autoPaused === undefined ? {} : { recordingPaused: options.autoPaused }),
     rideMovingSeconds: () => undefined,
+    // A recording begun at the press, as a game ride's is: the group's clock is tied to it.
+    rideElapsedSeconds: () => 0,
     watchRide: () => () => undefined,
   };
 }
@@ -318,6 +328,9 @@ describe('a group ride started from Your ride puts the group in the ride — #33
     expect(fact?.bots).toBe(5);
     expect(fact?.targetSpeed).toBeCloseTo(30 / 3.6, 9);
     expect(Number.isSafeInteger(fact?.seed)).toBe(true);
+    // Tied to the recording's timeline, which began at the press (the review of PR #3364).
+    expect(fact?.startedAt).toBeLessThanOrEqual(0);
+    expect(fact?.startedAt).toBeGreaterThan(-1);
     expect(fact?.log[0]).toMatchObject({ at: 0, phase: 'forming' });
     expect(fact?.log.some((entry) => entry.phase === 'steady')).toBe(true);
     // And the draft that marks the saved ride as drafted (ADR 0101 Q14).
@@ -443,11 +456,6 @@ describe('one mode a ride', () => {
     await expectEitherOr('Ride against a pacer');
   });
 
-  it('a lap race or the group, on a loop', async () => {
-    await open({ route: LOOP });
-    await expectEitherOr('Ride a lap race');
-  });
-
   it('a Delivery round or the group, in the realistic world', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await open();
@@ -457,9 +465,12 @@ describe('one mode a ride', () => {
   it('a course opened for a game starts with the group off, and forgets nothing', async () => {
     const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
     localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
-    globalThis.location.hash = '#/game?play=lap-race';
-    await open({ route: LOOP });
-    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    // A Delivery round, on a road the group is offered on: a loop is offered none (#3369).
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    globalThis.location.hash = '#/game?play=delivery';
+    await open();
+    expect(toggle('Ride a Delivery round')?.checked).toBe(true);
+    expect(groupSwitch()?.disabled).toBe(false);
     expect(groupSwitch()?.checked).toBe(false);
     expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
   });
@@ -517,6 +528,26 @@ describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
     expect(facts).toStrictEqual([]);
   });
 
+  it('a loop: the same, with its own sentence, because the plan is one pass (#3369)', async () => {
+    localStorage.setItem(
+      GROUP_RIDE_STORAGE_KEY,
+      JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
+    );
+    await open({ route: LOOP, port: ridePort() });
+    expect(groupSwitch()?.disabled).toBe(true);
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(speedBox()).toBeUndefined();
+    expect(root().textContent).toContain(GROUP_RIDE_UNAVAILABLE_TEXT.loop);
+    // The lap race is still offered on a loop, and is not switched off by the group.
+    expect(toggle('Ride a lap race')?.disabled).toBe(false);
+    await clickThrough(rideButton());
+    const factors = await frames(40);
+    expect(factors.length).toBeGreaterThan(0);
+    expect(new Set(factors)).toStrictEqual(new Set([1]));
+    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
+    expect(facts).toStrictEqual([]);
+  });
+
   it('the draft switched off on this device: the same, with its own sentence', async () => {
     localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'off');
     localStorage.setItem(
@@ -530,6 +561,31 @@ describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
     await frames(20);
     expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
     expect(facts).toStrictEqual([]);
+  });
+});
+
+describe('the group ride ends at the finish — the review of PR #3364', () => {
+  it('rides in the line to the finish, and on alone past it: no draft, no bots, nothing more kept', async () => {
+    const factors = await ride({ group: true, route: SHORT, port: ridePort() }, 240);
+    const distances = seen.frames.map((frame) => frame.state.ride.distance);
+    const finish = SHORT.profile.totalDistance;
+    expect(distances.at(-1)).toBeGreaterThan(finish + 30);
+    // The finish question is asked, and the ride runs on under it (*Keep riding*).
+    expect(root().textContent).toContain('End ride');
+    // In the line before the finish.
+    const before = distances.findIndex((distance) => distance >= finish);
+    expect(before).toBeGreaterThan(0);
+    expect(Math.min(...factors.slice(0, before))).toBeLessThan(0.7);
+    expect(seen.frames[before - 1]?.raceBots).toHaveLength(5);
+    // Alone a frame after it, and from then on.
+    const after = before + 2;
+    expect(new Set(factors.slice(after))).toStrictEqual(new Set([1]));
+    expect(seen.frames.slice(after).every((frame) => frame.raceBots === undefined)).toBe(true);
+    // The fact the recording keeps is the one the group ended with.
+    const kept = facts.length;
+    expect(kept).toBeGreaterThan(0);
+    await frames(20);
+    expect(facts).toHaveLength(kept);
   });
 });
 

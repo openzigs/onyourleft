@@ -10836,7 +10836,14 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');
     const first = { at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 } as const;
-    const fact = { version: 1, seed: 99, targetSpeed: 30 / 3.6, bots: 5, log: [first] };
+    const fact = {
+      version: 1,
+      seed: 99,
+      startedAt: 0,
+      targetSpeed: 30 / 3.6,
+      bots: 5,
+      log: [first],
+    };
     // A group stepped before the recording began is not kept.
     rig.controller.noteGroupRide({ ...fact, seed: 1 });
     await rig.controller.start();

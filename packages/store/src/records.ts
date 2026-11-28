@@ -689,7 +689,7 @@ export const GROUP_RIDE_LOG_MOST = 5_000;
  * and numbers, and no text.
  */
 export interface GroupRideLogEntry {
-  /** Seconds of the group ride ridden when this began, from nought. */
+  /** Seconds of the group ride ridden when this began, from nought: @see GroupRideFact.startedAt */
   readonly at: number;
   /** The line's phase (`@onyourleft/domain` §`LINE_PHASES`). */
   readonly phase: LinePhase;
@@ -709,6 +709,13 @@ export interface GroupRideFact {
   readonly version: number;
   /** The line's seed: every draw the line made came from it. */
   readonly seed: number;
+  /**
+   * The recording's elapsed seconds, pauses included, when the group's clock
+   * read nought: a log entry's `at` plus this is where it falls on the saved
+   * ride's timeline. About nought when the recording began at the press, and
+   * less than nought when it began part-way through the group ride.
+   */
+  readonly startedAt: number;
   /** The average speed the rider chose for the whole ride, metres a second (ADR 0101 D-2.1). */
   readonly targetSpeed: number;
   /** How many bots rode in the line beside the rider. */
