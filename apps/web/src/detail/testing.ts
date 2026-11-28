@@ -18,7 +18,13 @@
 
 import { act } from 'react';
 
-import { metres, seconds, unixSeconds } from '@onyourleft/domain';
+import {
+  kilometresPerHour,
+  kilometresPerHourToMetresPerSecond,
+  metres,
+  seconds,
+  unixSeconds,
+} from '@onyourleft/domain';
 import {
   activityId as toActivityId,
   DEFAULT_VISIBILITY,
@@ -304,7 +310,7 @@ export const GROUP_RIDE_WAITED: GroupRideFact = {
   seed: 3_310,
   startedAt: 0,
   ridden: 600,
-  targetSpeed: 30 / 3.6,
+  targetSpeed: kilometresPerHourToMetresPerSecond(kilometresPerHour(30)),
   bots: 5,
   log: [
     { at: 0, phase: 'forming', role: 'last-wheel', groupSpeed: 0 },
