@@ -188,6 +188,34 @@ read = "2026-09-16"
 sha256 = "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
 
 [[asset]]
+path = "apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png"
+source = "@capacitor/cli 8.5.2 iOS template (ios-spm-template), written verbatim by `npx cap add ios` (#1756) — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-11-28"
+sha256 = "29e4777e319de3ee5a52c3a8004ec19d0568414004257e36d7c94a077d71c93b"
+
+[[asset]]
+path = "apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732.png"
+source = "@capacitor/cli 8.5.2 iOS template (ios-spm-template), written verbatim by `npx cap add ios` (#1756) — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-11-28"
+sha256 = "1b5002b74a5500e697298ced06ca2811ac33f2771f236f3c720ff23243890530"
+
+[[asset]]
+path = "apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732-1.png"
+source = "@capacitor/cli 8.5.2 iOS template (ios-spm-template), written verbatim by `npx cap add ios` (#1756) — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-11-28"
+sha256 = "1b5002b74a5500e697298ced06ca2811ac33f2771f236f3c720ff23243890530"
+
+[[asset]]
+path = "apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732-2.png"
+source = "@capacitor/cli 8.5.2 iOS template (ios-spm-template), written verbatim by `npx cap add ios` (#1756) — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-11-28"
+sha256 = "1b5002b74a5500e697298ced06ca2811ac33f2771f236f3c720ff23243890530"
+
+[[asset]]
 path = "apps/web/src/game/models/building-type-h.glb"
 source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, downloaded as kenney_city-kit-suburban_20.zip and extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
 licence = "CC0-1.0"

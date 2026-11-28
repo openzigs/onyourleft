@@ -12,6 +12,11 @@ Claude Code loads this file whenever a session works on files under `apps/mobile
 - The shell wraps `apps/web`'s build: client code written here is never copied into the APK. The
   trainer game and HUD live in `apps/web/src/game/` ([`docs/agents/game.md`](../../docs/agents/game.md) §4h).
 - CI builds no Android. Do not claim an Android behaviour works until a validation part is filled in.
+- CI DOES build iOS (#1756): the `ios` shard of `rules.yml` builds `ios/` unsigned on `macos-latest`,
+  reads the built `Info.plist` and launches the app in a simulator (`tools/ios-ci.mjs`). A
+  simulator is not a device: an iOS behaviour is proved only on one. Nothing that identifies the
+  Apple team (team ID, profile, certificate) is committed; local signing reads the team from the
+  developer's own Xcode.
 
 ## Read before working here
 
@@ -23,5 +28,5 @@ Claude Code loads this file whenever a session works on files under `apps/mobile
 ## The Capacitor trees that are pruned, not exempted
 
 `cap sync` writes three trees that are pruned from every rule rather than listed in `.spdx-exempt`,
-and `.prettierignore` names them too. Which three, and why an exemption naming one would fail, is
+and `.prettierignore` names them too; `cap sync ios` writes their three iOS counterparts (#1756). Which three, and why an exemption naming one would fail, is
 [`docs/agents/licence-boundary.md`](../../docs/agents/licence-boundary.md) §3a.

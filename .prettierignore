@@ -47,6 +47,17 @@ apps/mobile/android/app/src/main/assets/capacitor.config.json
 apps/mobile/android/app/src/main/assets/capacitor.plugins.json
 apps/mobile/android/app/src/main/res/xml/config.xml
 apps/mobile/android/capacitor-cordova-android-plugins/
+# #1756: the iOS counterparts `cap sync ios` writes, which Capacitor's own
+# `apps/mobile/ios/.gitignore` keeps out of the repository: the copied web
+# build, the two generated config files, and the Cordova plugin tree.
+apps/mobile/ios/App/App/public/
+apps/mobile/ios/App/App/capacitor.config.json
+apps/mobile/ios/App/App/config.xml
+apps/mobile/ios/capacitor-cordova-ios-plugins/
+# And the asset catalogue's `Contents.json` files, which ARE committed: Xcode
+# writes them in its own layout and rewrites them on every edit to an icon or
+# an image set, so a Prettier layout would last until the next one (#1759).
+apps/mobile/ios/App/App/Assets.xcassets/
 
 # The instance's API specification (#36), GENERATED from its route table by
 # `pnpm --filter @onyourleft/instance run openapi:generate` and compared BYTE

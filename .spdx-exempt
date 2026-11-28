@@ -48,3 +48,17 @@ apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
 apps/mobile/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 apps/mobile/android/app/src/main/res/layout/activity_main.xml
 apps/mobile/android/app/src/main/res/xml/file_paths.xml
+
+# --- iOS: the Swift `cap add ios` wrote (#1756) -------------------------------
+#
+# `@capacitor/cli` 8.5.2's MIT iOS template, verbatim: the app and scene
+# delegates, and the local Swift package that hosts the plugins. Package.swift
+# carries Capacitor's own "DO NOT MODIFY THIS FILE" banner and is rewritten by
+# every `cap sync ios`; its first line must be `swift-tools-version`, so it
+# could not hold a header on line 1 in any case. Info.plist and the Xcode
+# project are ours to maintain (they name this application and its keys) but
+# carry no extension the header rules scan.
+apps/mobile/ios/App/App/AppDelegate.swift
+apps/mobile/ios/App/App/SceneDelegate.swift
+apps/mobile/ios/App/CapApp-SPM/Package.swift
+apps/mobile/ios/App/CapApp-SPM/Sources/CapApp-SPM/CapApp-SPM.swift

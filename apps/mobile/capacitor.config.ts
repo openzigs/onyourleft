@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Capacitor configuration for the Android shell (#87).
+ * Capacitor configuration for the Android shell (#87) and, since #1756, the
+ * iOS one.
  *
  * ⚠️ `webDir` points at `apps/web`'s build output rather than at anything this
  * package produces. That is #85's whole premise — the mobile shell wraps *the
@@ -32,6 +33,18 @@ const config = {
     // owner's 2026-09-26 ruling keeps it on everywhere else. The manifest's
     // `usesCleartextTraffic` says what that costs and what limits it.
     allowMixedContent: false,
+  },
+  ios: {
+    // #1756: the Xcode scheme `cap run ios` and `cap open ios` build, and the
+    // one the `ios` job of `.github/workflows/rules.yml` names to
+    // `xcodebuild -scheme`. 'App' is Capacitor's default, written down for
+    // the reason `allowMixedContent` is above: CI builds this scheme, and
+    // `apps/mobile/tools/ios-ci.test.mjs` holds the two to one name.
+    //
+    // ⚠️ Nothing else is set here yet. The page's origin (`server.iosScheme`,
+    // `capacitor://localhost` by default) is spike S2's question and #1772's
+    // decision, and the content mode on iPad is #1768's.
+    scheme: 'App',
   },
   plugins: {
     // #2050: the launch splash is held until the page has painted, so a rider

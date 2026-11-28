@@ -15,10 +15,11 @@ is the fonts this app's source repository commits and the app serves.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-Part 1 — in the app (75 packages)
+Part 1 — in the app (76 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
   @capacitor/core 8.5.3 — MIT
+  @capacitor/ios 8.5.3 — MIT
   @capacitor/splash-screen 8.0.2 — MIT
   @mapbox/jsonlint-lines-primitives 2.0.3 — MIT
   @mapbox/point-geometry 1.1.0 — ISC

@@ -1,4 +1,4 @@
-# The Android shell
+# The mobile shell: Android, and iOS since #1756
 
 Part of the agent instructions. The root [`CLAUDE.md`](../../CLAUDE.md) is the index; this file
 carries the `apps/mobile` part of the §2 layout tree, moved out of it verbatim on 2026-10-05 so that it is read when it is needed
@@ -18,6 +18,21 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         foreground service and its plugin bridge — MIT template
                         output, whose provenance and licence obligation are
                         apps/mobile/README.md §2 and whose exemptions are .spdx-exempt
+    ios/                since #1756, the generated iOS project (`cap add ios`,
+                        Capacitor 8, Swift Package Manager, no Podfile): MIT
+                        template output whose provenance is
+                        apps/mobile/README.md §2a. Ours to maintain: the
+                        Xcode project's settings (iPhone and iPad, iOS 17.0,
+                        `dev.openzigs.onyourleft`, no team: CI builds it
+                        unsigned) and `App/App/Info.plist` (the Bluetooth and
+                        camera strings, `bluetooth-central` and no other
+                        background mode). `App/App/public`, `config.xml`,
+                        `capacitor.config.json` and
+                        `capacitor-cordova-ios-plugins/` are what `cap sync
+                        ios` writes, ignored and pruned. The `ios` shard of
+                        rules.yml builds it on `macos-latest` and launches it
+                        in a simulator (docs/agents/ci.md §4c "The iOS shard
+                        — #1756")
     src/android/        reading a manifest as a document — NOT merging one (#87),
                         and since #318 reading the one the Gradle merge actually
                         ships: which file is the artefact, the reviewed list the
@@ -43,6 +58,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         (`@onyourleft/web` already depends on this package) —
                         and the launch theme, the window and `MainActivity`'s
                         WebView background to use it
+    src/ios/            since #1756, the scan that keeps network APIs out of
+                        the Swift under ios/ (`swift-network.test.ts`, its
+                        allowed list empty; #3244 is the fuller gate)
     src/index.ts        what the shell offers the client that runs inside it —
                         the reason this package is no longer an island (§4h)
     src/ble/            the Capacitor transport against #39's interface,
@@ -79,5 +97,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         output into a row of validation 0002 Part AH — the one
                         instrument every #615 issue is measured with. The
                         summary's arithmetic IS decidable, so it has a Vitest
-                        suite (`tools/**/*.test.mjs`, in the mobile project)
+                        suite (`tools/**/*.test.mjs`, in the mobile project).
+                        Since #1756 `ios-ci.mjs` is the iOS job's three
+                        checks (the Xcode floor, the built Info.plist, the
+                        simulator launch), macOS-only like the job, with its
+                        decisions tested in `ios-ci.test.mjs` on any machine
 ```

@@ -7,14 +7,15 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by jobs side by side -- the SHARDS, ten since
-# #3019 -- and one more, `rules`, that does nothing but fail unless every one
-# of them succeeded. `main` requires a status check whose context is exactly
-# "Repository rules", and that last job is the one that carries the name: a
-# shard reports under its own context, which `main` does not require, so a red
-# shard blocks a merge ONLY through the job at the bottom of this file. The
-# owner's ruling of 2026-10-12 (#1280, #1285): one job of 23 minutes on the
-# slower runner, growing about 21 s a day, had to stop being one serial run.
+# Since #1285 the work is done by jobs side by side -- the SHARDS, eleven since
+# #1756 (ten since #3019) -- and one more, `rules`, that does nothing but fail
+# unless every one of them succeeded. `main` requires a status check whose
+# context is exactly "Repository rules", and that last job is the one that
+# carries the name: a shard reports under its own context, which `main` does
+# not require, so a red shard blocks a merge ONLY through the job at the bottom
+# of this file. The owner's ruling of 2026-10-12 (#1280, #1285): one job of 23
+# minutes on the slower runner, growing about 21 s a day, had to stop being one
+# serial run.
 #
 #   checks   the bare-clone script checks, format, lint, typecheck, the build,
 #            every checker and its suite, the instance image, the Capacitor
@@ -32,6 +33,9 @@
 #            MapLibre cannot be constructed there at all, and "which hosts
 #            does the map engine actually contact" is a question only a
 #            browser answers
+#   ios      since #1756, the one job on `macos-latest`: the iOS app built
+#            unsigned for the simulator, its built Info.plist read back, and
+#            the app launched in a booted simulator and still running 30 s on
 #
 # ⚠️ A new gate goes INSIDE one of those shards. A new job is a new shard, and
 # a shard the `rules` job does not `needs` is a gate that cannot block a merge:
@@ -89,7 +93,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # --- Shard 1 of 10: everything that is not lint, Vitest or a browser ---------
+  # --- Shard 1 of 11: everything that is not lint, Vitest or a browser ---------
   checks:
     name: Checks
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
@@ -455,7 +459,7 @@ jobs:
       - name: Third-party notices
         run: pnpm run check:notices
 
-  # --- Shard 2 of 10: lint, alone (#3019) -----------------------------------------
+  # --- Shard 2 of 11: lint, alone (#3019) -----------------------------------------
   #
   # ⚠️ A shard of its own since #3019, and a reviewer who remembers `lint` in
   # `Checks, concurrently` is reading the old file. It was that step's long
@@ -515,7 +519,7 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-  # --- Shards 3 to 5 of 10: everything that is Vitest, in three parts (#2154, #3019)
+  # --- Shards 3 to 5 of 11: everything that is Vitest, in three parts (#2154, #3019)
   #
   # The accessibility gate and the suite, alone on their runners. Not side by
   # side with anything else: Vitest keeps three of the four CPUs busy and has
@@ -774,7 +778,7 @@ jobs:
       - name: Tests
         run: pnpm run test:required:shard-3
 
-  # --- Shards 6 to 10 of 10: the browser gate (#63), in five parts (#1362, #1720, #2376)
+  # --- Shards 6 to 10 of 11: the browser gate (#63), in five parts (#1362, #1720, #2376)
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -1161,6 +1165,111 @@ jobs:
         timeout-minutes: 14
         run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-5
 
+  # --- Shard 11 of 11: the iOS app, built and launched in a simulator (#1756) ---
+  #
+  # ADR 0018 D-5 puts the platform files in the pull request that can build
+  # them, and an UNSIGNED simulator build needs no Apple account, so this job
+  # builds `apps/mobile/ios/` on every pull request, every merge-queue entry and
+  # every push to `main`, like every other shard: no path filter, because a
+  # change to the web build, a Capacitor plugin or the lockfile changes the app
+  # as surely as a change under `ios/` does, and this file admits no step-level
+  # `if:` that could skip it (nightly-split.test.ts). It is a shard, so it can
+  # block a merge only through `rules` below, which `needs` it.
+  #
+  # ⚠️ This departs from apps/mobile/CLAUDE.md's "CI builds no Android" on
+  # purpose, and that line is still true: Android's build needs the Android SDK
+  # and Gradle and is left to release.yml and a person, while this one needs only
+  # the Xcode every macOS runner image carries.
+  #
+  # What it proves, each from the BUILT product rather than from a source file:
+  # the selected Xcode is at least Apple's upload floor; the `.app`'s own
+  # Info.plist holds the bundle ID, both device families, the deployment target,
+  # the Bluetooth and camera strings and exactly the background modes the
+  # shipped features use; and the app installed in a booted iPad simulator is
+  # still running thirty seconds after launch. apps/mobile/tools/ios-ci.mjs is
+  # all three, and its suite (ios-ci.test.mjs) runs in `tests-2`.
+  ios:
+    name: iOS simulator build
+    # ⚠️ The ONE job in this file that is not `ubuntu-latest`, and exactly
+    # `macos-latest`: a standard GitHub-hosted runner, free on this public
+    # repository. `macos-latest-large`, `macos-latest-xlarge`, `macos-26-xlarge`
+    # and every other `-large` or `-xlarge` label are larger runners, BILLED even
+    # on a public repository (CLAUDE.md section 8; D-8 on #15). Both
+    # nightly-split.test.ts and apps/mobile/tools/ios-ci.test.mjs go red on any
+    # other label here.
+    runs-on: macos-latest
+    # A stop on a hung job, held five minutes clear of its slowest measured run
+    # by nightly-split.test.ts (docs/agents/ci.md section 4c "The iOS shard --
+    # #1756").
+    timeout-minutes: 25
+    env:
+      # Xcode is SELECTED, not taken from whatever the image defaults to: the
+      # image's default moves without a commit here. The image carries several
+      # (`ls /Applications | grep Xcode`); this is the newest stable one on the
+      # macOS 26 image on 2026-11-28. A later image that drops it fails the
+      # `Selected Xcode` step by name, which is the moment to move this line.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in the `checks` shard, which has the
+        # provenance.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Each shard prints its own CPU (#866, #864); macOS has no lscpu.
+      - name: Record the runner's CPU
+        run: sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The iOS counterpart of REL002: Apple refuses an upload built with an
+      # Xcode older than its floor (Xcode 26 since 2026-04-28), so a build that
+      # passes here on an older one proves nothing a release can use.
+      - name: Selected Xcode
+        run: node apps/mobile/tools/ios-ci.mjs xcode
+
+      # `cap sync ios` copies the web build into the app (it refuses to without
+      # one) and rewrites the plugin package from the installed plugins.
+      - name: Build the web client
+        run: pnpm --filter @onyourleft/web run build
+
+      - name: Sync the iOS project
+        run: pnpm --filter @onyourleft/mobile exec cap sync ios
+
+      # Unsigned: CODE_SIGNING_ALLOWED=NO, no team, no profile, no secret.
+      # `-onlyUsePackageVersionsFromResolvedFile` holds the Swift packages to
+      # the committed Package.resolved: a resolution that wanted anything else
+      # fails rather than fetching it.
+      - name: Build for the simulator, unsigned
+        run: |
+          xcodebuild -project apps/mobile/ios/App/App.xcodeproj -scheme App \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-build" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+
+      - name: Built product
+        run: node apps/mobile/tools/ios-ci.mjs built-app "$RUNNER_TEMP/ios-build/Build/Products/Debug-iphonesimulator/App.app"
+
+      - name: Launch in a simulator
+        timeout-minutes: 10
+        run: node apps/mobile/tools/ios-ci.mjs launch "$RUNNER_TEMP/ios-build/Build/Products/Debug-iphonesimulator/App.app"
+
   # --- The required check ---------------------------------------------------------
   #
   # ⚠️ THE NAME IS LOAD-BEARING. `main` requires a status check whose context is
@@ -1191,7 +1300,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, lint, tests-1, tests-2, tests-3, browser-1, browser-2, browser-3, browser-4, browser-5]
+    needs: [checks, lint, tests-1, tests-2, tests-3, browser-1, browser-2, browser-3, browser-4, browser-5, ios]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.
