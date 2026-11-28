@@ -1920,6 +1920,37 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`GameView`: every ride but a Delivery round); lever
                         `-parked-cars`, pages `town=houses`, `town=commercial`
                         and `town=streets`.
+    src/game/field-life.ts
+                        life in the mapped fields (#3286): SCENERY, never read
+                        by a simulation or the trainer. Small seeded herds of
+                        cows and sheep on a mapped `meadow` or `grassland`,
+                        still (grazing, head up or lying, by hash; no walk
+                        cycle), and round bales on mapped `farmland`. Hashed
+                        from the seed and a fixed cell of the ground, so a
+                        place is the same on every ask. A piece stands inside
+                        its own polygon by `FIELD_LIFE_EDGE_METRES` (4), where
+                        the mask says `farmland`, ≥ 25 m from ANY stretch of
+                        the ridden road and 10 m from every mapped street and
+                        path: never on a road or a verge. ⚠️ **Mapped fields
+                        only**: the procedural world, the owner's village and
+                        wooded holds have none. ⚠️ **The bales are the VIEW's
+                        to show** (`balesInSeason`, from the season it was told
+                        by `GameView.setSeason`): late summer and autumn, from
+                        1 September (the clock's first autumn) until its winter
+                        starts; none in the tropics or with no hemisphere.
+                        `scene.ts` asks about the road 40 m ahead, again per
+                        16 m cell, and stands each on the frame's ground.
+                        Shapes are boxes and one prism built in code
+                        (`field-life-shapes.ts`), no file. Drawn by
+                        `three-renderer.ts` §`FieldLifeBelt`: ONE merged mesh,
+                        one call, inside `realistic-budget.ts`
+                        §`REALISTIC_FIELD_LIFE_TRIANGLES` (6 120, the caps at
+                        `REALISTIC_TRIANGLES`' `animal` 600, `animal-far` 60
+                        and `bale` 60) and §`REALISTIC_FIELD_LIFE_DRAW_CALLS`
+                        (1). A mapped field's roadside gate stands where the
+                        field starts past another mapped class (`settlements.ts`
+                        §`atFieldMouth`), in the fence's own draw. Lever
+                        `-field-life`.
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as

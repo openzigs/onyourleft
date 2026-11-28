@@ -85,6 +85,7 @@ import {
   railFixture,
   fieldsFixture,
   sceneryFixture,
+  pastureFixture,
   tracksFixture,
   yardsFixture,
   // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
@@ -129,6 +130,7 @@ import {
   setRealisticChainLink,
   setRealisticTrees,
   threeGameRenderer,
+  fieldLifeStatsOf,
   parkedCarStatsOf,
   villageHouseStatsOf,
   villageModelsShownOf,
@@ -137,6 +139,7 @@ import {
   windowRoomsOf,
   lotRealismOf,
   type MappedBuildingStats,
+  type FieldLifeStats,
   type ParkedCarStats,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
@@ -407,6 +410,12 @@ declare global {
        */
       readonly parkedCars?: ParkedCarStats;
       /**
+       * #3286: the cows, sheep and bales the view's belt drew on the last
+       * frame before the result was published (`three-renderer.ts`
+       * §`fieldLifeStatsOf`). Absent until a realistic frame carried a piece.
+       */
+      readonly fieldLife?: FieldLifeStats;
+      /**
        * #1815: what the view's Delivery belt drew on the last frame before the
        * result was published, read back off its instances
        * (`three-renderer.ts` §`deliveryDrawnOf`). Absent unless `?delivery=`
@@ -635,7 +644,10 @@ async function run(): Promise<void> {
                                                         : // #3252: every scenery setting, and the fences.
                                                           config.town === 'scenery'
                                                           ? sceneryFixture(latitude)
-                                                          : undefined;
+                                                          : // #3286: pasture and arable fields.
+                                                            config.town === 'pasture'
+                                                            ? pastureFixture(latitude)
+                                                            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -849,6 +861,8 @@ async function run(): Promise<void> {
       parkDressingOff: config.leversOff.includes('park-dressing'),
       // #3278's pair: no parked car — and none in a Delivery round, whatever the lever.
       parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
+      // #3286's pair: no cow, sheep or bale in the mapped fields.
+      fieldLifeOff: config.leversOff.includes('field-life'),
       // #2973's pair: the mapped streets off the route undrawn.
       nearbyStreetsOff: !nearbyStreetsWithLevers(config.leversOff),
       // #2972's pair: the mapped footways and zebras undrawn.
@@ -912,6 +926,7 @@ async function run(): Promise<void> {
             };
       const villageHouses = villageHouseStatsOf(view);
       const parkedCars = parkedCarStatsOf(view);
+      const fieldLife = fieldLifeStatsOf(view);
       const mapped = mappedBuildingStatsOf(view)?.stats;
       const delivery =
         config.delivery === undefined
@@ -930,6 +945,7 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(parkedCars === undefined ? {} : { parkedCars }),
+        ...(fieldLife === undefined ? {} : { fieldLife }),
         ...(mapped === undefined ? {} : { mapped }),
         ...(delivery === undefined ? {} : { delivery }),
         ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),

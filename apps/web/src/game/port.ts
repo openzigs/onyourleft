@@ -43,6 +43,7 @@ import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
 import type { ParkedCarsInView } from './parked-cars';
+import type { FieldLifeInView } from './field-life';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { Embankment } from './overpasses';
 import type { PeopleInView } from './people';
@@ -614,6 +615,22 @@ export interface SceneFrame {
    * `parked-car-belt.test.ts` off the belt it fills.
    */
   readonly parkedCars?: ParkedCarsInView | undefined;
+  /**
+   * The cows and sheep grazing on the mapped meadows and grassland in reach,
+   * and the round bales on its mapped farmland — #3286 (`field-life.ts`),
+   * each a place, a heading, a pose and a level of detail, drawn in ONE call
+   * of their own (`three-renderer.ts` §`FieldLifeBelt`), the bales only in
+   * the late summer and autumn the view was told of ({@link GameView.setSeason}).
+   * Scenery: no simulation, score or trainer reads one. Realistic world only.
+   * **Absent on every ride with no corridor**, and on the realistic page with
+   * its `-field-life` lever off (`scene.ts` §`SceneInput.fieldLifeOff`);
+   * `field-life.ts` §`NO_FIELD_LIFE` (empty) where no field is in reach.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `field-life-scene.test.ts` reads it back off `sceneFrame`, and
+   * `field-life-belt.test.ts` off the belt it fills.
+   */
+  readonly fieldLife?: FieldLifeInView | undefined;
 }
 
 /**

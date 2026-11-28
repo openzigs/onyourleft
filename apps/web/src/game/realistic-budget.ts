@@ -294,7 +294,15 @@ export const REALISTIC_TEXTURE_PIXELS = {
  */
 export const REALISTIC_TRIANGLES: Readonly<
   Record<
-    RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure' | 'roadside' | 'chain-link',
+    | RealisticVegetationKind
+    | 'tree-middle'
+    | 'rider'
+    | 'structure'
+    | 'roadside'
+    | 'chain-link'
+    | 'animal'
+    | 'animal-far'
+    | 'bale',
     number
   >
 > = {
@@ -379,6 +387,20 @@ export const REALISTIC_TRIANGLES: Readonly<
    * §`builtFenceGeometry`, {@link REALISTIC_STRUCTURE_MESHES}.
    */
   'chain-link': 180,
+  /**
+   * One grazing animal at its near level — #3286, ADR 0099 D-4 item 1:
+   * **600**, the issue's proposal. Generated in code from boxes
+   * (`field-life-shapes.ts`): a cow standing is 70 today, a sheep 60. Held by
+   * `field-life-belt.test.ts`, which builds every kind, pose and coat and
+   * counts. Seen from 25 m at the nearest (`field-life.ts`
+   * §`FIELD_LIFE_ROAD_CLEAR_METRES`), so the room is for an individual CC0
+   * model under ADR 0099 D-1's second row if the boxes read as a toy.
+   */
+  animal: 600,
+  /** The same animal at its far level, a few boxes — #3286: **60**; 40 today. */
+  'animal-far': 60,
+  /** One round bale, either level — #3286: **60**; an eight-sided prism, 28 today. */
+  bale: 60,
 };
 
 /**
@@ -1325,6 +1347,46 @@ export const REALISTIC_PARKED_CAR_TRIANGLES = 13_440;
  * run time
  */
 export const REALISTIC_PARKED_CAR_DRAW_CALLS = 1;
+
+/**
+ * The most triangles a frame's field life may add — #3286 (`field-life.ts`):
+ * **6 120**, every slot priced at its class's CEILING and not at what is
+ * built — `field-life.ts` §`FIELD_ANIMALS_NEAR_MAX` (6) animals at
+ * {@link REALISTIC_TRIANGLES}' `animal` (600), the rest of §`FIELD_ANIMALS_MAX`
+ * (24) at `animal-far` (60), and §`FIELD_BALES_MAX` (18) bales at `bale` (60).
+ * As built the worst is 6 × 70 + 24 × 40 + 18 × 28 = 1 884
+ * (`three-renderer.ts` §`fieldLifeWorstTriangles`), so a cow may grow to its
+ * ceiling without this figure or the frame's moving.
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, by that constant's own
+ * rule: the realistic world's alone. `realistic-budget.test.ts` adds it to the
+ * fullest frame the caps allow, a street of parked cars included, and holds
+ * the sum; no ceiling was raised to make the room. Generated in code: no
+ * file, no texture, no byte of {@link REALISTIC_BUILD_BYTES}.
+ *
+ * @test-facing held by `realistic-budget.test.ts` and `field-life-belt.test.ts`
+ */
+export const REALISTIC_FIELD_LIFE_TRIANGLES = 6_120;
+
+/**
+ * The draw calls a frame's field life may add — #3286: **1**, one merged mesh
+ * of every cow, sheep and bale (`three-renderer.ts` §`FieldLifeBelt`), and
+ * none on a frame that carries no piece.
+ *
+ * ⚠️ **Accounted against {@link REALISTIC_WOODED_DRAW_CALLS} (35), which is
+ * not raised.** A piece stands only on a MAPPED meadow, grassland or farmland,
+ * so neither of the views that ceiling is held at — the gate's wooded valley
+ * and the owner's page at `at=2550`, both procedural, no corridor — builds
+ * the belt, and each makes the calls it made; nor does the frozen village
+ * frame ({@link REALISTIC_VILLAGE_DRAW_CALLS}). On mapped countryside the call
+ * is one more than the same frame with the realistic page's `-field-life`
+ * lever, and a field has none of a town's parked cars or a park's pieces.
+ *
+ * @test-facing held by `field-life-belt.test.ts`, which counts the meshes the
+ * belt adds to a scene; nothing in the product applies a draw-call ceiling at
+ * run time
+ */
+export const REALISTIC_FIELD_LIFE_DRAW_CALLS = 1;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,

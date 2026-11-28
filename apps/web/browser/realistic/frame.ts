@@ -58,6 +58,8 @@ export function rideFrame(input: {
    * are its own obstacles, as `GameView` says of a round.
    */
   readonly parkedCarsOff?: boolean;
+  /** #3286's lever, `levers=-field-life`: no cow, sheep or bale in the mapped fields. */
+  readonly fieldLifeOff?: boolean;
   /** #2973's lever, `levers=-nearby-streets`: only the route, its stubs and its overpasses' roads. */
   readonly nearbyStreetsOff?: boolean;
   /** #2972's lever, `levers=-footways`: the mapped footways, cycleways, park paths, steps and zebras undrawn. */
@@ -114,6 +116,7 @@ export function rideFrame(input: {
     parkDressingOff: input.parkDressingOff,
     // #3278: as `GameView` passes it — every ride but a Delivery round.
     parkedCars: input.parkedCarsOff !== true,
+    fieldLifeOff: input.fieldLifeOff,
     nearbyStreetsOff: input.nearbyStreetsOff,
     footwaysOff: input.footwaysOff,
     ...(input.town === undefined

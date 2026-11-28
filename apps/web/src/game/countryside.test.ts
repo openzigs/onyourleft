@@ -513,6 +513,77 @@ describe('#1542 boundaries on the span, and clear of villages and streams', () =
   });
 });
 
+describe('#3286 a field gate where the field’s boundary meets the road', () => {
+  /** Two woods across the road, so three mapped fields start and end along it. */
+  const WOODS = [
+    [2_500, 2_600],
+    [3_200, 3_300],
+  ] as const;
+  const FIELDS = mask(
+    rectangle('farmland', MIDDLE),
+    ...WOODS.map(([from, to]) =>
+      rectangle('wood', { minX: MIDDLE.minX, maxX: MIDDLE.maxX, minZ: from, maxZ: to }),
+    ),
+  );
+  const gatesOn = (land: LandClassMask, countryside: Countryside = COUNTRYSIDE) =>
+    structures(land, countryside)
+      .filter(inside)
+      .filter(
+        (item) => item.kind === 'fence' && item.scale === FIELD_GATE_SCALE && Math.abs(item.x) < 8,
+      );
+  /** Whether a gate stands on `side` within the first piece and a half past `along`. */
+  const gateAfter = (gates: readonly ScatterItem[], along: number, side: number): boolean =>
+    gates.some(
+      (gate) =>
+        Math.sign(gate.x) === side &&
+        gate.z > along &&
+        gate.z < along + 1.5 * BOUNDARY_PIECE_METRES,
+    );
+
+  it('hangs a gate in the roadside where each field starts past the wood before it, both sides', () => {
+    const gates = gatesOn(FIELDS);
+    for (const [, to] of WOODS) {
+      for (const side of [-1, 1])
+        expect(gateAfter(gates, to, side), `${String(to)} ${String(side)}`).toBe(true);
+    }
+    // Each is the fence's own shape at the gate's scale, along the road: the
+    // boundary's own draw, no new shape.
+    for (const gate of gates) {
+      expect(gate.kind).toBe('fence');
+      expect(gate.variant).toBe(0);
+    }
+  });
+
+  it('hangs none there on unbroken farmland, nor with the roadside left solid', () => {
+    const plain = gatesOn(FARMLAND);
+    for (const [, to] of WOODS) {
+      for (const side of [-1, 1]) expect(gateAfter(plain, to, side)).toBe(false);
+    }
+    // The solid hedge of #1542's first cut has no gate anywhere, as before.
+    expect(gatesOn(FIELDS, FIRST_CUT)).toHaveLength(0);
+    // Nor where the map's coverage starts: the end of the map is not a field's end.
+    const fromTheMapsEdge = structures(FARMLAND).filter(
+      (item) =>
+        item.kind === 'fence' &&
+        item.scale === FIELD_GATE_SCALE &&
+        Math.abs(item.x) < 8 &&
+        item.z > MIDDLE.minZ &&
+        item.z < MIDDLE.minZ + 1.5 * BOUNDARY_PIECE_METRES,
+    );
+    expect(fromTheMapsEdge).toHaveLength(0);
+    // Non-vacuity: the hedge does start there.
+    expect(
+      structures(FARMLAND).some(
+        (item) =>
+          item.kind === 'hedge' &&
+          Math.abs(item.x) < 8 &&
+          item.z > MIDDLE.minZ &&
+          item.z < MIDDLE.minZ + 2 * BOUNDARY_PIECE_METRES,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () => {
   const roadside = (countryside: Countryside, seed = SEED) =>
     structuresAt(

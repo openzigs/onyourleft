@@ -24,6 +24,11 @@
  * July day and on an autumn or a winter one draws a different picture in the
  * same draw calls and triangles, from the same files.
  *
+ * And since #3286, **the field life**: an autumn frame in the pasture fixture
+ * draws its animals and its bales, read off the view's own belt
+ * (`three-renderer.ts` §`fieldLifeStatsOf`) — one load, which is what the
+ * shard has room for.
+ *
  * The default URL's road is read back too, by its fingerprint, on the #616
  * load (#1559): the same road every validation 0002 row was taken on.
  *
@@ -43,12 +48,15 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import {
+  REALISTIC_FIELD_LIFE_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
 import { realisticRoute, routeDigest } from '../src/demo/synthetic-road';
-import { HELD, REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { HELD, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
 
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
@@ -188,5 +196,28 @@ test.describe('the route’s own season, in the realistic world — #1623', { ta
     costsNothing(january, july);
     // The ground and the roofs are drawn under the route's own winter.
     expect(january.shot.equals(july.shot)).toBe(false);
+  });
+});
+
+test.describe('the realistic page’s field life, through the view — #3286', { tag: NIGHTLY }, () => {
+  // At 320 × 180: the case reads counts, which the canvas's size does not move.
+  test.use({ viewport: SIXTEENTH_PAGE });
+
+  test('draws the pasture’s animals and, on a day in October, its bales', async ({ page }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+    // Inside the pasture fixture's meadow and farmland, held; the people off.
+    const october = await ride(
+      page,
+      '?ladder=0&panel=0&seconds=1&town=pasture&at=1000&date=2026-10-15&levers=-people',
+    );
+    const fieldLife = october.page.fieldLife;
+    console.log(`#3286 town=pasture at=1000 on 15 October: ${JSON.stringify(fieldLife)}`);
+    // The belt reads the pieces the frame carried and the season the view was
+    // told by `setSeason`: it draws none if either is not handed on, and no
+    // bale if the season is not.
+    expect(fieldLife?.animals ?? 0).toBeGreaterThan(0);
+    expect(fieldLife?.bales ?? 0).toBeGreaterThan(0);
+    expect(fieldLife?.triangles ?? 0).toBeGreaterThan(0);
+    expect(fieldLife?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_FIELD_LIFE_TRIANGLES);
   });
 });
