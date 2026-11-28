@@ -98,6 +98,7 @@ import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import { stylisedSceneDrawCallCeiling, villageDrawCallCeiling } from '../src/game/realistic-budget';
 import type { GameView, SceneFrame } from '../src/game/port';
+import { RIDE_LOOKS, rideWeatherOf, type RideLook } from '../src/game/ride-sky';
 import { corridorOrigin } from '../src/game/terrain';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
@@ -334,6 +335,23 @@ declare global {
      * Only on `town=level`, the fixture level, with its own round's houses.
      * @see realistic/round.ts
      */
+    /**
+     * #3281: the page's last frame, its round and race taken off, drawn
+     * again as an ordinary ride in each look the setup offers: its calls and
+     * triangles, what it was drawn with, and with `photograph` a PNG of each.
+     * Absent until the first frame.
+     */
+    __oylRealisticLooks?: (photograph?: boolean) => Readonly<
+      Record<
+        RideLook,
+        {
+          readonly calls: number;
+          readonly triangles: number;
+          readonly weather: ReturnType<typeof deliveryWeatherOf>;
+          readonly photo?: string;
+        }
+      >
+    >;
     __oylRealisticRound?: (leads: readonly number[]) => {
       /** The houses on the round: the fixture level's own `round.houses`. */
       readonly houses: number;
@@ -423,8 +441,10 @@ declare global {
       readonly villageCeiling?: number;
       /**
        * #2366: a level's weather as the view drew the last frame — the rain
-       * drawn or not, and the exposure (dimmer at dusk). Absent unless
-       * `?weather=` asked for one (`three-renderer.ts` §`deliveryWeatherOf`).
+       * drawn or not, and the exposure (dimmer at dusk). Absent on a round
+       * with no `?weather=`; since #3281 on every load with no round too, for
+       * an ordinary ride's `?look=` and its clear control
+       * (`three-renderer.ts` §`deliveryWeatherOf`).
        */
       readonly weather?: ReturnType<typeof deliveryWeatherOf>;
       /**
@@ -943,7 +963,13 @@ async function run(): Promise<void> {
         ...(parkedCars === undefined ? {} : { parkedCars }),
         ...(mapped === undefined ? {} : { mapped }),
         ...(delivery === undefined ? {} : { delivery }),
-        ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),
+        // #3281: and an ordinary ride's look, read back the same way — always,
+        // so a clear load is the control a look's load is compared with.
+        ...(config.weather === undefined &&
+        config.look === undefined &&
+        config.delivery !== undefined
+          ? {}
+          : { weather: deliveryWeatherOf(view) }),
         // A stylised race is the scenery-free frame's; the village's ceiling is
         // no part of it. #1971: a realistic race's frame is the village's.
         ...(drawn === undefined || (config.race !== undefined && config.world !== 'realistic')
@@ -1035,6 +1061,37 @@ async function run(): Promise<void> {
     const seen = changedPixels(without, read(), width, height);
     // The frame with the piece, as a PNG, before the next frame draws over it.
     return photograph ? { ...seen, photo: canvas.toDataURL('image/png') } : seen;
+  };
+  /** #3281: frames drawn before the looks are read — more than any hand-over takes. */
+  const LOOKS_SETTLE_FRAMES = 120;
+  // #3281: the last frame as an ordinary ride, in each look. Each is drawn
+  // twice and the second counted: a look's first frame grades its sky.
+  window.__oylRealisticLooks = (photograph = false) => {
+    if (drawn === undefined) throw new Error('no frame has been drawn yet');
+    const bare: SceneFrame = { ...drawn, delivery: undefined, lapRace: undefined };
+    // Settled first: a tree moves between its levels a step a frame
+    // (`tree-levels.ts` §`TreeHandOver`), so a frame drawn after others at
+    // another place is not yet the one this place settles to.
+    for (let settle = 0; settle < LOOKS_SETTLE_FRAMES; settle += 1) view.render(bare);
+    const read = (look: RideLook) => {
+      const frame: SceneFrame = { ...bare, weather: rideWeatherOf(look) };
+      view.render(frame);
+      counter.takeCalls();
+      counter.takeTriangles();
+      view.render(frame);
+      const calls = counter.takeCalls();
+      const triangles = counter.takeTriangles();
+      return {
+        calls,
+        triangles,
+        weather: deliveryWeatherOf(view),
+        ...(photograph ? { photo: canvas.toDataURL('image/png') } : {}),
+      };
+    };
+    return Object.fromEntries(RIDE_LOOKS.map((look) => [look, read(look)])) as Record<
+      RideLook,
+      ReturnType<typeof read>
+    >;
   };
   // #2513: a real round on the page's town — the product's own pick, markers
   // and HUD words — its rider held before each house in turn, in route order,

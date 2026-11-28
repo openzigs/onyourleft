@@ -104,6 +104,51 @@ const SIGHTED = `?world=stylised&ladder=0&panel=0&seconds=1&at=${String(VILLAGE_
  * {@link SIGHTED_FROM_METRES} up the road, and with each 50 m behind the
  * rider as the control. Each frame is attached for the owner.
  */
+/**
+ * #3281: the page's last frame, its round taken off, drawn as an ordinary
+ * ride in each of the four looks on the owner's 1280×800 — every look at the
+ * clear day's calls and triangles and under its haze, the realistic world's
+ * dusk at its dimmer exposure, and each frame attached for the owner. Read
+ * off a load another case pays for, so it costs the shard none.
+ */
+async function looksOnThePage(page: Page, testInfo: TestInfo): Promise<void> {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  const looks = await page.evaluate(() => {
+    const draw = window.__oylRealisticLooks;
+    if (draw === undefined) throw new Error('the page published no looks');
+    return draw(true);
+  });
+  const { clear } = looks;
+  for (const [name, look] of Object.entries(looks)) {
+    const { photo, ...read } = look;
+    console.log(`#3281 realistic ride look ${name}: ${JSON.stringify(read)}`);
+    expect(look.calls, `${name}: draw calls`).toBe(clear.calls);
+    expect(look.triangles, `${name}: triangles`).toBe(clear.triangles);
+    expect(look.weather.rain, `${name}: no falling rain`).toBe(false);
+    expect(look.weather.readback?.fogDensity, `${name}: the haze`).toBe(
+      clear.weather.readback?.fogDensity,
+    );
+    if (photo !== undefined) {
+      await testInfo.attach(`realistic-ride-look-${name}`, {
+        body: Buffer.from(photo.slice(photo.indexOf(',') + 1), 'base64'),
+        contentType: 'image/png',
+      });
+    }
+  }
+  expect(clear.calls).toBeGreaterThan(0);
+  expect(clear.weather.exposure).toBeCloseTo(REALISTIC_EXPOSURE, 6);
+  expect(looks.dusk.weather.exposure).toBeCloseTo(
+    REALISTIC_EXPOSURE * REALISTIC_DUSK_EXPOSURE_SHARE,
+    6,
+  );
+}
+
 async function seenFromAfar(page: Page, testInfo: TestInfo, world: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 800 });
   // Two frames, so the page has drawn at the new size before it is read.
@@ -216,7 +261,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
 
   test('draws a round on the fixture level, a parked car among the obstacles, in rain and at dusk, inside DELIVERY_VILLAGE_DRAW_CALLS — #2362, #2366', async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
     const level = await ride(page, ON_THE_LEVEL);
     console.log(
@@ -278,6 +323,8 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
       );
       expect(each.markerSide, `${where}: the marker's side`).toBe(each.hud?.side);
     }
+    // #3281: the same load, its frame drawn as an ordinary ride in each look.
+    await looksOnThePage(page, testInfo);
   });
 });
 

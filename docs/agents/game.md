@@ -586,6 +586,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is solved rather than written down, and the provenance
                         of every other one. Pure, so the renderer stays the
                         only file that names three
+    src/game/ride-sky.ts
+                        an ordinary ride's light and weather (#3281): clear,
+                        overcast, rain, dusk or *Surprise me* (seeded by the
+                        route and the start), chosen in the setup and kept on
+                        the device. The ride puts it on `SceneFrame.weather`
+                        (absent in clear daylight, so the frame is today's);
+                        `weather-look.ts` draws it as a Delivery level's is,
+                        in both worlds, for no call and no triangle. A round's
+                        own weather wins. ⚠️ Its rain keeps the haze and
+                        draws no streaks: the 40 m reveal is Delivery's alone
     src/game/scatter.ts where the scenery goes, what kind it is and — since
                         #367 — which of that kind's shapes it wears (#243) — a
                         seeded, stateless hash of where you are rather than a
