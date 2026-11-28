@@ -935,11 +935,11 @@ until it is named. Two workers in every game part, as `coverage-1` had since #22
 
 **Four parts first, and why not.** The first reading divided the game in two by letter (a to m and
 r, then the rest) and kept the rest as two parts. On an EPYC 7763 the first game part took 1 057 s
-(run [46097868936](https://github.com/openzigs/onyourleft/actions/runs/46097868936)), past the 60 %
-below, while the web and outside-web parts took 339 to 496 s. Its case time was 1 263 to 1 673 s of
-worker time against the other game part's 940 to 1 350 s, so the two were not as even as the one
-log they were chosen from said; and even an even pair is about 900 s each on the 7763, with the game
-growing by about ten files a day. Three game parts is what fits.
+(run [46097868936](https://github.com/openzigs/onyourleft/actions/runs/46097868936)), 23 s inside the
+60 % below (1 080 s), while the web and outside-web parts took 339 to 496 s. Its case time was
+1 263 to 1 673 s of worker time against the other game part's 940 to 1 350 s, so the two were not
+as even as the one log they were chosen from said; and even an even pair is about 900 s each on
+the 7763, with the game growing by about ten files a day. Three game parts is what fits.
 
 **Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
 §"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
