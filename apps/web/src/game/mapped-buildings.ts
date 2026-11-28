@@ -540,6 +540,8 @@ export function selectMappedBuildings(
   models?: readonly number[],
   ahead?: Float32Array,
   kit = false,
+  /** #3282: how far a building is drawn at all; the rung's `mappedBuildingReach`. */
+  reach: number = MAPPED_BUILDING_REACH_METRES,
 ): void {
   // No closure and no object here: since #3334 the belt runs this between chunks too, to ask
   // whether the wraps would change, on a frame that may write nothing.
@@ -555,6 +557,7 @@ export function selectMappedBuildings(
     models,
     ahead,
     most,
+    reach,
   );
   if (!kit) return;
   // #3334: never fewer buildings, nor fewer structures ranked in, nor more passed over, than
@@ -577,6 +580,7 @@ export function selectMappedBuildings(
     models,
     ahead,
     0,
+    reach,
   );
   const bareCount = into.count;
   const bareRivals = into.rivals;
@@ -594,6 +598,7 @@ export function selectMappedBuildings(
       models,
       ahead,
       wraps,
+      reach,
     );
     return;
   }
@@ -610,6 +615,7 @@ export function selectMappedBuildings(
       models,
       ahead,
       wraps,
+      reach,
     );
     if (into.count >= bareCount && into.rivals >= bareRivals && into.passed <= barePassed) return;
   }
@@ -801,6 +807,7 @@ function walkMappedBuildings(
   models: readonly number[] | undefined,
   ahead: Float32Array | undefined,
   wraps: number,
+  reach: number,
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -819,7 +826,7 @@ function walkMappedBuildings(
   for (let index = 0; index < plans.length; index += 1) {
     const plan = plans[index] as FootprintPlan;
     const apart = Math.hypot(plan.centroid.x - x, plan.centroid.z - z);
-    if (apart > MAPPED_BUILDING_REACH_METRES) continue;
+    if (apart > reach) continue;
     // #2429: ranked by the road ahead, where there is one.
     distances[index] =
       ahead === undefined ? apart : rankFrom(ahead, x, z, plan.centroid.x, plan.centroid.z);

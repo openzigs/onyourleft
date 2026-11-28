@@ -14,6 +14,7 @@ import {
   ARRIVING_REALISTIC_QUALITY,
   FRAME_MS_REDUCE_ABOVE,
   INITIAL_QUALITY,
+  REALISTIC_LADDER,
   REALISTIC_SETTLING_SAMPLES,
   SUSTAINED_SAMPLES,
   nextWorldQuality,
@@ -87,13 +88,19 @@ describe('a realistic ride’s record — #2289', () => {
     const fast = { frameMs: 50 };
     // The first run mixes two frame times, for a median that is not either end.
     const first = [...times(10, fast), ...times(SUSTAINED_SAMPLES - 10, { frameMs: 70 })];
+    // #3282: then one slow run for each realistic rung below the top, the last leaving.
     const { state, reports } = ride(new RealisticWatch(), settled, [
       ...first,
-      ...times(SUSTAINED_SAMPLES, SLOW),
+      ...times(SUSTAINED_SAMPLES * (REALISTIC_LADDER.length - 1), SLOW),
     ]);
     expect(state.realistic).toBe(false);
-    expect(reports).toHaveLength(2);
-    const [down, left] = reports.at(-1)?.steps ?? [];
+    expect(reports).toHaveLength(REALISTIC_LADDER.length);
+    const steps = reports.at(-1)?.steps ?? [];
+    expect(steps.map((step) => [step.rung, step.left])).toEqual(
+      REALISTIC_LADDER.map((_, rung) => [rung, rung === REALISTIC_LADDER.length - 1]),
+    );
+    const down = steps[0];
+    const left = steps.at(-1);
     expect(down).toEqual({
       rung: 0,
       left: false,
@@ -103,9 +110,9 @@ describe('a realistic ride’s record — #2289', () => {
       medianMs: 70,
       worstMs: 70,
     });
-    // The ladder's pressure starts again on a step, so the window is the second run.
+    // The ladder's pressure starts again on a step, so the window is the last run.
     expect(left).toMatchObject({
-      rung: 1,
+      rung: REALISTIC_LADDER.length - 1,
       left: true,
       frames: SUSTAINED_SAMPLES,
       medianMs: SLOW.frameMs,

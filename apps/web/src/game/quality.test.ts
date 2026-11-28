@@ -19,12 +19,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALL_SCENERY,
   ARRIVING_REALISTIC_QUALITY,
   DISPLAY_RATE,
   FRAME_MS_REDUCE_ABOVE,
   INITIAL_QUALITY,
   INITIAL_REALISTIC_QUALITY,
   QUALITY_LADDER,
+  REALISTIC_FLOOR,
   REALISTIC_LADDER,
   REALISTIC_ARRIVAL_LIMIT_MS,
   REALISTIC_SETTLING_SAMPLES,
@@ -65,6 +67,10 @@ function sustain(state: QualityState, sample: QualitySample, count: number): Qua
 }
 
 const HOT: QualitySample = { frameMs: FRAME_MS_REDUCE_ABOVE + 5 };
+/** The realistic floor's level: how many sustained runs from the top reach it — #3282. */
+const LAST_REALISTIC = REALISTIC_LADDER.length - 1;
+/** How many sustained runs of hot frames take a ride from the realistic top out of realism. */
+const LEAVES_REALISM = REALISTIC_LADDER.length;
 const COOL: QualitySample = { frameMs: 20 };
 // Between the restore and reduce thresholds: argues for nothing.
 const STEADY: QualitySample = { frameMs: 33 };
@@ -608,9 +614,10 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
     });
   });
 
-  it('samples its photographs one mip coarser on its second rung only, and no stylised rung is biased — #619', () => {
-    // Lever 2: a hot tablet sheds texture bandwidth before it sheds the world.
-    expect(REALISTIC_LADDER.map((rung) => rung.textureLodBias)).toEqual([0, 1]);
+  it('samples its photographs one mip coarser on its floor rung only, and no stylised rung is biased — #619', () => {
+    // Lever 2: a hot tablet sheds texture bandwidth before it sheds the world —
+    // on the floor since #3282, its second rung before.
+    expect(REALISTIC_LADDER.map((rung) => rung.textureLodBias)).toEqual([0, 0, 0, 0, 1]);
     // No stylised rung carries a bias, so none can move a stylised pixel
     // through it — the browser gate also renders one with the bias forced on.
     for (const rung of [...QUALITY_LADDER, RIDER_SHADOW_MAP_RUNG]) {
@@ -638,13 +645,14 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
     for (const rung of REALISTIC_LADDER) {
       expect(rung.frameCap, rung.label).toBe(QUALITY_LADDER[0]?.frameCap);
     }
-    // Cheaper than the realistic target by the stylised ladder's first step.
-    expect(REALISTIC_LADDER[1]?.renderScale).toBeLessThan(REALISTIC_LADDER[0]?.renderScale ?? 0);
-    expect(REALISTIC_LADDER[1]?.scatterItems).toBeLessThan(REALISTIC_LADDER[0]?.scatterItems ?? 0);
+    // The floor is cheaper than the realistic target by the stylised ladder's first step.
+    expect(REALISTIC_FLOOR.renderScale).toBeLessThan(REALISTIC_LADDER[0]?.renderScale ?? 0);
+    expect(REALISTIC_FLOOR.scatterItems).toBeLessThan(REALISTIC_LADDER[0]?.scatterItems ?? 0);
   });
 
   it('steps from its floor to the TOP of the stylised ladder — every kind at once', () => {
-    const floor = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES);
+    const floor = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * LAST_REALISTIC);
+    expect(worldRung(floor)).toBe(REALISTIC_FLOOR);
     const left = sustainWorld(floor, HOT, SUSTAINED_SAMPLES);
     expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
     expect(worldRung(left)).toBe(QUALITY_LADDER[0]);
@@ -652,7 +660,7 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
   });
 
   it('never re-enters realism once it has left it, however cool the device gets — the latch', () => {
-    const left = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 2);
+    const left = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * LEAVES_REALISM);
     expect(left.realistic).toBe(false);
     const cooled = sustainWorld(left, COOL, SUSTAINED_SAMPLES * 10);
     expect(cooled.realistic).toBe(false);
@@ -713,7 +721,12 @@ describe('a Delivery round holds the realistic world — #2513', () => {
   });
 
   it('leaves for the stylised top on the same frames without the hold — the control', () => {
-    const left = sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 2, false);
+    const left = sustainHeld(
+      INITIAL_REALISTIC_QUALITY,
+      HOT,
+      SUSTAINED_SAMPLES * LEAVES_REALISM,
+      false,
+    );
     expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
   });
 
@@ -760,7 +773,7 @@ describe('the realistic ladder waits for its world — #2289', () => {
       HOT,
       REALISTIC_SETTLING_SAMPLES,
     );
-    const left = sustainWorld(settled, HOT, SUSTAINED_SAMPLES * 2);
+    const left = sustainWorld(settled, HOT, SUSTAINED_SAMPLES * LEAVES_REALISM);
     expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
     expect(REALISTIC_SETTLING_SAMPLES).toBe(SUSTAINED_SAMPLES);
     expect(FRAME_MS_REDUCE_ABOVE).toBe(45);
@@ -826,7 +839,7 @@ describe('the realistic ladder waits for its world — #2289', () => {
     const once = sustainWorld(settled, slow, SUSTAINED_SAMPLES);
     expect(once.realistic).toBe(true);
     expect(once.quality.level).toBe(1);
-    expect(sustainWorld(once, slow, SUSTAINED_SAMPLES)).toEqual({
+    expect(sustainWorld(once, slow, SUSTAINED_SAMPLES * LAST_REALISTIC)).toEqual({
       realistic: false,
       quality: INITIAL_QUALITY,
     });
@@ -893,19 +906,38 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
     }
   });
 
-  it('keeps D-3: the realistic rungs are stylised 0 and 1 with the world swapped, and realism goes two steps before any frame rate', () => {
-    REALISTIC_LADDER.forEach((rung, level) => {
-      // The structures apart — #506 — the texture bias — #619 — and the
-      // people — #1541 — each asserted on its own.
-      expect(
-        { ...rung, world: 'stylised', label: '', structureItems: 0, textureLodBias: 0, people: 0 },
-        rung.label,
-      ).toEqual({
-        ...QUALITY_LADDER[level],
-        label: '',
-        structureItems: 0,
-        textureLodBias: 0,
-      });
+  it('keeps D-3: the realistic ladder runs from stylised 0 to stylised 1 with the world swapped, and realism goes two steps before any frame rate', () => {
+    // #3282: the top and the floor are the stylised rungs 0 and 1 with the
+    // world swapped. The structures apart — #506 — the texture bias — #619 —
+    // the people — #1541 — and what rungs 1 to 3 shed — #3282 — each asserted
+    // on its own (`quality-rungs.test.ts`).
+    const asStylised = (rung: QualitySettings): QualitySettings => ({
+      ...rung,
+      world: 'stylised',
+      label: '',
+      structureItems: 0,
+      textureLodBias: 0,
+      people: 0,
+      scenery: ALL_SCENERY,
+      nearestTrees: 'full',
+      mappedBuildingReach: 0,
+    });
+    const stylisedAs = (rung: QualitySettings | undefined): QualitySettings => ({
+      ...(rung as QualitySettings),
+      label: '',
+      structureItems: 0,
+      textureLodBias: 0,
+      people: 0,
+      mappedBuildingReach: 0,
+    });
+    expect(asStylised(REALISTIC_LADDER[0] as QualitySettings)).toEqual(
+      stylisedAs(QUALITY_LADDER[0]),
+    );
+    expect(asStylised(REALISTIC_FLOOR)).toEqual({
+      ...stylisedAs(QUALITY_LADDER[1]),
+      // #3282: capture and presence go at rung 1, which the floor carries down.
+      capture: false,
+      presence: false,
     });
     let state: WorldQualityState = INITIAL_REALISTIC_QUALITY;
     const walk = [worldRung(state)];
@@ -917,6 +949,9 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
       if (rung !== walk[walk.length - 1]) walk.push(rung);
     }
     expect(walk.map((rung) => `${rung.world}:${String(rung.frameCap)}`)).toEqual([
+      'realistic:Infinity',
+      'realistic:Infinity',
+      'realistic:Infinity',
       'realistic:Infinity',
       'realistic:Infinity',
       'stylised:Infinity',
@@ -1014,7 +1049,14 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
     expect(QUALITY_LADDER.slice(firstWithout).every((rung) => !rung.presence)).toBe(true);
     expect(QUALITY_LADDER[0]?.presence).toBe(true);
     expect(RIDER_SHADOW_MAP_RUNG.presence).toBe(true);
-    // The realistic ladder inherits it from the two stylised rungs it is built on.
-    expect(REALISTIC_LADDER.map((rung) => rung.presence)).toStrictEqual([true, false]);
+    // The realistic ladder withdraws it on its first step down, with the first
+    // belt it sheds (#3282), and never gives it back inside realism.
+    expect(REALISTIC_LADDER.map((rung) => rung.presence)).toStrictEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });

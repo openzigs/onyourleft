@@ -52,11 +52,25 @@ import { sceneFrame } from './scene';
 import { SETTLEMENT_CLEARED_KINDS, SETTLEMENT_MARGIN_METRES } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, VIEW_AHEAD_METRES } from './terrain';
+import { REDUCED_MAPPED_BUILDING_REACH_METRES } from './quality';
+import { PHOTOGRAPHIC_STRUCTURE_SURFACES } from './realistic-assets';
 import { cityCentreFixture } from './testing/urban-fixtures';
+import { MappedBuildingBelt } from './three-renderer';
 import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
 const town = rowTownFixture();
+
+/** #3282: the photographs a mapped buildings' belt is built with, as `city-centre.test.ts` makes them. */
+const BELT_TEXTURES = new Map(
+  PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => [
+    surface,
+    {
+      colour: { image: { width: 512, height: 512 }, dispose: () => undefined } as never,
+      normal: { image: { width: 512, height: 512 }, dispose: () => undefined } as never,
+    },
+  ]),
+);
 const planned = footprintPlans(
   town.corridor,
   landClassMask(town.corridor),
@@ -790,5 +804,82 @@ describe('a city centre’s far-level cap — #1638, off by default', () => {
     expect(mappedBuildingsOf(classed, MAPPED_BUILDING_MAX + 1).cityFarMax).toBe(
       MAPPED_BUILDING_MAX + 1,
     );
+  });
+});
+
+describe('a rung’s shorter reach for the mapped buildings — #3282', () => {
+  const rider = roadAt(1_500);
+  /** A point the full reach draws buildings from both inside and beyond the reduced reach. */
+  const where = Array.from({ length: 41 }, (_, step) => ({
+    x: rider.x + step * 10,
+    z: rider.z,
+  })).find((at) => {
+    const selection = new MappedSelection();
+    selectMappedBuildings(buildings, at.x, at.z, MAPPED_BUILDING_TRIANGLES, selection);
+    const distances = drawn(selection).map((plan) => apart(plan, at));
+    return (
+      distances.some((each) => each > REDUCED_MAPPED_BUILDING_REACH_METRES) &&
+      distances.some((each) => each <= REDUCED_MAPPED_BUILDING_REACH_METRES)
+    );
+  });
+  const reached = (reach?: number): MappedSelection => {
+    const at = where as { x: number; z: number };
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      buildings,
+      at.x,
+      at.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      reach,
+    );
+    return selection;
+  };
+
+  it('draws nothing beyond the reach it is given, where the full reach draws something there', () => {
+    // Non-vacuity: the full reach draws a building past the reduced one here.
+    expect(where).toBeDefined();
+    const at = where as { x: number; z: number };
+    const selection = reached(REDUCED_MAPPED_BUILDING_REACH_METRES);
+    expect(selection.count).toBeGreaterThan(0);
+    for (const plan of drawn(selection)) {
+      expect(apart(plan, at)).toBeLessThanOrEqual(REDUCED_MAPPED_BUILDING_REACH_METRES);
+    }
+  });
+
+  it('is the full reach when none is given, as every caller but the belt asks', () => {
+    expect(drawn(reached(MAPPED_BUILDING_REACH_METRES))).toEqual(drawn(reached(undefined)));
+  });
+
+  it('is applied by the belt at its next refill, whatever the chunk, and only when it changes', () => {
+    const at = where as { x: number; z: number };
+    const belt = new MappedBuildingBelt(buildings, BELT_TEXTURES);
+    belt.setCarried(true);
+    belt.refill(at.x, at.z, MAPPED_BUILDING_TRIANGLES, 7);
+    const far = (): number =>
+      belt
+        .drawnPlans()
+        .filter(
+          (index) =>
+            apart(planned[index] as FootprintPlan, at) > REDUCED_MAPPED_BUILDING_REACH_METRES,
+        ).length;
+    expect(belt.reach).toBe(MAPPED_BUILDING_REACH_METRES);
+    expect(far()).toBeGreaterThan(0);
+    // The same chunk needs no refill until the rung changes the reach…
+    expect(belt.needsRefill(7)).toBe(false);
+    belt.setReach(MAPPED_BUILDING_REACH_METRES);
+    expect(belt.needsRefill(7)).toBe(false);
+    belt.setReach(REDUCED_MAPPED_BUILDING_REACH_METRES);
+    expect(belt.needsRefill(7)).toBe(true);
+    // …and the refill draws inside it.
+    belt.refill(at.x, at.z, MAPPED_BUILDING_TRIANGLES, 7);
+    expect(belt.drawnPlans().length).toBeGreaterThan(0);
+    expect(far()).toBe(0);
+    belt.dispose();
   });
 });
