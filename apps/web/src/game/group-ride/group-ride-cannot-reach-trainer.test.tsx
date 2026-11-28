@@ -240,11 +240,11 @@ async function clickThrough(element: HTMLElement | undefined): Promise<void> {
  * mounts it (it finds no pad and asks for no more), which would otherwise be
  * handed a frame of the ride's.
  */
-async function oneFrame(frame: number): Promise<void> {
+async function oneFrame(frame: number, frameMs = FRAME_MS): Promise<void> {
   const due = pending;
   if (due.length === 0) throw new Error(`the ride stopped asking for frames at ${String(frame)}`);
   pending = [];
-  nowMs += FRAME_MS;
+  nowMs += frameMs;
   await act(async () => {
     for (const next of due) next(nowMs);
     await Promise.resolve();
@@ -373,6 +373,8 @@ interface PressedRun extends Run {
   readonly states: ReadonlySet<string>;
   /** How many times the rider went from the front to drifting back. */
   readonly pullOffs: number;
+  /** How many frames the rider spent on the front of a steady line before the first of those. */
+  readonly framesOnFront: number;
 }
 
 /** The power that holds the wheel, from the line as the newest step left it. */
@@ -399,12 +401,18 @@ const hudButton = (name: string): HTMLButtonElement | undefined =>
   );
 
 /** Frames after the first pull-off: sit-in toggled, then the rider eases, then holds a wheel again. */
-const SIT_IN_FRAMES = 160;
-const SIT_IN_EVERY = 40;
-const EASED_FRAMES = 70;
-const BACK_FRAMES = 50;
+const SIT_IN_FRAMES = 80;
+const SIT_IN_EVERY = 20;
+const EASED_FRAMES = 40;
+const BACK_FRAMES = 30;
 /** The most frames the rider is given to reach the front and pull off. */
-const TO_THE_FRONT_MOST = 1_200;
+const TO_THE_FRONT_MOST = 600;
+/**
+ * The pressed ride's frame: half a second, ten simulation steps, so its three
+ * minutes are ridden in half the frames (#1688's ruling: a slow case is made
+ * cheaper, never given a longer timeout).
+ */
+const PRESSED_FRAME_MS = 500;
 
 /**
  * The pressed ride, or, handed one, **the same power on the same frames at
@@ -416,6 +424,13 @@ async function ridePressed(replayOf?: PressedRun): Promise<PressedRun> {
   seen.replayed = 0;
   seen.session = undefined;
   powerNow = 150;
+  // One line every time: the seed `ride-group.ts` draws at the press.
+  const seeded = vi
+    .spyOn(globalThis.crypto, 'getRandomValues')
+    .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+      (array as unknown as Uint32Array)[0] = 7;
+      return array;
+    });
   const written: Write[] = [];
   mounted = await mount(
     <GameView
@@ -449,6 +464,7 @@ async function ridePressed(replayOf?: PressedRun): Promise<PressedRun> {
   const toggledIn = new Set<string>();
   const states = new Set<string>();
   let pullOffs = 0;
+  let framesOnFront = 0;
   /** The frame the rider first drifted back at, or `undefined` before it. */
   let pulledOffAt: number | undefined;
   let role = '';
@@ -488,8 +504,9 @@ async function ridePressed(replayOf?: PressedRun): Promise<PressedRun> {
       powerNow = replayOf.powers[frame] as number;
     }
     powers.push(powerNow);
-    await oneFrame(frame);
+    await oneFrame(frame, PRESSED_FRAME_MS);
     states.add(stateNow());
+    if (pulledOffAt === undefined && stateNow() === 'steady/on-front') framesOnFront += 1;
     const now: string = line()?.role ?? '';
     if (role === 'on-front' && now === 'drifting-back') {
       pullOffs += 1;
@@ -503,7 +520,18 @@ async function ridePressed(replayOf?: PressedRun): Promise<PressedRun> {
   mounted.unmount();
   mounted = undefined;
   await settle();
-  return { written: [...written], given, distance, powers, pressedIn, toggledIn, states, pullOffs };
+  seeded.mockRestore();
+  return {
+    written: [...written],
+    given,
+    distance,
+    powers,
+    pressedIn,
+    toggledIn,
+    states,
+    pullOffs,
+    framesOnFront,
+  };
 }
 
 /** The pressed ride and its groupless twin, each ridden once. @see ridden */
@@ -542,8 +570,11 @@ describe('a pull-off press and a sit-in choice reach no trainer write — #3307,
         'off-the-back',
       ]),
     );
-    // …and it bit: the rider took the front and a press ended the pull.
+    // …and it bit: the rider took the front and a press ended the pull, inside
+    // a decision window of the line settling (a second and a half of frames),
+    // where a rider who only fades is left there five seconds and more.
     expect(pressed.pullOffs).toBeGreaterThan(0);
+    expect(pressed.framesOnFront).toBeLessThanOrEqual(6);
     // Sit-in was toggled on and off, and the line heard it.
     expect(pressed.toggledIn.size).toBeGreaterThan(1);
     expect([...roles(pressed.states)]).toContain('sitting-in');
