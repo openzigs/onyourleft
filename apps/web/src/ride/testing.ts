@@ -325,6 +325,7 @@ export function stubRideController(
     },
     // #3088: not counted, so the call record a snapshot holds does not move.
     noteOpenWorld: () => undefined,
+    noteGroupRide: () => undefined,
     noteLapRace: (race) => {
       calls.noteLapRace.push(race);
     },

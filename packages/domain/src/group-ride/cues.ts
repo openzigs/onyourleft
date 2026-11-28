@@ -371,7 +371,8 @@ function outOfBand(
   const front = member(line, order[0] as string);
   const last = member(line, order[order.length - 1] as string);
   return {
-    'past-front': onWheel(role) && me.distanceM > front.distanceM,
+    // `off-the-front` is that same fact as no-drop (#3301) names it.
+    'past-front': role === 'off-the-front' || (onWheel(role) && me.distanceM > front.distanceM),
     surging: role === 'on-front' && me.speedMps > line.groupSpeedMps + CUE_SURGE_MPS,
     'eased-too-much': role === 'latching' && last.distanceM - me.distanceM > CUE_EASED_METRES,
     'close-gap': onWheel(role) && ahead !== null && ahead.distanceM - me.distanceM > CUE_GAP_METRES,

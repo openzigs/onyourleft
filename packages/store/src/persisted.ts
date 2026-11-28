@@ -42,6 +42,10 @@ import {
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   readLapRaceModelRecord,
   readPacerDecisionRecord,
+  LINE_PHASES,
+  RIDER_ROLES,
+  ROTATION_LINE_LEAST,
+  ROTATION_LINE_MOST,
   readReplanRecord,
   wind as validWind,
   readWorkoutGoals,
@@ -53,7 +57,9 @@ import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analy
 import type {
   GeographicPosition,
   LapRaceModelRecord,
+  LinePhase,
   PacerDecisionRecord,
+  RiderRole,
   Wind,
   ReplanRecord,
   RouteProfile,
@@ -78,6 +84,9 @@ import type {
   ActivityCaloriesBasis,
   ActivityRecord,
   DraftSpan,
+  GroupRideFact,
+  GroupRideLogEntry,
+  GroupRidePress,
   PacerModelFact,
   PacerRidingPosition,
   RideFacts,
@@ -107,6 +116,8 @@ import {
   CAMERA_FRAME_SOURCES,
   ACTIVITY_CALORIES_BASES,
   FRAMING_CHECK_RECORDS,
+  GROUP_RIDE_LOG_MOST,
+  GROUP_RIDE_PRESSES,
   isBirthYear,
   parseCalorieSex,
   RIDE_WRITE_UP_SOURCES,
@@ -205,6 +216,18 @@ export interface PersistedRideFacts {
    * the record's own shape, each re-read on the way in and out: @see lapRacesOf
    */
   lapRaces?: unknown[];
+  /** @see RideFacts.groupRide — #3303. Re-read whole on the way in and out: @see groupRideOf */
+  groupRide?: {
+    version: unknown;
+    seed: unknown;
+    startedAt: unknown;
+    targetSpeed: unknown;
+    bots: unknown;
+    log: unknown[];
+    logCut?: true;
+    /** #3307. */
+    presses?: unknown[];
+  };
   /** @see RideFacts.pacerModel — #2712. Re-read whole on the way in and out: @see pacerModelOf */
   pacerModel?: {
     version: unknown;
@@ -715,6 +738,22 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   // too — one that does not read is dropped, never the ride.
   const lapRaces = lapRacesOf(facts.lapRaces);
   if (lapRaces !== undefined) row.lapRaces = [...lapRaces];
+  // #3303: the group ride, through its reader on the way in too.
+  const group = groupRideOf(facts.groupRide);
+  if (group !== undefined) {
+    row.groupRide = {
+      version: group.version,
+      seed: group.seed,
+      startedAt: group.startedAt,
+      targetSpeed: group.targetSpeed,
+      bots: group.bots,
+      log: group.log.map(({ at, phase, role, groupSpeed }) => ({ at, phase, role, groupSpeed })),
+      ...(group.logCut === true ? { logCut: true as const } : {}),
+      ...(group.presses === undefined
+        ? {}
+        : { presses: group.presses.map(({ at, press }) => ({ at, press })) }),
+    };
+  }
   // #2712: the AI pacer's log, through its reader on the way in too.
   const pacer = pacerModelOf(facts.pacerModel);
   if (pacer !== undefined) {
@@ -839,6 +878,86 @@ export function lapRacesOf(value: unknown): readonly LapRaceModelRecord[] | unde
     .map(readLapRaceModelRecord)
     .filter((record): record is LapRaceModelRecord => record !== undefined);
   return read.length === 0 ? undefined : read;
+}
+
+/**
+ * A ride's group ride (#3303, ADR 0101), or `undefined` when there is none or
+ * it does not read — dropped WHOLE, never the ride, as the AI pacer's log is:
+ * an entry missing from the middle of the log would be a different ride. The
+ * log is in time order, of at most `GROUP_RIDE_LOG_MOST` entries, and every
+ * word in it is one of `@onyourleft/domain`'s own. The rider's presses
+ * (#3307) are read the same way, in time order and from their closed list,
+ * and a fact whose presses do not read is dropped whole too: the line
+ * replays from them.
+ */
+export function groupRideOf(value: unknown): GroupRideFact | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { version, seed, startedAt, targetSpeed, bots, log, logCut, presses } = value as {
+    presses?: unknown;
+    version?: unknown;
+    seed?: unknown;
+    startedAt?: unknown;
+    targetSpeed?: unknown;
+    bots?: unknown;
+    log?: unknown;
+    logCut?: unknown;
+  };
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1)
+    return undefined;
+  if (typeof seed !== 'number' || !Number.isSafeInteger(seed) || seed < 0) return undefined;
+  // Any sign: below nought for a recording begun part-way through the group ride.
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return undefined;
+  if (typeof targetSpeed !== 'number' || !Number.isFinite(targetSpeed) || !(targetSpeed > 0))
+    return undefined;
+  // A line holds the rider and its bots.
+  if (
+    typeof bots !== 'number' ||
+    !Number.isSafeInteger(bots) ||
+    bots < ROTATION_LINE_LEAST - 1 ||
+    bots > ROTATION_LINE_MOST - 1
+  )
+    return undefined;
+  if (!Array.isArray(log) || log.length === 0 || log.length > GROUP_RIDE_LOG_MOST) return undefined;
+  const read: GroupRideLogEntry[] = [];
+  for (const each of log as unknown[]) {
+    if (typeof each !== 'object' || each === null) return undefined;
+    const { at, phase, role, groupSpeed } = each as {
+      at?: unknown;
+      phase?: unknown;
+      role?: unknown;
+      groupSpeed?: unknown;
+    };
+    if (typeof at !== 'number' || !Number.isFinite(at) || at < (read.at(-1)?.at ?? 0))
+      return undefined;
+    if (!LINE_PHASES.includes(phase as LinePhase)) return undefined;
+    if (!RIDER_ROLES.includes(role as RiderRole)) return undefined;
+    if (typeof groupSpeed !== 'number' || !Number.isFinite(groupSpeed) || groupSpeed < 0)
+      return undefined;
+    read.push({ at, phase: phase as LinePhase, role: role as RiderRole, groupSpeed });
+  }
+  const pressed: GroupRidePress[] = [];
+  if (presses !== undefined) {
+    if (!Array.isArray(presses) || presses.length > GROUP_RIDE_LOG_MOST) return undefined;
+    for (const each of presses as unknown[]) {
+      if (typeof each !== 'object' || each === null) return undefined;
+      const { at, press } = each as { at?: unknown; press?: unknown };
+      if (typeof at !== 'number' || !Number.isFinite(at) || at < (pressed.at(-1)?.at ?? 0))
+        return undefined;
+      const kind = GROUP_RIDE_PRESSES.find((known) => known === press);
+      if (kind === undefined) return undefined;
+      pressed.push({ at, press: kind });
+    }
+  }
+  return {
+    version,
+    seed,
+    startedAt,
+    targetSpeed,
+    bots,
+    log: read,
+    ...(logCut === true ? { logCut: true as const } : {}),
+    ...(pressed.length === 0 ? {} : { presses: pressed }),
+  };
 }
 
 /**
@@ -1026,6 +1145,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const lapRaces = lapRacesOf(facts.lapRaces);
   // #2712: never a throw either. @see pacerModelOf
   const pacerModel = pacerModelOf(facts.pacerModel);
+  // #3303: never a throw either. @see groupRideOf
+  const groupRide = groupRideOf(facts.groupRide);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -1078,6 +1199,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(draftSpans === undefined ? {} : { draftSpans }),
     ...(lapRaces === undefined ? {} : { lapRaces }),
     ...(pacerModel === undefined ? {} : { pacerModel }),
+    ...(groupRide === undefined ? {} : { groupRide }),
     ...(facts.openWorld === undefined
       ? {}
       : { openWorld: decodedBoolean('activity.rideFacts.openWorld', facts.openWorld) }),
