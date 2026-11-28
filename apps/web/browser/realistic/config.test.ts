@@ -583,6 +583,16 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(harness).toMatch(/config\.town === 'pois'\s*\?\s*poiStreetFixture\(latitude\)/);
   });
 
+  it('rides the road of three settings through #3287’s fixture, which is where it is wired', () => {
+    expect(parseConfig('?town=settings&world=stylised&at=1300').town).toBe('settings');
+    expect(configQuery(parseConfig('?town=settings'))).toBe('?town=settings');
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toMatch(/config\.town === 'settings'\s*\?\s*settingsFixture\(latitude\)/);
+  });
+
   it('rides the untagged street through #2023’s fixture, which is where it is wired', () => {
     expect(parseConfig('?town=untagged').town).toBe('untagged');
     const harness = readFileSync(

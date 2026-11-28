@@ -132,6 +132,7 @@ import type { ChainLinkPiece } from './chain-link';
 import { sceneryGrid, wrappedCell, type SceneryGrid } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import { leastSquaredNearRoad, nearestOnDrawnRoad, squaredToSegment } from './road-grid';
+import { buildingSettingOf } from './stylised-shapes';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
 import type { UrbanClassMap } from './urban-class';
 import { inWater, waterways } from './waterways';
@@ -1396,6 +1397,10 @@ export function lotSpacing(profile: RouteProfile): SceneryGrid & { readonly plot
  *    ({@link MappedTown.urban}): there a lot is a terraced block, planned at
  *    the press as a footprint is (`footprint-buildings.ts` §`terracePlans`),
  *    and drawn with the mapped buildings. Every other class is today's.
+ * 8. Since #3287 a house carries **the setting its stretch is**
+ *    (`ScatterItem.lotSetting`, `stylised-shapes.ts` §`buildingSettingOf`), by
+ *    which the stylised world chooses its shape. It moves no lot and builds
+ *    none: a ride with no urban class has no setting on anything.
  *
  * **Along the route's own road only**: the game draws one road, and a lot
  * beside a mapped side street the game does not draw would face nothing.
@@ -1417,6 +1422,8 @@ export function lotsAt(
   if (mask.bytes === 0) return;
   const grid = lotSpacing(profile);
   const { plots, span, shift } = grid;
+  // #3287: the class along THIS profile, an open-world ride's included (#3131).
+  const urban = urbanOfTown(mapped, profile);
   const lotTurn = Math.floor(
     uniformFrom(slotHash(seed, 0, LOT_KEY + 3), STREAM_TURN_VARIANT) * SCATTER_VARIANT_SLOTS,
   );
@@ -1492,10 +1499,16 @@ export function lotsAt(
             LOT_PORCH_VARIANT &&
           footprintClearance(profile, origin, item, LOT_PORCH_FOOTPRINT) >= ROAD_CLEARANCE_METRES &&
           lotStands(mask, mapped, placeLot(lotScratch, x, z, LOT_PORCH_FOOTPRINT, rotation));
+        // #3287: the setting the stylised world draws a house by.
+        const lotSetting =
+          kind === 'building' && urban !== undefined
+            ? buildingSettingOf(urban.classAt(distanceOnRoute(profile, along)))
+            : 'rural';
         found.push({
           ...item,
           // #1588: a house is clad, a shop never.
           paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building', porch),
+          ...(lotSetting === 'rural' ? {} : { lotSetting }),
         });
       }
     }

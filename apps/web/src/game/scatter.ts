@@ -143,6 +143,13 @@ export type StructureKind =
 export type SceneryKind = ScatterKind | StructureKind;
 
 /**
+ * Where a building stands, as the stylised world draws it — #3287: on a
+ * rural stretch, a suburban one or a commercial one, from the ride's urban
+ * class (`stylised-shapes.ts` §`buildingSettingOf`).
+ */
+export type BuildingSetting = 'rural' | 'suburban' | 'commercial';
+
+/**
  * Every kind THIS file places, in a fixed order.
  *
  * The order is load-bearing: {@link pickKind} walks it to turn one uniform
@@ -268,6 +275,16 @@ export interface ScatterItem {
    * like the variant it changes what stands somewhere, never where.
    */
   readonly setting?: ScenerySetting;
+  /**
+   * The setting a mapped town's lot stands in — #3287, `settlements.ts`
+   * §`lotsAt`, a `building` only, and only where it is not `rural`: absent is
+   * rural, which is every building of a ride with no urban class. The
+   * stylised world draws a suburban lot as a modern house and a commercial
+   * one as a shop or a low block of flats over one (`stylised-shapes.ts`
+   * §`stylisedFoldOf`); the realistic world does not read it. Like the
+   * variant it changes what stands somewhere, never where.
+   */
+  readonly lotSetting?: BuildingSetting;
 }
 
 /**

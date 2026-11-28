@@ -2,7 +2,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { drawCounter, GL_TRIANGLES, trianglesInDraw } from './draws';
+import {
+  drawCounter,
+  GL_TRIANGLES,
+  indicesInMultiDraw,
+  trianglesInDraw,
+  trianglesInMultiDraw,
+  watchMultiDraws,
+} from './draws';
 
 const LINES = 1;
 const UNSIGNED_SHORT = 0x1403;
@@ -79,5 +86,63 @@ describe('the draw counter — #478, #616', () => {
     expect(counter.takeTriangles()).toBe(2);
     expect(counter.takeCalls()).toBe(0);
     expect(counter.takeTriangles()).toBe(0);
+  });
+
+  it('counts a multi-draw as one call, and the sum of its draws — #3287', () => {
+    const { prototype } = fakeContext();
+    const made: string[] = [];
+    const extension = {
+      multiDrawElementsWEBGL: (...args: unknown[]): string => {
+        made.push(`elements:${String(args[6])}`);
+        return 'made';
+      },
+      multiDrawArraysWEBGL: (...args: unknown[]): string => {
+        made.push(`arrays:${String(args[5])}`);
+        return 'made';
+      },
+    };
+    const counter = drawCounter(prototype, extension);
+    // Three draws of 30, 60 and 300 indices: one call, 130 triangles.
+    const counts = Int32Array.of(999, 30, 60, 300, 999);
+    expect(
+      extension.multiDrawElementsWEBGL(GL_TRIANGLES, counts, 1, UNSIGNED_SHORT, [0, 0, 0], 0, 3),
+    ).toBe('made');
+    expect(counter.takeCalls()).toBe(1);
+    expect(counter.takeTriangles()).toBe(130);
+    // Arrays: the counts are the fourth argument, from the fifth.
+    extension.multiDrawArraysWEBGL(GL_TRIANGLES, [0, 0], 0, Int32Array.of(9, 12), 0, 2);
+    extension.multiDrawArraysWEBGL(LINES, [0], 0, Int32Array.of(30), 0, 1);
+    expect(counter.takeCalls()).toBe(2);
+    expect(counter.takeTriangles()).toBe(7);
+    expect(made).toEqual(['elements:3', 'arrays:2', 'arrays:1']);
+  });
+
+  it('reads a multi-draw’s counts from its offset, for as many draws as it makes', () => {
+    const counts = [5, 6, 9, 12];
+    expect(
+      indicesInMultiDraw('multiDrawElementsWEBGL', [GL_TRIANGLES, counts, 2, 0, [], 0, 2]),
+    ).toBe(21);
+    expect(indicesInMultiDraw('multiDrawArraysWEBGL', [GL_TRIANGLES, [], 0, counts, 0, 3])).toBe(
+      20,
+    );
+    expect(trianglesInMultiDraw('multiDrawArraysWEBGL', [LINES, [], 0, counts, 0, 3])).toBe(0);
+    expect(indicesInMultiDraw('multiDrawArraysWEBGL', [GL_TRIANGLES, [], 0, counts, 0, 0])).toBe(0);
+  });
+
+  it('puts a watched multi-draw back as it was, and watches nothing where there is none', () => {
+    const real = (): string => 'real';
+    const extension = { multiDrawElementsWEBGL: real };
+    let seen = 0;
+    const stop = watchMultiDraws(() => {
+      seen += 1;
+    }, extension);
+    expect(extension.multiDrawElementsWEBGL).not.toBe(real);
+    extension.multiDrawElementsWEBGL();
+    stop();
+    expect(extension.multiDrawElementsWEBGL).toBe(real);
+    expect(seen).toBe(1);
+    expect(() => {
+      watchMultiDraws(() => undefined, undefined)();
+    }).not.toThrow();
   });
 });

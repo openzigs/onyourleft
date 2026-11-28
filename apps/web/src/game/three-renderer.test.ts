@@ -2584,7 +2584,9 @@ describe('the shapes the models bring — #341', () => {
     return loadSceneryModels(loaderFrom(donor, 'tree-conifer')).then(() => {
       const belt = new ScatterBelt();
 
-      // Every kind with a model in the table now draws the loaded shape…
+      // Every kind with a model in the table now draws the loaded shape. (The
+      // files #3287 draws beside it are a batched belt's:
+      // `stylised-folds.test.ts`.)
       for (const kind of Object.keys(SCENERY_MODELS) as SceneryKind[]) {
         expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
       }

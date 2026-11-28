@@ -39,7 +39,7 @@ describe('install', () => {
 
   it('does NOT call skipWaiting — ADR 0024 D-3 rule 1, #407 criterion 1', async () => {
     // ⚠️ The create-react-app#3613 failure mode, and it is the likely case here
-    // rather than the exotic one: this client is eleven models and four lazy
+    // rather than the exotic one: this client is twenty-six models and four lazy
     // chunks deep, so a v1 page served v2's precache asks for a chunk name its
     // own bundle has never heard of. Moving `skipWaiting()` into the install
     // handler turns this red.

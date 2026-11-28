@@ -232,6 +232,7 @@ import {
   realisticTextureReport,
   uploadRealisticTexturesOf,
   loadSceneryModels,
+  setStylisedFolds,
   airOf,
   atmosphereOf,
   type AirReading,
@@ -364,16 +365,25 @@ import {
 } from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import type { NearTreeFade } from '../src/game/near-tree-fade';
-import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
+import {
+  COUNTED_DRAWS,
+  indicesInMultiDraw,
+  trianglesInDraw,
+  trianglesInMultiDraw,
+  watchMultiDraws,
+} from './realistic/draws';
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
   SCENERY_KINDS,
   SCATTER_VARIANT_SLOTS,
+  type BuildingSetting,
   type ScatterItem,
   type SceneryKind,
 } from '../src/game/scatter';
+import { SCENERY_MODELS, stylisedShapeNameOf } from '../src/game/scenery-models';
+import { writeStylisedTint } from '../src/game/stylised-shapes';
 import { atStartLine } from '../src/game/simulation';
 import {
   CAMERA_CONSTRAINTS,
@@ -1037,6 +1047,13 @@ declare global {
        * other measurement here, including the draw-call counts above.
        */
       readonly variantIndices: Readonly<Record<string, readonly number[]>>;
+      /**
+       * #3287: a building by its setting, two shrubs by their tints, and what
+       * the folded shapes cost a frame — with the models alone as the control.
+       */
+      readonly stylisedFolds: StylisedFoldMeasurement & {
+        readonly control: StylisedFoldMeasurement;
+      };
       /**
        * The mean colour of each rider's own silhouette — #368.
        *
@@ -2200,9 +2217,14 @@ function countingDrawCalls(body: (calls: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  // #3287: a `BatchedMesh` is drawn by a multi-draw, which is one call.
+  const stop = watchMultiDraws(() => {
+    calls += 1;
+  });
   try {
     body(() => calls);
   } finally {
+    stop();
     for (const name of names) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
@@ -2237,9 +2259,13 @@ function countingNonEmptyDrawCalls(body: (calls: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    if (indicesInMultiDraw(name, args) > 0) calls += 1;
+  });
   try {
     body(() => calls);
   } finally {
+    stop();
     for (const [name, original] of originals) {
       (gl as unknown as Record<string, unknown>)[name] = original;
     }
@@ -2292,9 +2318,13 @@ function countingIndices(body: (indices: () => number) => void): void {
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    indices += indicesInMultiDraw(name, args);
+  });
   try {
     body(() => indices);
   } finally {
+    stop();
     for (const name of Object.keys(submitted)) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
@@ -2324,12 +2354,17 @@ function countingTriangles(body: (triangles: () => number, calls: () => number) 
       return original.apply(this, args);
     };
   }
+  const stop = watchMultiDraws((name, args) => {
+    triangles += trianglesInMultiDraw(name, args);
+    calls += 1;
+  });
   try {
     body(
       () => triangles,
       () => calls,
     );
   } finally {
+    stop();
     for (const [name, original] of originals) gl[name] = original;
   }
 }
@@ -2403,6 +2438,219 @@ function placedAhead(
   };
 }
 
+/** What one building drawn alone covers, and what leads in it. @see foldProbe */
+interface SettingPixels {
+  /** Pixels the building changed. */
+  readonly pixels: number;
+  /** Of those, the ones whose green leads — a roof of City Kit (Suburban), a plant or an awning. */
+  readonly green: number;
+}
+
+/** #3287's measurement of one load of the models. @see foldProbe */
+interface StylisedFoldMeasurement {
+  /** The first building mesh's house, drawn alone, on a lot of each setting. */
+  readonly settings: Readonly<Record<BuildingSetting, SettingPixels>>;
+  /**
+   * Two shrubs of one shape, each drawn alone 14 m ahead: the mean colour of
+   * each one's pixels, and the share of the first's green the second's tint
+   * leaves (`stylised-shapes.ts` §`writeStylisedTint`), linear.
+   */
+  readonly tint: {
+    readonly lighter: Pixel;
+    readonly darker: Pixel;
+    readonly ratio: number;
+  };
+  /**
+   * The same of two conifers — a kind whose mesh holds several shapes, so
+   * they are drawn by a `BatchedMesh` and tinted through its colours. Both
+   * are the mesh's own model, `tree_pineTallA`, so one shape in two tints.
+   */
+  readonly batchedTint: {
+    readonly lighter: Pixel;
+    readonly darker: Pixel;
+    readonly ratio: number;
+  };
+  /**
+   * What the frame of one item a slot a kind submits for its scenery, its
+   * buildings stood on a rural, a suburban and a commercial lot in turn.
+   */
+  readonly triangles: number;
+  readonly calls: number;
+  /**
+   * That frame's items of a kind with a model: the file each is drawn as,
+   * and its mesh's own model, which is what it is drawn as with the models
+   * alone. The spec reads each file's triangles off its bytes.
+   */
+  readonly drawnAs: readonly { readonly shape: string; readonly model: string }[];
+}
+
+/** What {@link foldProbe} reports when it did not run. */
+const NO_STYLISED_FOLDS: StylisedFoldMeasurement = {
+  settings: {
+    rural: { pixels: 0, green: 0 },
+    suburban: { pixels: 0, green: 0 },
+    commercial: { pixels: 0, green: 0 },
+  },
+  tint: { lighter: [0, 0, 0, 0], darker: [0, 0, 0, 0], ratio: 1 },
+  batchedTint: { lighter: [0, 0, 0, 0], darker: [0, 0, 0, 0], ratio: 1 },
+  triangles: 0,
+  calls: 0,
+  drawnAs: [],
+};
+
+/**
+ * #3287, read back off a drawing buffer: that an instance draws the ONE shape
+ * its setting names, that a tint reaches the screen, and what the folded
+ * shapes cost.
+ *
+ * - **The settings.** One building, of the first mesh, 14 m ahead, drawn
+ *   alone as a rural, a suburban and a commercial lot. Three silhouettes,
+ *   so three counts — and the rural house has a green roof where the
+ *   commercial building is white, so a fold that did not fold, which would
+ *   draw all three shapes through each other, leaves that roof's green in
+ *   the commercial lot and makes all three counts one.
+ * - **The tint.** A shrub is one colour and has one shape a mesh, so two
+ *   drawn alone a pace apart differ by their tints and nothing else. The two
+ *   places are the pair, of a few dozen, whose tints are furthest apart.
+ * - **The cost.** The scenery's triangles and draw calls on `every`, the
+ *   frame of one item a slot a kind — every mesh the belt owns.
+ *
+ * Run twice by its caller: as the product loads the models, and with the
+ * models alone (`setStylisedFolds`), which is the control for all three.
+ */
+function foldProbe(probe: SceneFrame, every: SceneFrame): StylisedFoldMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2');
+  const whole = () =>
+    gl === null ? new Uint8Array(0) : readRegion(gl, 0, 0, canvas.width, canvas.height);
+  const pose = probe.camera;
+  const alone = (item: ScatterItem): SceneFrame => ({ ...probe, markers: [], scatter: [item] });
+  const empty: SceneFrame = { ...probe, markers: [], scatter: [] };
+  view.render(empty);
+  view.render(empty);
+  const nothing = whole();
+  /** The pixels a frame changed, and their mean colour. */
+  const changed = (present: Uint8Array): { pixels: number; mean: Pixel } => {
+    let pixels = 0;
+    const sum = [0, 0, 0];
+    for (let at = 0; at + 3 < present.length; at += 4) {
+      if (
+        present[at] === nothing[at] &&
+        present[at + 1] === nothing[at + 1] &&
+        present[at + 2] === nothing[at + 2]
+      ) {
+        continue;
+      }
+      pixels += 1;
+      sum[0] = (sum[0] ?? 0) + (present[at] ?? 0);
+      sum[1] = (sum[1] ?? 0) + (present[at + 1] ?? 0);
+      sum[2] = (sum[2] ?? 0) + (present[at + 2] ?? 0);
+    }
+    const count = Math.max(1, pixels);
+    return {
+      pixels,
+      mean: [(sum[0] ?? 0) / count, (sum[1] ?? 0) / count, (sum[2] ?? 0) / count, 255],
+    };
+  };
+
+  const lot = (setting: BuildingSetting): SettingPixels => {
+    view.render(
+      alone({
+        ...placedAhead(pose, 'building', 0, 14, 0),
+        scale: 1.4,
+        ...(setting === 'rural' ? {} : { lotSetting: setting }),
+      }),
+    );
+    const drawn = whole();
+    return { pixels: changed(drawn).pixels, green: channelLead(drawn, nothing).green };
+  };
+  const settings = {
+    rural: lot('rural'),
+    suburban: lot('suburban'),
+    commercial: lot('commercial'),
+  };
+
+  // Two of a kind: of a few dozen places a pace apart, the lightest and the
+  // darkest — for a conifer, among the places where it is its mesh's own model.
+  const tintAt = new Float32Array(3);
+  const greenOf = (item: ScatterItem): number => {
+    writeStylisedTint(item.kind, item.x, item.z, tintAt, 0);
+    return tintAt[1] ?? 1;
+  };
+  const tintPair = (
+    kind: 'shrub' | 'tree-conifer',
+  ): { lighter: Pixel; darker: Pixel; ratio: number } => {
+    let lightest: ScatterItem | undefined;
+    let darkest: ScatterItem | undefined;
+    for (let step = 0; step < 96; step += 1) {
+      const here = placedAhead(
+        pose,
+        kind,
+        0,
+        13.5 + (step % 16) / 16,
+        (Math.floor(step / 16) - 3) / 6,
+      );
+      if (kind === 'tree-conifer' && stylisedShapeNameOf(here) !== 'tree_pineTallA') continue;
+      if (lightest === undefined || greenOf(here) > greenOf(lightest)) lightest = here;
+      if (darkest === undefined || greenOf(here) < greenOf(darkest)) darkest = here;
+    }
+    if (lightest === undefined || darkest === undefined) {
+      throw new Error(`no place to stand a ${kind}`);
+    }
+    view.render(alone({ ...lightest, scale: 1.4 }));
+    const lighter = changed(whole()).mean;
+    view.render(alone({ ...darkest, scale: 1.4 }));
+    const darker = changed(whole()).mean;
+    return { lighter, darker, ratio: greenOf(darkest) / greenOf(lightest) };
+  };
+  const tint = tintPair('shrub');
+  const batchedTint = tintPair('tree-conifer');
+
+  let triangles = 0;
+  let calls = 0;
+  // Every mesh the belt owns, and every shape of a building's: its houses
+  // stand on a rural, a suburban and a commercial lot in turn.
+  const lots = [undefined, 'suburban', 'commercial'] as const;
+  let houses = 0;
+  const settled: SceneFrame = {
+    ...every,
+    scatter: every.scatter.map((item): ScatterItem => {
+      if (item.kind !== 'building') return item;
+      // Stepped on by one a round, so no mesh's houses are all of one setting.
+      const setting = lots[(houses + Math.floor(houses / lots.length)) % lots.length];
+      houses += 1;
+      return setting === undefined ? item : { ...item, lotSetting: setting };
+    }),
+  };
+  const bare: SceneFrame = { ...settled, scatter: [] };
+  // Drawn once first: three compiles a program and allocates an instance
+  // buffer the first time it draws a mesh. @see sceneryCallsAcrossRungs
+  view.render(settled);
+  view.render(bare);
+  countingTriangles((submitted, drawn) => {
+    view.render(bare);
+    const bareTriangles = submitted();
+    const bareCalls = drawn();
+    view.render(settled);
+    triangles = submitted() - 2 * bareTriangles;
+    calls = drawn() - 2 * bareCalls;
+  });
+  view.destroy();
+  const drawnAs = settled.scatter.flatMap((item) => {
+    const shape = stylisedShapeNameOf(item);
+    const own = SCENERY_MODELS[item.kind];
+    if (shape === undefined || own === undefined) return [];
+    const wanted = Number.isInteger(item.variant) ? item.variant : 0;
+    const model = own[((wanted % own.length) + own.length) % own.length]?.name;
+    return model === undefined ? [] : [{ shape, model }];
+  });
+  return { settings, tint, batchedTint, triangles, calls, drawnAs };
+}
+
 /**
  * Counts every WebGL texture created for the whole of `body` — #366.
  *
@@ -2411,22 +2659,53 @@ function placedAhead(
  * *"no texture reaches the GPU"* unreadable. Patched on the prototype for the
  * reason every counter here is — three obtains its own context and the harness
  * never sees it.
+ *
+ * ⚠️ **Less the instance tables of a `BatchedMesh` — #3287.** A stylised mesh
+ * of several shapes keeps its instances' matrices, which instance each draw
+ * is and, for a tinted kind, their colours in small data textures
+ * ({@link INSTANCE_TABLE_FORMATS}): numbers, as an instance buffer is, and
+ * not a picture. They are told apart by the format they are stored in, which
+ * no image a model or a logo brings is stored in, and `instanceTables` says
+ * how many there were. What #366 claims is about pictures, and still is.
  */
-function countingTextures(body: (textures: () => number) => void): void {
+function countingTextures(
+  body: (textures: () => number, instanceTables: () => number) => void,
+): void {
   const gl = WebGL2RenderingContext.prototype;
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+  /* eslint-disable @typescript-eslint/unbound-method */
   const real = gl.createTexture;
+  const realStorage = gl.texStorage2D;
+  /* eslint-enable @typescript-eslint/unbound-method */
   let created = 0;
+  let tables = 0;
   gl.createTexture = function patchedCreateTexture(this: WebGL2RenderingContext) {
     created += 1;
     return real.call(this);
   };
+  gl.texStorage2D = function countedStorage(
+    this: WebGL2RenderingContext,
+    ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
+  ) {
+    if (INSTANCE_TABLE_FORMATS.has(args[2])) tables += 1;
+    realStorage.apply(this, args);
+  };
   try {
-    body(() => created);
+    body(
+      () => created - tables,
+      () => tables,
+    );
   } finally {
     gl.createTexture = real;
+    gl.texStorage2D = realStorage;
   }
 }
+
+/**
+ * The formats three stores a `BatchedMesh`'s instance tables in — #3287:
+ * `RGBA32F` (its matrices, and its colours) and `R32UI` (which instance each
+ * draw is). @see countingTextures
+ */
+const INSTANCE_TABLE_FORMATS: ReadonlySet<number> = new Set([0x8814, 0x8236]);
 
 /** Which channel leads in each pixel of a region, counted. @see treeRedPixels */
 function channelLead(
@@ -11420,7 +11699,10 @@ function stylisedTextureProbe(): StylisedTextureMeasurement {
       this: WebGL2RenderingContext,
       ...args: Parameters<WebGL2RenderingContext['texStorage2D']>
     ) {
-      if (watching) uploads.push(`${String(args[3])}x${String(args[4])}`);
+      // #3287: not a `BatchedMesh`'s instance tables. @see countingTextures
+      if (watching && !INSTANCE_TABLE_FORMATS.has(args[2])) {
+        uploads.push(`${String(args[3])}x${String(args[4])}`);
+      }
       realStorage.apply(this, args);
     };
     gl.texImage2D = function patchedImage(this: WebGL2RenderingContext, ...args: unknown[]) {
@@ -14018,6 +14300,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     buildingBluePixels: 0,
     sceneryCallsByVariants: [],
     variantIndices: {},
+    stylisedFolds: { ...NO_STYLISED_FOLDS, control: NO_STYLISED_FOLDS },
     riderMeanColour: {},
     riderSilhouettePixels: {},
     riderBuriedPixels: 0,
@@ -14474,6 +14757,10 @@ async function run(): Promise<void> {
   let buildingBluePixels = 0;
   let sceneryCallsByVariants: readonly number[] = [];
   let variantIndices: Record<string, readonly number[]> = {};
+  let stylisedFolds: StylisedFoldMeasurement & { readonly control: StylisedFoldMeasurement } = {
+    ...NO_STYLISED_FOLDS,
+    control: NO_STYLISED_FOLDS,
+  };
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
   let riderBuriedPixels = 0;
@@ -15006,6 +15293,27 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // ------------------------------------- shapes by setting — #3287
+  //
+  // Here for the models' reason: its control loads the models again, with
+  // none of #3287's shapes folded in beside them, and that is asynchronous.
+  try {
+    if (probeFrame !== null && variantFrame !== null && !SHADOW_MAP_LOAD) {
+      const folded = foldProbe(probeFrame, variantFrame);
+      try {
+        setStylisedFolds(false);
+        await loadSceneryModels();
+        stylisedFolds = { ...folded, control: foldProbe(probeFrame, variantFrame) };
+      } finally {
+        setStylisedFolds(true);
+        await loadSceneryModels();
+      }
+      phaseEnds('default: folds');
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   // -------------------------------------------- the variants — #367
   //
   // Outside the synchronous block for the reason the one above it is: the
@@ -15177,6 +15485,7 @@ async function run(): Promise<void> {
     buildingBluePixels,
     sceneryCallsByVariants,
     variantIndices,
+    stylisedFolds,
     riderMeanColour,
     riderSilhouettePixels,
     riderBuriedPixels,

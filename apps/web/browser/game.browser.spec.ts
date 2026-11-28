@@ -69,6 +69,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { readGlb } from '../src/game/model-bytes-testing';
 import { MIXED_TOWN_EDGE_RUNG } from '../src/game/footprint-fixtures-testing';
 import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
@@ -206,6 +207,7 @@ interface GameHarnessResult {
   readonly buildingBluePixels: number;
   readonly sceneryCallsByVariants: readonly number[];
   readonly variantIndices: Readonly<Record<string, readonly number[]>>;
+  readonly stylisedFolds: StylisedFoldMeasurement & { readonly control: StylisedFoldMeasurement };
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
   readonly riderBuriedPixels: number;
@@ -574,6 +576,37 @@ function expectWordmarkUpright(logos: LogoMeasurement): void {
  * ⚠️ **It was 6 before #367**, one mesh a kind, which is what #244 spent.
  */
 const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 * 2 + 4;
+
+/** #3287's measurement of one load of the models — `game-harness.ts` §`foldProbe`. */
+interface StylisedFoldMeasurement {
+  readonly settings: Readonly<
+    Record<'rural' | 'suburban' | 'commercial', { readonly pixels: number; readonly green: number }>
+  >;
+  readonly tint: {
+    readonly lighter: readonly number[];
+    readonly darker: readonly number[];
+    readonly ratio: number;
+  };
+  readonly batchedTint: StylisedFoldMeasurement['tint'];
+  readonly triangles: number;
+  readonly calls: number;
+  readonly drawnAs: readonly { readonly shape: string; readonly model: string }[];
+}
+
+/** A committed stylised model's triangles, read off its bytes — #3287. */
+function stylisedModelTriangles(name: string): number {
+  const { json } = readGlb(
+    fileURLToPath(new URL(`../src/game/models/${name}.glb`, import.meta.url)),
+  );
+  let triangles = 0;
+  for (const mesh of json.meshes ?? []) {
+    for (const primitive of mesh.primitives) {
+      const accessor = primitive.indices ?? primitive.attributes['POSITION'];
+      triangles += (accessor === undefined ? 0 : (json.accessors?.[accessor]?.count ?? 0)) / 3;
+    }
+  }
+  return triangles;
+}
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -2703,7 +2736,7 @@ test.describe('the scenery is models, not solids — #341', () => {
     expect(sceneryCalls).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
   });
 
-  test('fetches the committed models and its one atlas, and nothing else', async ({
+  test('fetches the committed models and their two atlases, and nothing else', async ({
     harnessRun,
   }) => {
     // ⚠️ **#240's NFR-5 — *"makes no network request"* — was true until #341
@@ -2738,11 +2771,16 @@ test.describe('the scenery is models, not solids — #341', () => {
     const atlases = new Set(requested.filter((url) => url.includes('colormap')));
 
     // Eleven since #367 — two shapes for each of the four natural kinds and
-    // three buildings. {@link SCATTER_MESH_CEILING} is the same arithmetic from
-    // the renderer's end.
-    expect(models.size).toBe(11);
-    // One atlas, shared by all three buildings, served from this origin.
-    expect(atlases.size).toBe(1);
+    // three buildings; {@link SCATTER_MESH_CEILING} is the same arithmetic from
+    // the renderer's end. And since #3287 the fifteen files folded in beside
+    // them (`scenery-models.ts` §`STYLISED_FOLD_MODELS`): six buildings, and
+    // three each of broadleaf, conifer and stone. Twenty-six requests at
+    // load, for the same eleven meshes.
+    expect(models.size).toBe(11 + 15);
+    // Two atlases since #3287, one a City Kit: the suburban kit's, shared by
+    // six buildings, and the commercial kit's, shared by three. Both are
+    // served from this origin.
+    expect(atlases.size).toBe(2);
     for (const atlas of atlases) {
       expect(atlas.startsWith(HARNESS_ORIGIN)).toBe(true);
     }
@@ -3050,6 +3088,148 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
     // not the log, and the log is the only artefact anybody reads on a green
     // run.
     console.log(`what the variants cost — ${measured}`);
+  });
+});
+
+/**
+ * A building by its setting, more trees, and a tint — #3287, read back off the
+ * drawing buffer, with the models alone as the control
+ * (`three-renderer.ts` §`setStylisedFolds`).
+ *
+ * jsdom holds everything up to the instance attribute
+ * (`stylised-folds.test.ts`). What only a driver can say is that the vertex
+ * rule compiled and folds: without it every instance of a mesh draws ALL its
+ * shapes through each other, and every count there is unmoved.
+ */
+test.describe('the stylised world’s shapes by setting — #3287', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
+  test('draws a suburban and a commercial lot as shapes of their own, and not the Kenney building through them', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun);
+    const { settings, control } = result.stylisedFolds;
+    const measured =
+      `a lot drawn alone, pixels/green-leading — rural ${String(settings.rural.pixels)}/${String(settings.rural.green)}, ` +
+      `suburban ${String(settings.suburban.pixels)}/${String(settings.suburban.green)}, ` +
+      `commercial ${String(settings.commercial.pixels)}/${String(settings.commercial.green)}; ` +
+      `with the models alone ${String(control.settings.rural.pixels)}/${String(control.settings.rural.green)}, ` +
+      `${String(control.settings.suburban.pixels)}/${String(control.settings.suburban.green)}, ` +
+      `${String(control.settings.commercial.pixels)}/${String(control.settings.commercial.green)}`;
+    testInfo.annotations.push({ type: 'a building by its setting', description: measured });
+    console.log(`#3287 a building by its setting — ${measured}`);
+
+    // Rural is the building the mesh always had, whose roof is green (#366).
+    expect(settings.rural.green).toBeGreaterThan(200);
+    // Each of the others is drawn, and is a different silhouette.
+    for (const setting of ['suburban', 'commercial'] as const) {
+      expect(settings[setting].pixels, setting).toBeGreaterThan(2_000);
+      expect(settings[setting].pixels, setting).not.toBe(settings.rural.pixels);
+    }
+    expect(settings.suburban.pixels).not.toBe(settings.commercial.pixels);
+    // ⚠️ **And the rural roof is not in the commercial one.** That mesh's
+    // commercial building (`building-e`) is white with one small awning,
+    // where the rural house is under a green roof — so green there is the
+    // rural house drawn through it: a fold that did not fold. (The suburban
+    // house, `building-type-l`, has a green roof of its own, and is told
+    // apart by its silhouette alone.) A fold that folds nothing draws all
+    // three shapes on every lot, and all three counts above are then one.
+    expect(settings.commercial.green).toBeLessThan(settings.rural.green / 4);
+    // The control: with the models alone, a lot of any setting is the Kenney building.
+    expect(control.settings.rural).toEqual(settings.rural);
+    expect(control.settings.suburban).toEqual(settings.rural);
+    expect(control.settings.commercial).toEqual(settings.rural);
+  });
+
+  test('draws two shrubs of one shape in the two tints of where they stand', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun);
+    const { lighter, darker, ratio } = result.stylisedFolds.tint;
+    const colour = (pixel: readonly number[]): string =>
+      pixel
+        .slice(0, 3)
+        .map((channel) => channel.toFixed(0))
+        .join('/');
+    const measured =
+      `the lighter ${colour(lighter)}, the darker ${colour(darker)}; ` +
+      `the tints leave ${(ratio * 100).toFixed(0)} % of the green, linear`;
+    testInfo.annotations.push({ type: 'a seeded tint', description: measured });
+    console.log(`#3287 a seeded tint — ${measured}`);
+
+    // The pair was picked to be far apart: at least a tenth of the green.
+    expect(ratio).toBeLessThan(0.9);
+    // And it reaches the screen: the darker shrub's green is lower by about
+    // what the tints say, read through the display's curve (a 2.2 power).
+    const drawn = (darker[1] ?? 0) / (lighter[1] ?? 1);
+    expect(drawn).toBeLessThan(0.985);
+    expect(drawn).toBeGreaterThan(Math.pow(ratio, 1 / 2.2) - 0.06);
+    expect(drawn).toBeLessThan(Math.pow(ratio, 1 / 2.2) + 0.06);
+  });
+
+  test('tints a conifer its mesh draws beside other shapes, through the batch’s colours', async ({
+    harnessRun,
+  }, testInfo) => {
+    // A conifer's mesh holds three shapes, so it is a `BatchedMesh`, whose
+    // instances are tinted through its colour table and not the attribute a
+    // shrub's are. Both trees here are `tree_pineTallA`: one shape, two tints.
+    const result = await harness(harnessRun);
+    const { lighter, darker, ratio } = result.stylisedFolds.batchedTint;
+    const colour = (pixel: readonly number[]): string =>
+      pixel
+        .slice(0, 3)
+        .map((channel) => channel.toFixed(0))
+        .join('/');
+    const measured =
+      `the lighter conifer ${colour(lighter)}, the darker ${colour(darker)}; ` +
+      `the tints leave ${(ratio * 100).toFixed(0)} % of the green, linear`;
+    testInfo.annotations.push({ type: 'a seeded tint on a batched kind', description: measured });
+    console.log(`#3287 a seeded tint on a batched kind — ${measured}`);
+
+    expect(lighter[1]).toBeGreaterThan(0);
+    expect(ratio).toBeLessThan(0.9);
+    const drawn = (darker[1] ?? 0) / (lighter[1] ?? 1);
+    expect(drawn).toBeLessThan(0.985);
+    expect(drawn).toBeGreaterThan(Math.pow(ratio, 1 / 2.2) - 0.06);
+    expect(drawn).toBeLessThan(Math.pow(ratio, 1 / 2.2) + 0.06);
+  });
+
+  test('adds no draw call, and submits each item’s own shape and no other', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun);
+    const { triangles, calls, control, drawnAs } = result.stylisedFolds;
+    // What each item is drawn as, off the committed bytes: with the files
+    // beside the models, and with the models alone.
+    const own = drawnAs.reduce((sum, each) => sum + stylisedModelTriangles(each.shape), 0);
+    const alone = drawnAs.reduce((sum, each) => sum + stylisedModelTriangles(each.model), 0);
+    const measured =
+      `the frame of one item a slot a kind: ${String(control.triangles)} triangles of scenery in ` +
+      `${String(control.calls)} draw calls with the models alone, ${String(triangles)} in ` +
+      `${String(calls)} with #3287's shapes beside them; its ${String(drawnAs.length)} modelled ` +
+      `items are ${String(own)} triangles as the shapes they are, ${String(alone)} as the models`;
+    testInfo.annotations.push({ type: 'what the shapes cost', description: measured });
+    console.log(`#3287 what the shapes cost — ${measured}`);
+
+    // Not one draw call: the belt's whole width, as it was (#367).
+    expect(control.calls).toBe(SCATTER_MESH_CEILING);
+    expect(calls).toBe(control.calls);
+    // The frame holds every kind of shape: a file beside a model, and both
+    // settings' buildings among them.
+    const drawn = new Set(drawnAs.map((each) => each.shape));
+    expect(drawnAs.some((each) => each.shape !== each.model)).toBe(true);
+    for (const kit of [
+      ['building-type-l', 'building-type-p', 'building-type-q'],
+      ['building-e', 'building-g', 'building-h'],
+    ]) {
+      expect(kit.some((building) => drawn.has(building))).toBe(true);
+    }
+    // ⚠️ **Each item submits the ONE shape it is.** The difference from the
+    // models alone is exactly the difference between the files, item by
+    // item — where the fold this replaced submitted every shape a mesh held,
+    // three houses for a house.
+    expect(control.triangles).toBeGreaterThan(0);
+    expect(triangles - control.triangles).toBe(own - alone);
   });
 });
 

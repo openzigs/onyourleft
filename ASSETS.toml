@@ -307,6 +307,186 @@ creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
 modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
+# ---------------------------------------------------------------------------
+# #3287: the Kenney files the stylised world folds in beside the models above
+# (apps/web/src/game/scenery-models.ts §STYLISED_FOLD_MODELS) — City Kit
+# (Suburban)'s three modern houses, three City Kit (Commercial) buildings and
+# that kit's own colour atlas, and Nature Kit trees and stones. kenney.nl
+# serves its archives only through a link its own page signs, so the owner
+# downloaded the three archives from the pages below on 2026-11-26; each page
+# reads "Creative Commons CC0" and each archive's own License.txt reads
+# "License: (Creative Commons Zero, CC0)". Each row pins the archive it came
+# out of by SHA-256, read off the file the owner placed (ADR 0049 D-11); no
+# archive is committed. Every file is the archive's own bytes. Each carries
+# a `modified` sentence it shares with others, so the Credits screen says each
+# once and its Kenney card stays short enough for the two-column layout
+# (apps/web/browser/sections.browser.spec.ts, #2067): the Suburban and Nature
+# files the sentence of the models above, word for word, and the four
+# Commercial files one of their own. What they leave out is that a building
+# drawn beside another is turned half a turn at load, to face the road, and
+# that the second atlas is committed under a name of its own.
+# ---------------------------------------------------------------------------
+
+[[asset]]
+path = "apps/web/src/game/models/building-type-l.glb"
+source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, from the archive kenney_city-kit-suburban_20.zip the owner placed on 2026-11-26 (SHA-256 5869c35cf30b1c87bdb2d197b6d325eebadd2ef08ea27f04797e8e08d77a9a39, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "5f03bf2e65a3a795afc18f7e56a5da891908d59d937e660be8478b66905d2cee"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-suburban"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/building-type-p.glb"
+source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, from the archive kenney_city-kit-suburban_20.zip the owner placed on 2026-11-26 (SHA-256 5869c35cf30b1c87bdb2d197b6d325eebadd2ef08ea27f04797e8e08d77a9a39, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "561b2eff15bd2bfe2799a8a049cafc70a1c7bfb6e35f3b2a4d95c8f4f376458c"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-suburban"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/building-type-q.glb"
+source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, from the archive kenney_city-kit-suburban_20.zip the owner placed on 2026-11-26 (SHA-256 5869c35cf30b1c87bdb2d197b6d325eebadd2ef08ea27f04797e8e08d77a9a39, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "9b56037cab0de804e308766cc5e69b95b3576ffb444084c9016a0748cbcaca04"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-suburban"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/building-h.glb"
+source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "6881613ce218bb33a0f56137d4d33b00d307c47e518fbb21ccba1083efbea896"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-commercial"
+modified = "Each file is committed byte for byte. A model's instances are scaled between 0.7 and 1.4 and its vertices carry the kit's own colours, toned down where a channel would clip under the scene's peak irradiance; the colour atlas is sampled once at load and never uploaded to the GPU (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/building-g.glb"
+source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "9a28fa2fdfac07492ee95589882213cfd6eb32d6752cb3b2f5404604c676d27a"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-commercial"
+modified = "Each file is committed byte for byte. A model's instances are scaled between 0.7 and 1.4 and its vertices carry the kit's own colours, toned down where a channel would clip under the scene's peak irradiance; the colour atlas is sampled once at load and never uploaded to the GPU (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/building-e.glb"
+source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "edbe5b49858a3c83e72d3cf496129c06082ef3a3d6005769f8883138e275b456"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-commercial"
+modified = "Each file is committed byte for byte. A model's instances are scaled between 0.7 and 1.4 and its vertices carry the kit's own colours, toned down where a channel would clip under the scene's peak irradiance; the colour atlas is sampled once at load and never uploaded to the GPU (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/colormap-city-kit-commercial.png"
+source = "Kenney *City Kit (Commercial)*, CC0-1.0 — https://kenney.nl/assets/city-kit-commercial, from the archive kenney_city-kit-commercial_2.1.zip the owner placed on 2026-11-26 (SHA-256 f8b09b081c2bb88bcc126e2dec1cb40fd0dad7e7e591b6c26aaefe96fb35276b, ADR 0049 D-11), extracted verbatim from `Models/GLB format/Textures/colormap.png` and committed under this name because City Kit (Suburban)'s atlas, a different image, is already committed as colormap.png. The shared colour atlas every building in that kit declares as an external resource"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "191bec3889aaaca5018380038fecc129ebb5c2182879a099b7b538b3fa050b5d"
+creator = "Kenney"
+url = "https://kenney.nl/assets/city-kit-commercial"
+modified = "Each file is committed byte for byte. A model's instances are scaled between 0.7 and 1.4 and its vertices carry the kit's own colours, toned down where a channel would clip under the scene's peak irradiance; the colour atlas is sampled once at load and never uploaded to the GPU (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_fat.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "84b262c5dda3a91ac6c95f9d8b23a0ebbb1951d678c0e1375d3e32623cc43ee2"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_simple.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "93891ea740447634930de19c31a7c1c9f4add94122e6db03aca9f75aea32f9d6"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_tall.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "3515a8826044d91e84e011186c86878f62024a487a079b4e32c9ac2e71994411"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_pineSmallC.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "c334c78379b2968b0c198a92b4e429e433c89e1685792b5c6ed730216c8512e3"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_pineSmallB.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "59392aa6604adb9dccd4fb76df5ed12ae8ac7d7391eb7e04bc84fffe9f9b36c8"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_pineSmallD.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "5128c47e7dc954b539245968d05fa518c9afa677d740fb11db0813aafadf17ef"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/stone_largeB.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "2b6b96b701b42d96efaa92ad4aba0cc8d23417f1bc07f0e996ee1a5acd52b4b8"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/stone_largeD.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "db945df5cc1fb3113777dc208bac3f46d3fb970aaf39f2c517612f99fbf3532b"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
+[[asset]]
+path = "apps/web/src/game/models/stone_largeF.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, from the archive kenney_nature-kit.zip the owner placed on 2026-11-26 (SHA-256 fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d, ADR 0049 D-11), extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-11-26"
+sha256 = "6fd7761da24e492b9e763cfc8ebb5f3c2bb33aa68fb0f320a8769ab71fcc6c9e"
+creator = "Kenney"
+url = "https://kenney.nl/assets/nature-kit"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
+
 [[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
 source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
