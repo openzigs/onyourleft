@@ -88,6 +88,7 @@ import type { RaceStandingsView } from '../room-ride';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
+import type { GroupRideRiderInput } from '../group-ride/rider-input';
 import type { JunctionInput } from './JunctionChoicePrompt';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import { deviceStorage } from './announce-preference';
@@ -405,6 +406,17 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
    * `open-world/junction-wiring.test.tsx` is what goes red.
    */
   readonly junction?: JunctionInput | undefined;
+  /**
+   * A group ride's pull-off press and sit-in choice — #3307, ADR 0101 D-3.7:
+   * whether the rider is on the front and sitting in on this frame, and where
+   * a press goes. With it the HUD shows `GroupRideControls` in its actions
+   * panel, inside the touch lock and exempt from none of it, listens for the
+   * pull-off key, and hands a pad's buttons to the same press
+   * (`GamepadIntents.tsx`). `undefined` on every other ride. ⚠️ An optional
+   * prop, which the wiring gate cannot see dropped (`wiring-gate.md`
+   * §Limits): `group-ride/group-ride-wiring.test.tsx` is what goes red.
+   */
+  readonly groupRide?: GroupRideRiderInput | undefined;
 }
 
 /**

@@ -10,6 +10,7 @@
  */
 
 import {
+  BOT_TACTIC_WHEEL_GAP_METRES,
   GROUP_PLAN_FACTOR_CEILING,
   GROUP_RIDE_CODE_VERSION,
   LINE_PHASES,
@@ -21,6 +22,7 @@ import { GROUP_RIDE_LOG_MOST } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import { riderMassFor } from '../../athlete/mass';
+import { LANE_OFFSETS_METRES } from '../lanes';
 import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from '../lap-race/pack-layout';
 import { rideConditionsFor } from '../rider';
 import { seededRiderBody } from '../rider-body';
@@ -35,10 +37,13 @@ import {
   groupLine,
   groupRideDrawing,
   groupRideFact,
+  pressGroupPullOff,
+  setGroupSitIn,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
 } from './ride-group';
+import { GROUP_RIDE_PULL_OFF_SIDE } from './rider-input';
 
 const FLAT = northRoute(20_000, () => 0);
 const THIRTY = 30 / 3.6;
@@ -341,5 +346,202 @@ describe('what the ride keeps of its group', () => {
     expect(end.logCut).toBe(true);
     expect(groupRideFact(end).logCut).toBe(true);
     expect(groupRideFact(session)).not.toHaveProperty('logCut');
+  });
+});
+
+/**
+ * A scripted rider who holds the wheel (#3307): placed, frame by frame, a
+ * wheel gap behind the member ahead of them in the line at that member's
+ * speed; on the front, at the group's speed now, so they never fade; aside,
+ * eased until they are behind the last wheel, then on it. `each` is the
+ * rider's hands: it is handed the session before every frame and returns it,
+ * pressed or not.
+ */
+function hold(
+  from: GroupRideSession,
+  seconds: number,
+  each: (session: GroupRideSession, atMs: number) => GroupRideSession = (session) => session,
+): GroupRideSession[] {
+  const frames: GroupRideSession[] = [];
+  const dt = FRAME_MS / 1_000;
+  let session = from;
+  let rider = from.rider;
+  for (let at = FRAME_MS; at <= seconds * 1_000; at += FRAME_MS) {
+    session = each(session, at - FRAME_MS);
+    const { order } = session.state.rotation;
+    const seat = order.indexOf(GROUP_RIDE_RIDER_ID);
+    const wheelId = seat === 0 ? undefined : seat > 0 ? order[seat - 1] : order[order.length - 1];
+    const wheel = wheelId === undefined ? undefined : session.state.bots[wheelId];
+    let speedMps: number;
+    if (wheel === undefined) {
+      speedMps = session.groupSpeedMps;
+    } else {
+      const behind = wheel.distanceM - BOT_TACTIC_WHEEL_GAP_METRES - rider.distanceM;
+      speedMps = Math.max(0, wheel.speedMps + Math.max(-1.5, Math.min(1.5, behind)));
+    }
+    rider = { distanceM: rider.distanceM + speedMps * dt, speedMps };
+    session = stepGroupRideSession(session, {
+      ticks: Math.round(dt / SIMULATION_STEP_SECONDS),
+      rider,
+      riderStopped: false,
+    });
+    frames.push(session);
+  }
+  return frames;
+}
+
+/** The first frame at which the rider is on the front of a steady line, or a failure. */
+function toTheFront(from: GroupRideSession, most = 400): GroupRideSession {
+  const front = hold(from, most).find(
+    (frame) => frame.role === 'on-front' && frame.phase === 'steady',
+  );
+  if (front === undefined) throw new Error('the rider never reached the front');
+  return front;
+}
+
+/** Each pull's puller, in order, over `frames`. */
+function pullers(frames: readonly GroupRideSession[]): string[] {
+  const by: string[] = [];
+  for (const frame of frames) {
+    const puller = frame.state.rotation.pull?.by;
+    if (puller !== undefined && puller !== last(by)) by.push(puller);
+  }
+  return by;
+}
+
+describe('the pull-off press — #3307, ADR 0101 D-3.7', () => {
+  it('on the front, ends the pull in the next decision window: the line is changing and the rider drifts back', () => {
+    const front = toTheFront(started({ bots: 3 }));
+    // Left alone, a rider who holds the group's speed is still on the front three seconds on.
+    const unpressed = hold(front, 3);
+    expect(unpressed.every((frame) => frame.role === 'on-front' && frame.phase === 'steady')).toBe(
+      true,
+    );
+    const pressed = pressGroupPullOff(front);
+    expect(pressed.pullOffPressed).toBe(true);
+    // One decision window is a second: by then the rotation has had the press.
+    const after = hold(pressed, 1.25);
+    expect(last(after).phase).toBe('changing');
+    expect(last(after).role).toBe('drifting-back');
+    expect(last(after).state.rotation.aside).toBe(GROUP_RIDE_RIDER_ID);
+    expect(last(after).state.rotation.order).toStrictEqual(front.state.rotation.order.slice(1));
+    // The press was handed on once: the next step carries none.
+    expect(after[0]?.pullOffPressed).toBe(false);
+    // What the ride keeps says so too.
+    expect(last(groupRideFact(last(after)).log)).toMatchObject({
+      phase: 'changing',
+      role: 'drifting-back',
+    });
+  });
+
+  it('moves the rider’s drawn lane one lane to the pull-off side, and back to the line’s once they are off it', () => {
+    expect(GROUP_RIDE_PULL_OFF_SIDE).toBe('lane-left');
+    const front = toTheFront(started({ bots: 3 }));
+    expect(groupRideDrawing(front, 0, 0).steeredLateral).toBe(0);
+    const frames = hold(pressGroupPullOff(front), 60);
+    // Half a second on, the move of 0.4 s is done: the left-hand lane.
+    const aside = groupRideDrawing(frames[1] as GroupRideSession, 0, 0);
+    expect(aside.steeredLateral).toBe(LANE_OFFSETS_METRES[0]);
+    expect(aside.steeringSpeed).toBe(0);
+    // Mid-move on the first frame, heading left.
+    const moving = stepGroupRideSession(pressGroupPullOff(front), {
+      ticks: 2,
+      rider: front.rider,
+      riderStopped: false,
+    });
+    expect(groupRideDrawing(moving, 0, 0).steeredLateral).toBeLessThan(0);
+    expect(groupRideDrawing(moving, 0, 0).steeredLateral).toBeGreaterThan(
+      LANE_OFFSETS_METRES[0] as number,
+    );
+    expect(groupRideDrawing(moving, 0, 0).steeringSpeed).toBeLessThan(0);
+    // Aside for as long as they drift back, and in the line's lane again once back on a wheel.
+    for (const frame of frames.slice(2)) {
+      if (frame.role === 'drifting-back') {
+        expect(frame.steer.offset).toBe(LANE_OFFSETS_METRES[0]);
+      }
+    }
+    const back = frames.findIndex((frame) => frame.role === 'last-wheel');
+    expect(back).toBeGreaterThan(0);
+    expect(groupRideDrawing(frames[back + 4] as GroupRideSession, 0, 0).steeredLateral).toBe(0);
+    // The simulation's rider was never handed any of it: the bots alone are laid out.
+    expect(groupRideDrawing(last(frames), 123.4, 0).riderDistance).toBe(123.4);
+  });
+
+  it('outside on-front, starts no rotation, changes no order and moves nothing', () => {
+    const roles = new Set<string>();
+    const pressedRide = hold(started({ bots: 3 }), 100, (session) => {
+      if (session.role === 'on-front') return session;
+      roles.add(session.role);
+      // The very same session: no press is held, and the drawn lane stays.
+      expect(pressGroupPullOff(session)).toBe(session);
+      return pressGroupPullOff(session);
+    });
+    const plain = hold(started({ bots: 3 }), 100);
+    // Pressed on every frame in every other role, the ride is the unpressed ride.
+    expect(roles.size).toBeGreaterThan(2);
+    expect(roles.has('second-wheel')).toBe(true);
+    expect(last(pressedRide).log).toStrictEqual(last(plain).log);
+    expect(last(pressedRide).state.rotation.order).toStrictEqual(last(plain).state.rotation.order);
+    expect(pressedRide.every((frame) => frame.steer.offset === 0)).toBe(true);
+  });
+
+  it('pressed 20 times in a second, is one pull-off and not a queue', () => {
+    const front = toTheFront(started({ bots: 3 }));
+    const once = hold(front, 200, (session, atMs) =>
+      atMs === 0 ? pressGroupPullOff(session) : session,
+    );
+    // Five presses before each of four frames: twenty in the first second.
+    let presses = 0;
+    const mashed = hold(front, 200, (session, atMs) => {
+      if (atMs >= 1_000) return session;
+      let next = session;
+      for (let press = 0; press < 5; press += 1) {
+        next = pressGroupPullOff(next);
+        presses += 1;
+      }
+      return next;
+    });
+    expect(presses).toBe(20);
+    // The whole ride after, the rider's next pull included, is the one press's ride.
+    expect(last(mashed).log).toStrictEqual(last(once).log);
+    const turns = last(once).log.filter((entry) => entry.role === 'on-front');
+    expect(turns.length).toBeGreaterThan(0);
+    // And that next pull was not cut short by a press left over: it ran its target length.
+    const again = once.findIndex(
+      (frame, index) => index > 8 && frame.role === 'on-front' && frame.phase === 'steady',
+    );
+    expect(again).toBeGreaterThan(0);
+    expect(once[again + 12]?.role).toBe('on-front');
+    expect(mashed[again + 12]?.role).toBe('on-front');
+  });
+});
+
+describe('the sit-in choice — #3307, ADR 0101 D-3.7', () => {
+  it('never gives a rider who sits in the front through three rotations, and gives it back at the next turn once off', () => {
+    const from = started({ bots: 3 });
+    // The same line without the choice: the rider is on the front inside the first rotation.
+    const taking = hold(from, 200);
+    expect(taking.some((frame) => frame.role === 'on-front')).toBe(true);
+
+    const sitting = setGroupSitIn(from, true);
+    expect(setGroupSitIn(sitting, true)).toBe(sitting);
+    const sat = hold(sitting, 420);
+    // Three rotations of the three bots: nine pulls, and the rider on the front in none.
+    const pulls = pullers(sat);
+    expect(pulls.length).toBeGreaterThanOrEqual(9);
+    expect(pulls).not.toContain(GROUP_RIDE_RIDER_ID);
+    expect(sat.some((frame) => frame.role === 'on-front')).toBe(false);
+    expect(sat.some((frame) => frame.role === 'sitting-in')).toBe(true);
+    for (const id of from.botIds) {
+      expect(pulls.filter((by) => by === id).length).toBeGreaterThanOrEqual(3);
+    }
+
+    // Off again: the rider is back in the order and takes the front within one rotation.
+    const off = setGroupSitIn(last(sat), false);
+    expect(off.state.rotation.order).toContain(GROUP_RIDE_RIDER_ID);
+    const back = hold(off, 200);
+    const turn = back.findIndex((frame) => frame.role === 'on-front');
+    expect(turn).toBeGreaterThanOrEqual(0);
+    expect(pullers(back.slice(0, turn + 1)).length).toBeLessThanOrEqual(from.botIds.length + 1);
   });
 });

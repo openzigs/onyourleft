@@ -35,7 +35,7 @@
  *
  * Nothing here returns a speed, a power or a place for the rider: their
  * physics is never tethered (ADR 0101 D-4.5). The drawing leaves the rider
- * where the ride put them and lays the bots out around them.
+ * where the ride put them along the road and lays the bots out around them.
  *
  * ## The drawing is the lap race's pack layout
  *
@@ -64,6 +64,26 @@
  * role changed, each with the group's speed then (`@onyourleft/store`
  * §`GroupRideFact`). Numbers and words from closed lists: no place, no
  * coordinate, no text.
+ *
+ * ## What the rider can tell the group (#3307, ADR 0101 D-3.7)
+ *
+ * Two things, and neither is ever needed to stay in the group:
+ *
+ * - **Pull off**, {@link pressGroupPullOff}: a discrete press, taken only
+ *   while the rider's role is `on-front`. It is handed to the rotation as
+ *   `riderSignal` on the next simulation step and to nothing else, and it
+ *   moves the rider's **drawn** lane one lane to
+ *   `rider-input.ts` §`GROUP_RIDE_PULL_OFF_SIDE` through `lanes.ts`, the lap
+ *   race's steer.
+ *   The press is one flag, so a held key or a mashed button is one pull-off,
+ *   never a queue; in any other role it changes nothing. The drawn lane comes
+ *   back to the line's once the rider is neither on the front nor drifting
+ *   back. A drawing only: the simulation has no lateral field.
+ * - **Sit in**, {@link setGroupSitIn}: a choice held for as long as it is on,
+ *   handed to the rotation as `riderSittingIn` on every step, so the rider is
+ *   never given the front; off again, they take their turn as it comes round.
+ *
+ * Neither is kept past the ride.
  *
  * ## Nothing here reaches a trainer
  *
@@ -102,10 +122,19 @@ import {
 } from '../lap-race/pack-layout';
 import type { LapRaceDrawing } from '../lap-race/ride-race';
 import { botSkinFor, seededRiderBody } from '../rider-body';
+import {
+  LANE_OFFSETS_METRES,
+  sidewaysSpeedOf,
+  startSteer,
+  steerToward,
+  stepSteer,
+  type SteerState,
+} from '../lanes';
 import type { RaceBotInput } from '../scene';
 import { SIMULATION_STEP_SECONDS } from '../simulation';
 
 import { groupRidePlan, groupRideSized, type GroupRideChoice } from './choice';
+import { GROUP_RIDE_PULL_OFF_SIDE } from './rider-input';
 
 /** The rider's id in the line. */
 export const GROUP_RIDE_RIDER_ID = 'rider';
@@ -129,6 +158,9 @@ export const GROUP_BOT_STRENGTH_SPREAD = 0.15;
 
 /** A bot's W′, joules: **20 kJ**, the scripted rides' figure. */
 export const GROUP_BOT_W_PRIME_JOULES = 20_000;
+
+/** The line's lane: the centre line, where the rider is drawn in the group. */
+const LINE_STEER: SteerState = startSteer(0);
 
 /** The line of a group of `bots`, front first, the rider on the last wheel. */
 export function groupLine(
@@ -187,6 +219,12 @@ export interface GroupRideSession {
   readonly log: readonly GroupRideLogEntry[];
   /** Whether a change was left out of {@link log} because it was full. */
   readonly logCut: boolean;
+  /** Whether the rider has chosen to sit in. @see setGroupSitIn */
+  readonly sittingIn: boolean;
+  /** A pull-off press the rotation has not been handed yet: one flag, never a count. */
+  readonly pullOffPressed: boolean;
+  /** Where the rider is drawn across the road: the line's lane, or a lane aside after a pull-off. */
+  readonly steer: SteerState;
 }
 
 /** What {@link startGroupRideSession} reads. */
@@ -214,9 +252,19 @@ function packField(
   state: GroupRideState,
   rider: MemberView,
   before?: GroupRideState,
+  steer: SteerState = LINE_STEER,
+  steeredBefore: number = steer.offset,
 ): PackRacer[] {
   const field: PackRacer[] = [
-    { id: GROUP_RIDE_RIDER_ID, along: rider.distanceM, lateral: 0, speed: rider.speedMps },
+    {
+      id: GROUP_RIDE_RIDER_ID,
+      along: rider.distanceM,
+      // #3307: the rider's drawn lane, so the line comes through beside a rider who pulled off.
+      lateral: steer.offset,
+      heading: LANE_OFFSETS_METRES[steer.lane],
+      lateralBefore: steeredBefore,
+      speed: rider.speedMps,
+    },
   ];
   for (const id of session.botIds) {
     const bot = state.bots[id];
@@ -266,7 +314,27 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     pack: gridPackLayout(packField({ botIds }, state, rider), GROUP_RIDE_RIDER_ID),
     log: [{ at: 0, phase, role, groupSpeed: groupSpeedMps }],
     logCut: false,
+    sittingIn: false,
+    pullOffPressed: false,
+    steer: LINE_STEER,
   };
+}
+
+/**
+ * The session after the rider pressed pull off (#3307): on the front, the
+ * press waits for the next simulation step, which hands it to the rotation,
+ * and the rider's drawn lane moves to the pull-off side. In
+ * any other role, the same session: no rotation starts and nothing moves.
+ */
+export function pressGroupPullOff(session: GroupRideSession): GroupRideSession {
+  if (session.role !== 'on-front' || session.pullOffPressed) return session;
+  const { lane } = steerToward(LINE_STEER, GROUP_RIDE_PULL_OFF_SIDE);
+  return { ...session, pullOffPressed: true, steer: { ...session.steer, lane } };
+}
+
+/** The session with the rider sitting in, or not (#3307): read by every step from the next on. */
+export function setGroupSitIn(session: GroupRideSession, sittingIn: boolean): GroupRideSession {
+  return session.sittingIn === sittingIn ? session : { ...session, sittingIn };
 }
 
 /** One frame's steps of the group. */
@@ -302,7 +370,7 @@ export function stepGroupRideSession(
   if (ticks === 0) return session;
   const from = session.rider;
   const to = step.rider;
-  let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut } = session;
+  let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut, steer } = session;
   let log = session.log;
   for (let tick = 0; tick < ticks; tick += 1) {
     const share = tick / ticks;
@@ -313,7 +381,14 @@ export function stepGroupRideSession(
     const before = state;
     const ridden = stepGroupRide(
       state,
-      { elapsedSeconds: SIMULATION_STEP_SECONDS, rider, riderStopped: step.riderStopped },
+      {
+        elapsedSeconds: SIMULATION_STEP_SECONDS,
+        rider,
+        riderStopped: step.riderStopped,
+        // #3307: a press since the last step, once; the choice, for as long as it is on.
+        riderSignal: session.pullOffPressed && tick === 0,
+        riderSittingIn: session.sittingIn,
+      },
       session.road,
     );
     state = ridden.state;
@@ -330,6 +405,13 @@ export function stepGroupRideSession(
         logCut = true;
       }
     }
+    // #3307: the drawn lane, back to the line's once the rider is neither on
+    // the front nor drifting back, and a step nearer the lane it is steered to.
+    const steeredBefore = steer.offset;
+    if (steer.lane !== LINE_STEER.lane && role !== 'on-front' && role !== 'drifting-back') {
+      steer = { ...steer, lane: LINE_STEER.lane };
+    }
+    steer = stepSteer(steer, SIMULATION_STEP_SECONDS);
     // The drawing, a tick on: the rider where this tick's end has them.
     const end = (tick + 1) / ticks;
     pack = stepPackLayout(
@@ -341,6 +423,8 @@ export function stepGroupRideSession(
           speedMps: from.speedMps + (to.speedMps - from.speedMps) * end,
         },
         before,
+        steer,
+        steeredBefore,
       ),
       GROUP_RIDE_RIDER_ID,
       pack,
@@ -358,6 +442,8 @@ export function stepGroupRideSession(
     pack,
     log,
     logCut,
+    pullOffPressed: false,
+    steer,
   };
 }
 
@@ -400,10 +486,11 @@ export function groupRideDrawing(
     });
   });
   return {
-    // The rider is never moved: their own drawn odometer, in the line's lane.
+    // The rider is never moved along the road: their own drawn odometer, in
+    // the line's lane, or a lane aside after a pull-off (#3307).
     riderDistance,
-    steeredLateral: 0,
-    steeringSpeed: 0,
+    steeredLateral: session.steer.offset,
+    steeringSpeed: sidewaysSpeedOf(session.steer),
     riderHit: undefined,
     raceBots,
   };
