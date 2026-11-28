@@ -1795,10 +1795,12 @@ describe('what the track costs — #3253', () => {
     expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(96);
   });
 
-  it.each([0, 0.5, 1, 1.5, 1.9])(
-    'finds a deck joined to another 1.5 m off, with the join %f m into a 2 m cell',
-    (shift) => {
-      // The ends straddle a cell edge for some of these shifts: a join is found across one.
+  it.each([0, 0.25, 0.5, 1, 1.9])(
+    'finds a deck joined to another 1.5 m off along it, with the join %f m into a 2 m cell',
+    (into) => {
+      // The gap is along the road, in z on this north-running fixture. Each case moves both
+      // decks in z so the first ends `into` m into its cell: the second starts in the same cell
+      // for 0 and 0.25, and in the next for the rest.
       const first = rail(
         [
           [1_000, 40],
@@ -1813,25 +1815,29 @@ describe('what the track costs — #3253', () => {
         ],
         'bridge',
       );
-      const moved = (feature: RailFeature): RailFeature => ({
+      const endZ = first.line[first.line.length - 1] as number;
+      const shift = into - (endZ - Math.floor(endZ / 2) * 2);
+      const moved = (feature: RailFeature, more = 0): RailFeature => ({
         ...feature,
-        line: feature.line.map((value, at) => (at % 2 === 0 ? value + shift : value)),
+        line: feature.line.map((value, at) => (at % 2 === 1 ? value + shift + more : value)),
       });
-      const joins = (feature: RailFeature, other: RailFeature) =>
-        railTrack(corridorOf([moved(feature), moved(other)]), ROLLING, ORIGIN).pieces.map(
-          (piece) => piece.deckJoins,
-        );
-      const found = joins(first, second);
+      const cell = (value: number) => Math.floor(value / 2);
+      const a = moved(first);
+      const b = moved(second);
+      const aEnd = a.line[a.line.length - 1] as number;
+      // Non-vacuity: the join is where the title says, and in one cell or across an edge as stated.
+      expect(aEnd - cell(aEnd) * 2).toBeCloseTo(into, 3);
+      expect(cell(b.line[1] as number) === cell(aEnd)).toBe(into + 1.5 < 2);
+      expect(cell(b.line[0] as number)).toBe(cell(a.line[a.line.length - 2] as number));
+      const joins = (one: RailFeature, other: RailFeature) =>
+        railTrack(corridorOf([one, other]), ROLLING, ORIGIN).pieces.map((piece) => piece.deckJoins);
+      const found = joins(a, b);
       expect(found.some((join) => join?.end === true)).toBe(true);
       expect(found.some((join) => join?.start === true)).toBe(true);
-      // Non-vacuity: a gap past JOINED_METRES is no join.
-      const apart: RailFeature = {
-        ...second,
-        line: second.line.map((value, at) => (at % 2 === 0 ? value + 1.5 : value)),
-      };
-      expect(joins(first, apart).some((join) => join?.start === true || join?.end === true)).toBe(
-        false,
-      );
+      // A gap of 3 m along the line, past JOINED_METRES, is no join.
+      expect(
+        joins(a, moved(second, 1.5)).some((join) => join?.start === true || join?.end === true),
+      ).toBe(false);
     },
   );
 
@@ -1956,7 +1962,8 @@ describe('the people keep off the track with a street in view — #1619, #3253',
       let seen = 0;
       let on = 0;
       let track: readonly SideRoad[] = [];
-      for (let second = 0; second < 600; second += 4) {
+      // 75 frames: with the track dropped from the people's side roads, 5 people land on it.
+      for (let second = 0; second < 600; second += 8) {
         const frame = sceneFrame({
           profile: ROLLING,
           origin: ORIGIN,
