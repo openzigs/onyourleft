@@ -91,6 +91,14 @@ import {
   type WorldQualityState,
 } from './quality';
 import {
+  MODE_ENDED_LABEL,
+  modeEndedText,
+  RIDE_STOPPED_LABEL,
+  rideFaultLog,
+  rideStoppedText,
+  type RideMode,
+} from './ride-fault';
+import {
   REALISTIC_WORLD_LEFT_NOTICE,
   realisticWorldNotice,
   type RealisticWorldOutcome,
@@ -1986,6 +1994,19 @@ function GameScreen({
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
+   * #3404: the optional modes a fault in a frame ended, said for
+   * STANDING_NOTICE_SECONDS of ride from when it ended, on the world notice's
+   * rule. @see ride-fault.ts
+   */
+  const [modeEnded, setModeEnded] = useState<
+    { readonly text: string; readonly from: number } | undefined
+  >(undefined);
+  /**
+   * #3404: what the rider is told once the core of the ride failed and the
+   * loop stopped, the trainer let go. Stands until the ride ends. @see ride-fault.ts
+   */
+  const [rideStopped, setRideStopped] = useState<string | undefined>(undefined);
+  /**
    * What the HUD says of a Delivery round asked for and not ridden, and the
    * ride time it says it from — #1818, on the world notice's rule: too few
    * houses in reach, or no houses read to count. `undefined` on every ride
@@ -3345,6 +3366,9 @@ function GameScreen({
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
       setWorldNotice(undefined);
+      // #3404: a new ride starts with no fault said of the last.
+      setModeEnded(undefined);
+      setRideStopped(undefined);
       shadowMapRef.current = !realistic && readShadowMapChoice(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
@@ -4173,10 +4197,14 @@ function GameScreen({
       observer?.observe(canvas);
     }
 
-    const tick = (): void => {
+    /**
+     * One animation frame of the ride. Returns whether the loop goes on: it
+     * stops when the ride has gone. A throw is {@link tick}'s to answer.
+     */
+    const rideFrame = (): boolean => {
       const simulation = simulationRef.current;
       if (simulation === undefined) {
-        return;
+        return false;
       }
       const at = clock();
       // ⚠️ **The frame cap decides whether this animation frame is DRAWN — #476
@@ -5592,6 +5620,75 @@ function GameScreen({
           setWorldNotice({ text: REALISTIC_WORLD_LEFT_NOTICE, from: simulation.state.elapsed });
         }
       }
+      return true;
+    };
+    /**
+     * #3404: a frame that threw. The optional modes it was running end and the
+     * loop goes on; with none running, the core of the ride failed, so the
+     * trainer is let go as *End ride* lets it go, the loop stops and the
+     * rider is told. Returns whether the loop goes on. @see ride-fault.ts
+     */
+    const frameFailed = (error: unknown): boolean => {
+      const ended: RideMode[] = [];
+      if (groupRideRef.current !== undefined) {
+        groupRideRef.current = undefined;
+        ended.push('group-ride');
+      }
+      const racing = lapRaceRef.current;
+      if (racing !== undefined) {
+        lapRaceRef.current = undefined;
+        // #2710's hold on the instance's model, let go as `teardown` lets it go.
+        if (racing.model !== undefined) void tacticsRef.current?.endTacticsRace();
+        ended.push('lap-race');
+      }
+      if (deliveryRef.current !== undefined) {
+        deliveryRef.current = undefined;
+        throwAskedRef.current = undefined;
+        crashRef.current = undefined;
+        crashShownRef.current = undefined;
+        ended.push('delivery');
+      }
+      const directed = modelPacerRef.current;
+      if (directed !== undefined) {
+        directed.director.end();
+        modelPacerRef.current = undefined;
+        pacerSayRef.current = undefined;
+        pacerDoingRef.current = undefined;
+        setPacerSay(undefined);
+        ended.push('ai-pacer');
+      }
+      const simulation = simulationRef.current;
+      if (ended.length > 0) {
+        // A race's or a group's shelter ends with it: the rider rides alone.
+        if (ended.includes('group-ride') || ended.includes('lap-race')) simulation?.draftWith(1);
+        console.error(rideFaultLog(ended, error));
+        const text = modeEndedText(ended);
+        setModeEnded({ text, from: simulation?.state.elapsed ?? 0 });
+        setAnnouncement(text);
+        return true;
+      }
+      // ⚠️ **First**, for `teardown`'s reason: no load left on the rider.
+      const gradient = gradientRef.current;
+      gradient?.stop();
+      loopRunningRef.current = false;
+      console.error(rideFaultLog(ended, error));
+      const text = rideStoppedText(gradient !== undefined);
+      setRideStopped(text);
+      setAnnouncement(text);
+      return false;
+    };
+    /**
+     * The loop's one callback, asking for the next frame only at its end.
+     * ⚠️ **#3404: it catches.** Before it did, a throw anywhere in a frame
+     * escaped, the next frame was never asked for, and the ride froze with the
+     * trainer holding the last grade it was sent.
+     */
+    const tick = (): void => {
+      try {
+        if (!rideFrame()) return;
+      } catch (error: unknown) {
+        if (!frameFailed(error)) return;
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -6592,6 +6689,14 @@ function GameScreen({
               }
         }
         notices={[
+          // #3404: the core of the ride failed, and the loop has stopped.
+          // First, above the Trainer fault, which says a refused release.
+          // Not `live`: the HUD's one region said it as it happened.
+          rideStopped === undefined ? undefined : (
+            <StatusMessage key="ride-stopped" tone="danger" label={RIDE_STOPPED_LABEL}>
+              {rideStopped}
+            </StatusMessage>
+          ),
           gradient?.fault === undefined ? undefined : (
             // Not `live` since #445, for the road notice's reason above.
             <StatusMessage key="fault" tone="danger" label="Trainer">
@@ -6744,6 +6849,14 @@ function GameScreen({
           (state?.elapsed ?? 0) - worldNotice.from >= STANDING_NOTICE_SECONDS ? undefined : (
             <StatusMessage key="world" tone="info" label="Standard world">
               {worldNotice.text}
+            </StatusMessage>
+          ),
+          // #3404: the modes a fault ended, on the world notice's rule. Not
+          // `live`: the HUD's one region said it as it happened.
+          modeEnded === undefined ||
+          (state?.elapsed ?? 0) - modeEnded.from >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="mode-ended" tone="warning" label={MODE_ENDED_LABEL}>
+              {modeEnded.text}
             </StatusMessage>
           ),
           // #2710: a solo race's AI bots, in the race notice's word, for
