@@ -38,10 +38,17 @@ import {
   type RoadsideSite,
   type RoadSide,
 } from './roadside-safety';
-import { hairpinRoute, hillRoute, northRoute, valleyRoute } from './route-fixtures-testing';
+import {
+  hairpinRoute,
+  hillRoute,
+  northRoute,
+  stadiumRoute,
+  valleyRoute,
+} from './route-fixtures-testing';
 import type { ScatterItem } from './scatter';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
+import { terrainHeightAt } from './landform';
 import { FIELD_GATE_SCALE } from './settlements';
 import { atStartLine } from './simulation';
 import type { VillageStreet } from './streets';
@@ -571,6 +578,100 @@ describe('a rail follows the drawn road — #3284', () => {
     // Within the tolerance (and the few millimetres a straight chord of the
     // inside line cuts against a polyline of the centre's), never a chord's sagitta.
     expect(worst).toBeLessThanOrEqual(RAIL_HEIGHT_TOLERANCE_METRES * 2);
+  });
+});
+
+/**
+ * The sides of the road the frame's rails stand on, read back out of the
+ * drawn boxes: each upper ridge against the drawn road's own normal at its
+ * nearest point (`side` is the sign on that normal, as `edgeAt` takes it).
+ */
+function railedSides(profile: RouteProfile, odometer: number): Map<RoadSide, number[]> {
+  const origin = corridorOrigin(profile);
+  const frame = frameAt(profile, odometer);
+  const sides = new Map<RoadSide, number[]>();
+  for (const ridge of upperRidges(drawnRails(frame.guardRails ?? []))) {
+    let best: { distance: number; along: number; side: RoadSide } | undefined;
+    for (let along = odometer - 60; along <= odometer + 260; along += 1) {
+      const here = drawnRoadFrame(profile, origin, along);
+      if (here === undefined) continue;
+      const dx = ridge.centre[0] - here.x;
+      const dz = ridge.centre[2] - here.z;
+      const distance = Math.hypot(dx, dz);
+      if (best === undefined || distance < best.distance) {
+        best = {
+          distance,
+          along,
+          side: dx * here.normalX + dz * here.normalZ >= 0 ? 1 : -1,
+        };
+      }
+    }
+    if (best === undefined) continue;
+    sides.set(best.side, [...(sides.get(best.side) ?? []), best.along]);
+  }
+  return sides;
+}
+
+/** Which side of a bend its outside is, by the road's own geometry: away from the chord's middle. */
+function outsideOfBend(profile: RouteProfile, along: number): RoadSide | undefined {
+  const origin = corridorOrigin(profile);
+  const back = drawnRoadFrame(profile, origin, along - 20);
+  const here = drawnRoadFrame(profile, origin, along);
+  const ahead = drawnRoadFrame(profile, origin, along + 20);
+  if (back === undefined || here === undefined || ahead === undefined) return undefined;
+  const inward =
+    ((back.x + ahead.x) / 2 - here.x) * here.normalX +
+    ((back.z + ahead.z) / 2 - here.z) * here.normalZ;
+  return inward > 0 ? -1 : 1;
+}
+
+describe('which side of the road the scene stands a rail on — #3284', () => {
+  it.each([
+    // #458's hill: the ground falls away on side +1 only at 600 m, on side −1 only at 1 100 m.
+    [600, 1],
+    [1_100, -1],
+  ] as const)(
+    'stands a rail on the side the ground falls away, and only that side, at %i m',
+    (odometer, fallen) => {
+      const profile = hillRoute();
+      const origin = corridorOrigin(profile);
+      const seed = scatterSeed(profile);
+      // The ground's own fall from the road's edge, each side, by the landform.
+      const fall = (along: number, side: RoadSide): number => {
+        let lowest = Number.POSITIVE_INFINITY;
+        for (const lateral of [3.6, 8, 12, 18, 26.5]) {
+          lowest = Math.min(
+            lowest,
+            terrainHeightAt(profile, origin, seed, along, lateral * side, NO_LAND_CLASS),
+          );
+        }
+        return terrainHeightAt(profile, origin, seed, along, 0, NO_LAND_CLASS) - lowest;
+      };
+      const sides = railedSides(profile, odometer);
+      expect([...sides.keys()]).toEqual([fallen]);
+      const railed = sides.get(fallen) ?? [];
+      expect(railed.length).toBeGreaterThan(10);
+      // Where it stands the ground falls away on that side and not on the other.
+      const middle = railed.slice().sort((a, b) => a - b)[Math.floor(railed.length / 2)] as number;
+      expect(fall(middle, fallen)).toBeGreaterThan(RAIL_DROP_METRES);
+      expect(fall(middle, -fallen as RoadSide)).toBeLessThan(RAIL_DROP_METRES);
+    },
+  );
+
+  it('stands a rail on the outside of a tight bend over a small fall, and none on its inside', () => {
+    // A stadium loop's 25 m bends: the ground 1 to 3 m down on the outside of
+    // the first (410–455 m), and on the inside of the second (890–915 m): both
+    // bends turn the same way, so the outside is the same side of the road.
+    const profile = stadiumRoute(25);
+    const outside = railedSides(profile, 400);
+    const bend = outsideOfBend(profile, 430);
+    expect(bend).toBeDefined();
+    expect([...outside.keys()]).toEqual([bend]);
+    expect(outsideOfBend(profile, 900)).toBe(bend);
+    const around = [...railedSides(profile, 800).values()]
+      .flat()
+      .filter((along) => along >= 885 && along <= 912);
+    expect(around).toEqual([]);
   });
 });
 
