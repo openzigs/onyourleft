@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bayCount,
+  doorBayCount,
   KIT_ATLAS_PIXELS,
   KIT_BAY_METRES,
   KIT_BRICK_SHADES,
@@ -587,7 +588,10 @@ describe('what one building looks like — #3334, the look check on PR #3343', (
 describe('a footprint wrapped — #3334', () => {
   /** A seed whose brick shop has a window one bay across, so its bays are the outline's own. */
   const PLAIN = seedFor({}, (style) => KIT_SKINS.brick.windows[style.window]?.span === 1);
-  /** An 8 m front: four bays, which 3 000 triangles put in relief whole. */
+  /**
+   * An 8 m front: three bays of 2.67 m (#3351: a door's edge is cut into an odd number, and
+   * its other 8 m edges into four), which 3 000 triangles put in relief whole.
+   */
   const NARROW = [0, 0, 8, 0, 8, 12, 0, 12];
   const bayRuns = (wrap: KitWrap): readonly Run[] => runsOf(wrap).filter((run) => !run.hung);
   const hungRuns = (wrap: KitWrap, piece: KitPieceId): readonly Run[] =>
@@ -601,6 +605,36 @@ describe('a footprint wrapped — #3334', () => {
     expect(bayCount(13.1)).toBe(7);
     expect(bayCount(0.4)).toBe(1);
     expect(KIT_BAY_METRES).toBe(2);
+  });
+
+  it('cuts the door’s edge into an odd number of bays, one fewer where that keeps them in shape — #3351', () => {
+    // Odd already: as any other edge.
+    for (const length of [2, 6, 10, 13.9, 0.4]) {
+      expect(doorBayCount(length)).toBe(bayCount(length));
+    }
+    // Even: one fewer, each bay stretched no more than 1.5 times. 20 m is 9 bays of 2.22 m,
+    // 8 m 3 of 2.67, 12 m 5 of 2.4, 7 m 3 of 2.33.
+    expect(doorBayCount(20)).toBe(9);
+    expect(doorBayCount(8)).toBe(3);
+    expect(doorBayCount(12)).toBe(5);
+    expect(doorBayCount(7)).toBe(3);
+    // One more where one fewer is out of shape: 4.6 m is one bay of 4.6 m, or three of 1.53.
+    expect(doorBayCount(4.6)).toBe(3);
+    // Where neither is in shape, the even count: 4 m is one bay stretched 2 times, or three
+    // squashed to 0.67.
+    expect(doorBayCount(4)).toBe(2);
+    for (let tenths = 1; tenths < 600; tenths += 1) {
+      const length = tenths / 10;
+      const bays = doorBayCount(length);
+      const label = length.toFixed(1);
+      // Never more than one bay from the edge's own, and never more bays where fewer are in shape.
+      expect(Math.abs(bays - bayCount(length)), label).toBeLessThanOrEqual(1);
+      // Odd everywhere but where no odd count is in shape: over 3 m and under 4.2 m.
+      if (bays % 2 === 0) {
+        expect(length > 3 && length < 4.2, label).toBe(true);
+        expect(bays, label).toBe(2);
+      }
+    }
   });
 
   it('covers every edge exactly, storey by storey, from the plan’s foot to its parapet’s top, whatever it is built of', () => {
@@ -689,11 +723,12 @@ describe('a footprint wrapped — #3334', () => {
       expect([...new Set(front.map((run) => run.piece))].sort()).toEqual(
         [wrap.door, style.shopfront?.front].sort(),
       );
-      expect(front.reduce((sum, run) => sum + run.bays, 0)).toBe(10);
+      // #3351: the door's edge an odd number of bays, nine where any other 20 m edge is ten.
+      expect(front.reduce((sum, run) => sum + run.bays, 0)).toBe(9);
       const door = front.find((run) => run.piece === wrap.door);
-      // The middle bay of ten: the fifth, 8 to 10 m along the 20 m edge.
+      // The middle bay of nine: the fifth, its middle the 20 m edge's, x = 10.
       expect(door?.bays).toBe(1);
-      expect(door?.x).toBeCloseTo(11, 4);
+      expect(door?.x).toBeCloseTo(10, 4);
       for (const run of ground.filter((each) => each.z !== 0)) expect(run.piece).toBe(skin.pier);
       // An upper storey of the street front is the wrap's window, and of any other wall the skin's first.
       for (const run of bayRuns(wrap).filter((each) => each.y > 10.4 && each.y < 19)) {
@@ -740,7 +775,8 @@ describe('a footprint wrapped — #3334', () => {
     // A 1 m return in an outline: one bay at half its width, too narrow for a window.
     const notched = [0, 0, 20, 0, 20, 12, 10, 12, 10, 11, 0, 11];
     const narrow = bayRuns(wrapped({ ring: notched })).filter(
-      (run) => run.x === 10 && run.y >= 10.4 && run.y < 19,
+      // On the return, between z = 11 and 12: not the door's bay, whose middle is x = 10 too.
+      (run) => run.x === 10 && run.z > 10 && run.y >= 10.4 && run.y < 19,
     );
     expect(narrow.length).toBeGreaterThan(0);
     for (const run of narrow) {
@@ -771,13 +807,14 @@ describe('a footprint wrapped — #3334', () => {
       }
     }
     expect(wraps).toBeGreaterThan(300);
-    // The cards alone: 32 bays on five levels, and the roof's two triangles.
-    expect(wrapped({ seed: PLAIN, budget: 322 }).triangles).toBe(322);
+    // The cards alone: 31 bays on five levels (the door's edge 9, #3351), and the roof's two
+    // triangles.
+    expect(wrapped({ seed: PLAIN, budget: 312 }).triangles).toBe(312);
     // Nothing in relief there costs a triangle more than its card: the plain wall is its card.
-    for (const run of runsOf(wrapped({ seed: PLAIN, budget: 322 })).filter((each) => each.relief)) {
+    for (const run of runsOf(wrapped({ seed: PLAIN, budget: 312 })).filter((each) => each.relief)) {
       expect(KIT_PIECES[kitPieceIndex(run.piece)]?.triangles, run.piece).toBe(KIT_CARD_TRIANGLES);
     }
-    expect(wrapFootprint(input({ seed: PLAIN, budget: 321 }))).toBeUndefined();
+    expect(wrapFootprint(input({ seed: PLAIN, budget: 311 }))).toBeUndefined();
   });
 
   it('puts the whole street front in relief at 3 000 triangles, where 640 left most of it flat cards', () => {
@@ -792,8 +829,9 @@ describe('a footprint wrapped — #3334', () => {
             const label = `${kind} ${surface} ${String(storeys)} ${String(seed)}`;
             const over = { kind, surface, seed, storeys, eaves: 10.4 + storeys * 3, ring: NARROW };
             const wrap = wrapped(over);
-            // Four bays on every level, every one its real geometry.
-            expect(wrap.front.bays, label).toBeGreaterThanOrEqual(12);
+            // Three bays on every level (a window two bays across a pair and one over, on
+            // an upper storey), every one its real geometry.
+            expect(wrap.front.bays, label).toBeGreaterThanOrEqual(3 * 3 + 2);
             expect(wrap.front.relief, label).toBe(wrap.front.bays);
             windows.add(wrap.window);
             cornices.add(wrap.cornice);
@@ -820,9 +858,10 @@ describe('a footprint wrapped — #3334', () => {
     let kept = 0;
     let traded = 0;
     for (let seed = 0; seed < 200; seed += 1) {
-      // A 12 m front of three storeys: six bays, which no window fills at 3 000. The cheapest
-      // of everything, as far as the budget goes.
-      const long = wrapped({ seed, ring: [0, 0, 12, 0, 12, 12, 0, 12] });
+      // A 14 m front of three storeys: seven bays, which no window fills at 3 000. The
+      // cheapest of everything, as far as the budget goes. (#3351: 12 m was six bays until a
+      // door's edge was cut into an odd number; its five are filled.)
+      const long = wrapped({ seed, ring: [0, 0, 14, 0, 14, 12, 0, 12] });
       expect(long.front.relief).toBeLessThan(long.front.bays);
       expect([long.window, long.door, long.cornice]).toEqual([
         'brick-window',
@@ -900,18 +939,18 @@ describe('a footprint wrapped — #3334', () => {
   it('hangs an awning or a sign band over every bay of the shop front, under the first floor', () => {
     const awning = wrapped({ ring: NARROW, awning: true });
     const canvas = hungRuns(awning, 'awning');
-    expect(canvas.reduce((sum, run) => sum + run.bays, 0)).toBe(4);
+    expect(canvas.reduce((sum, run) => sum + run.bays, 0)).toBe(3);
     for (const run of canvas) {
       expect(run.z).toBe(0);
       expect(run.relief).toBe(true);
       // Its top 5 cm under the first floor, 3 m over the ground floor's 10.4.
       expect(run.y + 1).toBeCloseTo(13.35, 3);
-      expect(widthOf(run)).toBeCloseTo(2, 5);
+      expect(widthOf(run)).toBeCloseTo(8 / 3, 5);
     }
     expect(hungRuns(awning, 'fascia')).toEqual([]);
     const seed = seedFor({}, (style) => style.sign === 'fascia');
     const band = hungRuns(wrapped({ ring: NARROW, seed }), 'fascia');
-    expect(band.reduce((sum, run) => sum + run.bays, 0)).toBe(4);
+    expect(band.reduce((sum, run) => sum + run.bays, 0)).toBe(3);
     for (const run of band) expect(run.y + 0.5).toBeCloseTo(13.35, 3);
     // A house has neither.
     const house = wrapped({ ring: NARROW, kind: 'townhouse', awning: true });
@@ -922,9 +961,9 @@ describe('a footprint wrapped — #3334', () => {
     const NONE = { sign: 'none' } as const;
     const pilastered = seedFor({}, (style) => style.pilasters && style.sign === NONE.sign);
     const piers = hungRuns(wrapped({ ring: NARROW, seed: pilastered }), 'brick-pilaster');
-    // Up the two upper storeys of a shop (its ground floor is the shop front's), five a storey.
+    // Up the two upper storeys of a shop (its ground floor is the shop front's), four a storey.
     expect([...new Set(piers.map((run) => run.y))].sort()).toEqual([13.4, 16.4]);
-    expect(piers.reduce((sum, run) => sum + run.bays, 0)).toBe(10);
+    expect(piers.reduce((sum, run) => sum + run.bays, 0)).toBe(8);
     for (const run of piers) {
       expect(run.z).toBe(0);
       expect(run.stretchX).toBe(1);
@@ -933,7 +972,7 @@ describe('a footprint wrapped — #3334', () => {
     const along = piers.flatMap((run) =>
       Array.from({ length: run.bays }, (_, bay) => millimetres(run.x - bay * run.pitch)),
     );
-    expect([...new Set(along)].sort((a, b) => a - b)).toEqual([0.25, 2, 4, 6, 7.75]);
+    expect([...new Set(along)].sort((a, b) => a - b)).toEqual([0.25, 2.667, 5.333, 7.75]);
     // A house's stand from its ground floor.
     const house = hungRuns(
       wrapped({
@@ -954,20 +993,21 @@ describe('a footprint wrapped — #3334', () => {
     expect(landings.map((run) => run.y).sort()).toEqual([13.4, 16.4]);
     expect(ladders.map((run) => run.y)).toEqual([13.4]);
     // On the bay beside the door's, not over it: the wall runs toward -x from x = 8, the
-    // door's bay is its second (x from 4 to 6) and the landing's its third, about x = 3.
-    for (const run of landings) expect(run.x).toBeCloseTo(3, 4);
+    // door's bay is its second of three (x from 5.33 to 2.67) and the landing's its third,
+    // about x = 1.33.
+    for (const run of landings) expect(run.x).toBeCloseTo(4 / 3, 2);
     expect(hungRuns(wrapped({ ring: NARROW, seed: pilastered }), 'balcony')).toEqual([]);
 
     const timber = seedFor({}, (style) => style.shopfront?.columns !== undefined);
     const columns = hungRuns(wrapped({ ring: NARROW, seed: timber }), 'timber-columns');
     // One before each shop-front bay, and none before the door.
-    expect(columns.reduce((sum, run) => sum + run.bays, 0)).toBe(3);
+    expect(columns.reduce((sum, run) => sum + run.bays, 0)).toBe(2);
     for (const run of columns) expect(run.y).toBe(10.4);
   });
 
   it('never draws what hangs on a wall as a card: in relief, or not at all', () => {
     for (let seed = 0; seed < 60; seed += 1) {
-      for (const budget of [322, 640, 1_500, REALISTIC_KIT_WRAP_TRIANGLES]) {
+      for (const budget of [312, 640, 1_500, REALISTIC_KIT_WRAP_TRIANGLES]) {
         const wrap = wrapFootprint(input({ seed, budget, awning: seed % 3 === 0 }));
         if (wrap === undefined) continue;
         for (const run of runsOf(wrap).filter((each) => each.hung)) {
@@ -977,7 +1017,7 @@ describe('a footprint wrapped — #3334', () => {
     }
     // With the cards alone, nothing hangs.
     expect(
-      runsOf(wrapped({ seed: PLAIN, budget: 322, awning: true })).some((run) => run.hung),
+      runsOf(wrapped({ seed: PLAIN, budget: 312, awning: true })).some((run) => run.hung),
     ).toBe(false);
   });
 
@@ -1026,8 +1066,8 @@ describe('a footprint wrapped — #3334', () => {
   it('draws no plinth where the floor is the foot', () => {
     const wrap = wrapped({ base: 10.4 });
     expect(runsOf(wrap).every((run) => run.y >= 10.4)).toBe(true);
-    // Its cards alone are a level fewer: 32 bays on four levels, and the roof.
-    expect(wrapped({ seed: PLAIN, base: 10.4, budget: 258 }).triangles).toBe(258);
-    expect(wrapFootprint(input({ seed: PLAIN, base: 10.4, budget: 257 }))).toBeUndefined();
+    // Its cards alone are a level fewer: 31 bays on four levels, and the roof.
+    expect(wrapped({ seed: PLAIN, base: 10.4, budget: 250 }).triangles).toBe(250);
+    expect(wrapFootprint(input({ seed: PLAIN, base: 10.4, budget: 249 }))).toBeUndefined();
   });
 });
