@@ -15,12 +15,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGradientSession } from './gradient';
 import type { GradientTrainer } from './trainer-port';
 import { TargetHeldBack } from '../ride/held-back';
+import { anchorScenery } from './scenery-anchor';
 import {
   MAX_SIMULATED_GRADE_PERCENT,
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradeAt,
   routeProfile,
   seconds,
   type RoutePoint,
@@ -563,5 +565,318 @@ describe('a fault during a correction keeps the bound — #932', () => {
     for (const grade of grades.slice(2)) {
       expect(Math.abs(grade - (grades[0] ?? Number.NaN))).toBeLessThanOrEqual(1 + 1e-9);
     }
+  });
+});
+
+describe('past a point-to-point route’s end, the trainer eases to flat — #3345', () => {
+  /** `metres` north from 51.5° N, climbing at `percent` (falling, when negative). */
+  function climb(percent: number, metres: number): RouteProfile {
+    const points: RoutePoint[] = [];
+    for (let along = 0; along <= metres; along += 10) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + along / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(100 + (along * percent) / 100),
+      });
+    }
+    return routeProfile(points);
+  }
+
+  /** A loop: 300 m north descending at 5 %, and back 10 m east of it climbing at 5 %. */
+  function loop(): RouteProfile {
+    const points: RoutePoint[] = [];
+    const east = 10 / (111_320 * Math.cos((51.5 * Math.PI) / 180));
+    for (let along = 0; along <= 300; along += 10) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + along / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(100 - along * 0.05),
+      });
+    }
+    for (let along = 300; along >= 0; along -= 10) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + along / 111_320),
+          degreesLongitude(-0.12 + east),
+        ),
+        elevation: altitudeMetres(100 - along * 0.05),
+      });
+    }
+    return routeProfile(points, { loop: true });
+  }
+
+  interface Write {
+    readonly grade: number;
+    readonly at: number;
+    readonly distance: number;
+  }
+
+  /**
+   * Rides `profile` from `from` to `to` metres at `speed` m/s, a sample every
+   * quarter second as `GameView`'s loop samples, and keeps each write with the
+   * ride second and distance it was offered at. With `stopAt`, the session is
+   * stopped (the rider ended the ride) on the first sample at or past it.
+   */
+  async function rideOver(
+    profile: RouteProfile,
+    options: {
+      readonly from: number;
+      readonly to: number;
+      readonly speed: number;
+      readonly stopAt?: number;
+      readonly refuse?: number;
+    },
+  ): Promise<{ readonly writes: Write[]; readonly releases: number[] }> {
+    const frame = 0.25;
+    let at = 0;
+    let distance = options.from;
+    const writes: Write[] = [];
+    const releases: number[] = [];
+    const control: GradientTrainer = {
+      setSimulationParameters: async (parameters) => {
+        const index = writes.length;
+        writes.push({ grade: parameters.grade, at, distance });
+        return index === options.refuse
+          ? Promise.reject(new SensorError('control-rejected', 'operation-failed'))
+          : Promise.resolve();
+      },
+      letGo: async () => {
+        releases.push(writes.length);
+        return Promise.resolve({ kind: 'stopped' as const });
+      },
+    };
+    const session = createGradientSession({ profile, control });
+    while (distance < options.to) {
+      if (options.stopAt !== undefined && distance >= options.stopAt) session.stop();
+      session.sample(seconds(at), distance);
+      await drain();
+      at += frame;
+      distance += options.speed * frame;
+    }
+    return { writes, releases };
+  }
+
+  /**
+   * Every write past the end is a step from the one before it within the
+   * existing rate limit, toward 0 %, never away from it and never across it.
+   * `held` maps a write to the one the trainer was holding before it, where a
+   * refusal means that is not simply the write before.
+   */
+  function expectAMonotonicBoundedEase(
+    writes: readonly Write[],
+    end: number,
+    held: (index: number) => number = (index) => index - 1,
+  ): void {
+    for (let index = 1; index < writes.length; index += 1) {
+      const before = writes[held(index)] as Write;
+      const write = writes[index] as Write;
+      if (write.distance <= end) continue;
+      const at = `${write.grade.toFixed(3)} % at ${(write.distance - end).toFixed(1)} m past the end`;
+      // The existing rate limit: at most one write a second, and 1 % a second.
+      expect(write.at - (writes[index - 1] as Write).at, at).toBeGreaterThanOrEqual(1 - 1e-9);
+      expect(Math.abs(write.grade - before.grade), at).toBeLessThanOrEqual(1 + 1e-9);
+      // Toward flat, never away from it and never across it.
+      expect(Math.abs(write.grade), at).toBeLessThanOrEqual(Math.abs(before.grade) + 1e-9);
+      expect(Math.sign(write.grade) * Math.sign(before.grade), at).not.toBe(-1);
+    }
+  }
+
+  it('walks the climb’s grade down to 0 % over about 100 m, then holds it, writing nothing more', async () => {
+    const profile = climb(5, 600);
+    const end: number = profile.totalDistance;
+    // 30 km/h, from 200 m short of the end to 1 km past it.
+    const { writes } = await rideOver(profile, {
+      from: end - 200,
+      to: end + 1_000,
+      speed: 30 / 3.6,
+    });
+    const past = writes.filter((write) => write.distance > end);
+    // Up to the end, the road's own grade there: the climb's, eased by the
+    // profile's gradient windows over its last metres.
+    const atTheEnd: number = gradeAt(profile, end);
+    expect(atTheEnd).toBeGreaterThan(2);
+    expect(writes.filter((write) => write.distance <= end).at(-1)?.grade).toBeCloseTo(atTheEnd, 0);
+    // Non-vacuity: an ease, a write at a time.
+    expect(past.length).toBeGreaterThanOrEqual(5);
+    expectAMonotonicBoundedEase(writes, end);
+    // Flat by about 100 m past the end, and exactly 0 %, not a deadband short of it.
+    const flat = past.find((write) => write.grade === 0);
+    expect(flat).toBeDefined();
+    expect((flat?.distance ?? Number.POSITIVE_INFINITY) - end).toBeLessThanOrEqual(110);
+    // And nothing after it: 0 % is held for the rest of the kilometre.
+    expect(past.at(-1)).toBe(flat);
+  });
+
+  it('eases a descent’s grade up to 0 % the same way', async () => {
+    const profile = climb(-6, 600);
+    const end: number = profile.totalDistance;
+    const { writes } = await rideOver(profile, { from: end - 200, to: end + 600, speed: 30 / 3.6 });
+    const past = writes.filter((write) => write.distance > end);
+    const atTheEnd: number = gradeAt(profile, end);
+    expect(atTheEnd).toBeLessThan(-2);
+    expect(writes.filter((write) => write.distance <= end).at(-1)?.grade).toBeCloseTo(atTheEnd, 0);
+    expect(past.length).toBeGreaterThanOrEqual(5);
+    expectAMonotonicBoundedEase(writes, end);
+    expect(past.at(-1)?.grade).toBe(0);
+  });
+
+  it('never steps faster than the bound however fast the ride: an 8× preview’s speed eases over more road', async () => {
+    const profile = climb(9, 800);
+    const end: number = profile.totalDistance;
+    // 70 m/s: the 100 m in under 1.5 s, which no walk at 1 % a second covers.
+    const { writes } = await rideOver(profile, { from: end - 300, to: end + 1_500, speed: 70 });
+    const past = writes.filter((write) => write.distance > end);
+    expectAMonotonicBoundedEase(writes, end);
+    // The end's grade in steps of at most 1 %: never at once.
+    const atTheEnd: number = gradeAt(profile, end);
+    expect(atTheEnd).toBeGreaterThan(4);
+    expect(past.length).toBeGreaterThanOrEqual(Math.floor(atTheEnd));
+    expect(past.at(-1)?.grade).toBe(0);
+  });
+
+  it('never walks away from flat, nor across it, when a correction is still walking at the line', async () => {
+    // 300 m falling at 5 %, then 300 m climbing at 8 % to the end.
+    const points: RoutePoint[] = [];
+    for (let along = 0; along <= 600; along += 10) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + along / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(along <= 300 ? 100 - along * 0.05 : 85 + (along - 300) * 0.08),
+      });
+    }
+    const profile = routeProfile(points);
+    const end: number = profile.totalDistance;
+    const trainer = recordingTrainer();
+    const session = createGradientSession({ profile, control: trainer.control });
+    // On the descent; then a room moves the rider to just short of the line,
+    // and the grade walks up from the descent's at 1 % a second (#782)…
+    session.sample(seconds(0), 150);
+    await drain();
+    session.sample(seconds(1), end - 5, true);
+    await drain();
+    // …and the rider crosses the line with the trainer still below flat.
+    for (let at = 2; at <= 30; at += 1) {
+      session.sample(seconds(at), end - 5 + at * 8);
+      await drain();
+    }
+    const grades = trainer.written.map((parameters) => Number(parameters.grade));
+    // Non-vacuity: below flat at the line, with the end's grade a climb.
+    expect(grades[1]).toBeLessThan(-2);
+    expect(gradeAt(profile, end)).toBeGreaterThan(2);
+    for (let index = 2; index < grades.length; index += 1) {
+      const before = grades[index - 1] ?? Number.NaN;
+      const grade = grades[index] ?? Number.NaN;
+      expect(Math.abs(grade - before)).toBeLessThanOrEqual(1 + 1e-9);
+      // Up toward 0 %, and never over it into the end's climb.
+      expect(grade).toBeGreaterThan(before);
+      expect(grade).toBeLessThanOrEqual(0);
+    }
+    expect(grades.at(-1)).toBe(0);
+  });
+
+  it('stops with the ride: nothing is written once the session is stopped mid-ease', async () => {
+    const profile = climb(6, 600);
+    const end: number = profile.totalDistance;
+    const ridden = await rideOver(profile, { from: end - 100, to: end + 400, speed: 30 / 3.6 });
+    const stopped = await rideOver(profile, {
+      from: end - 100,
+      to: end + 400,
+      speed: 30 / 3.6,
+      stopAt: end + 30,
+    });
+    // The control: riding on writes the ease past 30 m.
+    expect(ridden.writes.some((write) => write.distance > end + 30)).toBe(true);
+    // Stopped 30 m past the end, mid-ease: released once and written to no more.
+    expect(stopped.writes.some((write) => write.distance > end)).toBe(true);
+    expect(stopped.writes.every((write) => write.distance < end + 30)).toBe(true);
+    expect(stopped.releases).toEqual([stopped.writes.length]);
+  });
+
+  it('walks on from the grade the trainer holds when a write in the ease is refused', async () => {
+    const profile = climb(5, 600);
+    const end: number = profile.totalDistance;
+    const ridden = await rideOver(profile, { from: end - 200, to: end + 400, speed: 30 / 3.6 });
+    const refused = ridden.writes.findIndex((write) => write.distance > end) + 2;
+    const { writes } = await rideOver(profile, {
+      from: end - 200,
+      to: end + 400,
+      speed: 30 / 3.6,
+      refuse: refused,
+    });
+    expect(writes.length).toBeGreaterThan(refused + 2);
+    expect(writes[refused]?.distance).toBeGreaterThan(end);
+    // The refused write was never held, so the one after it steps from the one before.
+    expectAMonotonicBoundedEase(writes, end, (index) =>
+      index === refused + 1 ? refused - 1 : index - 1,
+    );
+    expect(writes.at(-1)?.grade).toBe(0);
+  });
+
+  it('keeps the bound when a write held in the ease times out with another waiting — #932', async () => {
+    const profile = climb(8, 600);
+    const end: number = profile.totalDistance;
+    const written: number[] = [];
+    let timeOut: ((reason: Error) => void) | undefined;
+    const control: GradientTrainer = {
+      setSimulationParameters: async (parameters) => {
+        written.push(Number(parameters.grade));
+        // The third write, the second inside the ease, is left unanswered.
+        if (written.length === 3) {
+          return new Promise<void>((_resolve, reject) => {
+            timeOut = reject;
+          });
+        }
+        return Promise.resolve();
+      },
+      letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
+    };
+    const session = createGradientSession({ profile, control });
+    session.sample(seconds(0), end - 100);
+    await drain();
+    // Seconds 1 and 2 write inside the ease; 3 and 4 find the slot occupied.
+    for (let at = 1; at <= 4; at += 1) {
+      session.sample(seconds(at), end + at * 10);
+      await drain();
+    }
+    expect(written).toHaveLength(3);
+    const confirmed = written[1] ?? Number.NaN;
+    timeOut?.(new Error('the write timed out'));
+    await drain();
+    session.sample(seconds(5), end + 50);
+    await drain();
+    // Nothing walked from the timed-out grade goes out: the write after it is
+    // a step from the grade the trainer confirmed, and never further from flat.
+    expect(written.length).toBeGreaterThan(3);
+    for (const grade of written.slice(3)) {
+      expect(Math.abs(grade - confirmed)).toBeLessThanOrEqual(1 + 1e-9);
+      expect(grade).toBeLessThanOrEqual(confirmed + 1e-9);
+    }
+  });
+
+  it('leaves a loop alone: past its length it rides round onto its own grade', async () => {
+    const profile = loop();
+    expect(profile.loop).toBe(true);
+    const lap: number = profile.totalDistance;
+    const { writes } = await rideOver(profile, { from: lap - 200, to: lap + 200, speed: 30 / 3.6 });
+    // Climbing in to the line, and over it onto the next lap's descent: never eased to 0 %.
+    expect(writes.some((write) => write.distance < lap && write.grade > 3)).toBe(true);
+    expect(writes.some((write) => write.distance > lap + 30 && write.grade < -3)).toBe(true);
+  });
+
+  it('leaves an open-world view alone, which has a road of its own ahead', async () => {
+    const profile = climb(5, 600);
+    anchorScenery(profile, { seed: 1, origin: 0 });
+    const end: number = profile.totalDistance;
+    const { writes } = await rideOver(profile, { from: end - 200, to: end + 300, speed: 30 / 3.6 });
+    // The driver's own, as before #3345: the view's last grade, held.
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.at(-1)?.grade).toBeCloseTo(gradeAt(profile, end), 0);
+    expect(writes.at(-1)?.grade).toBeGreaterThan(2);
   });
 });
