@@ -1646,3 +1646,91 @@ describe('a crash stops the drawn rider, on a second distance the trainer never 
     expect(drawnRiderDistance({ crashOffset: 0, crashOffsetBefore: 0 }, 100, 0.3)).toBe(100);
   });
 });
+
+describe('a recorded round replays to the same score, crashes and deliveries — #3288', () => {
+  /**
+   * The recorded round: the committed synthetic town (`delivery-town-testing.ts`)
+   * at this seed, on a level as dense in standing and moving hazards as a
+   * level may ask, so a dog runs out and the rider, who never changes lane,
+   * crashes twice and misses two houses.
+   */
+  const RECORDED_SEED = 16;
+  const RECORDED_LEVEL = {
+    houses: 8,
+    hazardsPerKilometre: { static: 4, moving: 4 },
+    lengthMetres: 3000,
+    id: 'replay-3288',
+  } as const;
+
+  /** What it came to on main's head before #3288 (2026-11-27), drawn or not. */
+  const RECORDED = { score: 5, crashes: 2, delivered: 6 } as const;
+
+  /**
+   * The recorded round ridden at {@link SPEED} in its middle lane, a parcel
+   * thrown at each house's throw point, and with `drawn` the view's own
+   * Delivery frame made from the ride after every step, as a ride's frames
+   * are (`in-view.ts` §`deliveryInView`, which since #3288 hands a dog the
+   * distance it has run). The drawing reads the ride and never writes it.
+   */
+  function replay(drawn: boolean): {
+    readonly outcome: {
+      readonly score: number;
+      readonly crashes: number;
+      readonly delivered: number;
+    };
+    readonly trotting: number;
+  } {
+    let ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: storageOf(),
+      seed: RECORDED_SEED,
+      level: RECORDED_LEVEL,
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    let crashes = 0;
+    let trotting = 0;
+    const end = (ride.throwTargets.at(-1)?.along ?? 0) + 20;
+    let next = 0;
+    while (ride.rideAlong < end - 1e-9) {
+      const target = ride.throwTargets[next];
+      const throwNow = target !== undefined && ride.rideAlong >= throwPoint(target);
+      if (throwNow) next += 1;
+      const stepped = stepDeliveryRide(ride, {
+        ticks: 1,
+        along: Math.min(end, ride.rideAlong + SPEED * DELIVERY_TICK_SECONDS),
+        speed: SPEED,
+        ...(throwNow ? { throwTo: target.side } : {}),
+      });
+      ride = stepped.ride;
+      crashes += stepped.crashes;
+      if (!drawn) continue;
+      const view = deliveryInView({
+        corridor: roadCorridor(town.profile, town.origin, ride.along),
+        targets: ride.targets,
+        round: ride.round,
+        throws: ride.throws,
+        obstacles: ride.obstacles,
+        obstacleState: ride.obstacleState,
+      });
+      trotting += view.obstacles.filter((piece) => (piece.ranMetres ?? 0) > 0).length;
+    }
+    return {
+      outcome: { score: ride.score, crashes, delivered: roundTally(ride.round).delivered },
+      trotting,
+    };
+  }
+
+  it('scores, crashes and delivers what it did before the realistic props, drawn on every step or not at all', () => {
+    const blind = replay(false);
+    const seen = replay(true);
+    expect(blind.outcome).toEqual(RECORDED);
+    expect(seen.outcome).toEqual(RECORDED);
+    // Not vacuous: a dog trotted across frames the view drew.
+    expect(blind.trotting).toBe(0);
+    expect(seen.trotting).toBeGreaterThan(0);
+  });
+});

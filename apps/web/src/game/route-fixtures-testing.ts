@@ -592,9 +592,12 @@ export const OUT_AND_BACK_NORTH_METRES = 1_500;
  * own points in reverse, so the two passes are one road; `offset` moves the
  * return that many metres east, as a recorded ride on the other side of the
  * road would be. Its height is a function of where a point is, so both passes
- * of one place are at one height, climbing gently on the way out.
+ * of one place are at one height, climbing gently on the way out. `oneWay`
+ * (#3416) stops at the turn: the same road, ridden once, as a control.
  */
-export function outAndBackRoute(options: { readonly offset?: number } = {}): RouteProfile {
+export function outAndBackRoute(
+  options: { readonly offset?: number; readonly oneWay?: boolean } = {},
+): RouteProfile {
   const metresPerDegreeLongitude =
     METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
   const offset = options.offset ?? 0;
@@ -609,7 +612,9 @@ export function outAndBackRoute(options: { readonly offset?: number } = {}): Rou
     });
   };
   for (let north = 0; north <= OUT_AND_BACK_NORTH_METRES; north += 10) push(north, 0);
-  for (let north = OUT_AND_BACK_NORTH_METRES - 10; north >= 0; north -= 10) push(north, offset);
+  if (options.oneWay !== true) {
+    for (let north = OUT_AND_BACK_NORTH_METRES - 10; north >= 0; north -= 10) push(north, offset);
+  }
   return routeProfile(points, { loop: false });
 }
 
