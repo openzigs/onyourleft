@@ -437,7 +437,7 @@ describe.each([1.5, 2, 4])(
       for (let second = 60; second + 30 < asked.length; second += 30) {
         expect(asked[second + 30] as number).toBeGreaterThanOrEqual(asked[second] as number);
       }
-      expect(asked[90] as number).toBeGreaterThan((asked[60] as number) + 0.1);
+      expect(asked[120] as number).toBeGreaterThan((asked[60] as number) + 0.1);
       const end = frames.slice(from + RECOVERY_SECONDS / TICK_SECONDS);
       expect(end.length * TICK_SECONDS).toBeGreaterThan(30);
       for (const frame of end) {
@@ -725,3 +725,44 @@ describe('deterministic for a seed (criterion 9)', () => {
     expect(rides().frames.some((frame) => sweepOf(frame) !== null)).toBe(true);
   });
 });
+
+describe.each([
+  { name: '1.86 to 2.17 m', low: 1.86, high: 2.17 },
+  { name: '2.5 to 3.37 m', low: 2.5, high: 3.37 },
+  { name: '0.95 to 1.04 m', low: 0.95, high: 1.04 },
+])(
+  'a rider whose gap wanders from $name behind the wheel has the group back at the plan’s speed after one wait',
+  ({ low, high }) => {
+    const RECOVERY_SECONDS = 360;
+    // The gap swings up and down in about half the windows: a rider is not
+    // losing ground because it grew in one of them.
+    const wander = (seconds: number): number =>
+      low + ((high - low) * (1 + Math.sin((seconds * 2 * Math.PI) / 7))) / 2;
+    const ride = ridden(() =>
+      rideGroup({
+        course: FLAT,
+        targetKmh: TARGET_KMH,
+        line: RIDER_LAST,
+        seconds: 600,
+        bendRadiusM: 20,
+        rider: {
+          gapM: (seconds) => (seconds < 50 ? 2 : wander(seconds)),
+          slow: { fromSeconds: 5, toSeconds: 50, kmh: 8 },
+        },
+      }),
+    );
+
+    it('rides the plan again within the recovery time', () => {
+      const { frames, plan } = ride();
+      const began = frames.findIndex((frame) => hold(frame) !== null);
+      const from = frames.findIndex((frame, index) => index > began && hold(frame) === null);
+      expect(from).toBeGreaterThan(0);
+      const end = frames.slice(from + RECOVERY_SECONDS / TICK_SECONDS);
+      expect(end.length * TICK_SECONDS).toBeGreaterThan(30);
+      for (const frame of end) {
+        expect(eased(frame)).toBe(false);
+        expect(frame.groupSpeedMps).toBe(plan.speedNowAt(at(frame, 'b1').distanceM));
+      }
+    });
+  },
+);

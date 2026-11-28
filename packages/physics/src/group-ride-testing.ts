@@ -93,7 +93,7 @@ export const SIX: readonly LineMember[] = [
 /** How the scripted rider rides. */
 export interface RiderScript {
   /** How far behind the wheel they hold, metres, in place of a wheel gap. */
-  readonly gapM?: number;
+  readonly gapM?: number | ((seconds: number) => number);
   /** A fixed power, watts, in place of holding the wheel. */
   readonly watts?: number;
   /** A share of the plan's power on the road under them, in place of holding the wheel. */
@@ -259,7 +259,8 @@ export function rideGroup(script: GroupScript): GroupRide {
       const further =
         riding.gapM === undefined || id === state.noDrop.sweep
           ? 0
-          : riding.gapM - BOT_TACTIC_WHEEL_GAP_METRES;
+          : (typeof riding.gapM === 'number' ? riding.gapM : riding.gapM(seconds)) -
+            BOT_TACTIC_WHEEL_GAP_METRES;
       return botWheelWatts({
         gapMetres: wheel.distanceM - rider.distanceM - further,
         closingMetresPerSecond: rider.speedMps - wheel.speedMps,

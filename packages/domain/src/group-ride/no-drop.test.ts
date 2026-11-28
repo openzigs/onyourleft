@@ -17,6 +17,7 @@ import noDropSource from './no-drop.ts?raw';
 import {
   NO_DROP_FULL_EASE_SECONDS,
   NO_DROP_GAPPED_METRES,
+  NO_DROP_PACE_MEMORY_SECONDS,
   NO_DROP_REACH_METRES,
   NO_DROP_SETTLE_MS,
   noDropRole,
@@ -111,6 +112,7 @@ describe('where the rider stands', () => {
       easedSpeedMps: null,
       paceShare: null,
       behindM: step.state.behindM,
+      worstM: step.state.worstM,
       insideSinceMs: null,
       overTheTop: false,
     });
@@ -405,7 +407,7 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
   });
 
   /** The released line, eased, with the rider `wasM` behind b3 at the last window. */
-  const paced = (wasM: number): NoDropState => ({ ...released, behindM: wasM });
+  const paced = (wasM: number): NoDropState => ({ ...released, behindM: wasM, worstM: wasM });
   const UP = 1 + 0.05 / 20;
   const DOWN = 1 - (1.5 * 0.05) / 20;
 
@@ -426,6 +428,25 @@ describe('the rider’s pace, remembered from the first wait (the owner’s ruli
     const slipping = next(paced(2), 1_000, 2.02, 8).state;
     expect(slipping.standing).toBe('with');
     expect(slipping.paceShare).toBeCloseTo(0.75 * DOWN, 12);
+  });
+
+  it('rises when the gap grows but is not its furthest lately: it wandered, it did not lose ground', () => {
+    // 2 m a second ago, but 2.5 m a few windows back: 2.2 m is a wander.
+    const wandering: NoDropState = { ...paced(2), worstM: 2.5 };
+    expect(next(wandering, 1_000, 2.2, 4).state.paceShare).toBeCloseTo(0.75 * UP, 12);
+    // A new furthest gap is losing ground.
+    expect(next(wandering, 1_000, 2.52, 4).state.paceShare).toBeCloseTo(0.75 * DOWN, 12);
+  });
+
+  it('keeps the furthest gap out at once and lets it in over its memory', () => {
+    const out = next(paced(2), 1_000, 3, 4).state;
+    expect(out.worstM).toBeCloseTo(3, 9);
+    // Back at 2 m, the furthest comes in a window's share of the way, not at once.
+    const back = next(out, 2_000, 2, 4).state;
+    expect(back.worstM).toBeCloseTo(3 - 1 / NO_DROP_PACE_MEMORY_SECONDS, 9);
+    // Off the wheel it is the gap itself.
+    expect(next(paced(2), 1_000, 12, 4).state.worstM).toBeCloseTo(12, 9);
+    expect(next({ ...paced(2), worstM: 20 }, 1_000, 12, 4).state.worstM).toBeCloseTo(12, 9);
   });
 
   it('stays while the line is at the plan’s speed, and follows the speed of a rider who is off the wheel', () => {
