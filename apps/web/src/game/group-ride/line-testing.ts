@@ -29,6 +29,7 @@ import { ROTATION_EASE_SHARE, type RouteProfile } from '@onyourleft/domain';
 
 import { northRoute } from '../route-fixtures-testing';
 import { SIMULATION_STEP_SECONDS } from '../simulation';
+import { speedFrom } from '../../units/format';
 
 import {
   GROUP_RIDE_RIDER_ID,
@@ -41,7 +42,7 @@ import {
 export const SCRIPT_FLAT: RouteProfile = northRoute(20_000, () => 0);
 
 /** The scripted rides' target average, m/s: 30 km/h. */
-export const SCRIPT_TARGET_MPS = 30 / 3.6;
+export const SCRIPT_TARGET_MPS = speedFrom(30, 'metric');
 
 /** How far behind a wheel the scripted rider holds, metres. */
 export const SCRIPT_WHEEL_GAP_METRES = 0.65;
@@ -50,7 +51,7 @@ export const SCRIPT_WHEEL_GAP_METRES = 0.65;
 export const SCRIPT_PULL_SECONDS = 12;
 
 /** How far under the group's speed the scripted rider fades, m/s: 2.2 km/h, past the rules' margin. */
-const SCRIPT_FADE_MPS = 2.2 / 3.6;
+const SCRIPT_FADE_MPS = speedFrom(2.2, 'metric');
 
 /** How fast they fade, m/s²: slower than a sheltered bot coasts down, so none rides into them. */
 const SCRIPT_FADE_MPS2 = 0.05;
