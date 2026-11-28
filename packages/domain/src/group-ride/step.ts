@@ -244,8 +244,9 @@ export function startGroupRide(setup: GroupRideSetup): GroupRideState {
  * The group one tick on. See the file comment for what each bot rides.
  *
  * @throws {GroupRideError} `view-out-of-range` for a tick that does not cover
- *   a finite time above zero, and as `stepRotation` for a rider who is not
- *   somewhere finite.
+ *   a finite time above zero, for a course whose spacing is not a finite
+ *   number of metres above zero (`lineClimbAheadM`), and as `stepRotation`
+ *   for a rider who is not somewhere finite.
  */
 export function stepGroupRide(
   state: GroupRideState,
