@@ -118,8 +118,8 @@ import {
   botWheelWatts,
 } from '../lap-race/tactics';
 import { fullBotEnergy, spendableWatts, stepWbal, type BotEnergy } from '../lap-race/wbal';
-import { courseHillsAhead } from '../route/course-ahead';
 import { gradeAt, type RouteProfile } from '../route/profile';
+import { lineClimbAheadM } from './climb-ahead';
 import { GroupRideError } from './errors';
 import {
   noDropRole,
@@ -393,7 +393,7 @@ export function stepGroupRide(
     groupSpeedMps,
     members,
     energy,
-    climbAheadM: courseHillsAhead(course, frontM).climb?.inM ?? null,
+    climbAheadM: lineClimbAheadM(course, frontM),
     bendRadiusM: input.bendRadiusM ?? null,
     riderSignal: input.riderSignal ?? false,
     riderSittingIn: input.riderSittingIn ?? false,
