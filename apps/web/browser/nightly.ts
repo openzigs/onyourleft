@@ -255,6 +255,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '`realistic-textures.test.ts` §"#1623".',
   },
   {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s field life, through the view — #3286',
+    seconds: 'one more load of the owner’s page, at 320 × 180',
+    why:
+      'the owner’s page’s `town=pasture` on an October day: that the view hands the frame’s ' +
+      'cows, sheep and bales, and the season it was told, to its field-life belt, read off the ' +
+      'belt’s own counts. An instrument of a page that ships in no build; the belt, the ' +
+      'shapes and the bales’ season are held in the required suite by `field-life.test.ts` ' +
+      'and `field-life-belt.test.ts`.',
+  },
+  {
     spec: 'reflow.browser.spec.ts',
     describe: 'the dark palette — #672, nightly since #1076',
     seconds: 'about 22 s on the EPYC 7763 (run 37131982824): six walks of every route',

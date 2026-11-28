@@ -28535,6 +28535,16 @@ export function parkedCarStatsOf(view: GameView): ParkedCarStats | undefined {
 }
 
 /**
+ * What a view's field life's belt drew on its last frame — #3286, for the
+ * browser gate's counts. `undefined` before a realistic frame carried a piece.
+ *
+ * @test-facing read by `realistic-harness.ts`; the product reads the stats nowhere
+ */
+export function fieldLifeStatsOf(view: GameView): FieldLifeStats | undefined {
+  return view instanceof ThreeGameView ? view.fieldLifeStats : undefined;
+}
+
+/**
  * What a view's village models drew on its last frame — #1566, for the
  * browser gate's counts. `undefined` before a realistic frame.
  *
@@ -29675,6 +29685,11 @@ class ThreeGameView implements GameView {
       this.#parkedCars.addTo(this.#scene);
     }
     this.#parkedCars?.update(view);
+  }
+
+  /** @see fieldLifeStatsOf */
+  get fieldLifeStats(): FieldLifeStats | undefined {
+    return this.#fieldLife?.stats;
   }
 
   /** @see parkedCarStatsOf */

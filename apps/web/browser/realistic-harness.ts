@@ -130,6 +130,7 @@ import {
   setRealisticChainLink,
   setRealisticTrees,
   threeGameRenderer,
+  fieldLifeStatsOf,
   parkedCarStatsOf,
   villageHouseStatsOf,
   villageModelsShownOf,
@@ -138,6 +139,7 @@ import {
   windowRoomsOf,
   lotRealismOf,
   type MappedBuildingStats,
+  type FieldLifeStats,
   type ParkedCarStats,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
@@ -407,6 +409,12 @@ declare global {
        * until a realistic frame carried a car.
        */
       readonly parkedCars?: ParkedCarStats;
+      /**
+       * #3286: the cows, sheep and bales the view's belt drew on the last
+       * frame before the result was published (`three-renderer.ts`
+       * §`fieldLifeStatsOf`). Absent until a realistic frame carried a piece.
+       */
+      readonly fieldLife?: FieldLifeStats;
       /**
        * #1815: what the view's Delivery belt drew on the last frame before the
        * result was published, read back off its instances
@@ -918,6 +926,7 @@ async function run(): Promise<void> {
             };
       const villageHouses = villageHouseStatsOf(view);
       const parkedCars = parkedCarStatsOf(view);
+      const fieldLife = fieldLifeStatsOf(view);
       const mapped = mappedBuildingStatsOf(view)?.stats;
       const delivery =
         config.delivery === undefined
@@ -936,6 +945,7 @@ async function run(): Promise<void> {
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
         ...(parkedCars === undefined ? {} : { parkedCars }),
+        ...(fieldLife === undefined ? {} : { fieldLife }),
         ...(mapped === undefined ? {} : { mapped }),
         ...(delivery === undefined ? {} : { delivery }),
         ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),
