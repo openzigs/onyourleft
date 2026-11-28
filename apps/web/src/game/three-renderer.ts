@@ -678,6 +678,7 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_REACH_METRES,
   MAPPED_BUILDING_TRIANGLES,
   MAPPED_KIT_NEAR_MAX,
   MAPPED_KIT_STRIDE_METRES,
@@ -686,10 +687,12 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_GUARD_RAIL_BOXES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
+import type { GuardRailPart } from './roadside-safety';
 import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import {
   FOLIAGE_TINT,
@@ -715,6 +718,7 @@ import {
   highBound,
   lowBound,
   treeLevelAt,
+  treeLevelShift,
   treeSlots,
   TreeHandOver,
   writeInterval,
@@ -2248,6 +2252,13 @@ export const OVERPASS_COLOURS: Readonly<Record<BridgeFinish, number>> = {
   road: ROAD_COLOUR,
   concrete: PAVEMENT_COLOUR,
 };
+
+/**
+ * A guard rail's galvanised steel — #3284, its beam's and its posts'
+ * (`roadside-safety.ts` §`guardRailParts`). This repository's own, drawn in
+ * the overpass box (@see BridgeBelt), so no texture and no byte of the build.
+ */
+export const GUARD_RAIL_COLOUR = 0x9aa0a3;
 
 /** One coloured solid of a piece of street furniture — #1536. */
 interface FurniturePart {
@@ -6917,6 +6928,13 @@ function environmentScaleFor(zenith: LinearColour, target: number): number {
  * submit here are what they were; the second box costs a draw call on a
  * frame with an overpass in view, and none on any other.
  *
+ * ⚠️ **Since #3284 the overpass box also draws the guard rails**
+ * (`roadside-safety.ts`), after the overpasses' blocks, in
+ * {@link GUARD_RAIL_COLOUR}, up to `realistic-budget.ts`
+ * §`REALISTIC_GUARD_RAIL_BOXES` more instances — in the REALISTIC world only.
+ * The stylised world's scenery-free frame is held to exactly
+ * `STYLISED_SCENE_DRAW_CALLS`, so the stylised world draws no rail.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class BridgeBelt {
@@ -6952,6 +6970,8 @@ export class BridgeBelt {
     road: new Color(OVERPASS_COLOURS.road),
     concrete: new Color(OVERPASS_COLOURS.concrete),
   };
+  /** #3284: the guard rails' steel. */
+  readonly #steel = new Color(GUARD_RAIL_COLOUR);
   readonly #along = new Vector3();
   readonly #across = new Vector3();
   readonly #up = new Vector3();
@@ -6967,7 +6987,12 @@ export class BridgeBelt {
     this.#mesh.visible = false;
     const plain = new BoxGeometry(1, 1, 1);
     paintEveryVertex(plain, 0xffffff);
-    this.#overpass = new InstancedMesh(plain, this.#overpassMaterials.lit, MAXIMUM_BRIDGE_PARTS);
+    // #3284: and room for the guard rails after the overpasses' blocks.
+    this.#overpass = new InstancedMesh(
+      plain,
+      this.#overpassMaterials.lit,
+      MAXIMUM_BRIDGE_PARTS + REALISTIC_GUARD_RAIL_BOXES,
+    );
     this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
     // The colour buffer from the start, so the mesh's program is the same every frame.
     this.#overpass.setColorAt(0, this.#finishes.concrete);
@@ -7054,27 +7079,33 @@ export class BridgeBelt {
   /**
    * One box a part: `length` along its axis, `width` across it level, and
    * `height` up. Allocates nothing.
+   *
+   * @param rails #3284: the guard rails' boxes, drawn as overpass instances
+   * after the overpasses' own — in the realistic world only.
    */
-  update(parts: readonly BridgePart[]): void {
+  update(parts: readonly BridgePart[], rails: readonly GuardRailPart[] = NO_RAILS): void {
     let stone = 0;
     let overpass = 0;
     for (const part of parts) {
       const finish = part.finish;
       if ((finish === undefined ? stone : overpass) >= MAXIMUM_BRIDGE_PARTS) continue;
-      this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
-      this.#across.crossVectors(this.#vertical, this.#along).normalize();
-      this.#up.crossVectors(this.#along, this.#across).normalize();
-      this.#across.multiplyScalar(part.width);
-      this.#up.multiplyScalar(part.height);
-      this.#along.multiplyScalar(part.length);
-      this.#matrix.makeBasis(this.#across, this.#up, this.#along);
-      this.#matrix.setPosition(part.x, part.y, part.z);
+      this.#basis(part);
       if (finish === undefined) {
         this.#mesh.setMatrixAt(stone, this.#matrix);
         stone += 1;
       } else {
         this.#overpass.setMatrixAt(overpass, this.#matrix);
         this.#overpass.setColorAt(overpass, this.#finishes[finish]);
+        overpass += 1;
+      }
+    }
+    if (this.#world === 'realistic') {
+      const room = Math.min(rails.length, REALISTIC_GUARD_RAIL_BOXES);
+      for (let index = 0; index < room; index += 1) {
+        const part = rails[index] as GuardRailPart;
+        this.#basis(part);
+        this.#overpass.setMatrixAt(overpass, this.#matrix);
+        this.#overpass.setColorAt(overpass, this.#steel);
         overpass += 1;
       }
     }
@@ -7087,6 +7118,23 @@ export class BridgeBelt {
       this.#overpass.instanceColor.needsUpdate = overpass > 0;
     }
     this.#overpass.visible = overpass > 0;
+  }
+
+  /** {@link #matrix} as `part`'s box. */
+  #basis(
+    part: Pick<
+      BridgePart,
+      'x' | 'y' | 'z' | 'axisX' | 'axisY' | 'axisZ' | 'length' | 'width' | 'height'
+    >,
+  ): void {
+    this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
+    this.#across.crossVectors(this.#vertical, this.#along).normalize();
+    this.#up.crossVectors(this.#along, this.#across).normalize();
+    this.#across.multiplyScalar(part.width);
+    this.#up.multiplyScalar(part.height);
+    this.#along.multiplyScalar(part.length);
+    this.#matrix.makeBasis(this.#across, this.#up, this.#along);
+    this.#matrix.setPosition(part.x, part.y, part.z);
   }
 
   dispose(): void {
@@ -7102,6 +7150,26 @@ export class BridgeBelt {
     this.#overpassPhysical.dispose();
     this.#stone?.material.dispose();
   }
+}
+
+/** No guard rail: a frame that carries none. @see BridgeBelt.update */
+const NO_RAILS: readonly GuardRailPart[] = [];
+
+/**
+ * The scenery a frame's belts are handed — #3284: its scatter, and in the
+ * realistic world its marker posts after it (`roadside-safety.ts`
+ * §`markerPostItems`), so a rung's scenery budget spends them last and they
+ * are drawn in the `post` kind's mesh, the one the scatter's bend posts are.
+ * The scatter itself, the same array, wherever there is no post to add: the
+ * stylised world, whose scenery-free frame is held to exactly
+ * `realistic-budget.ts` §`STYLISED_SCENE_DRAW_CALLS`, draws none.
+ */
+export function withMarkerPosts(
+  frame: Pick<SceneFrame, 'scatter' | 'markerPosts'>,
+  drawing: QualitySettings['world'],
+): readonly ScatterItem[] {
+  const posts = drawing === 'realistic' ? (frame.markerPosts ?? []) : [];
+  return posts.length === 0 ? frame.scatter : [...frame.scatter, ...posts];
 }
 
 /** A photographed surface's two maps. @see RealisticWorld.structures */
@@ -12164,6 +12232,8 @@ export class FurnitureBelt {
   readonly #drawn = new Map<FurnitureKind, number>();
   /** Whether the belt draws litter: the realistic world, handed the models. */
   readonly #litters: boolean;
+  /** #3282: whether this rung draws the litter it has. @see setLitter */
+  #litterOn = true;
   /** How many pieces of litter of each kind the last frame drew. @see litterDrawnOf */
   readonly #litterDrawn = new Map<LitterKind, number>();
   /** This frame's anchors drawn — reused. @see update */
@@ -12302,6 +12372,15 @@ export class FurnitureBelt {
     this.#switchedOn = on;
   }
 
+  /**
+   * Whether this rung draws the litter — #3282, from the next frame: off, the
+   * bags and tyres leave the painted mesh and the furniture stays.
+   * @see QualitySettings.scenery
+   */
+  setLitter(on: boolean): void {
+    this.#litterOn = on;
+  }
+
   /** Shades the furniture, or stops shading it — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     for (const [surface, mesh] of this.#meshes) {
@@ -12331,7 +12410,7 @@ export class FurnitureBelt {
       }
       // #1274: the litter, only beside an anchor this frame draws, in the
       // painted mesh that anchor is drawn in. @see the header
-      if (this.#litters) {
+      if (this.#litters && this.#litterOn) {
         const painted = this.#inReach.get('painted') as StreetPiece[];
         let litter = 0;
         for (const street of streets) {
@@ -16985,6 +17064,8 @@ export class RealisticVegetationBelt {
   #keep = new Float32Array(SCATTER_INSTANCE_CAPACITY);
   /** #545: how a tree near the camera is drawn. @see setNearTreeFade */
   #nearFade: NearTreeFade = 'fade';
+  /** #3282: how many ranks further out every tree is drawn at this rung. @see setNearestTrees */
+  #treeShift = 0;
   #shown = true;
   /** #1523: each fir mesh's depth pre-pass, and the materials they wear. @see withDepthPrepass */
   readonly #prepasses: DepthPrepass[] = [];
@@ -17162,6 +17243,14 @@ export class RealisticVegetationBelt {
    */
   setNearTreeFade(fade: NearTreeFade): void {
     this.#nearFade = fade;
+  }
+
+  /**
+   * What the nearest trees are drawn at on this rung — #3282: the full mesh,
+   * or every tree one level of detail down. @see QualitySettings.nearestTrees
+   */
+  setNearestTrees(nearest: QualitySettings['nearestTrees']): void {
+    this.#treeShift = treeLevelShift(this.#levels, nearest);
   }
 
   /**
@@ -17374,7 +17463,8 @@ export class RealisticVegetationBelt {
     handOver.begin();
     for (let rank = 0; rank < order.count; rank += 1) {
       const item = items[order.chosen[rank] ?? 0] as ScatterItem;
-      const level = treeLevelAt(rank, this.#levels);
+      // #3282: one level of detail down on a rung that asks. @see setNearestTrees
+      const level = treeLevelAt(rank + this.#treeShift, this.#levels);
       const fade =
         level === 'full-middle' || level === 'middle-impostor'
           ? bandFade(rank, order.distances, order.count)
@@ -20695,6 +20785,8 @@ export class PeopleBelt {
   #cyclistBodies = { first: 0, count: 0 };
   #shown = true;
   #switchedOn = true;
+  /** #3282: whether this rung draws the far band's impostors. @see setFarBand */
+  #farBand = true;
 
   /**
    * @param people the people's model and atlas, or `undefined` where the
@@ -20796,6 +20888,15 @@ export class PeopleBelt {
   }
 
   /**
+   * Whether this rung draws the far band of people — #3282: off, nobody beyond
+   * the near bodies is drawn, and the bodies and the scenery cyclists are as
+   * they were. @see QualitySettings.scenery
+   */
+  setFarBand(on: boolean): void {
+    this.#farBand = on;
+  }
+
+  /**
    * Whether this belt draws anybody — #2722: the scenery cyclists' bicycles
    * are drawn exactly when their bodies are, so they go with the people.
    */
@@ -20808,6 +20909,8 @@ export class PeopleBelt {
     const drawn = this.drawing ? (people ?? NO_PEOPLE) : NO_PEOPLE;
     // With no model there is no body to draw: nobody near, and no cyclist's.
     const near = this.bodyCount === 0 ? [] : drawn.near;
+    // #3282: the far band, on a rung that draws it. @see setFarBand
+    const far = this.#farBand ? drawn.far : NO_PEOPLE.far;
     const riding =
       this.drawing && this.bodyCount > 0 ? cyclists.slice(0, SCENERY_CYCLISTS_MAX) : [];
     near.forEach((person, index) => {
@@ -20828,7 +20931,7 @@ export class PeopleBelt {
         Math.min(this.bodyCount - 1, Math.floor(person.look.build * this.bodyCount)),
       );
     });
-    drawn.far.forEach((person, index) => {
+    far.forEach((person, index) => {
       this.#place(this.#impostors, index, person, false);
       this.#farLooks.setXYZW(
         index,
@@ -20854,7 +20957,7 @@ export class PeopleBelt {
     const bodies = near.length + riding.length;
     this.#cyclistBodies = { first: near.length, count: riding.length };
     this.#bodies.count = bodies;
-    this.#impostors.count = drawn.far.length;
+    this.#impostors.count = far.length;
     for (const attribute of [
       this.#bodies.instanceMatrix,
       this.#impostors.instanceMatrix,
@@ -20866,7 +20969,7 @@ export class PeopleBelt {
       attribute.needsUpdate = true;
     }
     this.#bodies.visible = bodies > 0;
-    this.#impostors.visible = drawn.far.length > 0;
+    this.#impostors.visible = far.length > 0;
   }
 
   /** One instance: at the person's feet, turned to face their way (a body only), their height tall. */
@@ -26137,6 +26240,8 @@ export class MappedBuildingBelt {
   /** #3334: scratch for {@link wrapsWouldChange}'s selection. */
   readonly #probe: MappedSelection;
   #refills = 0;
+  /** #3282: how far a building is drawn at all, on this rung. @see setReach */
+  #reach: number = MAPPED_BUILDING_REACH_METRES;
   #shown = true;
   /** Whether the browser gate has turned the mapped buildings off — its control. */
   #switchedOn = true;
@@ -26400,6 +26505,8 @@ export class MappedBuildingBelt {
       this.#houses?.triangles,
       ahead,
       this.#houses?.kit !== undefined,
+      // #3282: the rung's reach. @see setReach
+      this.#reach,
     );
     if (probe.kitCount !== this.#drawnWraps) return true;
     for (let at = 0; at < probe.count; at += 1) {
@@ -26417,6 +26524,22 @@ export class MappedBuildingBelt {
   /** The rung changed: the next frame refills, whatever its chunk. */
   invalidate(): void {
     this.#chunk = undefined;
+  }
+
+  /**
+   * How far from the rider a building is drawn at all, on this rung — #3282.
+   * A change refills on the next frame, whatever its chunk, so the town
+   * shortens or lengthens at once. @see QualitySettings.mappedBuildingReach
+   */
+  setReach(metres: number): void {
+    if (metres === this.#reach) return;
+    this.#reach = metres;
+    this.invalidate();
+  }
+
+  /** @see setReach */
+  get reach(): number {
+    return this.#reach;
   }
 
   setShown(on: boolean): void {
@@ -26498,6 +26621,8 @@ export class MappedBuildingBelt {
       this.#houses?.triangles,
       ahead,
       this.#houses?.kit !== undefined,
+      // #3282: the rung's reach. @see setReach
+      this.#reach,
     );
     // #3334: which plans are wraps now, for `wrapsWouldChange`.
     this.#drawnWraps = 0;
@@ -27749,6 +27874,8 @@ class RealisticDrawing {
   #mappedWarmUp: ReturnType<typeof mappedBuildingWarmUp> | undefined;
   /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
   #mappedOn = true;
+  /** #3282: the rung's reach for the mapped buildings, for a belt built later. @see setRung */
+  #mappedReach: number = MAPPED_BUILDING_REACH_METRES;
   #shown = true;
   /** Where the belts were added, for the mapped buildings' belt, built later. */
   #scene: Scene | undefined;
@@ -27981,6 +28108,21 @@ class RealisticDrawing {
   }
 
   /**
+   * What this rung sheds inside the belts this drawing owns — #3282: the
+   * litter, the far band of people, the nearest trees' level and the mapped
+   * buildings' reach. The view calls it with every rung, and once as the
+   * drawing is built, so a drawing made on a lower rung starts on it.
+   * @see QualitySettings.scenery
+   */
+  setRung(settings: QualitySettings): void {
+    this.furniture.setLitter(settings.scenery.litter);
+    this.people.setFarBand(settings.scenery.farPeople);
+    this.vegetation.setNearestTrees(settings.nearestTrees);
+    this.#mappedReach = settings.mappedBuildingReach;
+    this.#mapped?.setReach(settings.mappedBuildingReach);
+  }
+
+  /**
    * The ride's buildings from map data — #1549. Called once a frame, BEFORE
    * {@link updateScenery}, with the frame's own scenery and billboards.
    *
@@ -28042,6 +28184,8 @@ class RealisticDrawing {
       this.#mapped?.dispose();
       this.#mapped = belt;
       this.#mapped.setShown(this.#shown);
+      // #3282: at the rung's reach from its first refill.
+      this.#mapped.setReach(this.#mappedReach);
       if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
     }
     this.#mapped.setCarried(true);
@@ -29771,9 +29915,15 @@ class ThreeGameView implements GameView {
     // the realistic world's alone.
     const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;
     this.#terrain.updatePark(park?.ground);
-    this.#updateParkDressing(park);
+    // #3282: the dressing and the cars on a rung that draws them; the park's
+    // ground is painted on every rung.
+    this.#updateParkDressing(this.#quality.scenery.parkDressing ? park : undefined);
     // #3278: the parked cars in reach, the realistic world's alone.
-    this.#updateParkedCars(this.#drawing === 'realistic' ? frame.parkedCars : undefined);
+    this.#updateParkedCars(
+      this.#drawing === 'realistic' && this.#quality.scenery.parkedCars
+        ? frame.parkedCars
+        : undefined,
+    );
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -29801,7 +29951,8 @@ class ThreeGameView implements GameView {
       // #475: on the realistic rungs the water reflects the realistic sky; #2508, the one drawn.
       this.#drawnSky(),
     );
-    this.#bridges.update(frame.water.bridges);
+    // #3284: and the guard rails, in the overpass box.
+    this.#bridges.update(frame.water.bridges, frame.guardRails);
     this.#updateRoad(frame);
     // #1565: the cross streets, in whatever the road wears this frame.
     this.#sideRoads.setMaterial(this.#road.material as Material);
@@ -29815,9 +29966,11 @@ class ThreeGameView implements GameView {
     // #545: and neither is handed an item the near plane would cut, for THIS
     // frame's aspect and THIS world's shapes. `near-field.ts` says what that is,
     // and why it asks the triangles rather than a box.
+    // #3284: and, in the realistic world, the marker posts. @see withMarkerPosts
+    const placed = withMarkerPosts(frame, this.#drawing);
     const scenery = this.#clearOfTheCamera
       ? clearOfTheCamera(
-          frame.scatter,
+          placed,
           rig,
           this.#camera.aspect,
           this.#drawing,
@@ -29825,7 +29978,7 @@ class ThreeGameView implements GameView {
           // #630: the realistic foliage sways, so it is cleared by its sway too.
           this.#drawing === 'realistic' ? FOLIAGE_SWAY_METRES : 0,
         )
-      : frame.scatter;
+      : placed;
     this.#scatter.update(scenery, frame.camera);
     // #1835: the near pyramid the people and the mapped buildings are cleared
     // of — only in the realistic world, the one that draws them, and only with
@@ -29871,7 +30024,11 @@ class ThreeGameView implements GameView {
         : undefined;
     // #2722: and the scenery cyclists' bicycles after them — exactly while
     // their bodies are drawn, which is while the people are.
-    const cyclists = this.#realistic?.people.drawing === true ? (frame.cyclists ?? []) : [];
+    // #3282: and only on a rung that draws them.
+    const cyclists =
+      this.#realistic?.people.drawing === true && this.#quality.scenery.sceneryCyclists
+        ? (frame.cyclists ?? [])
+        : [];
     this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
@@ -29891,7 +30048,8 @@ class ThreeGameView implements GameView {
     this.#furniture.update(frame.streets, frame.camera);
     // #1624: the holiday's decorations on the villages in reach, in ONE call;
     // none with no holiday. The hidden world's draw nothing.
-    const holiday = this.#season.holiday;
+    // #3282: on a rung that draws them.
+    const holiday = this.#quality.scenery.decorations ? this.#season.holiday : undefined;
     this.#realistic?.updateDecorations(frame.streets, frame.camera, holiday, this.#decorationKinds);
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
@@ -30158,6 +30316,8 @@ class ThreeGameView implements GameView {
       settings.scatterItems + settings.structureItems,
       settings.structureItems,
     );
+    // #3282: what the rung sheds inside the realistic belts.
+    this.#realistic?.setRung(settings);
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
@@ -30225,6 +30385,7 @@ class ThreeGameView implements GameView {
           this.#quality.scatterItems + this.#quality.structureItems,
           this.#quality.structureItems,
         );
+        this.#realistic.setRung(this.#quality);
       }
     }
     const drawing = realistic ? this.#realistic : undefined;

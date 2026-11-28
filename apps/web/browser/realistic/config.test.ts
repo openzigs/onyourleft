@@ -926,7 +926,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
 
   it('refuses a value it does not know', () => {
     expect(() => parseConfig('?world=photoreal')).toThrow(/world is one of realistic, stylised/);
-    expect(() => parseConfig('?rung=2')).toThrow(/rung is one of 0, 1/);
+    expect(() => parseConfig('?rung=5')).toThrow(/rung is one of 0, 1, 2, 3, 4/);
     expect(() => parseConfig('?ladder=yes')).toThrow(/ladder/);
     expect(() => parseConfig('?seconds=0')).toThrow(/seconds is a number of at least 1/);
     expect(() => parseConfig('?at=-5')).toThrow(/at is a number of at least 0/);

@@ -385,6 +385,7 @@ import {
   readGroupRideKept,
   writeGroupRideKept,
   type GroupRideChoice,
+  type GroupRideUnavailable,
 } from './group-ride/choice';
 import {
   groupRideDrawing,
@@ -1752,32 +1753,50 @@ function GameScreen({
     },
     [keptStorage],
   );
+  /** Why the picker last drew the group as not offered, or `undefined` where it was offered. */
+  const groupUnavailableRef = useRef<GroupRideUnavailable | undefined>(undefined);
+  /**
+   * The group switched off by another mode going on — one mode a ride. Where
+   * the group is offered the rider sees it go off, and the device keeps that.
+   * Where it is not (a workout, the draft off), the rider never saw it on: it
+   * goes off on this screen only and **the device keeps the rider's setting**
+   * (#3369), as a course opened for a game leaves it.
+   */
+  const groupOffForAnother = useCallback(() => {
+    if (groupUnavailableRef.current === undefined) {
+      changeGroup({ on: false });
+      return;
+    }
+    const next = { ...groupSetupRef.current, on: false };
+    groupSetupRef.current = next;
+    setGroupSetup(next);
+  }, [changeGroup]);
   const chooseDelivery = useCallback(
     (value: boolean) => {
       setWithDelivery(value);
       if (value) {
         setWithLapRace(false);
-        changeGroup({ on: false });
+        groupOffForAnother();
       }
     },
-    [changeGroup],
+    [groupOffForAnother],
   );
   const chooseLapRace = useCallback(
     (value: boolean) => {
       setWithLapRace(value);
       if (value) {
         setWithDelivery(false);
-        changeGroup({ on: false });
+        groupOffForAnother();
       }
     },
-    [changeGroup],
+    [groupOffForAnother],
   );
   const choosePacer = useCallback(
     (value: boolean) => {
       setWithPacer(value);
-      if (value) changeGroup({ on: false });
+      if (value) groupOffForAnother();
     },
-    [changeGroup],
+    [groupOffForAnother],
   );
   const chooseGroup = useCallback(
     (value: boolean) => {
@@ -5882,6 +5901,16 @@ function GameScreen({
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.
     const trainerNow = props.trainer?.readTrainer();
+    // #3303, ADR 0101 D-1: whether a group ride is offered is read here, as
+    // the trainer notice is: a workout started on the Ride screen, or the
+    // draft switched off in Settings, is seen at once. A loop is offered one
+    // (#3369). Kept for the other modes' switches, which leave the device's
+    // setting alone while the group is not offered.
+    const groupUnavailable = groupRideUnavailable(
+      trainerNow?.kind === 'workout',
+      readSoloDraftChoice(deviceStorage()),
+    );
+    groupUnavailableRef.current = groupUnavailable;
     return (
       <>
         {rideEnded === undefined ? null : <RideEndedNotice ended={rideEnded} />}
@@ -5988,11 +6017,9 @@ function GameScreen({
             // either world.
             courses,
           }}
-          // #3303, ADR 0101 D-1: a group ride, beside the pacer. Whether it is
-          // offered is read here, as the trainer notice is: a workout started
-          // on the Ride screen, or the draft switched off in Settings, is seen
-          // at once.
-          groupRide={((unavailable) => ({
+          // #3303, ADR 0101 D-1: a group ride, beside the pacer, offered as
+          // `groupUnavailable` above says.
+          groupRide={{
             chosen: groupSetup.on,
             onChoose: chooseGroup,
             speed: groupSetup.speed,
@@ -6000,16 +6027,13 @@ function GameScreen({
             bots: groupSetup.bots,
             onBots: chooseGroupBots,
             speedUnit: speedUnit(units),
-            asked: unavailable === undefined ? groupAsked : { ride: undefined, problem: undefined },
+            asked:
+              groupUnavailable === undefined ? groupAsked : { ride: undefined, problem: undefined },
             unavailable:
-              unavailable === undefined ? undefined : GROUP_RIDE_UNAVAILABLE_TEXT[unavailable],
-          }))(
-            groupRideUnavailable(
-              trainerNow?.kind === 'workout',
-              readSoloDraftChoice(deviceStorage()),
-              groupCourse?.loop === true,
-            ),
-          )}
+              groupUnavailable === undefined
+                ? undefined
+                : GROUP_RIDE_UNAVAILABLE_TEXT[groupUnavailable],
+          }}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
           lapRace={{

@@ -844,9 +844,9 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 };
 
 /**
- * How many structures a realistic frame may carry: **36** — on both
- * `quality.ts` §`REALISTIC_LADDER` rungs, where the stylised rungs they are
- * copied from carry 240 and 120. #506, option 2 of the three it names.
+ * How many structures a realistic frame may carry: **36** — on every
+ * `quality.ts` §`REALISTIC_LADDER` rung (five since #3282), where the
+ * stylised rungs its top and floor are copied from carry 240 and 120. #506, option 2 of the three it names.
  *
  * ## Where 36 comes from
  *
@@ -1531,6 +1531,38 @@ export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 25_000;
  * WebGL entry points
  */
 export const REALISTIC_GANTRY_TRIANGLES = 4_400;
+
+/**
+ * The most boxes a frame's guard rails may be built from — #3284
+ * (`roadside-safety.ts` §`guardRailParts`): **256**, nearest the rider first.
+ * A 200 m run of rail at its posts' 4 m and its beam's longest 12 m pieces is
+ * about a hundred boxes, so this holds a run each side out to the posts'
+ * reach. A bound on the instance buffer as well as the triangles:
+ * `three-renderer.ts` §`BridgeBelt` gives the overpass box this many more
+ * instances.
+ */
+export const REALISTIC_GUARD_RAIL_BOXES = 256;
+
+/**
+ * The most triangles the guard rails may add to a frame — #3284: **3 072**,
+ * {@link REALISTIC_GUARD_RAIL_BOXES} boxes of twelve.
+ *
+ * ⚠️ **Inside {@link REALISTIC_FRAME_TRIANGLES}, which did not move**:
+ * `realistic-budget.test.ts` adds this row to the fullest frame the caps allow
+ * (#3278's sum: every structure at its ceiling, a room's remote riders, a
+ * full park belt, a holiday's decorations and a street of parked cars) and
+ * holds the total under the frame. The marker posts are `post` scenery items,
+ * inside the rung's scenery cap, so they take no row of their own.
+ * ⚠️ **No draw call of its own**: the boxes are instances of the overpass box
+ * `three-renderer.ts` §`BridgeBelt` already draws, in the realistic world
+ * only. Like an overpass, they cost that box's call on a frame with one in
+ * view and none on any other — which is why the stylised world, whose
+ * scenery-free frame is held to exactly {@link STYLISED_SCENE_DRAW_CALLS},
+ * draws none.
+ *
+ * @test-facing held by `realistic-budget.test.ts`
+ */
+export const REALISTIC_GUARD_RAIL_TRIANGLES = 3_072;
 
 /**
  * The most GPU texture memory the realistic set may hold, estimated: **160 MiB**,

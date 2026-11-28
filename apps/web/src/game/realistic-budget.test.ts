@@ -74,6 +74,8 @@ import {
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
+  REALISTIC_GUARD_RAIL_BOXES,
+  REALISTIC_GUARD_RAIL_TRIANGLES,
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
@@ -834,6 +836,63 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
     // One call of their own, and none on the village's frozen frame, which has no car.
     expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
+  });
+
+  it('holds it with the guard rails at their ceiling too, in the fullest frame with the cars — #3284', () => {
+    // The rails' row: every box the belt holds for them, a box of twelve.
+    expect(REALISTIC_GUARD_RAIL_TRIANGLES).toBe(REALISTIC_GUARD_RAIL_BOXES * BOX_TRIANGLES);
+    const frame = worstFrame();
+    const fullest =
+      frame.vegetation +
+      frame.riders +
+      frame.structureItems * REALISTIC_TRIANGLES.structure +
+      frame.blobs +
+      frame.gantries +
+      frame.lamps +
+      REALISTIC_REMOTE_TRIANGLES +
+      PARK_DRESSING_TRIANGLES +
+      PARK_FIELD_TRIANGLES +
+      REALISTIC_DECORATION_TRIANGLES +
+      REALISTIC_PARKED_CAR_TRIANGLES;
+    console.log(
+      `#3284: the fullest frame ${String(fullest)} triangles before the rails, ` +
+        `${String(fullest + REALISTIC_GUARD_RAIL_TRIANGLES)} with them, of ` +
+        `${String(REALISTIC_FRAME_TRIANGLES)}`,
+    );
+    expect(fullest + REALISTIC_GUARD_RAIL_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // And at every structure's heaviest shape as built, the #506 case, with the cars.
+    expect(
+      frame.vegetation +
+        frame.riders +
+        frame.structureItems * frame.heaviestStructure +
+        frame.blobs +
+        frame.gantries +
+        frame.lamps +
+        PARK_DRESSING_TRIANGLES +
+        REALISTIC_PARKED_CAR_TRIANGLES +
+        REALISTIC_GUARD_RAIL_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // With either set's trees.
+    for (const trees of REALISTIC_TREE_SETS) {
+      const loaded = worstFrame(trees);
+      expect(
+        loaded.vegetation +
+          loaded.riders +
+          loaded.structureItems * REALISTIC_TRIANGLES.structure +
+          loaded.blobs +
+          loaded.gantries +
+          loaded.lamps +
+          REALISTIC_PARKED_CAR_TRIANGLES +
+          REALISTIC_GUARD_RAIL_TRIANGLES,
+        trees,
+      ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    }
+    // Non-vacuity: a real row — a run of rail each side of the road.
+    expect(REALISTIC_GUARD_RAIL_TRIANGLES).toBeGreaterThan(1_000);
+    // No ceiling was raised to make the room, triangles or calls.
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
+    expect(REALISTIC_VILLAGE_DRAW_CALLS).toBe(50);
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {

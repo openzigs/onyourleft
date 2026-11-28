@@ -30,12 +30,11 @@
  * ## What it is not offered beside
  *
  * {@link groupRideUnavailable}: a workout holding the trainer at a set power
- * (D-1.5, Q7), the draft switched off on this device (Q8), and a loop route
- * (the review of PR #3364): the plan is one pass of the route
- * (`@onyourleft/domain` §`planGroupRide` clamps the odometer to it), so from
- * the second lap the group would ride the last cell's speed and its ledger
- * would stop. Laps of a loop are #3369's. Each has one sentence, shown beside
- * the switch, which is then disabled.
+ * (D-1.5, Q7), and the draft switched off on this device (Q8). Each has one
+ * sentence, shown beside the switch, which is then disabled. **A loop is
+ * offered a group** (#3369): `@onyourleft/domain` §`planGroupRide` reads the
+ * plan at the odometer wrapped into the lap and counts the laps in its planned
+ * time, so the group follows the road and the ledger advances lap after lap.
  *
  * Nothing here is a trainer target, and nothing here reaches a trainer.
  */
@@ -169,7 +168,7 @@ export function groupSpeedTyped(text: string, units: UnitSystem): number | undef
 }
 
 /** Why a group ride is not offered now. A closed list: each has one sentence. */
-export type GroupRideUnavailable = 'workout' | 'draft-off' | 'loop';
+export type GroupRideUnavailable = 'workout' | 'draft-off';
 
 /**
  * The one sentence for each reason, shown beside the switch — drafts for the
@@ -181,29 +180,25 @@ export const GROUP_RIDE_UNAVAILABLE_TEXT: Readonly<Record<GroupRideUnavailable, 
     'A group ride is not offered while a workout holds your trainer at a set power: taking a turn on the front needs you to change your effort freely.',
   'draft-off':
     'A group ride is not offered with the draft switched off: riding in a line teaches nothing without it.',
-  loop: 'A group ride is not offered on a loop yet: choose a route with a start and a finish.',
 };
 
 /**
  * Why a group ride is not offered, or `undefined` where it is — ADR 0101
  * D-1.5. A workout comes first: it is the one the rider cannot change from
- * this screen; then the draft, changed in Settings; then the route, changed
- * on this screen.
+ * this screen; then the draft, changed in Settings. A loop is offered one
+ * (#3369), and so is a route with a finish: the route is never a reason.
  *
  * @param workout - whether a workout holds the trainer (`trainer-port.ts`
  *   §`GameTrainerKind` `workout`).
  * @param drafted - whether this device drafts a solo ride
  *   (`solo-draft-preference.ts` §`readSoloDraftChoice`).
- * @param loop - whether the route chosen is a loop (`RouteProfile.loop`).
  */
 export function groupRideUnavailable(
   workout: boolean,
   drafted: boolean,
-  loop: boolean,
 ): GroupRideUnavailable | undefined {
   if (workout) return 'workout';
-  if (!drafted) return 'draft-off';
-  return loop ? 'loop' : undefined;
+  return drafted ? undefined : 'draft-off';
 }
 
 /**

@@ -572,6 +572,29 @@ describe('a village’s litter is Poly Haven’s, in the painted mesh — #1274,
     belt.dispose();
   });
 
+  it('sheds the litter on a rung that does not draw it, and keeps the furniture — #3282', () => {
+    const belt = new FurnitureBelt('realistic', planks, lamp, litter);
+    const camera = { x: piece.x, z: piece.z };
+    const litterDrawn = (): number => belt.litterDrawnOf('bag') + belt.litterDrawnOf('tyre');
+    const painted = (): number => trianglesOf(belt.meshOf('painted').geometry);
+    belt.update(streets, camera);
+    const withLitter = painted();
+    const furniture = FURNITURE_KINDS.map((kind) => belt.drawnOf(kind));
+    // Non-vacuity: the top rung draws litter here.
+    expect(litterDrawn()).toBeGreaterThan(0);
+    belt.setLitter(false);
+    belt.update(streets, camera);
+    expect(litterDrawn()).toBe(0);
+    // The painted mesh lost exactly the litter, and every piece of furniture stayed.
+    expect(painted()).toBeLessThan(withLitter);
+    expect(FURNITURE_KINDS.map((kind) => belt.drawnOf(kind))).toEqual(furniture);
+    // A rung that draws it again draws it on the next frame.
+    belt.setLitter(true);
+    belt.update(streets, camera);
+    expect(painted()).toBe(withLitter);
+    belt.dispose();
+  });
+
   it('draws a piece only on a frame that draws its anchor, so it never draws the painted mesh alone', () => {
     const belt = new FurnitureBelt('realistic', planks, lamp, litter);
     // The camera further out along the line from the anchor through the piece:

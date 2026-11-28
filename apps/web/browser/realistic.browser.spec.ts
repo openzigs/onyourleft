@@ -25,7 +25,9 @@
  * same draw calls and triangles, from the same files.
  *
  * The default URL's road is read back too, by its fingerprint, on the #616
- * load (#1559): the same road every validation 0002 row was taken on.
+ * load (#1559): the same road every validation 0002 row was taken on. And
+ * since #3282 that load's held frame is drawn at every realistic rung in turn,
+ * each never costing more than the one above (`realistic-rungs.ts`).
  *
  * ⚠️ **The page's other describes are in two more files since #1698**: the
  * tree levers (#1283, #1294, #1523) in `realistic-trees.browser.spec.ts`, and
@@ -49,6 +51,7 @@ import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
 import { realisticRoute, routeDigest } from '../src/demo/synthetic-road';
 import { HELD, REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { holdsEveryRung } from './realistic-rungs';
 
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
@@ -143,6 +146,13 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
     for (const layer of LAYERS) {
       expect(census?.objects[layer], `the ${layer} layer holds nothing`).toBeGreaterThan(0);
     }
+
+    // #3282, on the same load: the held frame at every realistic rung. A wood
+    // has no village, so nothing rungs 1 and 2 shed — litter, park dressing,
+    // decorations, people, parked cars — stands in it, and they draw what the
+    // top does; the trees (rung 3) and the scenery budget (rung 4) fall.
+    // @see realistic-rungs.ts
+    await holdsEveryRung(page, 'wooded at=2550', [3, 4]);
 
     // The control.
     const without = await ride(page, `${HELD}&layers=-vegetation`);

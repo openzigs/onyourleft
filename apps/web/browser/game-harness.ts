@@ -9323,8 +9323,9 @@ export interface RealisticMeasurement {
   readonly foliageOrderChangedPixels: number;
   /**
    * #619 lever 2: the share of the wooded frame that changes when a rung's
-   * texture bias is taken to 0 — at the second realistic rung, which carries
-   * one, and at the top rung, the control, which must carry none.
+   * texture bias is taken to 0 — at the realistic floor (rung 4 since #3282,
+   * the second rung before), which carries one, and at the top rung, the
+   * control, which must carry none.
    */
   readonly textureBiasReducedShare: number;
   readonly textureBiasTopShare: number;
@@ -13294,7 +13295,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const topPixels = drawnOnce();
   view.setQuality({ ...top, textureLodBias: 0 });
   const textureBiasTopShare = shareChanged(topPixels, drawnOnce());
-  const reduced = REALISTIC_LADDER[1] as QualitySettings;
+  // #3282: the floor, the one realistic rung with a bias.
+  const reduced = REALISTIC_LADDER[REALISTIC_LADDER.length - 1] as QualitySettings;
   view.setQuality(reduced);
   settle(wooded);
   const reducedPixels = drawnOnce();

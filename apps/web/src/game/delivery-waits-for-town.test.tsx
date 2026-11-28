@@ -513,8 +513,12 @@ describe('a Delivery round waits for the realistic town before counting a house 
 describe('a Delivery round holds the realistic world while it runs — #2513', () => {
   /** A frame slower than the ladder allows, by the pacer's own sample. */
   const SLOW_MS = FRAME_MS_REDUCE_ABOVE + 5;
-  /** The swap's frames, then three whole runs of slow ones: one more than leaving realism takes. */
-  const SLOW_FRAMES = REALISTIC_SETTLING_SAMPLES + 3 * SUSTAINED_SAMPLES;
+  /**
+   * The swap's frames, then one whole run of slow ones a realistic rung and
+   * one more: one more than leaving realism takes (#3282's five rungs).
+   */
+  const SLOW_FRAMES =
+    REALISTIC_SETTLING_SAMPLES + (REALISTIC_LADDER.length + 1) * SUSTAINED_SAMPLES;
 
   it('steps down to realism’s floor and stays there, its houses still drawn and counted', async () => {
     const drawn: SceneFrame[] = [];
@@ -552,7 +556,7 @@ describe('a Delivery round holds the realistic world while it runs — #2513', (
       }
     };
     await ride(FRAMES_PAST_LAST_HOUSE, LONG_FRAME_MS);
-    await ride(2 * SUSTAINED_SAMPLES, SLOW_MS);
+    await ride(REALISTIC_LADDER.length * SUSTAINED_SAMPLES, SLOW_MS);
     await settle();
     expect(begunAt).toEqual([0]);
     expect(field('Houses')).toEqual({

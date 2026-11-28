@@ -103,7 +103,7 @@ const ROUTE: RidableRoute = {
   attempts: 0,
 };
 
-/** A loop of about 250 m of the rider's own, where a lap race is offered and a group is not (#3369). */
+/** A loop of about 250 m of the rider's own, where a lap race and a group are both offered (#3369). */
 const LOOP: RidableRoute = {
   id: 'route-loop',
   name: 'Loop',
@@ -477,16 +477,31 @@ describe('one mode a ride', () => {
     await expectEitherOr('Ride against a pacer');
   });
 
+  it('a lap race or the group, on a loop', async () => {
+    await open({ route: LOOP });
+    await expectEitherOr('Ride a lap race');
+  });
+
   it('a Delivery round or the group, in the realistic world', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await open();
     await expectEitherOr('Ride a Delivery round');
   });
 
-  it('a course opened for a game starts with the group off, and forgets nothing', async () => {
+  it('a course opened for a lap race starts with the group off, and forgets nothing', async () => {
     const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
     localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
-    // A Delivery round, on a road the group is offered on: a loop is offered none (#3369).
+    globalThis.location.hash = '#/game?play=lap-race';
+    await open({ route: LOOP });
+    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    expect(groupSwitch()?.disabled).toBe(false);
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
+  });
+
+  it('a course opened for a Delivery round starts with the group off, and forgets nothing', async () => {
+    const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
+    localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     globalThis.location.hash = '#/game?play=delivery';
     await open();
@@ -549,24 +564,50 @@ describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
     expect(facts).toStrictEqual([]);
   });
 
-  it('a loop: the same, with its own sentence, because the plan is one pass (#3369)', async () => {
+  it('a loop is not among them: the group is offered there and rides past the lap line (#3369)', async () => {
     localStorage.setItem(
       GROUP_RIDE_STORAGE_KEY,
       JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
     );
     await open({ route: LOOP, port: ridePort() });
-    expect(groupSwitch()?.disabled).toBe(true);
-    expect(groupSwitch()?.checked).toBe(false);
-    expect(speedBox()).toBeUndefined();
-    expect(root().textContent).toContain(GROUP_RIDE_UNAVAILABLE_TEXT.loop);
-    // The lap race is still offered on a loop, and is not switched off by the group.
-    expect(toggle('Ride a lap race')?.disabled).toBe(false);
+    expect(groupSwitch()?.disabled).toBe(false);
+    expect(groupSwitch()?.checked).toBe(true);
+    expect(speedBox()?.value).toBe('30');
+    // The lap race is still offered beside it, off.
+    expect(toggle('Ride a lap race')?.checked).toBe(false);
     await clickThrough(rideButton());
-    const factors = await frames(40);
-    expect(factors.length).toBeGreaterThan(0);
-    expect(new Set(factors)).toStrictEqual(new Set([1]));
-    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
-    expect(facts).toStrictEqual([]);
+    // 80 s: the 250 m loop's lap line is behind the rider well inside it.
+    const factors = await frames(320);
+    const lap = LOOP.profile.totalDistance;
+    expect(seen.simulations[0]?.state.ride.distance ?? 0).toBeGreaterThan(lap);
+    // The group is still there on the second lap: drawn, drafting the rider, and kept.
+    expect(lastFrame()?.raceBots).toHaveLength(5);
+    expect(Math.min(...factors.slice(-40))).toBeLessThan(1);
+    expect(facts.at(-1)?.bots).toBe(5);
+    // And its plan still advances: the ledger stays inside its full band of
+    // the plan (20 s), where a plan stuck at the lap's end would read the
+    // group later by every second ridden past the lap line.
+    const session = seen.session as GroupRideSession;
+    // The front: the bot furthest along the road.
+    const front = Math.max(...session.botIds.map((id) => session.state.bots[id]?.distanceM ?? 0));
+    expect(front).toBeGreaterThan(lap);
+    const late = session.state.ledger.ridingSeconds - session.road.plan.plannedSecondsAt(front);
+    expect(Math.abs(late)).toBeLessThan(20);
+  });
+
+  it('keeps the rider’s setting when another mode goes on while the group is not offered (#3369)', async () => {
+    const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
+    localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
+    // On a loop with a workout holding the trainer: the group is not offered, the lap race is.
+    await open({ route: LOOP, port: ridePort({ workout: true }) });
+    expect(groupSwitch()?.disabled).toBe(true);
+    await clickThrough(toggle('Ride a lap race'));
+    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    await clickThrough(toggle('Ride a lap race'));
+    await clickThrough(toggle('Ride against a pacer'));
+    expect(toggle('Ride against a pacer')?.checked).toBe(true);
+    // The rider never saw the group on, so nothing switched it off on the device.
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
   });
 
   it('the draft switched off on this device: the same, with its own sentence', async () => {

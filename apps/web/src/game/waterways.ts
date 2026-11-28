@@ -2209,6 +2209,36 @@ export function bridgeParts(
 }
 
 /**
+ * Where along the road the bridges in view of this frame's corridor carry
+ * their parapets, as odometer readings — #3284: {@link bridgeParts}' decks,
+ * each crossing's middle less and plus its half-span, once a crossing for
+ * `bridgeParts`' reason. What `roadside-safety.ts` meets a guard rail to.
+ */
+export function bridgeSpans(
+  profile: RouteProfile,
+  corridor: RoadCorridor,
+  ways: Waterways,
+): readonly { readonly from: number; readonly to: number }[] {
+  const first = corridor.centre[0] as CorridorPoint;
+  const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
+  const spans: { from: number; to: number }[] = [];
+  for (const crossing of ways.crossings) {
+    const widen = crossingWiden(crossing);
+    const halfSpan = BRIDGE_HALF_SPAN_METRES + widen;
+    for (const centre of occurrences(
+      profile,
+      crossing.distance,
+      first.along,
+      last.along,
+      widen,
+    ).slice(0, 1)) {
+      spans.push({ from: centre - halfSpan, to: centre + halfSpan });
+    }
+  }
+  return spans;
+}
+
+/**
  * The most pieces one deck is built from: **12** — #3105. A stream's bridge is
  * six pieces of {@link BRIDGE_PIECE_METRES}; a mapped river's is longer, and
  * past twelve pieces each piece is longer instead, so the longest bridge is

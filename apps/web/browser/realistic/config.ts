@@ -14,7 +14,7 @@
  * | parameter | what | values |
  * |---|---|---|
  * | `world` | which world the ride starts in | `realistic` (default), `stylised` |
- * | `rung` | which rung of that world's ladder it starts on | `0` (default), `1` |
+ * | `rung` | which rung of that world's ladder it starts on — since #3282 any of the realistic ladder's five, and the stylised ladder's five | `0` (default), `1`, `2`, `3`, `4` |
  * | `ladder` | whether the ladder may move the rung | `1` (default), `0` to hold it |
  * | `seconds` | how long a measurement window is | default 30 |
  * | `soak` | minutes to keep riding, one sample a minute | default 0 |
@@ -89,10 +89,11 @@ export type Layer = (typeof LAYERS)[number];
  * - `foliage-order` — lever 1: the canopy drawn after the opaque world
  *   (`three-renderer.ts` §`FOLIAGE_RENDER_ORDER`). Off puts every vegetation
  *   mesh back where three draws it unasked. The picture is the same either way.
- * - `texture-bias` — lever 2: the second realistic rung's one-mip-coarser
+ * - `texture-bias` — lever 2: the realistic floor's one-mip-coarser
  *   photographs (`quality.ts` §`QualitySettings.textureLodBias`). Off samples
- *   them at the top rung's detail. It changes nothing on the top rung, which
- *   carries no bias: pair it with `rung=1&ladder=0`.
+ *   them at the top rung's detail. It changes nothing on any rung above the
+ *   floor, which carry no bias: pair it with `rung=4&ladder=0` — `rung=1`
+ *   until #3282 gave the realistic ladder five rungs.
  * - `air` — #622: the fog leaning towards the sky in the direction looked, and
  *   the valley haze. Off flattens the direction table to its mean and turns the
  *   haze off, which is the picture before #622 — for the owner's BY-EYE
@@ -618,7 +619,7 @@ export type Lever = (typeof LEVERS)[number];
 /** One configuration of the page. */
 export interface RealisticPageConfig {
   readonly world: 'realistic' | 'stylised';
-  readonly rung: 0 | 1;
+  readonly rung: 0 | 1 | 2 | 3 | 4;
   readonly ladder: boolean;
   readonly seconds: number;
   readonly soakMinutes: number;
@@ -1207,7 +1208,7 @@ export function parseConfig(search: string): RealisticPageConfig {
   };
   return {
     world: oneOf('world', ['realistic', 'stylised'] as const, DEFAULT_CONFIG.world),
-    rung: oneOf('rung', [0, 1] as const, DEFAULT_CONFIG.rung),
+    rung: oneOf('rung', [0, 1, 2, 3, 4] as const, DEFAULT_CONFIG.rung),
     ladder: oneOf('ladder', ['1', '0'] as const, '1') === '1',
     seconds: atLeast('seconds', DEFAULT_CONFIG.seconds, 1),
     soakMinutes: atLeast('soak', 0, 0),
