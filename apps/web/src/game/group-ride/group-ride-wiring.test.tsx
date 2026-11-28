@@ -29,12 +29,15 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { watts } from '@onyourleft/domain';
+import { BOT_TACTIC_WHEEL_GAP_METRES, watts } from '@onyourleft/domain';
 import type { GroupRideFact } from '@onyourleft/store';
 
 import { chooseOption, mount, queryAll, settle, typeInto, type Mounted } from '../../testing/mount';
 import { GameView, type GamePort, type RidableRoute } from '../GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY } from '../hud/announce-preference';
+import type { PadSnapshot } from '../gamepad-port';
+import { PULL_OFF_BUTTON_LABEL, SIT_IN_BUTTON_LABEL } from '../hud/GroupRideControls';
+import { LANE_OFFSETS_METRES } from '../lanes';
 import type { GameRenderer } from '../port';
 import { DEFAULT_LAP_RACE_CHOICE } from '../lap-race/choice';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
@@ -47,6 +50,7 @@ import { NO_GAME_TRAINER, type GameTrainerPort } from '../trainer-port';
 import { REALISTIC_WORLD_STORAGE_KEY } from '../world-preference';
 
 import { GROUP_RIDE_STORAGE_KEY, GROUP_RIDE_UNAVAILABLE_TEXT } from './choice';
+import type { GroupRideSession } from './ride-group';
 
 /** What the wrapped seams saw, for one case. Reset before each. */
 const seen = vi.hoisted(() => ({
@@ -54,7 +58,20 @@ const seen = vi.hoisted(() => ({
   simulations: [] as Pick<GameSimulation, 'draftFactor' | 'state'>[],
   /** Every frame's scene input, in order. */
   frames: [] as Pick<SceneInput, 'raceBots' | 'steeredLateral' | 'botDistance' | 'state'>[],
+  /** The group's session as the ride's newest step left it (#3307): read, never called. */
+  session: undefined as GroupRideSession | undefined,
 }));
+
+vi.mock('./ride-group', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ride-group')>();
+  return {
+    ...actual,
+    stepGroupRideSession: (...args: Parameters<typeof actual.stepGroupRideSession>) => {
+      seen.session = actual.stepGroupRideSession(...args);
+      return seen.session;
+    },
+  };
+});
 
 vi.mock('../simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../simulation')>();
@@ -154,6 +171,7 @@ function ridePort(
 beforeEach(() => {
   seen.simulations.length = 0;
   seen.frames.length = 0;
+  seen.session = undefined;
   pending = [];
   nowMs = 1_000_000;
   facts = [];
@@ -270,11 +288,14 @@ async function open(setup: Setup = {}): Promise<void> {
 async function frames(count: number): Promise<number[]> {
   const factors: number[] = [];
   for (let frame = 0; frame < count; frame += 1) {
-    const next = pending.shift();
-    if (next === undefined) break;
+    // Every callback waiting: the ride's, and since #3307 the one poll the
+    // HUD's gamepad reader makes as a group ride mounts it.
+    const due = pending;
+    if (due.length === 0) break;
+    pending = [];
     nowMs += FRAME_MS;
     await act(async () => {
-      next(nowMs);
+      for (const next of due) next(nowMs);
       await Promise.resolve();
     });
     factors.push(seen.simulations.at(-1)?.draftFactor ?? Number.NaN);
@@ -568,5 +589,237 @@ describe('a whole group ride with no network — ADR 0101 D-1.2', () => {
     expect(Math.min(...factors)).toBeLessThan(0.7);
     expect(lastFrame()?.raceBots).toHaveLength(5);
     expect(facts.at(-1)?.log.length ?? 0).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * **The pull-off press and the sit-in choice, through the ride** — #3307,
+ * ADR 0101 D-3.7. The named failure is an input the HUD takes and the line
+ * never hears: a button, a key and a pad that end no pull.
+ *
+ * The rider here holds a wheel, which a rider at one power cannot (they have
+ * no brake, and drift through the line): each frame's power is chosen from
+ * the group's own session as the ride's newest step left it, read by wrapping
+ * the real `stepGroupRideSession` and calling nothing on it. A wheel gap
+ * behind the member ahead in the line; on the front, the group's speed now,
+ * so the rider never fades and only a press can end the pull early.
+ */
+describe('the pull-off press and the sit-in choice reach the line — #3307', () => {
+  /** What `navigator.getGamepads()` lists now. */
+  let pads: (PadSnapshot | null)[] = [];
+
+  beforeEach(() => {
+    pads = [];
+    Object.defineProperty(window.navigator, 'getGamepads', {
+      configurable: true,
+      value: () => pads,
+    });
+    // One line for every case: the seed `ride-group.ts` draws at the press.
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, 'getGamepads');
+    vi.restoreAllMocks();
+  });
+
+  /** The power that holds the wheel, from the line as the newest step left it. */
+  function holdingWatts(): number {
+    const session = seen.session;
+    if (session === undefined) return RIDER_WATTS;
+    const { order } = session.state.rotation;
+    const seat = order.indexOf('rider');
+    const wheelId = seat === 0 ? undefined : seat > 0 ? order[seat - 1] : order[order.length - 1];
+    const wheel = wheelId === undefined ? undefined : session.state.bots[wheelId];
+    const { distanceM, speedMps } = session.rider;
+    const asked =
+      wheel === undefined
+        ? 180 + 400 * (session.groupSpeedMps - speedMps)
+        : 110 +
+          60 * (wheel.distanceM - BOT_TACTIC_WHEEL_GAP_METRES - distanceM) +
+          250 * (wheel.speedMps - speedMps);
+    return Math.max(0, Math.min(500, asked));
+  }
+
+  const holding = (): GameSensors => ({
+    rider: { power: watts(holdingWatts()), live: true, paired: true },
+    cadence: { value: 90, live: true, paired: true },
+    heartRate: { value: 140, live: true, paired: true },
+  });
+
+  /** One quarter-second frame: every callback waiting, the ride's and the pad's poll. */
+  async function pump(): Promise<void> {
+    const due = pending;
+    if (due.length === 0) throw new Error('the ride asked for no frame');
+    pending = [];
+    nowMs += FRAME_MS;
+    await act(async () => {
+      for (const callback of due) callback(nowMs);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  const hudButton = (name: string): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(root(), 'button').find((button) => button.textContent === name);
+
+  async function pressKey(init: KeyboardEventInit): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { cancelable: true, ...init }));
+      await Promise.resolve();
+    });
+  }
+
+  /** What the ride keeps of the line: its newest phase and role, as the recording was handed them. */
+  const kept = () => facts.at(-1)?.log.at(-1);
+
+  /**
+   * Start a group of three bots and ride, holding the wheel, until the rider
+   * is on the front of a steady line; `each` runs before every frame on the
+   * way. Returns the log the recording had been handed by then.
+   */
+  async function rideToTheFront(each: () => Promise<void> = () => Promise.resolve()) {
+    await open({ group: true, size: '3', port: ridePort(), read: holding });
+    await clickThrough(rideButton());
+    for (let frame = 0; frame < 1_600; frame += 1) {
+      if (seen.session?.role === 'on-front' && seen.session.phase === 'steady') {
+        return facts.at(-1)?.log ?? [];
+      }
+      await each();
+      await pump();
+    }
+    throw new Error(`the rider never reached the front: ${JSON.stringify(kept())}`);
+  }
+
+  /** Six frames, a second and a half: one decision window, and the frame that hands it the press. */
+  async function aWindowOn(): Promise<void> {
+    for (let frame = 0; frame < 6; frame += 1) await pump();
+  }
+
+  function expectPulledOff(): void {
+    // The line itself: changing, the rider aside and drifting back.
+    expect(seen.session?.phase).toBe('changing');
+    expect(seen.session?.role).toBe('drifting-back');
+    expect(seen.session?.state.rotation.aside).toBe('rider');
+    // What the recording is handed says the same, and keeps the press, once.
+    expect(kept()).toMatchObject({ phase: 'changing', role: 'drifting-back' });
+    expect(facts.at(-1)?.presses?.map((each) => each.press)).toStrictEqual(['pull-off']);
+    // The rider is drawn a lane to their left, and the button is unavailable again.
+    expect(lastFrame()?.steeredLateral).toBe(LANE_OFFSETS_METRES[0]);
+    expect(hudButton(PULL_OFF_BUTTON_LABEL)?.getAttribute('aria-disabled')).toBe('true');
+  }
+
+  it('leaves a rider who presses nothing on the front: the control for the three below', async () => {
+    await rideToTheFront();
+    // On the front the button is available, and the rider is drawn in the line's lane.
+    expect(hudButton(PULL_OFF_BUTTON_LABEL)?.hasAttribute('aria-disabled')).toBe(false);
+    await aWindowOn();
+    expect(seen.session?.phase).toBe('steady');
+    expect(seen.session?.role).toBe('on-front');
+    expect(kept()).toMatchObject({ phase: 'steady', role: 'on-front' });
+    expect(lastFrame()?.steeredLateral).toBe(0);
+    expect(facts.at(-1)?.presses).toBeUndefined();
+  });
+
+  it('ends the pull on the lane key toward the pull-off side, and hears no key off the front', async () => {
+    const unpressed = await rideToTheFront();
+    mounted?.unmount();
+    mounted = undefined;
+    facts = [];
+    seen.session = undefined;
+    seen.frames.length = 0;
+    // The picker as a first visit finds it, so the switch is pressed on again.
+    localStorage.removeItem(GROUP_RIDE_STORAGE_KEY);
+    // The same line again, the key pressed before every frame in every role but on-front…
+    const roles = new Set<string>();
+    const pressed = await rideToTheFront(() => {
+      const role = seen.session?.role ?? 'last-wheel';
+      if (role === 'on-front') return Promise.resolve();
+      roles.add(role);
+      return pressKey({ key: 'a' });
+    });
+    // …is the unpressed ride: no rotation started, no order changed, the lane never moved.
+    expect(roles.has('second-wheel')).toBe(true);
+    expect(pressed.length).toBeGreaterThan(4);
+    expect(pressed).toStrictEqual(unpressed);
+    expect(seen.frames.every((frame) => (frame.steeredLateral ?? 0) === 0)).toBe(true);
+
+    // Held on the front: one press, and its repeats.
+    await pressKey({ key: 'a' });
+    for (let repeat = 0; repeat < 20; repeat += 1) await pressKey({ key: 'a', repeat: true });
+    await aWindowOn();
+    expectPulledOff();
+  });
+
+  it('ends the pull on the HUD’s button, pressed 20 times', async () => {
+    await rideToTheFront();
+    for (let press = 0; press < 20; press += 1) {
+      await act(async () => {
+        hudButton(PULL_OFF_BUTTON_LABEL)?.click();
+        await Promise.resolve();
+      });
+    }
+    await aWindowOn();
+    expectPulledOff();
+  });
+
+  it('ends the pull on a gamepad’s button', async () => {
+    await rideToTheFront();
+    // A standard pad's A, the button a lap race uses its item on.
+    pads = [
+      {
+        connected: true,
+        mapping: 'standard',
+        axes: [0, 0, 0, 0],
+        buttons: Array.from({ length: 17 }, (_, index) => ({ pressed: index === 0 })),
+      },
+    ];
+    await act(async () => {
+      window.dispatchEvent(new Event('gamepadconnected'));
+      await Promise.resolve();
+    });
+    await aWindowOn();
+    expectPulledOff();
+  });
+
+  it('sits the rider in from the HUD’s toggle, and takes them out of it again', async () => {
+    await open({ group: true, size: '3', port: ridePort(), read: holding });
+    await clickThrough(rideButton());
+    for (let frame = 0; frame < 8; frame += 1) await pump();
+    expect(seen.session?.sittingIn).toBe(false);
+    expect(hudButton(SIT_IN_BUTTON_LABEL)?.getAttribute('aria-pressed')).toBe('false');
+
+    await clickThrough(hudButton(SIT_IN_BUTTON_LABEL));
+    // Drawn at once, before the ride's next frame.
+    expect(hudButton(SIT_IN_BUTTON_LABEL)?.getAttribute('aria-pressed')).toBe('true');
+    for (let frame = 0; frame < 8; frame += 1) await pump();
+    // The line heard it: the rider's role is the choice's, and the recording is handed it.
+    expect(seen.session?.sittingIn).toBe(true);
+    expect(seen.session?.role).toBe('sitting-in');
+    expect(kept()?.role).toBe('sitting-in');
+
+    await clickThrough(hudButton(SIT_IN_BUTTON_LABEL));
+    expect(hudButton(SIT_IN_BUTTON_LABEL)?.getAttribute('aria-pressed')).toBe('false');
+    for (let frame = 0; frame < 8; frame += 1) await pump();
+    expect(seen.session?.role).not.toBe('sitting-in');
+    expect(kept()?.role).not.toBe('sitting-in');
+    // Both choices are kept with the ride, in order, each at its ride time:
+    // eight frames a choice, and the ride's first frame runs no step.
+    expect(facts.at(-1)?.presses).toStrictEqual([
+      { at: 1.75, press: 'sit-in' },
+      { at: 3.75, press: 'sit-out' },
+    ]);
+  });
+
+  it('shows neither control on a ride with no group', async () => {
+    await ride({ port: ridePort() }, 8);
+    expect(hudButton('End ride')).toBeDefined();
+    expect(hudButton(PULL_OFF_BUTTON_LABEL)).toBeUndefined();
+    expect(hudButton(SIT_IN_BUTTON_LABEL)).toBeUndefined();
   });
 });

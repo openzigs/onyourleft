@@ -89,6 +89,7 @@ import {
 import { ClimbCallout } from './ClimbCallout';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
+import { GroupRideControls, pullOffPadPorts } from './GroupRideControls';
 import { ItemControl } from './ItemControl';
 import { JunctionChoicePrompt, JunctionUTurn } from './JunctionChoicePrompt';
 import { RecentGraph } from './RecentGraph';
@@ -379,6 +380,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // End ride do, and when it closes with the ride still on (Keep riding),
   // focus goes back to End ride — the control that opened it (SC 2.4.3).
   const asking = props.endQuestion !== undefined;
+  // #3307: a group ride's pull-off as the ports a pad reaches. @see pullOffPadPorts
+  const groupPad = props.groupRide === undefined ? undefined : pullOffPadPorts(props.groupRide);
   const endButton = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
   useEffect(() => {
@@ -709,18 +712,29 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.junction === undefined || asking ? null : (
           <JunctionUTurn junction={props.junction} touchLocked={touchLocked} />
         )}
+        {/*
+          #3307: a group ride's pull-off press and sit-in choice, where the
+          item stands in a race, and the pull-off key. Inside this region, so
+          the lock refuses a tap on either as on Pause: neither is exempt, and
+          the key or a pad still pulls off.
+        */}
+        {props.groupRide === undefined || asking ? null : (
+          <GroupRideControls input={props.groupRide} touchLocked={touchLocked} />
+        )}
         {/* #1820: a Delivery round's or a lap race's lane keys. Nothing drawn, so nothing the lock refuses. */}
         {props.steering === undefined ? null : <SteerKeys port={props.steering} />}
         {/* #1821: a gamepad's throws, items and lane changes, to the same ports. Nothing drawn. */}
         {/* #2898: and an open-world ride's turns, to the junction's press. */}
+        {/* #3307: and a group ride's pull-off, on the lane change and the buttons a race reads. */}
         {props.throwing === undefined &&
         props.steering === undefined &&
         props.items === undefined &&
-        props.junction === undefined ? null : (
+        props.junction === undefined &&
+        groupPad === undefined ? null : (
           <GamepadIntents
             throwing={props.throwing}
-            steering={props.steering}
-            items={props.items}
+            steering={props.steering ?? groupPad?.steering}
+            items={props.items ?? groupPad?.items}
             turning={props.junction?.press}
             onPadInUse={setPadInUse}
             // #2600: a pad's press brings the hidden controls back.
@@ -941,6 +955,9 @@ function hasContent(node: ReactNode): boolean {
  *   *Pause* and *End ride* stay too — because hidden, that panel is clipped
  *   to the trainer's line, and a *Use item* left drawn below the line would
  *   be clipped away with it. With nothing held they hide as on any ride.
+ * - **The rider is on the front of a group ride** (#3307) and *Pull off* is
+ *   live: the same reading, so the press that ends a pull is never spent on
+ *   bringing the button back. Off the front they hide as on any ride.
  *
  * A junction ahead on an open-world ride does not hold them since #3053: its
  * ways are a pop-up of their own, which no fade reaches (`JunctionChoicePrompt.tsx`),
@@ -962,7 +979,8 @@ function controlsHeld(props: HudCoreProps, asking: boolean): boolean {
     hasContent(props.notices) ||
     props.standingNotice !== undefined ||
     (props.lapRace !== undefined && riderFinished(props.lapRace)) ||
-    (props.items !== undefined && props.lapRace !== undefined && riderHolds(props.lapRace))
+    (props.items !== undefined && props.lapRace !== undefined && riderHolds(props.lapRace)) ||
+    props.groupRide?.onFront === true
   );
 }
 

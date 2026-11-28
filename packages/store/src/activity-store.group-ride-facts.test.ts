@@ -93,6 +93,23 @@ const BAD: readonly unknown[] = [
   { ...FACT, log: [first, { ...second, groupSpeed: -1 }] },
   { ...FACT, log: [first, { ...second, groupSpeed: '8.3' }] },
   { ...FACT, log: Array.from({ length: GROUP_RIDE_LOG_MOST + 1 }, () => first) },
+  // #3307: the rider's presses, which the line replays from.
+  { ...FACT, presses: 'a press' },
+  { ...FACT, presses: [null] },
+  { ...FACT, presses: [{ at: 20, press: 'attack' }] },
+  { ...FACT, presses: [{ at: -1, press: 'pull-off' }] },
+  { ...FACT, presses: [{ at: '20', press: 'pull-off' }] },
+  {
+    ...FACT,
+    presses: [
+      { at: 20, press: 'sit-in' },
+      { at: 19, press: 'sit-out' },
+    ],
+  },
+  {
+    ...FACT,
+    presses: Array.from({ length: GROUP_RIDE_LOG_MOST + 1 }, () => ({ at: 1, press: 'pull-off' })),
+  },
 ];
 
 /** What is wrong with `bad`, short enough to read in a failure. */
@@ -125,6 +142,34 @@ describe('the group ride kept with its ride — #3303', () => {
       async (store) => store.getActivity(ATHLETE_A, ride.id),
     );
     expect(read?.rideFacts?.groupRide).toStrictEqual(cut);
+  });
+
+  it('keeps what the rider told the group, in order, and reads none as no field (#3307)', async () => {
+    const open = await opened();
+    const pressed: GroupRideFact = {
+      ...FACT,
+      version: 2,
+      presses: [
+        { at: 12, press: 'sit-in' },
+        { at: 40.5, press: 'sit-out' },
+        { at: 71, press: 'pull-off' },
+        { at: 71, press: 'sit-in' },
+      ],
+    };
+    const ride = rideFor(ATHLETE_A, { rideFacts: { groupRide: pressed } });
+    const none = rideFor(ATHLETE_A, { rideFacts: { groupRide: { ...FACT, presses: [] } } });
+    const read = await open.roundTrip(
+      async (store) => {
+        await store.putActivity(ride);
+        await store.putActivity(none);
+      },
+      async (store) => ({
+        pressed: await store.getActivity(ATHLETE_A, ride.id),
+        none: await store.getActivity(ATHLETE_A, none.id),
+      }),
+    );
+    expect(read.pressed?.rideFacts?.groupRide).toStrictEqual(pressed);
+    expect(read.none?.rideFacts?.groupRide).toStrictEqual(FACT);
   });
 
   it('reads a ride saved before the field existed, with the field absent', async () => {
