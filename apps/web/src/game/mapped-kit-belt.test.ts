@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   KIT_ATLAS_PIXELS,
+  KIT_BRICK_SHADES,
   KIT_CELLS,
   KIT_GUTTER_PIXELS,
   KIT_PIECES,
@@ -1064,7 +1065,7 @@ describe('the belt, with the committed kit — #3334', () => {
       expect(highest).toBeCloseTo(plan.eaves + 0.5, 3);
       // Every vertex in one of its own three colours, or the atlas as it is; and its wall's
       // colour on some of them.
-      const palette = kitPaletteOf(wrap.style.skin, plan.paint);
+      const palette = kitPaletteOf(wrap.style.skin, plan.paint, wrap.wallShade);
       const own = [[1, 1, 1], palette.wall, palette.trim, palette.accent].map((each) =>
         each.map((channel) => Math.fround(channel)).join(),
       );
@@ -1170,6 +1171,51 @@ describe('the belt, with the committed kit — #3334', () => {
     expect([...without.mesh.geometry.getAttribute('position').array]).toEqual([
       ...bare.mesh.geometry.getAttribute('position').array,
     ]);
+  });
+
+  it('walls a brick wrap whose wall colour is mapped in the kit’s brick shade nearest it — #3352', () => {
+    // The same street, every footprint brick and tagged white: buff, the palest shade, on
+    // every brick wrap, where its extrusion's own entry would have walled it otherwise.
+    const tagged = footprintPlans(
+      {
+        ...street.corridor,
+        buildings: street.corridor.buildings.map((building) => ({
+          ...building,
+          wallMaterial: 'brick',
+          wallColour: 0,
+        })),
+      },
+      landClassMask(street.corridor),
+      street.profile,
+      street.origin,
+      undefined,
+      everywhere('town'),
+    ).plans;
+    const belt = aBelt(mappedBuildingsOf(tagged), withKit);
+    const rider = roadAt(1_150);
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.kitted).toBeGreaterThan(0);
+    const colour = belt.kitMesh.geometry.getAttribute('color').array;
+    const buff = (KIT_BRICK_SHADES[1] as readonly number[]).map((each) => Math.fround(each)).join();
+    let brick = 0;
+    let elsewhere = 0;
+    for (let place = 0; ; place += 1) {
+      const drawn = belt.drawnAt(place);
+      if (drawn === undefined) break;
+      const plan = tagged[drawn.plan] as FootprintPlan;
+      const wrap = plan.kit;
+      if (drawn.modelAt < 0 || wrap === undefined || wrap.style.skin !== 'brick') continue;
+      brick += 1;
+      const worn = new Set<string>();
+      for (let vertex = drawn.modelAt; vertex < drawn.modelAt + wrap.triangles * 3; vertex += 1) {
+        worn.add([...colour.slice(vertex * 3, vertex * 3 + 3)].join());
+      }
+      expect(worn.has(buff), String(drawn.plan)).toBe(true);
+      if (plan.paint.wall % KIT_BRICK_SHADES.length !== 1) elsewhere += 1;
+    }
+    expect(brick).toBeGreaterThan(0);
+    // The control: their extrusions' entry would not have chosen buff.
+    expect(elsewhere).toBeGreaterThan(0);
   });
 
   it('hides a wrapped building the near plane would cut, in its own range, and writes it back', () => {

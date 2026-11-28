@@ -15,7 +15,17 @@ import type { BuildingFeature } from '@onyourleft/map-features';
 import { describe, expect, it } from 'vitest';
 
 import { FOUNDATION_METRES } from './buildings';
-import { KIT_HUNG, KIT_PIECES, KIT_RUN_FLOATS, kitPaletteOf, type KitKind } from './facade-kit';
+import { MAPPED_PALETTE, mappedPaintEntry, type Rgb } from './building-paint';
+import {
+  KIT_BRICK_PICTURE,
+  KIT_BRICK_SHADES,
+  KIT_HUNG,
+  KIT_PIECES,
+  KIT_RUN_FLOATS,
+  KIT_STONE_PAINTS,
+  kitPaletteOf,
+  type KitKind,
+} from './facade-kit';
 import { committedKit } from './facade-kit-testing';
 import {
   FOOTPRINT_ROLES,
@@ -414,5 +424,127 @@ describe('what a wrap is never drawn on — #3334', () => {
     const gabled = one({ ...buildingBeside(road, origin, [shop], 9), roofShape: 'gabled' });
     expect(gabled?.roof).toBe('gable');
     expect(gabled?.kit).toBeUndefined();
+  });
+});
+
+describe('a mapped wall colour on a wrap of brick or stone — #3352', () => {
+  /** The entry of `list` nearest `colour`, each entry first taken through `drawn`; the lower on a tie. */
+  const nearestOf = (list: readonly Rgb[], colour: Rgb, drawn: (each: Rgb) => Rgb): number => {
+    let best = 0;
+    let least = Infinity;
+    list.forEach((each, at) => {
+      const [r, g, b] = drawn(each);
+      const distance = (r - colour[0]) ** 2 + (g - colour[1]) ** 2 + (b - colour[2]) ** 2;
+      if (distance < least) {
+        least = distance;
+        best = at;
+      }
+    });
+    return best;
+  };
+  /** A brick shade as it is drawn: times the kit's brick picture. */
+  const asBrick = (shade: Rgb): Rgb => [
+    shade[0] * KIT_BRICK_PICTURE[0],
+    shade[1] * KIT_BRICK_PICTURE[1],
+    shade[2] * KIT_BRICK_PICTURE[2],
+  ];
+  /** The review's shop, its walls tagged `material` and, where `colour` is a palette index, coloured. */
+  const shopOf = (material: string, colour: number | null): FootprintPlan => {
+    const building = {
+      ...buildingBeside(road, origin, [box(1_230, 10, -26, -14)], 9),
+      wallMaterial: material,
+      wallColour: colour,
+    } as BuildingFeature;
+    const plan = plansOf('town', {}, corridorOf([building])).plans[0];
+    if (plan?.kit === undefined) throw new Error('the shop was not wrapped');
+    return plan;
+  };
+  const wallOf = (plan: FootprintPlan): readonly number[] => {
+    const wrap = plan.kit;
+    if (wrap === undefined) throw new Error('the plan is not wrapped');
+    return kitPaletteOf(wrap.style.skin, plan.paint, wrap.wallShade).wall;
+  };
+
+  it('walls a brick shop in the kit’s brick shade nearest its mapped colour, for every colour of the palette', () => {
+    let moved = 0;
+    MAPPED_PALETTE.forEach((colour, index) => {
+      const plan = shopOf('brick', index);
+      const label = String(index);
+      expect(plan.kit?.style.skin, label).toBe('brick');
+      // The extrusion still wears its own nearest paint, of its own list.
+      expect(plan.paint.wall, label).toBe(mappedPaintEntry('brick', false, index));
+      const nearest = nearestOf(KIT_BRICK_SHADES, colour, asBrick);
+      expect(wallOf(plan), label).toEqual(KIT_BRICK_SHADES[nearest]);
+      // Not the shade the extrusion's entry indexes, where that is another.
+      if (nearest !== plan.paint.wall % KIT_BRICK_SHADES.length) moved += 1;
+    });
+    // The review's case: a white brick shop is the palest shade, buff, and its extrusion's
+    // entry would have walled it in the warm orange.
+    const white = shopOf('brick', 0);
+    expect(wallOf(white)).toEqual(KIT_BRICK_SHADES[1]);
+    expect(KIT_BRICK_SHADES[white.paint.wall % KIT_BRICK_SHADES.length]).toEqual(
+      KIT_BRICK_SHADES[3],
+    );
+    expect(moved).toBeGreaterThan(0);
+    // The control: untagged, its wall is the shade its seeded entry indexes.
+    const untagged = shopOf('brick', null);
+    expect(untagged.kit?.wallShade).toBeUndefined();
+    expect(wallOf(untagged)).toEqual(
+      KIT_BRICK_SHADES[untagged.paint.wall % KIT_BRICK_SHADES.length],
+    );
+  });
+
+  it('walls a stone shop (concrete, which the kit wraps in stone) in the stone nearest its mapped colour', () => {
+    MAPPED_PALETTE.forEach((colour, index) => {
+      const plan = shopOf('concrete', index);
+      expect(plan.kit?.style.skin, String(index)).toBe('stone');
+      const nearest = nearestOf(KIT_STONE_PAINTS, colour, (stone) => stone);
+      const wall = wallOf(plan);
+      // Over the neutral grey the pipeline bakes a stone at: the albedo the chart names.
+      const stone = KIT_STONE_PAINTS[nearest] as Rgb;
+      wall.forEach((channel, at) => {
+        expect(channel * 0.8, String(index)).toBeCloseTo(stone[at] as number, 6);
+      });
+    });
+  });
+
+  it('keeps a mapped colour’s wrap apart from its neighbours’ wraps, as `paintTown` keeps their paints', () => {
+    // Seven brick houses in a row, the middle one tagged each colour in turn.
+    const widths = [6, 7, 6, 8, 6, 7, 6];
+    for (let colour = 0; colour < MAPPED_PALETTE.length; colour += 1) {
+      const buildings: BuildingFeature[] = [];
+      let along = 1_100;
+      widths.forEach((width, at) => {
+        buildings.push({
+          ...buildingBeside(road, origin, [box(along, width, 14, 26)], 9),
+          wallMaterial: 'brick',
+          wallColour: at === 3 ? colour : null,
+        });
+        along += width;
+      });
+      const houses = plansOf('town', {}, corridorOf(buildings)).plans.slice(0, widths.length);
+      for (const plan of houses) expect(plan.kit?.style.skin).toBe('brick');
+      expect(houses[3]?.kit?.wallShade).toBeDefined();
+      // Within `paintTown`'s 30 m, no two wraps are walled alike: five shades, and at most
+      // five houses within reach of any.
+      for (let a = 0; a < houses.length; a += 1) {
+        for (let b = a + 1; b < houses.length; b += 1) {
+          const [one, two] = [houses[a], houses[b]] as [FootprintPlan, FootprintPlan];
+          const apart = Math.hypot(
+            one.centroid.x - two.centroid.x,
+            one.centroid.z - two.centroid.z,
+          );
+          if (apart > 30) continue;
+          expect(wallOf(one), `${String(colour)}: ${String(a)} and ${String(b)}`).not.toEqual(
+            wallOf(two),
+          );
+        }
+      }
+      // And the extrusions' paints are what they are with the lever off: only the wraps moved.
+      const off = plansOf('town', { facadeKit: false }, corridorOf(buildings)).plans;
+      expect(houses.map((plan) => plan.paint)).toEqual(
+        off.slice(0, widths.length).map((plan) => plan.paint),
+      );
+    }
   });
 });

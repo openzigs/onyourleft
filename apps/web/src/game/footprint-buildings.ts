@@ -383,6 +383,7 @@ import {
 import {
   AWNING_PAINTS,
   DOOR_PAINTS,
+  MAPPED_PALETTE,
   mappedPaintEntry,
   paintsOf,
   roofPaintsOf,
@@ -457,7 +458,7 @@ import {
   type PlanHouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
-import { kitKindOf, wrapFootprint, type KitWrap } from './facade-kit';
+import { kitKindOf, kitWallCount, kitWallShadeOf, wrapFootprint, type KitWrap } from './facade-kit';
 import {
   frontOf,
   HOUSE_MODELS,
@@ -6324,6 +6325,16 @@ function paintTown(
   const key = (ix: number, iz: number): number => (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
   const alike = (each: FootprintPlan): boolean =>
     near.some((other) => paintedAlike(other.plan, each));
+  // #3352: the wraps whose wall is a mapped colour's shade, by cell, and a wrap's neighbours.
+  const pinnedWraps = new Map<number, FootprintPlan[]>();
+  for (const plan of plans) {
+    if (plan.kit?.wallShade === undefined) continue;
+    const cell = key(Math.floor(plan.centroid.x / reach), Math.floor(plan.centroid.z / reach));
+    const list = pinnedWraps.get(cell);
+    if (list === undefined) pinnedWraps.set(cell, [plan]);
+    else list.push(plan);
+  }
+  const walled: Neighbour[] = [];
   for (const [index, plan] of plans.entries()) {
     const fixed = pinned[index] ?? NOT_PINNED;
     const ix = Math.floor(plan.centroid.x / reach);
@@ -6384,6 +6395,38 @@ function paintTown(
           door: (paint.door + step) % DOOR_PAINTS.length,
         },
       };
+    }
+    // #3352: a wrap's wall is its skin's own list, which the extrusion's entry indexes round,
+    // and a pinned wrap's is its mapped colour's nearest of it: so two neighbours whose
+    // entries are apart can still be walled in one shade. A wrap not pinned takes the next
+    // shade along that no wrap of its skin within reach wears, its extrusion's paint as it is;
+    // a pinned one's counted wherever it is in the corridor's order, since it never moves.
+    const wrap = candidate.kit;
+    if (!kept && wrap !== undefined && wrap.wallShade === undefined) {
+      const skin = wrap.style.skin;
+      walled.length = 0;
+      walled.push(...near);
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dz = -1; dz <= 1; dz += 1) {
+          for (const other of pinnedWraps.get(key(ix + dx, iz + dz)) ?? []) {
+            const apart = Math.hypot(
+              other.centroid.x - plan.centroid.x,
+              other.centroid.z - plan.centroid.z,
+            );
+            if (apart <= reach) walled.push({ plan: other, apart });
+          }
+        }
+      }
+      const worn = (shade: number): number =>
+        nearestWearer(
+          walled,
+          (other) =>
+            other.kit?.style.skin === skin && kitWallShadeOf(other.kit, other.paint.wall) === shade,
+        );
+      const own = kitWallShadeOf(wrap, candidate.paint.wall);
+      const shade =
+        worn(own) === Number.POSITIVE_INFINITY ? own : farthestEntry(own, kitWallCount(skin), worn);
+      if (shade !== own) candidate = { ...candidate, kit: { ...wrap, wallShade: shade } };
     }
     const cell = key(ix, iz);
     const list = cells.get(cell);
@@ -8761,6 +8804,13 @@ function planFootprint(
                 pole
                 ? 'corrugated'
                 : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  // #3352: the mapped wall colour, where it is the plan's wall paint: as `pinnedPaintOf` reads it.
+  const mappedWallColour =
+    choice.mappedPaint === true &&
+    building.wallColour !== null &&
+    mappedPaintOf(building.wallColour, wallSurface, false) !== undefined
+      ? MAPPED_PALETTE[building.wallColour]
+      : undefined;
   const kit =
     kitKind === undefined || front === undefined
       ? undefined
@@ -8773,6 +8823,9 @@ function planFootprint(
           storeys,
           // What it is walled in and painted is its extrusion's, so the two levels are one building.
           surface: wallSurface,
+          // #3352: and a mapped wall colour, which `paintTown` keeps (`pinnedPaintOf`), is the
+          // wrap's too: the nearest of its skin's own shades, which the extrusion's entry is not.
+          ...(mappedWallColour === undefined ? {} : { colour: mappedWallColour }),
           seed: Math.floor(share(STREAM_FACADE_KIT) * 0x1_0000_0000),
           awning: shop !== undefined && shop.awning > 0,
           parapet: PARAPET_METRES,
