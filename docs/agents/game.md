@@ -1095,9 +1095,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         ARRIVES on the front, before the line is steady,
                         is held by the rotation and ends the pull as soon
                         as it is. Sit-in is `setGroupSitIn`, handed as
-                        `riderSittingIn` on every step. Neither is kept
-                        past the ride; neither reaches the simulation, the
-                        gradient session or the trainer's port.
+                        `riderSittingIn` on every step. Neither choice
+                        outlives the ride, and **what was pressed is kept
+                        with it**: each press taken and each sit-in choice,
+                        with its ride time, in `GroupRideFact.presses`
+                        (`pull-off`, `sit-in`, `sit-out`; absent when
+                        nothing was pressed; a mashed button is one entry),
+                        because the line replays from them as well as the
+                        seed, and `GROUP_RIDE_CODE_VERSION` is **2** from
+                        here. Neither reaches the simulation, the gradient
+                        session or the trainer's port.
                         `group-ride-wiring.test.tsx` §"#3307" ends a pull by
                         each input through the real `GameView`, with a rider
                         who holds a wheel. ⚠️ A group ride now mounts

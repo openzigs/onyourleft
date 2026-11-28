@@ -516,6 +516,49 @@ describe('the pull-off press — #3307, ADR 0101 D-3.7', () => {
   });
 });
 
+describe('what the ride keeps of the rider’s presses — #3307', () => {
+  it('keeps a press taken on the front once however often it is pressed, and none made off it', () => {
+    const from = started({ bots: 3 });
+    // Nothing pressed: the fact has no such field, as a ride before #3307 had none.
+    expect('presses' in groupRideFact(last(hold(from, 5)))).toBe(false);
+    expect('presses' in groupRideFact(pressGroupPullOff(from))).toBe(false);
+
+    const front = toTheFront(from);
+    let pressed = front;
+    for (let press = 0; press < 20; press += 1) pressed = pressGroupPullOff(pressed);
+    const at = front.state.atMs / 1_000;
+    expect(at).toBeGreaterThan(0);
+    expect(groupRideFact(pressed).presses).toStrictEqual([{ at, press: 'pull-off' }]);
+    // It rides on with the ride, beside the log.
+    const after = last(hold(pressed, 5));
+    expect(groupRideFact(after).presses).toStrictEqual([{ at, press: 'pull-off' }]);
+    expect(groupRideFact(after).version).toBe(2);
+  });
+
+  it('keeps each sit-in choice with its ride time, in order, and no choice that changed nothing', () => {
+    const from = started({ bots: 3 });
+    const sat = setGroupSitIn(setGroupSitIn(from, false), true);
+    const later = last(hold(setGroupSitIn(sat, true), 12));
+    const out = setGroupSitIn(later, false);
+    expect(groupRideFact(out).presses).toStrictEqual([
+      { at: 0, press: 'sit-in' },
+      { at: 12, press: 'sit-out' },
+    ]);
+  });
+
+  it('stops at the most it holds, and says a press was left out', () => {
+    let session = started({ bots: 3 });
+    for (let choice = 0; choice < GROUP_RIDE_LOG_MOST; choice += 1) {
+      session = setGroupSitIn(session, choice % 2 === 0);
+    }
+    expect(groupRideFact(session).presses).toHaveLength(GROUP_RIDE_LOG_MOST);
+    expect(groupRideFact(session).logCut).toBeUndefined();
+    session = setGroupSitIn(session, !session.sittingIn);
+    expect(groupRideFact(session).presses).toHaveLength(GROUP_RIDE_LOG_MOST);
+    expect(groupRideFact(session).logCut).toBe(true);
+  });
+});
+
 describe('the sit-in choice — #3307, ADR 0101 D-3.7', () => {
   it('never gives a rider who sits in the front through three rotations, and gives it back at the next turn once off', () => {
     const from = started({ bots: 3 });

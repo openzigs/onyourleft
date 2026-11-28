@@ -706,8 +706,9 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     expect(seen.session?.phase).toBe('changing');
     expect(seen.session?.role).toBe('drifting-back');
     expect(seen.session?.state.rotation.aside).toBe('rider');
-    // What the recording is handed says the same.
+    // What the recording is handed says the same, and keeps the press, once.
     expect(kept()).toMatchObject({ phase: 'changing', role: 'drifting-back' });
+    expect(facts.at(-1)?.presses?.map((each) => each.press)).toStrictEqual(['pull-off']);
     // The rider is drawn a lane to their left, and the button is unavailable again.
     expect(lastFrame()?.steeredLateral).toBe(LANE_OFFSETS_METRES[0]);
     expect(hudButton(PULL_OFF_BUTTON_LABEL)?.getAttribute('aria-disabled')).toBe('true');
@@ -722,6 +723,7 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     expect(seen.session?.role).toBe('on-front');
     expect(kept()).toMatchObject({ phase: 'steady', role: 'on-front' });
     expect(lastFrame()?.steeredLateral).toBe(0);
+    expect(facts.at(-1)?.presses).toBeUndefined();
   });
 
   it('ends the pull on the lane key toward the pull-off side, and hears no key off the front', async () => {
@@ -806,6 +808,12 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     for (let frame = 0; frame < 8; frame += 1) await pump();
     expect(seen.session?.role).not.toBe('sitting-in');
     expect(kept()?.role).not.toBe('sitting-in');
+    // Both choices are kept with the ride, in order, each at its ride time:
+    // eight frames a choice, and the ride's first frame runs no step.
+    expect(facts.at(-1)?.presses).toStrictEqual([
+      { at: 1.75, press: 'sit-in' },
+      { at: 3.75, press: 'sit-out' },
+    ]);
   });
 
   it('shows neither control on a ride with no group', async () => {

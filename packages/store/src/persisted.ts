@@ -86,6 +86,7 @@ import type {
   DraftSpan,
   GroupRideFact,
   GroupRideLogEntry,
+  GroupRidePress,
   PacerModelFact,
   PacerRidingPosition,
   RideFacts,
@@ -116,6 +117,7 @@ import {
   ACTIVITY_CALORIES_BASES,
   FRAMING_CHECK_RECORDS,
   GROUP_RIDE_LOG_MOST,
+  GROUP_RIDE_PRESSES,
   isBirthYear,
   parseCalorieSex,
   RIDE_WRITE_UP_SOURCES,
@@ -222,6 +224,8 @@ export interface PersistedRideFacts {
     bots: unknown;
     log: unknown[];
     logCut?: true;
+    /** #3307. */
+    presses?: unknown[];
   };
   /** @see RideFacts.pacerModel — #2712. Re-read whole on the way in and out: @see pacerModelOf */
   pacerModel?: {
@@ -743,6 +747,9 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
       bots: group.bots,
       log: group.log.map(({ at, phase, role, groupSpeed }) => ({ at, phase, role, groupSpeed })),
       ...(group.logCut === true ? { logCut: true as const } : {}),
+      ...(group.presses === undefined
+        ? {}
+        : { presses: group.presses.map(({ at, press }) => ({ at, press })) }),
     };
   }
   // #2712: the AI pacer's log, through its reader on the way in too.
@@ -876,11 +883,15 @@ export function lapRacesOf(value: unknown): readonly LapRaceModelRecord[] | unde
  * it does not read — dropped WHOLE, never the ride, as the AI pacer's log is:
  * an entry missing from the middle of the log would be a different ride. The
  * log is in time order, of at most `GROUP_RIDE_LOG_MOST` entries, and every
- * word in it is one of `@onyourleft/domain`'s own.
+ * word in it is one of `@onyourleft/domain`'s own. The rider's presses
+ * (#3307) are read the same way, in time order and from their closed list,
+ * and a fact whose presses do not read is dropped whole too: the line
+ * replays from them.
  */
 export function groupRideOf(value: unknown): GroupRideFact | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { version, seed, targetSpeed, bots, log, logCut } = value as {
+  const { version, seed, targetSpeed, bots, log, logCut, presses } = value as {
+    presses?: unknown;
     version?: unknown;
     seed?: unknown;
     targetSpeed?: unknown;
@@ -919,6 +930,19 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
       return undefined;
     read.push({ at, phase: phase as LinePhase, role: role as RiderRole, groupSpeed });
   }
+  const pressed: GroupRidePress[] = [];
+  if (presses !== undefined) {
+    if (!Array.isArray(presses) || presses.length > GROUP_RIDE_LOG_MOST) return undefined;
+    for (const each of presses as unknown[]) {
+      if (typeof each !== 'object' || each === null) return undefined;
+      const { at, press } = each as { at?: unknown; press?: unknown };
+      if (typeof at !== 'number' || !Number.isFinite(at) || at < (pressed.at(-1)?.at ?? 0))
+        return undefined;
+      const kind = GROUP_RIDE_PRESSES.find((known) => known === press);
+      if (kind === undefined) return undefined;
+      pressed.push({ at, press: kind });
+    }
+  }
   return {
     version,
     seed,
@@ -926,6 +950,7 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
     bots,
     log: read,
     ...(logCut === true ? { logCut: true as const } : {}),
+    ...(pressed.length === 0 ? {} : { presses: pressed }),
   };
 }
 

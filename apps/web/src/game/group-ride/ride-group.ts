@@ -60,10 +60,10 @@
  * ## What the ride keeps
  *
  * {@link groupRideFact}: the seed, the average chosen, the size, the rules'
- * version and a log with an entry each time the line's phase or the rider's
- * role changed, each with the group's speed then (`@onyourleft/store`
- * §`GroupRideFact`). Numbers and words from closed lists: no place, no
- * coordinate, no text.
+ * version, a log with an entry each time the line's phase or the rider's
+ * role changed, each with the group's speed then, and what the rider told
+ * the group (`@onyourleft/store` §`GroupRideFact`). Numbers and words from
+ * closed lists: no place, no coordinate, no text.
  *
  * ## What the rider can tell the group (#3307, ADR 0101 D-3.7)
  *
@@ -83,7 +83,10 @@
  *   handed to the rotation as `riderSittingIn` on every step, so the rider is
  *   never given the front; off again, they take their turn as it comes round.
  *
- * Neither is kept past the ride.
+ * Neither choice outlives the ride. What was pressed is kept with it: every
+ * press taken and every sit-in choice goes in {@link GroupRideSession.presses}
+ * with its ride time, and so in the ride's fact, because the line's decisions
+ * depend on them as well as on the seed. A mashed button is one entry.
  *
  * ## Nothing here reaches a trainer
  *
@@ -109,7 +112,12 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 import { groupRidePhysics } from '@onyourleft/physics';
-import { GROUP_RIDE_LOG_MOST, type GroupRideFact, type GroupRideLogEntry } from '@onyourleft/store';
+import {
+  GROUP_RIDE_LOG_MOST,
+  type GroupRideFact,
+  type GroupRideLogEntry,
+  type GroupRidePress,
+} from '@onyourleft/store';
 
 import {
   drawnLateral,
@@ -225,6 +233,8 @@ export interface GroupRideSession {
   readonly pullOffPressed: boolean;
   /** Where the rider is drawn across the road: the line's lane, or a lane aside after a pull-off. */
   readonly steer: SteerState;
+  /** Every press taken and every sit-in choice so far, oldest first. @see GroupRideFact.presses */
+  readonly presses: readonly GroupRidePress[];
 }
 
 /** What {@link startGroupRideSession} reads. */
@@ -317,7 +327,21 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     sittingIn: false,
     pullOffPressed: false,
     steer: LINE_STEER,
+    presses: [],
   };
+}
+
+/** `session` with `press` kept, at the ride time its last step ended; past the most kept, the cut is said. */
+function pressKept(
+  session: GroupRideSession,
+  press: GroupRidePress['press'],
+): Pick<GroupRideSession, 'presses' | 'logCut'> {
+  return session.presses.length < GROUP_RIDE_LOG_MOST
+    ? {
+        presses: [...session.presses, { at: session.state.atMs / 1_000, press }],
+        logCut: session.logCut,
+      }
+    : { presses: session.presses, logCut: true };
 }
 
 /**
@@ -329,12 +353,19 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
 export function pressGroupPullOff(session: GroupRideSession): GroupRideSession {
   if (session.role !== 'on-front' || session.pullOffPressed) return session;
   const { lane } = steerToward(LINE_STEER, GROUP_RIDE_PULL_OFF_SIDE);
-  return { ...session, pullOffPressed: true, steer: { ...session.steer, lane } };
+  return {
+    ...session,
+    ...pressKept(session, 'pull-off'),
+    pullOffPressed: true,
+    steer: { ...session.steer, lane },
+  };
 }
 
 /** The session with the rider sitting in, or not (#3307): read by every step from the next on. */
 export function setGroupSitIn(session: GroupRideSession, sittingIn: boolean): GroupRideSession {
-  return session.sittingIn === sittingIn ? session : { ...session, sittingIn };
+  return session.sittingIn === sittingIn
+    ? session
+    : { ...session, ...pressKept(session, sittingIn ? 'sit-in' : 'sit-out'), sittingIn };
 }
 
 /** One frame's steps of the group. */
@@ -506,5 +537,6 @@ export function groupRideFact(session: GroupRideSession): GroupRideFact {
     bots: session.choice.bots,
     log: session.log,
     ...(session.logCut ? { logCut: true as const } : {}),
+    ...(session.presses.length === 0 ? {} : { presses: session.presses }),
   };
 }
