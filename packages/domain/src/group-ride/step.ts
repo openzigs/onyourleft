@@ -138,6 +138,7 @@ import {
   type MemberView,
   type RotationState,
   type RotationStep,
+  type RotationView,
 } from './rotation';
 
 /**
@@ -257,6 +258,13 @@ export interface GroupRideTick {
    * `gapped`, `off-the-back` or `off-the-front` where they are off the line.
    */
   readonly rotation: RotationStep;
+  /**
+   * What the rotation read for the tick: the line as the tick began, at the
+   * group's speed now. With {@link rotation} it is what the cue selector
+   * (`cues.ts` §`stepCues`) reads, so the cues are chosen on the view the
+   * roles were (#3305).
+   */
+  readonly line: RotationView;
   /**
    * Every member's draft multiplier this tick, by id, **the rider's
    * included**: the one call the bots were ridden at.
@@ -388,7 +396,7 @@ export function stepGroupRide(
     road.noDrop !== false &&
     (easing || (underSpeed && (state.heldFromM !== null || frontId === riderId)));
 
-  const decision = stepRotation(lineBefore, {
+  const view: RotationView = {
     atMs: state.atMs,
     groupSpeedMps,
     members,
@@ -397,7 +405,8 @@ export function stepGroupRide(
     bendRadiusM: input.bendRadiusM ?? null,
     riderSignal: input.riderSignal ?? false,
     riderSittingIn: input.riderSittingIn ?? false,
-  });
+  };
+  const decision = stepRotation(lineBefore, view);
   const riderRole = decision.roles[riderId] as RiderRole;
   const standingRole = noDropRole(noDrop.standing, riderRole);
   const rotation: RotationStep =
@@ -537,6 +546,7 @@ export function stepGroupRide(
       riderWas: { speedMps: input.rider.speedMps, elapsedSeconds: elapsed },
     },
     rotation,
+    line: view,
     draft,
     groupSpeedMps,
   };
