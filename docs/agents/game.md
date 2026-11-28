@@ -1079,7 +1079,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `noteGroupRide` and is saved as
                         `RideFacts.groupRide` (seed, average, size, rules'
                         version, `startedAt` on the recording's clock, a
-                        log of phase and role changes); no fact is handed
+                        log of phase and role changes, and since #3310
+                        `ridden`, where the log ends on the group's own
+                        clock, which a HUD pause parts from the
+                        recording's); no fact is handed
                         until a recording's elapsed time has been read.
                         `group-ride-wiring.test.tsx` drives the real picker
                         and reads the simulation's own draft factor, the

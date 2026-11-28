@@ -489,8 +489,11 @@ export function setGroupSitIn(session: GroupRideSession, sittingIn: boolean): Gr
 /**
  * The session with where its clock begins on the recording's — the review of
  * PR #3364: the log's `at` is the group's own seconds from the press, and
- * this ties them to the recording's timeline, pauses included on both, so
- * the debrief (#3310) can line the log up with the samples. Fixed from the
+ * this ties them to the recording's timeline at the start. Only there: the
+ * recording's elapsed time counts every second, and the group's clock only
+ * the simulation steps that ran, so the two part after a HUD pause or a long
+ * stall, and the debrief (#3310) reads its durations on the group's clock
+ * alone, to `GroupRideFact.ridden` ({@link groupRideFact}). Fixed from the
  * first frame a recording's elapsed time is read and never moved after, to
  * within the recording's own tick. Usually about nought, as the recording
  * starts at the press; less than nought for a recording begun part-way
@@ -753,6 +756,8 @@ export function groupRideFact(session: GroupRideSession): GroupRideFact | undefi
     version: GROUP_RIDE_CODE_VERSION,
     seed: session.seed,
     startedAt: session.startedAt,
+    // #3310: where the last log entry ends, on the group's own clock.
+    ridden: session.state.atMs / 1_000,
     targetSpeed: session.choice.targetSpeed,
     bots: session.choice.bots,
     log: session.log,

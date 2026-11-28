@@ -335,10 +335,13 @@ describe('what the ride keeps of its group', () => {
       version: GROUP_RIDE_CODE_VERSION,
       seed: 4242,
       startedAt: 0,
+      // #3310: where the last entry ends, on the group's own clock.
+      ridden: end.state.atMs / 1_000,
       targetSpeed: THIRTY,
       bots: 4,
       log: end.log,
     });
+    expect(fact.ridden).toBeGreaterThanOrEqual(fact.log.at(-1)?.at ?? Number.POSITIVE_INFINITY);
     // An entry for each change, in time order, in the rules' own words.
     expect(fact.log.length).toBeGreaterThan(1);
     fact.log.forEach((entry, index) => {

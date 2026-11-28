@@ -725,12 +725,25 @@ export interface GroupRideFact {
   /** The line's seed: every draw the line made came from it. */
   readonly seed: number;
   /**
-   * The recording's elapsed seconds, pauses included, when the group's clock
-   * read nought: a log entry's `at` plus this is where it falls on the saved
-   * ride's timeline. About nought when the recording began at the press, and
-   * less than nought when it began part-way through the group ride.
+   * The recording's elapsed seconds when the group's clock read nought:
+   * about nought when the recording began at the press, and less than nought
+   * when it began part-way through the group ride.
+   *
+   * ⚠️ **Only near the start is a log entry's `at` plus this where it falls
+   * on the saved ride's timeline** (#3310, from PR #3364's delta review): the
+   * recording's elapsed time counts every second, and the group's clock only
+   * the simulation steps that ran, so the two part after a HUD pause or a
+   * long stall. A duration in the group ride is read on the group's clock
+   * alone, to {@link ridden}.
    */
   readonly startedAt: number;
+  /**
+   * Seconds of the group ride ridden when it was last kept, on the group's
+   * own clock as the log's `at` is: where the last log entry ends (#3310).
+   * Never before the last entry's `at`. Absent from a fact kept before #3310,
+   * whose last entry is read to the recording's end instead.
+   */
+  readonly ridden?: number;
   /** The average speed the rider chose for the whole ride, metres a second (ADR 0101 D-2.1). */
   readonly targetSpeed: number;
   /** How many bots rode in the line beside the rider. */

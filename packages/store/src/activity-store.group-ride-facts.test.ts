@@ -14,6 +14,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { groupRideOf } from './persisted';
 import { GROUP_RIDE_LOG_MOST, type GroupRideFact } from './records';
 import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
@@ -150,6 +151,45 @@ describe('the group ride kept with its ride — #3303', () => {
     );
     expect(read?.rideFacts?.groupRide?.startedAt).toBe(-40.25);
     expect(read?.rideFacts?.groupRide).toStrictEqual(late);
+  });
+
+  it('keeps where the last entry ends on the group’s clock, from its start on — #3310', async () => {
+    const open = await opened();
+    const ended: GroupRideFact = { ...FACT, ridden: 180.5 };
+    // A ride that ended the moment its last entry began.
+    const atOnce: GroupRideFact = { ...FACT, ridden: 96.5 };
+    const ride = rideFor(ATHLETE_A, { rideFacts: { groupRide: ended } });
+    const other = rideFor(ATHLETE_A, { rideFacts: { groupRide: atOnce } });
+    const read = await open.roundTrip(
+      async (store) => {
+        await store.putActivity(ride);
+        await store.putActivity(other);
+      },
+      async (store) => ({
+        ended: await store.getActivity(ATHLETE_A, ride.id),
+        atOnce: await store.getActivity(ATHLETE_A, other.id),
+      }),
+    );
+    expect(read.ended?.rideFacts?.groupRide).toStrictEqual(ended);
+    expect(read.atOnce?.rideFacts?.groupRide).toStrictEqual(atOnce);
+  });
+
+  it('leaves out a fact whose end does not read, and keeps the ride — #3310', async () => {
+    const open = await opened();
+    // Ended before its last entry began: a log that ran backwards.
+    const ride = rideFor(ATHLETE_A, {
+      rideFacts: { drafted: true, groupRide: { ...FACT, ridden: 96 } },
+    });
+    await open.write(async (store) => store.putActivity(ride));
+    const read = await open.read((store) => store.getActivity(ATHLETE_A, ride.id));
+    expect(read?.id).toBe(ride.id);
+    expect(read?.rideFacts).toStrictEqual({ drafted: true });
+    // The reader the store reads with on the way in and out, over every way it is wrong.
+    for (const ridden of [Number.NaN, Number.POSITIVE_INFINITY, '120', 96, null]) {
+      expect(groupRideOf({ ...FACT, ridden }), String(ridden)).toBeUndefined();
+    }
+    expect(groupRideOf({ ...FACT, ridden: 96.5 })).toStrictEqual({ ...FACT, ridden: 96.5 });
+    expect(groupRideOf(FACT)).toStrictEqual(FACT);
   });
 
   it('keeps a log that was cut short, and says so', async () => {

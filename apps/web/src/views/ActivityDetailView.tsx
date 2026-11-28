@@ -43,6 +43,14 @@
  * with the overview — one point lookup, no picture and no number on the row —
  * and rendered by `detail/SideCameraSection.tsx`, only for a ride that has one.
  *
+ * ## A group ride's debrief (#3310)
+ *
+ * A ride ridden in the AI group ride says what happened in it — pulls,
+ * time on the front, in the draft and with the group, gaps, and the target
+ * average beside the average ridden — from `rideFacts.groupRide`, read with
+ * the overview and drawn by `detail/GroupRideDebriefSection.tsx`. No model
+ * writes it; a ride in no group ride renders nothing for it.
+ *
  * ## A model's write-up (#804, #805)
  *
  * Below it, on every ride: the write-up saved with the ride, read with the
@@ -116,6 +124,7 @@ import type { SharedTrack } from '../detail/privacy';
 import { CaloriesFact } from '../detail/CaloriesFact';
 import { LapsTable } from '../detail/LapsTable';
 import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
+import { GroupRideDebriefSection } from '../detail/GroupRideDebriefSection';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideSnapshotsSection } from '../detail/RideSnapshotsSection';
 import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
@@ -1059,6 +1068,16 @@ export function ActivityDetailView({
               <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
             </>
           )}
+
+          {/*
+        #3310, ADR 0101 D-5.8: a group ride's debrief, read from the ride's
+        saved fact. A ride in no group ride renders nothing here.
+      */}
+          <GroupRideDebriefSection
+            groupRide={activity.rideFacts?.groupRide}
+            ride={activity}
+            units={units}
+          />
 
           {/*
         #388. Only for a ride the side camera filmed — the owner's ruling puts

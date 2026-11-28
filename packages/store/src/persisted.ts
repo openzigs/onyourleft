@@ -221,6 +221,8 @@ export interface PersistedRideFacts {
     version: unknown;
     seed: unknown;
     startedAt: unknown;
+    /** #3310. */
+    ridden?: unknown;
     targetSpeed: unknown;
     bots: unknown;
     log: unknown[];
@@ -745,6 +747,7 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
       version: group.version,
       seed: group.seed,
       startedAt: group.startedAt,
+      ...(group.ridden === undefined ? {} : { ridden: group.ridden }),
       targetSpeed: group.targetSpeed,
       bots: group.bots,
       log: group.log.map(({ at, phase, role, groupSpeed }) => ({ at, phase, role, groupSpeed })),
@@ -892,8 +895,9 @@ export function lapRacesOf(value: unknown): readonly LapRaceModelRecord[] | unde
  */
 export function groupRideOf(value: unknown): GroupRideFact | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { version, seed, startedAt, targetSpeed, bots, log, logCut, presses } = value as {
+  const { version, seed, startedAt, ridden, targetSpeed, bots, log, logCut, presses } = value as {
     presses?: unknown;
+    ridden?: unknown;
     version?: unknown;
     seed?: unknown;
     startedAt?: unknown;
@@ -935,6 +939,12 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
       return undefined;
     read.push({ at, phase: phase as LinePhase, role: role as RiderRole, groupSpeed });
   }
+  // #3310: where the last entry ends, on the group's clock; never before it begins.
+  if (
+    ridden !== undefined &&
+    (typeof ridden !== 'number' || !Number.isFinite(ridden) || ridden < (read.at(-1)?.at ?? 0))
+  )
+    return undefined;
   const pressed: GroupRidePress[] = [];
   if (presses !== undefined) {
     if (!Array.isArray(presses) || presses.length > GROUP_RIDE_LOG_MOST) return undefined;
@@ -952,6 +962,7 @@ export function groupRideOf(value: unknown): GroupRideFact | undefined {
     version,
     seed,
     startedAt,
+    ...(typeof ridden === 'number' ? { ridden } : {}),
     targetSpeed,
     bots,
     log: read,
