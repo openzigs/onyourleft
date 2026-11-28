@@ -416,6 +416,9 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
     // have written. The driver is told nothing it would believe it wrote.
     driver.restart();
     sent = { grade, at };
+    // #932: the walk is owed, so a fault mid-ease replaces a waiting write
+    // (walked from the refused grade) with the confirmed grade itself.
+    owed = true;
     fault = undefined;
     offer(gradePercent(grade));
     changed();

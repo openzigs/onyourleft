@@ -818,6 +818,47 @@ describe('past a point-to-point route’s end, the trainer eases to flat — #33
     expect(writes.at(-1)?.grade).toBe(0);
   });
 
+  it('keeps the bound when a write held in the ease times out with another waiting — #932', async () => {
+    const profile = climb(8, 600);
+    const end: number = profile.totalDistance;
+    const written: number[] = [];
+    let timeOut: ((reason: Error) => void) | undefined;
+    const control: GradientTrainer = {
+      setSimulationParameters: async (parameters) => {
+        written.push(Number(parameters.grade));
+        // The third write, the second inside the ease, is left unanswered.
+        if (written.length === 3) {
+          return new Promise<void>((_resolve, reject) => {
+            timeOut = reject;
+          });
+        }
+        return Promise.resolve();
+      },
+      letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
+    };
+    const session = createGradientSession({ profile, control });
+    session.sample(seconds(0), end - 100);
+    await drain();
+    // Seconds 1 and 2 write inside the ease; 3 and 4 find the slot occupied.
+    for (let at = 1; at <= 4; at += 1) {
+      session.sample(seconds(at), end + at * 10);
+      await drain();
+    }
+    expect(written).toHaveLength(3);
+    const confirmed = written[1] ?? Number.NaN;
+    timeOut?.(new Error('the write timed out'));
+    await drain();
+    session.sample(seconds(5), end + 50);
+    await drain();
+    // Nothing walked from the timed-out grade goes out: the write after it is
+    // a step from the grade the trainer confirmed, and never further from flat.
+    expect(written.length).toBeGreaterThan(3);
+    for (const grade of written.slice(3)) {
+      expect(Math.abs(grade - confirmed)).toBeLessThanOrEqual(1 + 1e-9);
+      expect(grade).toBeLessThanOrEqual(confirmed + 1e-9);
+    }
+  });
+
   it('leaves a loop alone: past its length it rides round onto its own grade', async () => {
     const profile = loop();
     expect(profile.loop).toBe(true);
