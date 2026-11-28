@@ -295,10 +295,15 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
       });
       return;
     }
+    const across = obstacleAcross(obstacle, seconds);
     obstacles.push({
-      ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
+      ...placed(at, across, 0, obstacleTurn(obstacle)),
       kind: obstacle.kind,
       index,
+      // #3288: a dog trots through how far it has run, and stands when it stops.
+      ...(obstacle.kind === 'dog'
+        ? { ranMetres: Math.abs(across - obstacleAcross(obstacle, 0)) }
+        : {}),
     });
   });
 
