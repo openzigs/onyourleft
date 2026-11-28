@@ -905,7 +905,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     const jobs = [...jobsOf(nightly)];
     const suitesOf = (job: string): string[] =>
       [...job.matchAll(/^ +run: pnpm (?:run )?(\S+)/gm)].map((match) => String(match[1]));
-    const homes = coverageShardScripts().map(([name]) => {
+    const homes = coverageShardScripts().map(([name, script]) => {
       const where = jobs.filter(([, job]) => job.includes(`run: pnpm run ${name}\n`));
       expect(
         where.map(([id]) => id),
@@ -913,11 +913,12 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
       ).toHaveLength(1);
       const [id = '', job = ''] = where[0] ?? [];
       expect(suitesOf(job), id).toEqual(['install', name]);
-      // Two workers for the game half on the runner's two cores (#2285):
-      // with Vitest's three, two share a core and its whole-ride cases pass
-      // their own timeouts on the EPYC 7763. docs/agents/ci.md §4c §"Two
-      // coverage jobs — #2285".
-      if (name === 'test:coverage:shard-1') {
+      // Two workers for every game part on the runner's two cores (#2285,
+      // #3341): with Vitest's three, two share a core and its whole-ride
+      // cases pass their own timeouts on the EPYC 7763. Read from the
+      // script, so a part that takes game files cannot leave it out.
+      // docs/agents/ci.md §4c §"Four coverage jobs — #3341".
+      if (script.split(' ').some((word) => word.startsWith('src/game/'))) {
         const run = stepsOf(job).find((step) => step.includes(`run: pnpm run ${name}\n`)) ?? '';
         expect(run, id).toMatch(/^ {10}VITEST_MAX_WORKERS: '2'$/m);
       }

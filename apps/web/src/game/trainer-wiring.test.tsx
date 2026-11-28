@@ -88,7 +88,8 @@ vi.mock('./hud/announce', async (importOriginal) => {
     },
   };
 });
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
+import { END_RIDE_TEXT } from '../ride/EndRideQuestion';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -103,7 +104,7 @@ import {
   unixSeconds,
   type RoutePoint,
 } from '@onyourleft/domain';
-import type { SimulationParameters } from '@onyourleft/sensors/protocol';
+import { encodeControlRequest, type SimulationParameters } from '@onyourleft/sensors/protocol';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { FLAG_FINISHED } from '@onyourleft/protocol';
@@ -775,6 +776,159 @@ describe('the road the game draws reaches the trainer', () => {
     });
     mounted = undefined;
     expect(commands.releases).toHaveLength(1);
+  });
+});
+
+describe('past a point-to-point route’s end, the trainer eases to flat — #3345', () => {
+  /**
+   * 300 m north falling at 6 %, and the end. A descent, so a ride at 300 W
+   * reaches its end in a few dozen frames; steep, so the grade at the end is
+   * still a descent after the profile's gradient windows have eased its last
+   * metres.
+   */
+  function shortDescent(): RidableRoute {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 30; index += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (index * 10) / 111_320),
+          degreesLongitude(-0.12),
+        ),
+        elevation: altitudeMetres(40 - index * 0.6),
+      });
+    }
+    return {
+      id: 'route-short-descent',
+      name: 'A short descent',
+      profile: routeProfile(points),
+      attempts: 0,
+    };
+  }
+
+  /** The finish's question, which opens on the frame the rider crosses the line. */
+  function atTheFinish(): boolean {
+    return (
+      document.querySelector('[data-oyl-end-ride]')?.getAttribute('aria-label') ===
+      END_RIDE_TEXT.finishLabel
+    );
+  }
+
+  /**
+   * Mounts the game on {@link shortDescent}, starts it with `start`, rides to
+   * the line and `framesPast` frames past it, and says how many writes the
+   * trainer had been handed when the rider crossed the line.
+   */
+  async function rideOnPastTheEnd(
+    trainer: GameTrainerPort,
+    framesPast: number,
+    start: () => Promise<void> = () => clickThrough(buttonStarting('Ride ')),
+  ): Promise<{ readonly atTheLine: number | undefined }> {
+    globalThis.location.hash = '#/game';
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(shortDescent())}
+        trainer={trainer}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await start();
+    for (let frame = 0; frame < 120 && !atTheFinish(); frame += 1) await pump(1);
+    const crossed = atTheFinish();
+    const atTheLine = crossed ? trainerWrites() : undefined;
+    await pump(framesPast);
+    await settle();
+    return { atTheLine };
+  }
+
+  let trainerWrites: () => number = () => 0;
+
+  afterEach(() => {
+    globalThis.location.hash = '';
+    trainerWrites = () => 0;
+  });
+
+  it('walks the trainer to 0 % past the end, a bounded step a write and never away from flat, then holds it', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    trainerWrites = () => commands.written.length;
+    const { atTheLine } = await rideOnPastTheEnd(trainerPort(READY, commands), 24);
+
+    expect(atTheLine).toBeDefined();
+    const grades = commands.written.map((parameters) => Number(parameters.grade));
+    const line = atTheLine ?? grades.length;
+    // Non-vacuity: the descent reached the trainer, and the ride crossed the line on it.
+    expect(grades[line - 1]).toBeLessThan(-2);
+    const past = grades.slice(line);
+    expect(past.length).toBeGreaterThanOrEqual(2);
+    for (let index = line; index < grades.length; index += 1) {
+      const before = grades[index - 1] ?? Number.NaN;
+      const grade = grades[index] ?? Number.NaN;
+      const at = `write ${String(index - line + 1)} past the end: ${String(before)} % to ${String(grade)} %`;
+      // Never a step larger than the existing bound: 1 % a write, at most one a second.
+      expect(Math.abs(grade - before), at).toBeLessThanOrEqual(
+        CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * SIMULATION_SETPOINT_INTERVAL_SECONDS + 1e-9,
+      );
+      // Monotonic, up toward flat and never over it.
+      expect(grade, at).toBeGreaterThanOrEqual(before);
+      expect(grade, at).toBeLessThanOrEqual(0);
+      // And the wire's own encoder takes it.
+      expect(() =>
+        encodeControlRequest({
+          opCode: 'set-simulation-parameters',
+          parameters: commands.written[index] as SimulationParameters,
+        }),
+      ).not.toThrow();
+    }
+    // Flat, and held there: the last write is 0 %, and ten seconds on writes nothing.
+    expect(past.at(-1)).toBe(0);
+    const flat = commands.written.length;
+    await pump(20);
+    expect(commands.written).toHaveLength(flat);
+    expect(commands.releases).toHaveLength(0);
+  });
+
+  it('stops the ease with the ride: End ride at the finish releases the trainer and writes nothing more', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    trainerWrites = () => commands.written.length;
+    const { atTheLine } = await rideOnPastTheEnd(trainerPort(READY, commands), 2);
+    expect(atTheLine).toBeDefined();
+    // Mid-ease: not flat yet.
+    expect(commands.written.at(-1)?.grade).toBeLessThan(0);
+
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    await settle();
+    const ended = commands.written.length;
+    expect(commands.releases).toEqual([ended]);
+    await pump(20);
+    await settle();
+    expect(commands.written).toHaveLength(ended);
+  });
+
+  it('writes nothing past the end to a trainer a workout is driving in ERG', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    trainerWrites = () => commands.written.length;
+    const { atTheLine } = await rideOnPastTheEnd(trainerPort(READY, commands, true), 24);
+    // The ride crossed the line, and the workout's trainer was handed no grade at all.
+    expect(atTheLine).toBe(0);
+    expect(commands).toEqual({ written: [], releases: [], requests: [] });
+  });
+
+  it('writes nothing past the end from the picker’s Preview without a trainer, with a trainer ready', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    trainerWrites = () => commands.written.length;
+    const { atTheLine } = await rideOnPastTheEnd(trainerPort(READY, commands), 24, async () => {
+      const container = mounted?.container ?? document.body;
+      const box = container.querySelector<HTMLInputElement>(
+        '.oyl-chooser__preview input[type=number]',
+      );
+      expect(box).not.toBeNull();
+      if (box !== null) await typeInto(box, '300');
+      await clickThrough(buttonStarting('Preview '));
+      await settle();
+    });
+    expect(atTheLine).toBe(0);
+    expect(commands).toEqual({ written: [], releases: [], requests: [] });
   });
 });
 

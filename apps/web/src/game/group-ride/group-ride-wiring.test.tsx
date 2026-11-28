@@ -934,8 +934,32 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     expect(hudButton(PULL_OFF_BUTTON_LABEL)?.getAttribute('aria-disabled')).toBe('true');
   }
 
+  /**
+   * The log an unpressed ride to the front was handed, kept by the control
+   * case for the lane-key case to compare with. Every ride here starts from
+   * the same seed, clock and readings, so the two cases' unpressed rides are
+   * one ride; riding it twice in the lane-key case ran it past Vitest's 5 s
+   * on CI (#3391). A copy, so the control's later frames cannot reach it.
+   */
+  let unpressedLog: Awaited<ReturnType<typeof rideToTheFront>> | undefined;
+
+  /** The unpressed ride's log: the control case's, or ridden here when the case runs alone. */
+  async function unpressedRide(): Promise<Awaited<ReturnType<typeof rideToTheFront>>> {
+    if (unpressedLog !== undefined) return unpressedLog;
+    const log = structuredClone(await rideToTheFront());
+    mounted?.unmount();
+    mounted = undefined;
+    facts = [];
+    seen.session = undefined;
+    seen.frames.length = 0;
+    nowMs = 1_000_000;
+    // The picker as a first visit finds it, so the switch is pressed on again.
+    localStorage.removeItem(GROUP_RIDE_STORAGE_KEY);
+    return log;
+  }
+
   it('leaves a rider who presses nothing on the front: the control for the three below', async () => {
-    await rideToTheFront();
+    unpressedLog = structuredClone(await rideToTheFront());
     // On the front the button is available, and the rider is drawn in the line's lane.
     expect(hudButton(PULL_OFF_BUTTON_LABEL)?.hasAttribute('aria-disabled')).toBe(false);
     await aWindowOn();
@@ -947,14 +971,7 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
   });
 
   it('ends the pull on the lane key toward the pull-off side, and hears no key off the front', async () => {
-    const unpressed = await rideToTheFront();
-    mounted?.unmount();
-    mounted = undefined;
-    facts = [];
-    seen.session = undefined;
-    seen.frames.length = 0;
-    // The picker as a first visit finds it, so the switch is pressed on again.
-    localStorage.removeItem(GROUP_RIDE_STORAGE_KEY);
+    const unpressed = await unpressedRide();
     // The same line again, the key pressed before every frame in every role but on-front…
     const roles = new Set<string>();
     const pressed = await rideToTheFront(() => {

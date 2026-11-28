@@ -51,7 +51,7 @@ export {
 
 // The climb the front is told of (#3348): 0 from a climb's start to its crest,
 // which `courseHillsAhead` alone stops reporting 200 m before the top.
-export { lineClimbAheadM } from './climb-ahead';
+export { LINE_CLIMB_EASED_METRES, LINE_CLIMB_EASING_METRES, lineClimbAheadM } from './climb-ahead';
 
 // The rider's cue (#3302): at most one a window, events said once,
 // corrections out of band for a dwell and rate limited. Kinds, never

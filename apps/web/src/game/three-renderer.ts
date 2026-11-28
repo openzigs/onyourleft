@@ -12901,7 +12901,7 @@ export interface DrawnDeliveryPiece {
   readonly kind: DeliveryObstacleKind | DeliveryMarkerKind | undefined;
   /** For a parked car or a car pulling out (#2506), which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
-  /** For a car in a belt drawing the realistic cars (#2540, #2847), the pose its instance was given; else `undefined`. */
+  /** For a car, or since #3288 a dog, in a belt drawing the realistic cars (#2540, #2847), the pose its instance was given; else `undefined`. */
   readonly pose?: DeliveryCarPose | undefined;
   /** For a car in a belt drawing the PSX cars (#2847), which body its instance draws; else `undefined`. */
   readonly body?: number | undefined;
@@ -13636,6 +13636,8 @@ const DELIVERY_PAINT = {
   binLid: 0x244a2e,
   trolleyFrame: 0xb3362c,
   trolleyPlate: 0x8c8c8c,
+  // #3288: the realistic world's shopping trolley's basket, galvanised wire.
+  trolleyWire: 0xa3a9ad,
   coneBody: 0xe8661c,
   coneBand: 0xe6e6e6,
   carGlass: 0x2c3a46,
@@ -13799,12 +13801,118 @@ function obstacleHazardMarker(kind: DeliveryObstacleKind): BufferGeometry {
   return new ConeGeometry(reach, height, 4, 1).rotateX(Math.PI).translate(0, middle, 0);
 }
 
-/** A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded with tape. */
-function parcelShape(): BufferGeometry {
+/**
+ * A parcel, its middle at the origin: card 0.34 m × 0.22 m × 0.28 m, banded
+ * with tape. In the realistic world (#3288) it is taped both ways, a band
+ * round its length crossing one round its width, 36 triangles where the
+ * stylised parcel's one band makes 24.
+ */
+function parcelShape(world: 'stylised' | 'realistic' = 'stylised'): BufferGeometry {
   return deliveryShape([
     { made: deliveryBox(0.34, 0.22, 0.28, 0, 0, 0), colour: DELIVERY_PAINT.card },
     { made: deliveryBox(0.35, 0.23, 0.07, 0, 0, 0), colour: DELIVERY_PAINT.tape },
+    ...(world === 'realistic'
+      ? [{ made: deliveryBox(0.07, 0.232, 0.29, 0, 0, 0), colour: DELIVERY_PAINT.tape }]
+      : []),
   ]);
+}
+
+/**
+ * The stylised world's mailbox on its post — #2365, its post sturdier than a
+ * doorstep's since #2507. Its diamond and ring are {@link markerShape}'s.
+ */
+function stylisedMailboxParts(kind: number): readonly DeliveryPart[] {
+  const other = OTHER_MARKER_METRES;
+  const box = other.box;
+  const boxAcross = box * 0.6;
+  return [
+    {
+      made: deliveryBox(other.postThick, other.post, other.postThick, 0, other.post / 2, 0),
+      colour: DELIVERY_PAINT.post,
+      kind,
+    },
+    // #2507, the owner's ruling on PR #2518: a mailbox's shape, not a cube. Its
+    // lower half a box, its upper a half-round roof along its length, so it
+    // stands 0.6 of its length across and tall as before, and a red flag
+    // raised at its side, standing above the roof.
+    {
+      made: deliveryBox(boxAcross, boxAcross / 2, box, 0, other.post + boxAcross / 4, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind,
+    },
+    {
+      made: new CylinderGeometry(
+        boxAcross / 2,
+        boxAcross / 2,
+        box,
+        4,
+        1,
+        false,
+        Math.PI / 2,
+        Math.PI,
+      )
+        .rotateX(Math.PI / 2)
+        .translate(0, other.post + boxAcross / 2, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind,
+    },
+    {
+      made: deliveryBox(
+        0.03,
+        MAILBOX_FLAG_METRES.height,
+        MAILBOX_FLAG_METRES.length,
+        boxAcross / 2 + 0.02,
+        other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
+        -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
+      ),
+      colour: DELIVERY_PAINT.mailboxFlag,
+      kind,
+    },
+  ];
+}
+
+/**
+ * The realistic world's mailbox on its post — #3288, this project's own, the
+ * stylised mailbox's sizes ({@link OTHER_MARKER_METRES}, #2507) in rounder
+ * shapes: a six-sided post, the box and its half-round roof one solid whose
+ * roof shades round ({@link deliveryTunnel}), and its raised red flag a thin
+ * plate drawn on both faces. 48 triangles, the stylised mailbox's less its
+ * glowing diamond and ring, so the markers' geometry stays
+ * {@link DELIVERY_MARKER_TRIANGLES}. Only the drawing: the catch is still
+ * `delivery/throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`.
+ */
+function realisticMailboxParts(kind: number): readonly DeliveryPart[] {
+  const other = OTHER_MARKER_METRES;
+  const box = other.box;
+  const boxAcross = box * 0.6;
+  const flag = new PlaneGeometry(MAILBOX_FLAG_METRES.length, MAILBOX_FLAG_METRES.height).rotateY(
+    Math.PI / 2,
+  );
+  const flagBack = flag.clone().rotateY(Math.PI);
+  const flags = mergeGeometries([flag.toNonIndexed(), flagBack.toNonIndexed()]).translate(
+    boxAcross / 2 + 0.02,
+    other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
+    -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
+  );
+  flag.dispose();
+  flagBack.dispose();
+  return [
+    {
+      made: new CylinderGeometry(other.postThick / 2, other.postThick / 2, other.post, 6).translate(
+        0,
+        other.post / 2,
+        0,
+      ),
+      colour: DELIVERY_PAINT.post,
+      kind,
+    },
+    {
+      made: deliveryTunnel(boxAcross, boxAcross, box, 5).translate(0, other.post, 0),
+      colour: DELIVERY_PAINT.mailbox,
+      kind,
+    },
+    { made: flags, colour: DELIVERY_PAINT.mailboxFlag, kind },
+  ];
 }
 
 /**
@@ -13893,7 +14001,7 @@ export const MARKER_DIAMOND_HEIGHTS: Readonly<{ bottom: number; middle: number; 
  * with a smaller diamond and ring; and a no-delivery sign, a crossed ring on a
  * post with no ring on the step ({@link OTHER_MARKER_METRES}).
  */
-function markerShape(trim = true): BufferGeometry {
+function markerShape(trim = true, world: 'stylised' | 'realistic' = 'stylised'): BufferGeometry {
   const { post, postThick, diamond, ring } = MARKER_METRES;
   const half = diamond / 2;
   const kind = (marker: DeliveryMarkerKind): number => DELIVERY_MARKER_ORDER.indexOf(marker);
@@ -13922,48 +14030,10 @@ function markerShape(trim = true): BufferGeometry {
       kind: kind('house'),
     },
     // #2365: a mailbox at the kerb, on a sturdier post than a doorstep's since #2507.
-    {
-      made: deliveryBox(other.postThick, other.post, other.postThick, 0, other.post / 2, 0),
-      colour: DELIVERY_PAINT.post,
-      kind: kind('mailbox'),
-    },
-    // #2507, the owner's ruling on PR #2518: a mailbox's shape, not a cube. Its
-    // lower half a box, its upper a half-round roof along its length, so it
-    // stands 0.6 of its length across and tall as before, and a red flag
-    // raised at its side, standing above the roof.
-    {
-      made: deliveryBox(boxAcross, boxAcross / 2, box, 0, other.post + boxAcross / 4, 0),
-      colour: DELIVERY_PAINT.mailbox,
-      kind: kind('mailbox'),
-    },
-    {
-      made: new CylinderGeometry(
-        boxAcross / 2,
-        boxAcross / 2,
-        box,
-        4,
-        1,
-        false,
-        Math.PI / 2,
-        Math.PI,
-      )
-        .rotateX(Math.PI / 2)
-        .translate(0, other.post + boxAcross / 2, 0),
-      colour: DELIVERY_PAINT.mailbox,
-      kind: kind('mailbox'),
-    },
-    {
-      made: deliveryBox(
-        0.03,
-        MAILBOX_FLAG_METRES.height,
-        MAILBOX_FLAG_METRES.length,
-        boxAcross / 2 + 0.02,
-        other.post + boxAcross / 2 + MAILBOX_FLAG_METRES.height / 2,
-        -box / 2 + MAILBOX_FLAG_METRES.length / 2 + 0.05,
-      ),
-      colour: DELIVERY_PAINT.mailboxFlag,
-      kind: kind('mailbox'),
-    },
+    // #3288: the realistic world's own, in the same sizes.
+    ...(world === 'realistic'
+      ? realisticMailboxParts(kind('mailbox'))
+      : stylisedMailboxParts(kind('mailbox'))),
     // Its diamond: the mailbox's own amber, untoned (DELIVERY_PIECE_ALSO_ATTRIBUTE's `y`).
     {
       made: new OctahedronGeometry(mailboxHalf, 0)
@@ -14254,6 +14324,360 @@ function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
   );
 }
 
+/** A point in a Delivery piece's own frame, metres: across, up and along. */
+type DeliveryPoint = readonly [number, number, number];
+
+/**
+ * A round section from `from` to `to` — #3288: `sides` sided, `radius` round
+ * at `from` and `endRadius` at `to`, open at both ends, so the end of a dog's
+ * leg inside its body or of a trolley's handle inside its grip costs no
+ * triangle. Three sides by default: a 1.5 cm wire or a 3 cm leg reads as
+ * round at any distance the chase camera sees it from.
+ */
+function deliveryTube(
+  from: DeliveryPoint,
+  to: DeliveryPoint,
+  radius: number,
+  endRadius = radius,
+  sides = 3,
+): BufferGeometry {
+  const start = new Vector3(...from);
+  const way = new Vector3(...to).sub(start);
+  const length = way.length();
+  return new CylinderGeometry(endRadius, radius, length, sides, 1, true)
+    .translate(0, length / 2, 0)
+    .applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), way.normalize()))
+    .translate(start.x, start.y, start.z);
+}
+
+/**
+ * `made` seen from inside — #3288: the same triangles wound the other way
+ * and their normals turned about, so an open basket shows its inside walls
+ * and floor to an eye above it. The material draws front faces only.
+ */
+function turnedInsideOut(made: BufferGeometry): BufferGeometry {
+  const flat = made.index === null ? made : made.toNonIndexed();
+  const position = flat.getAttribute('position').array;
+  const normal = flat.getAttribute('normal').array;
+  const positions = new Float32Array(position.length);
+  const normals = new Float32Array(normal.length);
+  for (let corner = 0; corner < position.length / 3; corner += 1) {
+    // Each triangle's second and third corners swapped.
+    const from = corner % 3 === 1 ? corner + 1 : corner % 3 === 2 ? corner - 1 : corner;
+    for (let axis = 0; axis < 3; axis += 1) {
+      positions[corner * 3 + axis] = position[from * 3 + axis] as number;
+      normals[corner * 3 + axis] = -(normal[from * 3 + axis] as number);
+    }
+  }
+  if (flat !== made) flat.dispose();
+  made.dispose();
+  const inside = new BufferGeometry();
+  inside.setAttribute('position', new BufferAttribute(positions, 3));
+  inside.setAttribute('normal', new BufferAttribute(normals, 3));
+  return inside;
+}
+
+/**
+ * A mailbox's body — #3288: a box `across` wide and `tall` high whose top is
+ * a half-round `across` across, `length` long along `z`, standing on `y = 0`,
+ * its arc in `arcSegments` with normals round it, so it shades as round. One
+ * closed convex solid ({@link solidOf}), so the post's top inside it is
+ * trimmed. `4 × (arcSegments + 3) − 4` triangles.
+ */
+function deliveryTunnel(
+  across: number,
+  tall: number,
+  length: number,
+  arcSegments: number,
+): BufferGeometry {
+  const half = across / 2;
+  const springs = tall - half;
+  // The outline, anticlockwise seen from +z, each point with its outward normal.
+  const outline: (readonly [number, number, number, number])[] = [
+    [-half, 0, 0, -1],
+    [half, 0, 0, -1],
+  ];
+  for (let step = 0; step <= arcSegments; step += 1) {
+    const angle = (Math.PI * step) / arcSegments;
+    outline.push([
+      half * Math.cos(angle),
+      springs + half * Math.sin(angle),
+      Math.cos(angle),
+      Math.sin(angle),
+    ]);
+  }
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const corner = (x: number, y: number, z: number, nx: number, ny: number, nz: number): void => {
+    positions.push(x, y, z);
+    normals.push(nx, ny, nz);
+  };
+  const back = -length / 2;
+  const front = length / 2;
+  outline.forEach((here, at) => {
+    const next = outline[(at + 1) % outline.length] as (typeof outline)[number];
+    // The bottom and the two sides are flat; the arc's walls shade round.
+    const flat = at === 0 || at === 1 || at === outline.length - 1;
+    const [ax, ay] = here;
+    const [bx, by] = next;
+    const wall = [by - ay, ax - bx];
+    const size = Math.hypot(wall[0] as number, wall[1] as number);
+    const [anx, any] = flat
+      ? [(wall[0] as number) / size, (wall[1] as number) / size]
+      : [here[2], here[3]];
+    const [bnx, bny] = flat
+      ? [(wall[0] as number) / size, (wall[1] as number) / size]
+      : [next[2], next[3]];
+    corner(ax, ay, back, anx, any, 0);
+    corner(bx, by, back, bnx, bny, 0);
+    corner(ax, ay, front, anx, any, 0);
+    corner(bx, by, back, bnx, bny, 0);
+    corner(bx, by, front, bnx, bny, 0);
+    corner(ax, ay, front, anx, any, 0);
+  });
+  // The two ends, each fanned from the outline's first point.
+  const [fx, fy] = outline[0] as (typeof outline)[number];
+  for (let at = 1; at < outline.length - 1; at += 1) {
+    const [bx, by] = outline[at] as (typeof outline)[number];
+    const [cx, cy] = outline[at + 1] as (typeof outline)[number];
+    corner(fx, fy, front, 0, 0, 1);
+    corner(bx, by, front, 0, 0, 1);
+    corner(cx, cy, front, 0, 0, 1);
+    corner(fx, fy, back, 0, 0, -1);
+    corner(cx, cy, back, 0, 0, -1);
+    corner(bx, by, back, 0, 0, -1);
+  }
+  const tunnel = new BufferGeometry();
+  tunnel.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  tunnel.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3));
+  return tunnel;
+}
+
+/**
+ * Which way a dog's leg swings in its trot — #3288, in
+ * {@link DELIVERY_PIECE_ATTRIBUTE}'s `z` beside {@link DELIVERY_CAR_PART_CODES}'
+ * car parts: the front leg on its left side and the hind leg on its right
+ * swing with the pose (`lead`), the other two against it (`trail`), as a
+ * trotting dog's diagonal pairs do. Each swings about its hip, about the
+ * dog's own `z`, the axis across its body ({@link DELIVERY_CAR_POSE_GLSL}).
+ */
+const DELIVERY_DOG_LEG_CODES = { lead: 4, trail: 5 } as const;
+
+/**
+ * How far a dog runs in one whole trot, each diagonal pair of legs forward
+ * and back once, metres — #3288: **1**. A dog crossing at `obstacles.ts`
+ * §`OBSTACLE_KINDS`' 3 m/s trots three times a second, a medium dog's trot.
+ * This project's own number.
+ */
+export const DOG_TROT_STRIDE_METRES = 1;
+
+/**
+ * How far a dog's leg swings either side of straight down, radians — #3288:
+ * **0.45**, about 26°. Its foot rises about 4 cm at either end of the swing,
+ * so the whole dog stands inside its footprint (`delivery-car.test.ts`). This
+ * project's own number.
+ */
+export const DOG_LEG_SWING_RADIANS = 0.45;
+
+/**
+ * A dog's pose from how far it has run — #3288: its legs swing through the
+ * distance, {@link DOG_LEG_SWING_RADIANS} either side over each
+ * {@link DOG_TROT_STRIDE_METRES}, packed in a car pose's `roll`, the slot an
+ * obstacle instance already carries ({@link DELIVERY_CAR_POSE_ATTRIBUTE}), so
+ * the trot costs no attribute and no call. Nothing else moves: its body is
+ * never pitched, leaned or turned, so it stays upright and whole whatever
+ * happens to it (ADR 0065 D-10.6). A dog that has not run, or has stopped,
+ * holds the swing it has, and one that never set out stands square.
+ */
+export function deliveryDogPose(ranMetres: number | undefined): DeliveryCarPose {
+  if (ranMetres === undefined || !Number.isFinite(ranMetres)) return PARKED_CAR_POSE;
+  return {
+    ...PARKED_CAR_POSE,
+    roll: DOG_LEG_SWING_RADIANS * Math.sin((2 * Math.PI * ranMetres) / DOG_TROT_STRIDE_METRES),
+  };
+}
+
+/**
+ * The realistic world's wheelie bin — #3288, this project's own: a body that
+ * narrows to its foot and a lid that overhangs it, each eight-sided with its
+ * corners cut, so it shades round where the stylised bin's are square, on
+ * two six-sided wheels at its back. The body's top and the lid's underside
+ * meet and are trimmed ({@link trimmedPart}). 84 triangles.
+ * {@link fittedToFootprint} holds it to `obstacles.ts`' 0.6 m by 0.74 m.
+ */
+function realisticBinParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.bin;
+  const section = (top: number, bottom: number, height: number, foot: number): BufferGeometry =>
+    // A face square to each side, so the cut corners are the eight's diagonals.
+    new CylinderGeometry(top, bottom, height, 8, 1, false, Math.PI / 8)
+      .scale(0.56, 1, 0.64)
+      .translate(0, foot + height / 2, 0.02);
+  const parts: (readonly [BufferGeometry, number])[] = [
+    [section(0.5, 0.44, 0.92, 0), DELIVERY_PAINT.binBody],
+    [section(0.53, 0.5, 0.06, 0.92), DELIVERY_PAINT.binLid],
+  ];
+  for (const side of [-1, 1]) {
+    parts.push([
+      deliveryWheel(0.1, 0.06, side * 0.25, 0.1, -0.3, SMALL_WHEEL_SIDES),
+      DELIVERY_PAINT.black,
+    ]);
+  }
+  return fittedToFootprint(parts, halfWidth, halfLength);
+}
+
+/**
+ * The realistic world's shopping trolley — #3288, this project's own: a
+ * wire basket open at the top, its walls and floor drawn inside and out, on
+ * two six-sided wheels, with one pole up its back to a T grip. 72 triangles.
+ * {@link fittedToFootprint} holds it to `obstacles.ts`' 0.6 m by 0.5 m.
+ */
+function realisticTrolleyParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.trolley;
+  const wall = (): BufferGeometry =>
+    new CylinderGeometry(1, 0.9, 0.58, 4, 1, true, Math.PI / 4)
+      .scale(0.27, 1, 0.23)
+      .translate(0, 0.32, 0.04);
+  const floor = (facing: number): BufferGeometry =>
+    new PlaneGeometry(0.9 * 0.27 * Math.SQRT2, 0.9 * 0.23 * Math.SQRT2)
+      .rotateX((facing * Math.PI) / 2)
+      .translate(0, 0.03, 0.04);
+  const parts: (readonly [BufferGeometry, number])[] = [
+    [wall(), DELIVERY_PAINT.trolleyWire],
+    [turnedInsideOut(wall()), DELIVERY_PAINT.trolleyWire],
+    [floor(1), DELIVERY_PAINT.trolleyWire],
+    [floor(-1), DELIVERY_PAINT.trolleyWire],
+    [deliveryTube([0, 0.1, -0.13], [0, 1.02, -0.2], 0.015), DELIVERY_PAINT.trolleyFrame],
+    [deliveryTube([-0.1, 1.02, -0.2], [0.1, 1.02, -0.2], 0.02), DELIVERY_PAINT.black],
+  ];
+  for (const side of [-1, 1]) {
+    parts.push([
+      deliveryWheel(0.12, 0.05, side * 0.22, 0.12, -0.1, SMALL_WHEEL_SIDES),
+      DELIVERY_PAINT.black,
+    ]);
+  }
+  return fittedToFootprint(parts, halfWidth, halfLength);
+}
+
+/**
+ * The realistic world's traffic cone — #3288, this project's own: a square
+ * foot with sloping sides and a round cone on it, banded white between
+ * 0.35 m and 0.47 m. The band is a section of the cone, not a sleeve over
+ * it, so nothing is drawn twice. 42 triangles. {@link fittedToFootprint}
+ * holds it to `obstacles.ts`' 0.4 m square.
+ */
+function realisticConeParts(): readonly (readonly [BufferGeometry, number])[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.cone;
+  const foot = 0.04;
+  const tip = 0.74;
+  const radius = 0.15;
+  const sides = 6;
+  const radiusAt = (up: number): number => (radius * (tip - up)) / (tip - foot);
+  const section = (from: number, to: number): BufferGeometry =>
+    new CylinderGeometry(radiusAt(to), radiusAt(from), to - from, sides, 1, true).translate(
+      0,
+      (from + to) / 2,
+      0,
+    );
+  return fittedToFootprint(
+    [
+      // A square 0.4 m across its flats: a four-sided frustum turned an eighth.
+      [
+        new CylinderGeometry(
+          0.26,
+          halfWidth * Math.SQRT2,
+          foot,
+          4,
+          1,
+          false,
+          Math.PI / 4,
+        ).translate(0, foot / 2, 0),
+        DELIVERY_PAINT.black,
+      ],
+      [section(foot, 0.35), DELIVERY_PAINT.coneBody],
+      [section(0.35, 0.47), DELIVERY_PAINT.coneBand],
+      [
+        new ConeGeometry(radiusAt(0.47), tip - 0.47, sides, 1, true).translate(
+          0,
+          (0.47 + tip) / 2,
+          0,
+        ),
+        DELIVERY_PAINT.coneBody,
+      ],
+    ],
+    halfWidth,
+    halfLength,
+  );
+}
+
+/**
+ * The realistic world's dog — #3288, this project's own: a five-sided body
+ * that is deeper at the chest, a five-sided head narrowing to its muzzle,
+ * two pointed ears, a tail carried up, and four legs that trot
+ * ({@link deliveryDogPose}), each marked to swing about its hip
+ * ({@link DELIVERY_DOG_LEG_CODES}). Its head is along `+x`, as the
+ * stylised dog's is (`delivery/in-view.ts` §`obstacleTurn`). 65 triangles.
+ * {@link fittedToFootprint} holds it to `obstacles.ts`' 0.9 m across by
+ * 0.4 m along, standing square; swung, it stays inside.
+ */
+function realisticDogParts(kind: number): readonly DeliveryPart[] {
+  const { halfLength, halfWidth } = DELIVERY_OBSTACLE_FOOTPRINTS.dog;
+  // Five sides with a corner straight up: a spine along the top and a flat belly.
+  const along = (back: number, front: number, backRadius: number, frontRadius: number) =>
+    new CylinderGeometry(frontRadius, backRadius, front - back, 5, 1, false, 0.3 * Math.PI)
+      .rotateZ(-Math.PI / 2)
+      .translate((back + front) / 2, 0, 0);
+  const ear = (side: number): BufferGeometry =>
+    new ConeGeometry(0.035, 0.1, 3, 1, true)
+      .translate(0, 0.05, 0)
+      .rotateX(side * 0.35)
+      .translate(0.27, 0.65, side * 0.06);
+  const pieces: { made: BufferGeometry; colour: number; leg?: number }[] = [
+    { made: along(-0.25, 0.25, 0.11, 0.12).translate(0, 0.42, 0), colour: DELIVERY_PAINT.dogCoat },
+    { made: along(0.2, 0.48, 0.11, 0.045).translate(0, 0.57, 0), colour: DELIVERY_PAINT.dogCoat },
+    { made: ear(-1), colour: DELIVERY_PAINT.dogDark },
+    { made: ear(1), colour: DELIVERY_PAINT.dogDark },
+    {
+      // Carried up and back from its rump.
+      made: new ConeGeometry(0.025, 0.24, 3, 1, true)
+        .translate(0, 0.12, 0)
+        .rotateZ(0.8)
+        .translate(-0.24, 0.5, 0),
+      colour: DELIVERY_PAINT.dogDark,
+    },
+  ];
+  // The trot's diagonal pairs: the front left with the hind right, the front right with the hind left.
+  for (const [x, z, leg] of [
+    [0.18, 1, DELIVERY_DOG_LEG_CODES.lead],
+    [0.18, -1, DELIVERY_DOG_LEG_CODES.trail],
+    [-0.18, 1, DELIVERY_DOG_LEG_CODES.trail],
+    [-0.18, -1, DELIVERY_DOG_LEG_CODES.lead],
+  ] as const) {
+    pieces.push({
+      made: deliveryTube([x, 0.42, z * 0.08], [x, 0, z * 0.12], 0.035, 0.025),
+      colour: DELIVERY_PAINT.dogCoat,
+      leg,
+    });
+  }
+  fittedToFootprint(
+    pieces.map((piece) => [piece.made, piece.colour] as const),
+    halfWidth,
+    halfLength,
+  );
+  return pieces.map(({ made, colour, leg }): DeliveryPart => {
+    if (leg === undefined) return { made, colour, kind };
+    // Its hip, as fitted: the top of the leg.
+    made.computeBoundingBox();
+    const box = made.boundingBox as Box3;
+    return {
+      made,
+      colour,
+      kind,
+      carPart: leg,
+      pivot: [(box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2],
+    };
+  });
+}
+
 /**
  * The obstacle roster, every kind in one geometry, each vertex marked
  * with its kind (@see withObstacleKinds), standing on the road at the
@@ -14263,7 +14687,12 @@ function oncomingRiderParts(): readonly (readonly [BufferGeometry, number])[] {
  * Each kind also carries its hazard marker overhead ({@link
  * obstacleHazardMarker}, #2396), inside that footprint. Given `car` — the
  * realistic world's, #2540 — a parked car is that car
- * ({@link realisticCarParts}); otherwise it is this file's own.
+ * ({@link realisticCarParts}); otherwise it is this file's own. Given it,
+ * since #3288 the bin, the trolley, the cone and the dog are the realistic
+ * world's own too ({@link realisticBinParts}, {@link realisticTrolleyParts},
+ * {@link realisticConeParts}, {@link realisticDogParts}): the dog's trot
+ * needs the cars' pose, which only a belt given the cars splices
+ * ({@link withDeliveryCarPose}).
  */
 function obstacleShape(car?: DeliveryCarGeometry, trim = true): BufferGeometry {
   const parts: DeliveryPart[] = [];
@@ -14278,6 +14707,24 @@ function obstacleShape(car?: DeliveryCarGeometry, trim = true): BufferGeometry {
       glows: true,
       kind: DELIVERY_OBSTACLE_ORDER.indexOf(kind),
     });
+  }
+  // #2540, #2847: the realistic world's cars, where they are given. #2506: a car
+  // pulling out's instance draws them too; their indicators are their own, lit
+  // by the instance's lamps (DeliveryBelt.update). #3288: and its own props.
+  if (car !== undefined) {
+    for (const [made, colour] of realisticBinParts()) add('bin', made, colour);
+    for (const [made, colour] of realisticTrolleyParts()) add('trolley', made, colour);
+    for (const [made, colour] of realisticConeParts()) add('cone', made, colour);
+    parts.push(...realisticDogParts(DELIVERY_OBSTACLE_ORDER.indexOf('dog')));
+    for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
+    parts.push(
+      ...realisticCarParts(
+        car,
+        DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
+        DELIVERY_OBSTACLE_ORDER.indexOf('car-pulling-out'),
+      ),
+    );
+    return deliveryShape(parts, trim ? 'trim' : 'keep');
   }
   {
     const across = 2 * DELIVERY_OBSTACLE_FOOTPRINTS.bin.halfWidth;
@@ -14367,19 +14814,6 @@ function obstacleShape(car?: DeliveryCarGeometry, trim = true): BufferGeometry {
   // #2364: the moving hazards' own figures; a car pulling out is drawn as the car below.
   for (const [made, colour] of dogParts()) add('dog', made, colour);
   for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
-  // #2540, #2847: the realistic world's cars, where they are given. #2506: a car
-  // pulling out's instance draws them too; their indicators are their own, lit
-  // by the instance's lamps (DeliveryBelt.update).
-  if (car !== undefined) {
-    parts.push(
-      ...realisticCarParts(
-        car,
-        DELIVERY_OBSTACLE_ORDER.indexOf('parked-car'),
-        DELIVERY_OBSTACLE_ORDER.indexOf('car-pulling-out'),
-      ),
-    );
-    return deliveryShape(parts, trim ? 'trim' : 'keep');
-  }
   // One car: its body's vertices take the instance's paint (round 6). #2506: a
   // car pulling out's instance draws it too, and its lit indicators are that
   // kind's alone, so a parked car shows none.
@@ -14415,8 +14849,10 @@ export function deliveryPieceShape(
   trimmed: boolean,
   /** #2540: the realistic world's car, drawn as a parked car in its place. */
   car?: DeliveryCarGeometry,
+  /** #3288: whose markers, the realistic world's mailbox being its own. */
+  world: 'stylised' | 'realistic' = 'stylised',
 ): BufferGeometry {
-  return what === 'obstacles' ? obstacleShape(car, trimmed) : markerShape(trimmed);
+  return what === 'obstacles' ? obstacleShape(car, trimmed) : markerShape(trimmed, world);
 }
 
 /**
@@ -14721,8 +15157,10 @@ const INDICATOR_LIT_GAIN = 1.25;
  * lean)`: a wheel rolls about its axle (the car's `x`) and a front wheel then
  * steers about the vertical; the body pitches about `x` (its nose down for a
  * positive pitch) and leans about its length (its left side up for a
- * positive lean). Anything that is not a car part is left as it is.
- * `oylCarLampLevel` is how bright an indicator vertex is drawn for the
+ * positive lean). Since #3288 a realistic dog's leg swings about its hip,
+ * about `z`, by the pose's `roll`, one diagonal pair (4) with it and the other
+ * (5) against it ({@link DELIVERY_DOG_LEG_CODES}). Anything that is not a car
+ * part or a leg is left as it is. `oylCarLampLevel` is how bright an indicator vertex is drawn for the
  * instance's indicators. Spliced into the realistic Delivery obstacles'
  * material by {@link withDeliveryCarPose}, and run as text by
  * `delivery-car.test.ts`.
@@ -14737,6 +15175,12 @@ vec3 oylCarTurn( vec3 v, float part, vec4 pose ) {
 		float cl = cos( pose.w );
 		float sl = sin( pose.w );
 		return vec3( cl * v.x - sl * v.y, sl * v.x + cl * v.y, v.z );
+	}
+	if ( part > 3.5 ) {
+		float swing = part < 4.5 ? pose.x : -pose.x;
+		float cw = cos( swing );
+		float sw = sin( swing );
+		return vec3( cw * v.x - sw * v.y, sw * v.x + cw * v.y, v.z );
 	}
 	float cr = cos( pose.x );
 	float sr = sin( pose.x );
@@ -15111,11 +15555,15 @@ export const DELIVERY_MARKER_TRIANGLES = 180;
  * wheels and two indicators of 4) in place of Kenney's 1 192, 30 more an
  * instance and 600 on the frame of twenty: an instance submits all three
  * bodies and collapses the two it is not ({@link deliveryCarBodyVertexDrawn}).
+ * Then **1 637**, #3288: the realistic world's own bin (84), trolley (72),
+ * cone (42) and dog (65), 263, in place of the stylised ones' 58, 100, 42 and
+ * 66, 266: 3 fewer an instance, inside the figure as the issue asks, and not
+ * a split of the roster.
  *
  * @test-facing `delivery-car.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_640;
+export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_637;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
@@ -15214,7 +15662,8 @@ export class DeliveryBelt {
       lit: markerLit,
       flat: marker.flat === marker.lit ? markerLit : withObstacleKinds(marker.flat),
     };
-    const markers = markerShape();
+    // #3288: the realistic world's mailbox and parcel are its own.
+    const markers = markerShape(true, world);
     this.#markerKinds.setUsage(DynamicDrawUsage);
     markers.setAttribute(DELIVERY_OBSTACLE_ATTRIBUTE, this.#markerKinds);
     const obstacles = obstacleShape(this.#car);
@@ -15237,7 +15686,7 @@ export class DeliveryBelt {
     this.#rain.frustumCulled = false;
     this.#rain.visible = false;
     this.#meshes = {
-      parcels: made(parcelShape(), this.#materials.lit),
+      parcels: made(parcelShape(world), this.#materials.lit),
       markers: made(markers, this.#markerMaterials.lit),
       obstacles: made(obstacles, this.#obstacleMaterials.lit),
     };
@@ -15368,14 +15817,17 @@ export class DeliveryBelt {
       packed[at * 4 + 3] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
       // #2540: a car's pose, from how it moves; anything else, and a parked car, at rest.
       // #2847: a car's body, by its place on the round; anything else, the first's.
+      // #3288: a dog's, its legs trotting through how far it has run.
       if (this.#car !== undefined) {
         const body = isCarKind(piece.kind) ? deliveryCarBody(piece, this.#car.bodies.length) : 0;
         const pose =
-          piece.kind === 'car-pulling-out' && piece.car === undefined
-            ? PULLING_OUT_CAR_POSE
-            : isCarKind(piece.kind)
-              ? deliveryCarPose(piece.car, this.#car.bodies[body] as DeliveryCarBody)
-              : PARKED_CAR_POSE;
+          piece.kind === 'dog'
+            ? deliveryDogPose(piece.ranMetres)
+            : piece.kind === 'car-pulling-out' && piece.car === undefined
+              ? PULLING_OUT_CAR_POSE
+              : isCarKind(piece.kind)
+                ? deliveryCarPose(piece.car, this.#car.bodies[body] as DeliveryCarBody)
+                : PARKED_CAR_POSE;
         const poses = this.#poses.array as Float32Array;
         const lamps = this.#lamps.array as Float32Array;
         poses[at * 4] = pose.roll;
@@ -15444,8 +15896,9 @@ export class DeliveryBelt {
       const paint = car ? (this.#paintOf[at] as number) : undefined;
       const poses = this.#poses.array;
       const lamps = this.#lamps.array;
+      // #3288: a realistic dog's too, its legs' swing in `roll`.
       const pose =
-        car && this.#car !== undefined
+        (car || (what === 'obstacles' && kind === 'dog')) && this.#car !== undefined
           ? {
               roll: poses[at * 4] as number,
               steer: poses[at * 4 + 1] as number,
@@ -25647,6 +26100,11 @@ export class MappedBuildingBelt {
   readonly #roofAt: Int32Array;
   /** Each drawn building's first vertex of its spire, in the slate's range — #2206. */
   readonly #spireAt: Int32Array;
+  /**
+   * Each drawn wrap's first vertex of its paved apron, in its wall surface's range; -1
+   * for an extrusion, a model or a wrap not paved — #3349, read by the control alone.
+   */
+  readonly #apronAt: Int32Array;
   /** Each drawn building's vertex after its model, or -1 for an extrusion — #1835. */
   readonly #modelEnd: Int32Array;
   /** Which drawn buildings the near plane would cut this frame, so are drawn as nothing — #1835. @see clearOf */
@@ -25706,6 +26164,7 @@ export class MappedBuildingBelt {
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
+    this.#apronAt = new Int32Array(this.#selection.plans.length);
     this.#materials = drawnIn.surfaces;
     const first = this.#materials.get(FOOTPRINT_SURFACES[0] as StructureSurface) as Material;
     this.#slots = Array.from({ length: MAPPED_BUILDING_DRAW_CALLS }, () => first);
@@ -26058,6 +26517,7 @@ export class MappedBuildingBelt {
       // #1585: a modelled plan's triangles are its model's, in the models' buffer.
       // #1835: a refill writes every building whole; `clearOf` hides again.
       this.#hidden[at] = 0;
+      this.#apronAt[at] = -1;
       if (selection.modelled[at] === 1 && plan.model !== undefined) {
         this.#modelAt[at] = modelEnd;
         this.#wallAt[at] = -1;
@@ -26075,6 +26535,7 @@ export class MappedBuildingBelt {
         // And its paved apron, where the selection counted it: ground, in its wall's surface.
         if (selection.paved[at] === 1) {
           const slot = surfaces.indexOf(plan.surfaces.wall);
+          this.#apronAt[at] = this.#cursors[slot] as number;
           this.#cursors[slot] = this.#append(plan, 'apron', this.#cursors[slot] as number);
         }
         continue;
@@ -26185,12 +26646,26 @@ export class MappedBuildingBelt {
     }
   }
 
-  /** The browser gate's control: a group — a draw call — per building and surface. */
+  /**
+   * The browser gate's control: a group — a draw call — per building and surface.
+   * #3349: a model or a wrap has no range here (its `#wallAt` and `#roofAt` are -1):
+   * its triangles are in the models' buffer, in that buffer's one call, and only a
+   * paved wrap's apron, written here, is a group of its own.
+   */
   #groupEachBuilding(): void {
     const selection = this.#selection;
+    const geometry = this.mesh.geometry;
+    const surfaces = selection.surfaces;
     for (let at = 0; at < selection.count; at += 1) {
-      if (selection.modelled[at] === 1) continue;
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      if (this.#wallAt[at] === -1) {
+        const apron = this.#apronAt[at] as number;
+        if (apron !== -1) {
+          const count = roleTriangles(plan, 'apron') * 3;
+          geometry.addGroup(apron, count, surfaces.indexOf(plan.surfaces.wall));
+        }
+        continue;
+      }
       let walls = 0;
       let roofs = 0;
       let spires = 0;
@@ -26199,8 +26674,6 @@ export class MappedBuildingBelt {
         else if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
         else walls += roleTriangles(plan, role) * 3;
       }
-      const geometry = this.mesh.geometry;
-      const surfaces = selection.surfaces;
       geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
       geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
       // #2206: a spire's slate, a group of its own where the roof is not slate.

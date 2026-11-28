@@ -160,6 +160,8 @@ describe('the line stays together over the hilly fixture (criterion 1)', () => {
     // last 10 m sample is where the grade falls under a climb's 3 %.
     expect(starts.filter((at) => at >= 2_700 && at < 4_490)).toEqual([]);
     expect(starts.filter((at) => at < 2_700).length).toBeGreaterThan(5);
+    // And the hold lifts at the crest (#3362): the change it deferred starts just over it.
+    expect(starts.some((at) => at >= 4_490 && at < 4_800)).toBe(true);
   });
 });
 
