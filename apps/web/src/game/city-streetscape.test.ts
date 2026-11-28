@@ -38,7 +38,7 @@ import { ROAD_CLEARANCE_METRES } from './landform';
 import { MappedSelection, mappedBuildingsOf, selectMappedBuildings } from './mapped-buildings';
 import { MAPPED_BUILDING_DRAW_CALLS, MAPPED_BUILDING_TRIANGLES } from './realistic-budget';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
-import { hairpinRoute, northRoute } from './route-fixtures-testing';
+import { hairpinRoute, lollipopRoute, northRoute, outAndBackRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import type { SceneFrame } from './port';
 import { sceneFrame, type SceneInput } from './scene';
@@ -737,6 +737,205 @@ describe('a city centre’s lots — #1637', () => {
     expect(frame.scatter.filter((item) => item.paint !== undefined)).toEqual(
       noneFrame.scatter.filter((item) => item.paint !== undefined),
     );
+  });
+});
+
+describe('a city centre’s road ridden twice — #3416', () => {
+  /**
+   * The terraced blocks `footprintPlans` hands back for `profile`, with
+   * commercial land 40 m either side of its road, in 10 m pieces so no curve
+   * is cut, and no mapped footprint: every block is the plan's own.
+   */
+  function blocksOn(profile: RouteProfile): {
+    readonly blocks: readonly FootprintPlan[];
+    readonly origin: ReturnType<typeof corridorOrigin>;
+  } {
+    const origin = corridorOrigin(profile);
+    const corridor: WorldCorridor = {
+      routeId: 'ridden-twice',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -2_000, maxX: 2_000, minZ: -2_000, maxZ: 2_000 }],
+      landUse: Array.from({ length: Math.ceil(profile.totalDistance / 10) }, (_, piece) =>
+        landBeside(
+          profile,
+          origin,
+          'landuse',
+          'commercial',
+          piece * 10,
+          Math.min(piece * 10 + 11, profile.totalDistance),
+          -40,
+          40,
+        ),
+      ),
+      buildings: [],
+      paths: [],
+      streets: [],
+    };
+    const { plans } = footprintPlans(
+      corridor,
+      landClassMask(corridor),
+      profile,
+      origin,
+      FOOTPRINT_MAX_VERTICES,
+      everywhere('city-centre'),
+    );
+    return {
+      blocks: plans.filter(
+        (plan) => plan.urban === 'city-centre' && TERRACE_STOREYS.includes(plan.storeys),
+      ),
+      origin,
+    };
+  }
+
+  /** The corners of a plan's footprint. */
+  function cornersOf(plan: FootprintPlan): { readonly x: number; readonly z: number }[] {
+    const corners = [];
+    for (let at = 0; at + 1 < plan.footprint.length; at += 2) {
+      corners.push({ x: plan.footprint[at] as number, z: plan.footprint[at + 1] as number });
+    }
+    return corners;
+  }
+
+  /** Whether `(x, z)` lies inside `plan`'s footprint. */
+  function inside(plan: FootprintPlan, x: number, z: number): boolean {
+    const corners = cornersOf(plan);
+    let within = false;
+    for (let i = 0, j = corners.length - 1; i < corners.length; j = i, i += 1) {
+      const a = corners[i]!;
+      const b = corners[j]!;
+      if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) {
+        within = !within;
+      }
+    }
+    return within;
+  }
+
+  /**
+   * Points well inside `plan`'s footprint: its centroid, and nine tenths of the
+   * way from it to each corner and to each edge's middle.
+   */
+  function interiorOf(plan: FootprintPlan): { readonly x: number; readonly z: number }[] {
+    const { x, z } = plan.centroid;
+    const corners = cornersOf(plan);
+    const toward = corners.flatMap((corner, at) => {
+      const next = corners[(at + 1) % corners.length]!;
+      return [corner, { x: (corner.x + next.x) / 2, z: (corner.z + next.z) / 2 }];
+    });
+    return [{ x, z }, ...toward.map((p) => ({ x: x + (p.x - x) * 0.9, z: z + (p.z - z) * 0.9 }))];
+  }
+
+  /** How many pairs of `blocks` overlap: a point well inside one lies inside the other. */
+  function overlapping(blocks: readonly FootprintPlan[]): number {
+    let pairs = 0;
+    for (let a = 0; a < blocks.length; a += 1) {
+      for (let b = a + 1; b < blocks.length; b += 1) {
+        const [one, other] = [blocks[a]!, blocks[b]!];
+        if (Math.hypot(one.centroid.x - other.centroid.x, one.centroid.z - other.centroid.z) > 60) {
+          continue;
+        }
+        if (
+          interiorOf(one).some((p) => inside(other, p.x, p.z)) ||
+          interiorOf(other).some((p) => inside(one, p.x, p.z))
+        ) {
+          pairs += 1;
+        }
+      }
+    }
+    return pairs;
+  }
+
+  /**
+   * The wall vertices of `plan` on the edge of its footprint nearest the road:
+   * its front, the face the rider sees.
+   */
+  function frontWallOf(
+    plan: FootprintPlan,
+    profile: RouteProfile,
+    origin: ReturnType<typeof corridorOrigin>,
+  ): Vertex[] {
+    const corners = cornersOf(plan);
+    let nearest = 0;
+    let least = Number.POSITIVE_INFINITY;
+    corners.forEach((corner, at) => {
+      const next = corners[(at + 1) % corners.length]!;
+      const out = distanceToDrawnRoad(
+        profile,
+        origin,
+        (corner.x + next.x) / 2,
+        (corner.z + next.z) / 2,
+        60,
+      );
+      if (out < least) [nearest, least] = [at, out];
+    });
+    const a = corners[nearest]!;
+    const b = corners[(nearest + 1) % corners.length]!;
+    const length = Math.hypot(b.x - a.x, b.z - a.z);
+    const on = (v: Vertex): boolean => {
+      const offset = Math.abs(((v.x - a.x) * (b.z - a.z) - (v.z - a.z) * (b.x - a.x)) / length);
+      const t = ((v.x - a.x) * (b.x - a.x) + (v.z - a.z) * (b.z - a.z)) / (length * length);
+      return offset < 0.25 && t > -0.05 && t < 1.05;
+    };
+    const vertices = wallVertices(plan);
+    const front: Vertex[] = [];
+    for (let i = 0; i + 2 < vertices.length; i += 3) {
+      const three = vertices.slice(i, i + 3);
+      if (three.every(on)) front.push(...three);
+    }
+    return front;
+  }
+
+  /** Every way `blocks` fall short of a street of terraced blocks, as a readable list. */
+  function faults(
+    blocks: readonly FootprintPlan[],
+    profile: RouteProfile,
+    origin: ReturnType<typeof corridorOrigin>,
+  ): string[] {
+    const out: string[] = [];
+    blocks.forEach((plan, at) => {
+      const front = frontWallOf(plan, profile, origin);
+      // By its place in the list, never by where it stands (ADR 0004 decision D).
+      const where = `block ${at}`;
+      if (front.length === 0) {
+        out.push(`${where} has no wall facing the road`);
+        return;
+      }
+      // Down to the ground storey, with its windows: not a strip under a floating roof.
+      if (Math.min(...front.map((v) => v.y)) > plan.base + STOREY_METRES) {
+        out.push(`${where} has no wall below its upper storeys`);
+      }
+      if (!front.some((v) => v.top > 0)) out.push(`${where} has no window on its front`);
+      if (plan.triangles.shopfront.length === 0) out.push(`${where} has no shop front`);
+    });
+    return out;
+  }
+
+  it.each([
+    ['an out-and-back', outAndBackRoute],
+    ['a lollipop, its stem ridden both ways', lollipopRoute],
+  ])('plans one block a place on %s: no two overlap, and each keeps its front', (_, route) => {
+    const profile = route();
+    const { blocks, origin } = blocksOn(profile);
+    // Non-vacuity: the street is built up its whole way, both sides.
+    expect(blocks.length).toBeGreaterThan(100);
+    expect(overlapping(blocks)).toBe(0);
+    expect(faults(blocks, profile, origin)).toEqual([]);
+  });
+
+  it('plans the same street as the road ridden one way only: the control', () => {
+    const once = outAndBackRoute({ oneWay: true });
+    const one = blocksOn(once);
+    expect(overlapping(one.blocks)).toBe(0);
+    expect(faults(one.blocks, once, one.origin)).toEqual([]);
+    // Ridden there and back, the street is as long and as full: the way back adds no block.
+    const twice = blocksOn(outAndBackRoute()).blocks;
+    expect(Math.abs(twice.length - one.blocks.length)).toBeLessThanOrEqual(4);
+    // Every block of the way back's street stands where one of the way out's does.
+    for (const plan of twice) {
+      expect(one.blocks.some((other) => inside(other, plan.centroid.x, plan.centroid.z))).toBe(
+        true,
+      );
+    }
   });
 });
 
