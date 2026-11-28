@@ -147,6 +147,14 @@ report() {
 # committed on the branch a worktree holds is REL001's business on that branch,
 # where this same script runs.
 #
+# ⚠️ The last three since #1756 are the iOS counterparts of the three Android
+# trees, for the same reason: `cap sync ios` copies the web build to
+# `ios/App/App/public`, writes `ios/App/App/config.xml` and fills
+# `ios/capacitor-cordova-ios-plugins/`, and Capacitor's own
+# `apps/mobile/ios/.gitignore` keeps all three out of the repository. Unpruned,
+# one local sync made this script report 252 violations, nearly all ASSET001
+# over the copied realistic-world binaries.
+#
 # ⚠️ `__pycache__` since #900: Python writes one beside any module a script
 # imports, and the realistic pipeline's Blender scripts import siblings
 # (`rider_kit.py`, `gltf_import.py`). Until #900 the only thing keeping a
@@ -160,6 +168,9 @@ GENERATED=(
   -o -name capacitor-cordova-android-plugins
   -o -path '*/main/assets/public'
   -o -path '*/main/res/xml/config.xml'
+  -o -name capacitor-cordova-ios-plugins
+  -o -path '*/ios/App/App/public'
+  -o -path '*/ios/App/App/config.xml'
 )
 
 # Every file this repository authors: the walk above, with nothing else added.
@@ -196,6 +207,12 @@ repo_files_z() {
 # compatible with it -- and until this line a Python file there passed with no
 # header at all. `# SPDX-License-Identifier: ...` is the comment form, and a
 # shebang on line 1 leaves four lines for it, which `spdx_of` already reads.
+#
+# ⚠️ `.swift` since #1756, the first `apps/mobile/ios/` tree. Swift's comment is
+# `//`, so the header is the TypeScript one. The four Swift files `cap add ios`
+# wrote from Capacitor's MIT template are named in `.spdx-exempt`, one exact
+# path at a time, as the Android ones are; a Swift file this repository writes
+# carries the header.
 source_files() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
@@ -204,7 +221,8 @@ source_files() {
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
                -o -name '*.mjs' -o -name '*.cjs' -o -name '*.css' -o -name '*.sh' \
                -o -name '*.kt' -o -name '*.kts' -o -name '*.java' \
-               -o -name '*.gradle' -o -name '*.xml' -o -name '*.py' \) -print
+               -o -name '*.gradle' -o -name '*.xml' -o -name '*.py' \
+               -o -name '*.swift' \) -print
 }
 
 # --- .spdx-exempt: generated scaffolding, named one exact path at a time ------

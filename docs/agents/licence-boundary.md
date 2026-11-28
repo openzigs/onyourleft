@@ -63,7 +63,8 @@ What this means in practice:
 [#87](https://github.com/openzigs/onyourleft/issues/87) — `.kt`, `.kts`, `.java`, `.gradle` and
 `.xml`, and — since [#430](https://github.com/openzigs/onyourleft/issues/430) — `.py`, because the
 realistic world's Blender scripts live under `apps/` (ADR 0026 D-5) and a Python file there passed
-with no header at all. The identifier may sit anywhere in the first **five** lines, not only the first, because a
+with no header at all. Since [#1756](https://github.com/openzigs/onyourleft/issues/1756) `.swift` too, for the first
+`apps/mobile/ios/` tree; the four Swift files `cap add ios` wrote are in `.spdx-exempt`. The identifier may sit anywhere in the first **five** lines, not only the first, because a
 shebang and an XML declaration both legitimately precede it. An `AndroidManifest.xml` therefore
 carries `<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->` on line 2.
 
@@ -95,7 +96,9 @@ WebView in the page's canvas colour.
 
 ⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
 `android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
-`android/capacitor-cordova-android-plugins/`. `cap sync` regenerates all three and Capacitor's own
+`android/capacitor-cordova-android-plugins/` — and, since #1756, their iOS counterparts
+`ios/App/App/public`, `ios/App/App/config.xml` and `ios/capacitor-cordova-ios-plugins/`. `cap sync`
+regenerates all of them and Capacitor's own
 nested `.gitignore` keeps them out of the repository, so they are absent from a clean clone and an
 `.spdx-exempt` entry naming one would be a `LIC006` violation. `.prettierignore` carries the same
 three plus two generated JSON assets, because **Prettier reads only the root `.gitignore`, not a

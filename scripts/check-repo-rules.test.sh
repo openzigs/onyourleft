@@ -1412,6 +1412,25 @@ printf '<?xml version="1.0" encoding="utf-8"?>\n<!-- SPDX-License-Identifier: AG
   > "${fixture_root}/apps/mobile/res/probe.xml"
 assert_clean "an .xml header on line 2, after the XML declaration, is accepted"
 
+# --- LIC001/LIC002 reach Swift (#1756) ---------------------------------------
+#
+# The first `apps/mobile/ios/` tree. Until #1756 a `.swift` file was in no
+# scanned extension, so a Swift file this repository wrote passed with no
+# header at all. One case per direction, and the comment form Swift uses.
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/App/App"
+printf 'import UIKit\n' > "${fixture_root}/apps/mobile/ios/App/App/Probe.swift"
+assert_violation "a .swift file without a header is rejected" LIC002 \
+  "apps/mobile/ios/App/App/Probe.swift: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/App/App"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nimport UIKit\n' \
+  > "${fixture_root}/apps/mobile/ios/App/App/Probe.swift"
+assert_clean "a .swift file carrying the AGPL header passes"
+
 # --- LIC001/LIC002 reach Python (#430, ADR 0026 D-5) -------------------------
 #
 # The asset pipeline's Blender scripts are the first Python in the tree, and
@@ -1572,6 +1591,37 @@ mkdir -p "${fixture_root}/apps/mobile/android/app/src/main/res/xml"
 printf '<?xml version="1.0"?>\n<widget />\n' \
   > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/config.xml"
 assert_clean "the generated res/xml/config.xml is not scanned"
+
+# #1756: the iOS counterparts, which `cap sync ios` writes and Capacitor's
+# `apps/mobile/ios/.gitignore` keeps out of the repository.
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/App/App/public/assets"
+printf 'console.log(1);\n' \
+  > "${fixture_root}/apps/mobile/ios/App/App/public/assets/index-abc123.js"
+assert_clean "the copied web build under ios/App/App/public is not scanned"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/App/App"
+printf '<?xml version="1.0"?>\n<widget />\n' \
+  > "${fixture_root}/apps/mobile/ios/App/App/config.xml"
+assert_clean "the generated ios/App/App/config.xml is not scanned"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/capacitor-cordova-ios-plugins/sources"
+printf 'import UIKit\n' \
+  > "${fixture_root}/apps/mobile/ios/capacitor-cordova-ios-plugins/sources/Probe.swift"
+assert_clean "the generated Cordova plugin tree for iOS is not scanned"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/ios/App/Other"
+printf '<?xml version="1.0"?>\n<widget />\n' \
+  > "${fixture_root}/apps/mobile/ios/App/Other/config.xml"
+assert_violation "a config.xml one directory across from the pruned one is scanned" LIC002 \
+  "apps/mobile/ios/App/Other/config.xml: no SPDX-License-Identifier"
 
 # --- REL001: signing key material must never be committed (#95) --------------
 #

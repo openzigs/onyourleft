@@ -1311,9 +1311,14 @@ describe('the required check is one job over every shard — #1285', () => {
   });
 
   it('runs every job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {
+    // The `ios` shard (#1756) is the one job a Linux runner cannot do, and it
+    // is EXACTLY `macos-latest`: every `-large` / `-xlarge` label is billed
+    // even on this public repository. apps/mobile/tools/ios-ci.test.mjs holds
+    // the rest of that job.
     for (const [id, job] of jobs) {
-      expect(jobField(job, 'runs-on'), id).toBe('ubuntu-latest');
+      expect(jobField(job, 'runs-on'), id).toBe(id === 'ios' ? 'macos-latest' : 'ubuntu-latest');
     }
+    expect(jobs.has('ios')).toBe(true);
     const uses = [...workflow.matchAll(/^ +uses: (\S+)/gm)].map((match) => String(match[1]));
     expect(uses.length).toBeGreaterThan(jobs.size);
     for (const action of uses) expect(action).toMatch(/^[\w-]+\/[\w-]+@[0-9a-f]{40}$/);
