@@ -38,7 +38,8 @@ import { ANNOUNCEMENTS_STORAGE_KEY } from '../hud/announce-preference';
 import type { PadSnapshot } from '../gamepad-port';
 import { PULL_OFF_BUTTON_LABEL, SIT_IN_BUTTON_LABEL } from '../hud/GroupRideControls';
 import { LANE_OFFSETS_METRES } from '../lanes';
-import type { GameRenderer } from '../port';
+import { CAMERA_ABOVE_METRES, CAMERA_BEHIND_METRES, cameraRig, GROUP_RIDE_CAMERA } from '../camera';
+import type { GameRenderer, SceneFrame } from '../port';
 import { DEFAULT_LAP_RACE_CHOICE } from '../lap-race/choice';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import type { SceneInput } from '../scene';
@@ -60,6 +61,8 @@ const seen = vi.hoisted(() => ({
   frames: [] as Pick<SceneInput, 'raceBots' | 'steeredLateral' | 'botDistance' | 'state'>[],
   /** The group's session as the ride's newest step left it (#3307): read, never called. */
   session: undefined as GroupRideSession | undefined,
+  /** Every frame the renderer was handed, in order (#3371): its camera and its riders. */
+  drawn: [] as Pick<SceneFrame, 'camera' | 'markers'>[],
 }));
 
 vi.mock('./ride-group', async (importOriginal) => {
@@ -103,7 +106,7 @@ const ROUTE: RidableRoute = {
   attempts: 0,
 };
 
-/** A loop of about 250 m of the rider's own, where a lap race is offered and a group is not (#3369). */
+/** A loop of about 250 m of the rider's own, where a lap race and a group are both offered (#3369). */
 const LOOP: RidableRoute = {
   id: 'route-loop',
   name: 'Loop',
@@ -135,7 +138,14 @@ const renderer: GameRenderer = {
   create: () => ({
     hasContext: true,
     prepare: () => Promise.resolve(),
-    render: () => undefined,
+    render: (frame) => {
+      // Only the camera and the rider: a whole frame kept for every step of a
+      // long ride is memory this file's slowest cases do not need to carry.
+      seen.drawn.push({
+        camera: frame.camera,
+        markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+      });
+    },
     setQuality: () => undefined,
     setRiderKit: () => undefined,
     setSeason: () => undefined,
@@ -182,6 +192,7 @@ beforeEach(() => {
   seen.simulations.length = 0;
   seen.frames.length = 0;
   seen.session = undefined;
+  seen.drawn.length = 0;
   pending = [];
   nowMs = 1_000_000;
   facts = [];
@@ -477,16 +488,31 @@ describe('one mode a ride', () => {
     await expectEitherOr('Ride against a pacer');
   });
 
+  it('a lap race or the group, on a loop', async () => {
+    await open({ route: LOOP });
+    await expectEitherOr('Ride a lap race');
+  });
+
   it('a Delivery round or the group, in the realistic world', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await open();
     await expectEitherOr('Ride a Delivery round');
   });
 
-  it('a course opened for a game starts with the group off, and forgets nothing', async () => {
+  it('a course opened for a lap race starts with the group off, and forgets nothing', async () => {
     const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
     localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
-    // A Delivery round, on a road the group is offered on: a loop is offered none (#3369).
+    globalThis.location.hash = '#/game?play=lap-race';
+    await open({ route: LOOP });
+    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    expect(groupSwitch()?.disabled).toBe(false);
+    expect(groupSwitch()?.checked).toBe(false);
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
+  });
+
+  it('a course opened for a Delivery round starts with the group off, and forgets nothing', async () => {
+    const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
+    localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     globalThis.location.hash = '#/game?play=delivery';
     await open();
@@ -549,24 +575,50 @@ describe('what a group ride is not offered beside — ADR 0101 D-1.5', () => {
     expect(facts).toStrictEqual([]);
   });
 
-  it('a loop: the same, with its own sentence, because the plan is one pass (#3369)', async () => {
+  it('a loop is not among them: the group is offered there and rides past the lap line (#3369)', async () => {
     localStorage.setItem(
       GROUP_RIDE_STORAGE_KEY,
       JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
     );
     await open({ route: LOOP, port: ridePort() });
-    expect(groupSwitch()?.disabled).toBe(true);
-    expect(groupSwitch()?.checked).toBe(false);
-    expect(speedBox()).toBeUndefined();
-    expect(root().textContent).toContain(GROUP_RIDE_UNAVAILABLE_TEXT.loop);
-    // The lap race is still offered on a loop, and is not switched off by the group.
-    expect(toggle('Ride a lap race')?.disabled).toBe(false);
+    expect(groupSwitch()?.disabled).toBe(false);
+    expect(groupSwitch()?.checked).toBe(true);
+    expect(speedBox()?.value).toBe('30');
+    // The lap race is still offered beside it, off.
+    expect(toggle('Ride a lap race')?.checked).toBe(false);
     await clickThrough(rideButton());
-    const factors = await frames(40);
-    expect(factors.length).toBeGreaterThan(0);
-    expect(new Set(factors)).toStrictEqual(new Set([1]));
-    expect(seen.frames.every((frame) => frame.raceBots === undefined)).toBe(true);
-    expect(facts).toStrictEqual([]);
+    // 80 s: the 250 m loop's lap line is behind the rider well inside it.
+    const factors = await frames(320);
+    const lap = LOOP.profile.totalDistance;
+    expect(seen.simulations[0]?.state.ride.distance ?? 0).toBeGreaterThan(lap);
+    // The group is still there on the second lap: drawn, drafting the rider, and kept.
+    expect(lastFrame()?.raceBots).toHaveLength(5);
+    expect(Math.min(...factors.slice(-40))).toBeLessThan(1);
+    expect(facts.at(-1)?.bots).toBe(5);
+    // And its plan still advances: the ledger stays inside its full band of
+    // the plan (20 s), where a plan stuck at the lap's end would read the
+    // group later by every second ridden past the lap line.
+    const session = seen.session as GroupRideSession;
+    // The front: the bot furthest along the road.
+    const front = Math.max(...session.botIds.map((id) => session.state.bots[id]?.distanceM ?? 0));
+    expect(front).toBeGreaterThan(lap);
+    const late = session.state.ledger.ridingSeconds - session.road.plan.plannedSecondsAt(front);
+    expect(Math.abs(late)).toBeLessThan(20);
+  });
+
+  it('keeps the rider’s setting when another mode goes on while the group is not offered (#3369)', async () => {
+    const kept = JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 });
+    localStorage.setItem(GROUP_RIDE_STORAGE_KEY, kept);
+    // On a loop with a workout holding the trainer: the group is not offered, the lap race is.
+    await open({ route: LOOP, port: ridePort({ workout: true }) });
+    expect(groupSwitch()?.disabled).toBe(true);
+    await clickThrough(toggle('Ride a lap race'));
+    expect(toggle('Ride a lap race')?.checked).toBe(true);
+    await clickThrough(toggle('Ride a lap race'));
+    await clickThrough(toggle('Ride against a pacer'));
+    expect(toggle('Ride against a pacer')?.checked).toBe(true);
+    // The rider never saw the group on, so nothing switched it off on the device.
+    expect(localStorage.getItem(GROUP_RIDE_STORAGE_KEY)).toBe(kept);
   });
 
   it('the draft switched off on this device: the same, with its own sentence', async () => {
@@ -607,6 +659,71 @@ describe('the group ride ends at the finish — the review of PR #3364', () => {
     expect(kept).toBeGreaterThan(0);
     await frames(20);
     expect(facts).toHaveLength(kept);
+  });
+});
+
+describe('the camera shows the line — #3371', () => {
+  /**
+   * How far behind the drawn rider, along the camera's heading, and how far
+   * above them the eye of the camera the renderer was handed stands. The road
+   * is level, so above the rider is above the road under the eye.
+   */
+  function eyeFromRider(frame: Pick<SceneFrame, 'camera' | 'markers'>): {
+    readonly back: number;
+    readonly up: number;
+  } {
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) throw new Error('no rider on the frame');
+    const { eye } = cameraRig(frame.camera);
+    return {
+      back: (rider.x - eye.x) * frame.camera.headingX + (rider.z - eye.z) * frame.camera.headingZ,
+      up: eye.y - rider.y,
+    };
+  }
+  const GROUP_BACK = CAMERA_BEHIND_METRES + GROUP_RIDE_CAMERA.backMetres;
+  const GROUP_UP = CAMERA_ABOVE_METRES + GROUP_RIDE_CAMERA.upMetres;
+
+  it('stands the camera back and up from the first drawn frame of a group ride to the last', async () => {
+    await ride({ group: true, port: ridePort() }, 40);
+    expect(seen.drawn.length).toBeGreaterThan(30);
+    for (const frame of seen.drawn) {
+      const { back, up } = eyeFromRider(frame);
+      expect(back).toBeCloseTo(GROUP_BACK, 1);
+      expect(up).toBeCloseTo(GROUP_UP, 1);
+    }
+  });
+
+  it('keeps the solo camera on the same press without the switch', async () => {
+    await ride({ port: ridePort() }, 40);
+    expect(seen.drawn.length).toBeGreaterThan(30);
+    for (const frame of seen.drawn) {
+      const { back, up } = eyeFromRider(frame);
+      expect(back).toBeCloseTo(CAMERA_BEHIND_METRES, 1);
+      expect(up).toBeCloseTo(CAMERA_ABOVE_METRES, 1);
+    }
+  });
+
+  it('eases back to the solo camera over a second and a half once the group is gone at the finish', async () => {
+    await ride({ group: true, route: SHORT, port: ridePort() }, 240);
+    // The first scene with no bots on it: the group ended a step before.
+    const ended = seen.frames.findIndex(
+      (frame, index) => index > 0 && frame.raceBots === undefined,
+    );
+    expect(ended).toBeGreaterThan(0);
+    // Every scene after the first was drawn: the first is the one the view
+    // prepares where nobody sees it (#547). So the two line up one apart.
+    expect(seen.drawn).toHaveLength(seen.frames.length - 1);
+    const backs = [Number.NaN, ...seen.drawn.map((frame) => eyeFromRider(frame).back)];
+    expect(backs[ended - 1]).toBeCloseTo(GROUP_BACK, 1);
+    // Part of the way in, and never a cut: a quarter-second frame moves it a
+    // sixth of the way, eased, so no frame moves it more than 1.5 m.
+    expect(backs[ended]).toBeLessThan(GROUP_BACK);
+    expect(backs[ended]).toBeGreaterThan(CAMERA_BEHIND_METRES + 0.5);
+    for (let index = ended; index < ended + 8; index += 1) {
+      expect(Math.abs((backs[index] ?? 0) - (backs[index - 1] ?? 0))).toBeLessThan(1.5);
+    }
+    // Home by 1.5 s, six frames, and there from then on.
+    for (const back of backs.slice(ended + 5)) expect(back).toBeCloseTo(CAMERA_BEHIND_METRES, 1);
   });
 });
 

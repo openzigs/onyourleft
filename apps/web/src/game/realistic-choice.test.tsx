@@ -410,17 +410,23 @@ describe('which world a ride draws — #475', () => {
     // #2289: the swap's frames are not counted, however slow…
     await frames(hot, REALISTIC_SETTLING_SAMPLES);
     expect(told).toEqual([]);
-    // …and a realistic world that stays slow after them still leaves.
+    // …and a realistic world that stays slow after them walks every realistic
+    // rung (#3282), saying nothing while it is still realistic…
+    for (let rung = 1; rung < REALISTIC_LADDER.length; rung += 1) {
+      await frames(hot, SUSTAINED_SAMPLES + 2);
+    }
+    expect(told).toEqual(REALISTIC_LADDER.slice(1));
+    expect(mounted?.container.textContent).not.toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    // …and still leaves, and says so once.
     await frames(hot, SUSTAINED_SAMPLES + 2);
-    await frames(hot, SUSTAINED_SAMPLES + 2);
-    expect(told).toEqual([REALISTIC_LADDER[1], qualitySettings(0)]);
+    expect(told).toEqual([...REALISTIC_LADDER.slice(1), qualitySettings(0)]);
     expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
     // Cool for a long time: the stylised ladder climbs nowhere above its top,
     // and nothing hands the ride back to the realistic world.
     await frames(1000 / 60, 3 * (SUSTAINED_SAMPLES + 2));
-    expect(told.every((each) => each.world === 'stylised' || each === REALISTIC_LADDER[1])).toBe(
-      true,
-    );
+    expect(
+      told.every((each) => each.world === 'stylised' || REALISTIC_LADDER.slice(1).includes(each)),
+    ).toBe(true);
     expect(told.at(-1)).toEqual(qualitySettings(0));
   });
 
@@ -478,16 +484,17 @@ describe('which world a ride draws — #475', () => {
     await settleLoad({ loaded: true });
     await frames(1000 / 60, REALISTIC_SETTLING_SAMPLES);
     const hot = FRAME_MS_REDUCE_ABOVE + 10;
-    await frames(hot, SUSTAINED_SAMPLES);
-    await frames(hot, SUSTAINED_SAMPLES);
+    // #3282: one run a realistic rung, and the last leaves.
+    for (let rung = 0; rung < REALISTIC_LADDER.length; rung += 1) {
+      await frames(hot, SUSTAINED_SAMPLES);
+    }
     expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
     const report = readRealisticReport(localStorage);
     expect(report?.settling).toMatchObject({ frames: REALISTIC_SETTLING_SAMPLES, slow: 0 });
-    expect(report?.steps.map((step) => [step.rung, step.left])).toEqual([
-      [0, false],
-      [1, true],
-    ]);
-    const left = report?.steps[1];
+    expect(report?.steps.map((step) => [step.rung, step.left])).toEqual(
+      REALISTIC_LADDER.map((_, rung) => [rung, rung === REALISTIC_LADDER.length - 1]),
+    );
+    const left = report?.steps.at(-1);
     // Frame time fired, every sample of the window.
     expect(left).toMatchObject({
       frames: SUSTAINED_SAMPLES,

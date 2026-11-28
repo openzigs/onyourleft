@@ -424,6 +424,50 @@ describe('what a wrap is never drawn on — #3334', () => {
     expect(gabled?.roof).toBe('gable');
     expect(gabled?.kit).toBeUndefined();
   });
+
+  it('leaves a footprint round a courtyard its extrusion, whose roof keeps the courtyard open — #3350', () => {
+    /** The area of `triangles` seen from above, m²: `x, ?, z` from each vertex's first floats. */
+    const areaFromAbove = (triangles: Float32Array, stride: number): number => {
+      let area = 0;
+      for (let at = 0; at + 3 * stride <= triangles.length; at += 3 * stride) {
+        const [ax, az] = [triangles[at] as number, triangles[at + 2] as number];
+        const [bx, bz] = [triangles[at + stride] as number, triangles[at + stride + 2] as number];
+        const [cx, cz] = [
+          triangles[at + 2 * stride] as number,
+          triangles[at + 2 * stride + 2] as number,
+        ];
+        area += Math.abs((bx - ax) * (cz - az) - (cx - ax) * (bz - az)) / 2;
+      }
+      return area;
+    };
+    const one = (building: BuildingFeature): FootprintPlan => {
+      const plan = plansOf('town', {}, corridorOf([building])).plans[0];
+      if (plan === undefined) throw new Error('the footprint was not planned');
+      return plan;
+    };
+    // The review's 16 m square shop, with and without a 6 m courtyard in its middle.
+    const shop = box(1_230, 16, -30, -14);
+    const courtyard = box(1_235, 6, -25, -19);
+    const solid = one(buildingBeside(road, origin, [shop], 9));
+    const holed = one(buildingBeside(road, origin, [shop, courtyard], 9));
+    // The control: the solid shop is wrapped, and its wrap's roof is its extrusion's.
+    expect(solid.kit?.kind).toBe('shop');
+    const solidRoof = areaFromAbove(solid.triangles.roof, FOOTPRINT_VERTEX_FLOATS);
+    expect(solidRoof).toBeCloseTo(256, 0);
+    expect(areaFromAbove(solid.kit?.roof ?? new Float32Array(), 3)).toBeCloseTo(solidRoof, 1);
+    // Its extrusion keeps the courtyard open: 36 m² less roof.
+    const holedRoof = areaFromAbove(holed.triangles.roof, FOOTPRINT_VERTEX_FLOATS);
+    expect(holedRoof).toBeCloseTo(256 - 36, 0);
+    // So it is not wrapped: a wrap's roof is the outer ring's and would roof the courtyard over.
+    expect(holed.kit).toBeUndefined();
+    // And it is the same extrusion as with the lever off: the wrap is all that changed.
+    const off = plansOf(
+      'town',
+      { facadeKit: false },
+      corridorOf([buildingBeside(road, origin, [shop, courtyard], 9)]),
+    );
+    expect(planFingerprint([holed])).toBe(planFingerprint(off.plans.slice(0, 1)));
+  });
 });
 
 describe('a wrap’s door, where the plan’s front step is — #3351', () => {

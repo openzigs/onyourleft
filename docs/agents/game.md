@@ -132,6 +132,28 @@ timings only between runs on one machine, and score the bots on the instance PC:
 answers a seven-bot call past the race's 8 s limit (the development Mac took 10.6 s on 2026-11-18)
 rides the seeded race and fails on late answers.
 
+⚠️ **Before any change to the AI group ride's rules, run the group-ride harness**
+([#3309](https://github.com/openzigs/onyourleft/issues/3309)), and again before the owner's tablet
+ride: `pnpm run group-ride:harness` from `apps/web` (`node tools/group-ride-harness/run.mjs`;
+`-- --rider <name>,… --course <name>,…` rides only those). "The rules" are everything the session
+rides: `packages/domain/src/group-ride/` (plan, rotation, no-drop, cues, step), the draft and the
+group physics, and `src/game/group-ride/ride-group.ts`. It rides seven scripted riders (`steady`,
+`surger`, `gap-opener`, `weak` at 60 %, `absent` for three minutes, `never-presses`, and the owner's
+`fixed-power` at 120 W) over three synthetic 6 km courses (flat, hilly, rolling) on the line and plan
+the session builds (`groupLine`, `groupRidePlan`) and the two calls it makes each tick
+(`stepGroupRide`, then `stepCues`), on one seed fixed in the harness. ⚠️ Its tick is 0.25 s, the
+scripted rides' of #3300 and #3301, not the game's 0.05 s: the rules decide once a 1 s window either
+way, and at the game's tick a marked ride ran past a case's 5 s under the nightly coverage run. It prints a score table, numbers only (cohesion, rotations, cues a minute,
+corrections, time beyond the draft reach, the average made, and the four of the owner's note on the
+issue: the slip after a rejoin, cohesion at a crawl, `past-front` a minute, the group's speed swing),
+then each pass mark with its reason beside it, writes the scores, numbers and seeds only, under
+`tools/group-ride-harness/results/` (ignored by git), and **exits 1 below a pass mark**. It needs no
+model and no network, so **two runs write the same bytes**, and unlike the model harness **its marks
+are a CI gate**: `marks.flat.test.ts`, `marks.hilly.test.ts` and `marks.rolling.test.ts` ride every
+marked rider in `pnpm run test`. The marks and their reasons are in `tools/group-ride-harness/marks.ts`; a change that
+moves a mark on purpose moves it there, in the same pull request, with the reason. A stop on a climb
+is not ridden yet: #3405 and #3406 are what it found (`riders.ts` §`ABSENT_FROM_SECONDS`).
+
 From the layout tree of CLAUDE.md §2, under `apps/web/`:
 
 ```
@@ -1040,9 +1062,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         offered on a circuit, a level or the open world, and
                         **unavailable, with the reason as the switch's
                         description**, while a workout holds the trainer,
-                        the draft is switched off, or the route is a loop
-                        (the plan is one pass; laps are #3369). It ends at
-                        a finish: past it, *Keep riding* rides alone. A
+                        or the draft is switched off; another mode switched
+                        on then leaves the device's setting alone. On a
+                        loop it rides lap after lap (#3369: the plan read at
+                        the odometer mod the lap, its time counting laps).
+                        It ends at a finish: past it, *Keep riding* rides
+                        alone. A
                         target the plan refuses
                         on the chosen route blocks *Ride* with the most (or
                         least) the group can average there. Solo only, never
@@ -1079,7 +1104,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         only. A drawing only: nothing reads it back
                         (`line-drawing.test.ts`, every step of a scripted
                         rotation from `line-testing.ts`; the browser case
-                        is `lap-race.browser.spec.ts` §"#3304"). What
+                        is `lap-race.browser.spec.ts` §"#3304"). ⚠️ **The
+                        camera stands back and up** on a group ride
+                        (#3371: `camera.ts` §`GROUP_RIDE_CAMERA`, 8.5 m
+                        back and 3.5 m up, eased by `GameView` over 1.5 s
+                        and back at the finish), applied by `groupRidePose`
+                        to the pose's x/z, so every cull that stands the
+                        eye behind x/z sees it; the solo camera is
+                        untouched. What
                         the ride keeps goes through the port's
                         `groupRideStepped` to the controller's
                         `noteGroupRide` and is saved as
@@ -2492,8 +2524,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Drawn at the near level only, as a model is
                         (`FootprintPlan.kit`; its extrusion is its far level
                         and the same height); never where a house model fits
-                        (the brick shop stays), on a part, or under a pitched
-                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        (the brick shop stays), on a part, under a pitched
+                        roof, or round a courtyard (#3350: the wrap roofs
+                        its outer ring alone, and the extrusion keeps the
+                        courtyard open). A city centre's own lots (#1637) ARE wrapped,
                         as a mapped shop is. One more draw call for
                         every wrap in view, counted INSIDE
                         `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
@@ -2555,6 +2589,34 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and wreathe village doors in the belt; a MAPPED door's
                         wreath is the facade's `WREATH_GLSL` (`oylWreath`, 0
                         calls), its gate control the `facade-wreath` lever
+    src/game/roadside-safety.ts
+                        the open road's own safety furniture (#3284), placed by
+                        rule because no map carries it: a steel W-beam guard
+                        rail where the landform falls more than 3 m within
+                        24 m of the edge (`terrainHeightAt`), on the outside of
+                        a bend under 60 m radius over a 1 m fall, and 20 m along
+                        each approach to a stream bridge from its parapet's end
+                        (`waterways.ts` §`bridgeSpans`); a marker post every
+                        50 m each side (25 m on a bend under 200 m) where no
+                        rail runs. Neither across a side road's mouth or a
+                        driveway (the frame's side roads, on their own side of
+                        the centreline only), a field gate, a footway, on
+                        mapped built-up land or along a kerbed pavement
+                        (`SceneFrame.streets`). Sampled on the ODOMETER's 2 m
+                        grid, never the sliding corridor rows, so a run's ends
+                        stay put. ⚠️ **The rail's top is read off the road's own
+                        edge vertices** (`RoadCorridor.vertices`), 0.75 m over
+                        them at every row. ⚠️ **Realistic world only, and no
+                        mesh of its own**: the rail is `SceneFrame.guardRails`,
+                        instances of `BridgeBelt`'s overpass box (≤
+                        `REALISTIC_GUARD_RAIL_BOXES`, its triangle row in the
+                        worst-frame sum); the posts are
+                        `SceneFrame.markerPosts`, `post` scenery items the
+                        renderer hands its belts after the scatter
+                        (`withMarkerPosts`), kept out of `SceneFrame.scatter`
+                        whose arrangement is pinned. The stylised world's
+                        scenery-free frame is held to exactly 11 calls, so it
+                        draws neither
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

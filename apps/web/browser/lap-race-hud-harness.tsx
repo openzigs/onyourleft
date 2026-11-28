@@ -50,6 +50,15 @@
  * (the pull's countdown at its longest) and `group-lost` (no power reading:
  * dashes). `?text=` sets the HUD's text size, as it does for `?corner=race`.
  *
+ * ## `?group=controls` — the pull-off button lit and unlit (#3371)
+ *
+ * The `group-front` and `group-wheel` stages again, each with the group
+ * ride's controls (`game/hud/GroupRideControls.tsx`) on the actions panel:
+ * `pull-off-on-front` with the rider on the front, where *Pull off left* can
+ * be used, and `pull-off-off-front` on a wheel, where it cannot. The spec
+ * reads the button's drawn colours and edge off each, and photographs both
+ * for the owner.
+ *
  * ⚠️ **What it does not prove**: the stage is not `GameView`'s. No lap race
  * runs inside a game ride until #1906, and the notices a real ride can put
  * on the HUD (the road notice, a lap's notice) are not here. The rider's box
@@ -509,6 +518,8 @@ export const LONGEST_CUE = [...CUE_KINDS]
   .sort((a, b) => b.length - a.length)[0] as string;
 
 const GROUP = SEARCH.get('group') === 'ride';
+/** #3371: `?group=controls`. @see the file header */
+const GROUP_CONTROLS = SEARCH.get('group') === 'controls';
 
 /** A group of eight at 42 km/h on a ride chosen at 38: the widest the chooser starts. */
 const GROUP_ON_A_WHEEL: GroupRideHud = {
@@ -566,9 +577,54 @@ function Group(): JSX.Element {
   );
 }
 
+/** #3371, `?group=controls`: the pull-off button on the front and off it. @see the file header */
+function GroupControls(): JSX.Element {
+  const stages = [
+    { stage: 'pull-off-on-front', onFront: true, group: GROUP_STAGES[1]?.group },
+    { stage: 'pull-off-off-front', onFront: false, group: GROUP_STAGES[0]?.group },
+  ];
+  return (
+    <div>
+      {stages.map(({ stage, onFront, group }) => (
+        <section
+          key={stage}
+          className="oyl-game oyl-game--riding"
+          style={STAGE_IN_FLOW}
+          data-oyl-lap-race-stage={stage}
+        >
+          <HudPanel
+            profile={PROFILE}
+            shownPower={SHOWN_POWER}
+            state={STATE}
+            cadence={{ value: 92, live: true }}
+            heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
+            elapsedSeconds={MOVING_SECONDS}
+            chases={CHASES.filter((chase) => chase.to === 'ghost')}
+            paused={false}
+            onPause={() => undefined}
+            onEnd={() => undefined}
+            announcement=""
+            trainer={{ gradePercent: -12.5, writes: 1_234 }}
+            layout={CORNER_LAYOUT}
+            {...(group === undefined ? {} : { groupRide: group })}
+            groupRideInput={{
+              onFront,
+              sittingIn: false,
+              pullOff: () => undefined,
+              sitIn: () => undefined,
+            }}
+          />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function Harness(): JSX.Element {
   if (CORNER) return <Corner />;
   if (GROUP) return <Group />;
+  if (GROUP_CONTROLS) return <GroupControls />;
   return (
     <div>
       {STAGES.map(({ stage, race, speed }) => (
@@ -807,7 +863,8 @@ async function run(): Promise<void> {
   // frame is the layout a rider meets when a race opens, not one drawn in a
   // fallback face (on the CI runner's, the large text then had no room for a
   // line until the fonts arrived). The other stages keep the page as it was.
-  if (CORNER || GROUP) await Promise.all([...document.fonts].map((face) => face.load()));
+  if (CORNER || GROUP || GROUP_CONTROLS)
+    await Promise.all([...document.fonts].map((face) => face.load()));
   // #2600: the ride controls drawn and every panel open, as this page
   // measures them; `ride-chrome.browser.spec.ts` measures them hidden — and
   // #2837's `&controls=hide`, the corner's standings as they hide.

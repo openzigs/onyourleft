@@ -16,8 +16,10 @@
  *
  * ## Unavailable off the front
  *
- * A press is taken only while the rider is on the front. Anywhere else the
- * button is `aria-disabled`, drawn in the HUD's muted ink, and described by
+ * A press is taken only while the rider is on the front, and there the button
+ * is lit: a 4 px edge in the HUD's ink (#3371, `theme.css`
+ * §`.oyl-hud__pull-off`). Anywhere else the button is `aria-disabled`, drawn
+ * in the HUD's muted ink with a dashed edge, and described by
  * {@link PULL_OFF_NOT_ON_FRONT_SENTENCE}, a sentence off the screen; a press
  * then asks nothing. `aria-disabled` and not `disabled`, for
  * `ItemControl.tsx`'s reason: it stays in the tab order and says why. The key
@@ -151,7 +153,7 @@ export function GroupRideControls(props: GroupRideControlsProps): JSX.Element {
     <div className="oyl-hud__item" {...{ [HIDES_ATTRIBUTE]: '' }}>
       <button
         type="button"
-        className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+        className={`oyl-hud__control oyl-hud__pull-off ${RIDE_SIZE_CLASS}`}
         onClick={() => {
           // `aria-disabled` stops no click: the refusal is here.
           if (!input.onFront) return;

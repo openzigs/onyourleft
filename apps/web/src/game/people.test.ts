@@ -42,7 +42,7 @@ import {
   type WalkLine,
 } from './people';
 import { landClassMask, NO_LAND_CLASS, type LandClass, type LandClassMask } from './land-class';
-import { QUALITY_LADDER, REALISTIC_LADDER } from './quality';
+import { QUALITY_LADDER, REALISTIC_FLOOR, REALISTIC_LADDER } from './quality';
 import { distanceToDrawnRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -317,12 +317,13 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
     }
   });
 
-  it('places nobody where the rung draws nobody — every stylised rung, and the realistic second', () => {
-    for (const rung of [...QUALITY_LADDER, REALISTIC_LADDER[1]]) {
+  it('places nobody where the rung draws nobody — every stylised rung, and the realistic floor', () => {
+    // #3282: the floor is the one realistic rung with no near people.
+    for (const rung of [...QUALITY_LADDER, REALISTIC_FLOOR]) {
       expect(rung?.people).toBe(0);
       expect(frameAt(village.centre, 30, { people: rung?.people }).people).toEqual(NO_PEOPLE);
     }
-    expect(REALISTIC_LADDER[0]?.people).toBe(PEOPLE_NEAR_MAX);
+    for (const rung of REALISTIC_LADDER.slice(0, -1)) expect(rung.people).toBe(PEOPLE_NEAR_MAX);
     // Absent is nobody: GameView passes it.
     expect(frameAt(village.centre, 30, { people: undefined }).people).toEqual(NO_PEOPLE);
   });

@@ -46,7 +46,7 @@ export interface RealisticSettlingReading {
 
 /** One step down the realistic ladder, and the samples that decided it. */
 export interface RealisticStepReading {
-  /** The realistic rung it stepped from: 0 is the top, 1 the reduced rung. */
+  /** The realistic rung it stepped from: 0 is the top, 4 the floor since #3282 (1 before it). */
   readonly rung: number;
   /** Whether this step left the realistic world for the rest of the ride. */
   readonly left: boolean;

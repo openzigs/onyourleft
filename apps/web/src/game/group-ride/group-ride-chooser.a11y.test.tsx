@@ -10,10 +10,10 @@
  * - on, with the two controls;
  * - refused, where the reason is an alert **and** travels with the speed box
  *   and with *Ride* (`aria-describedby`, #255's rule);
- * - **not offered**, with a workout holding the trainer at a set power, the
- *   draft switched off, or a loop chosen (#3369): the switch is disabled and
- *   **its accessible description is the reason**, so a rider who reaches it
- *   hears why.
+ * - **not offered**, with a workout holding the trainer at a set power or the
+ *   draft switched off: the switch is disabled and **its accessible
+ *   description is the reason**, so a rider who reaches it hears why;
+ * - on a loop, offered as on any other route (#3369).
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -43,7 +43,7 @@ const ROUTE: RidableRoute = {
   attempts: 0,
 };
 
-/** A loop of the rider's own, on which a group ride is not offered yet (#3369). */
+/** A loop of the rider's own, on which a group ride is offered, lap after lap (#3369). */
 const LOOP: RidableRoute = {
   id: 'loop',
   name: 'Loop',
@@ -207,18 +207,20 @@ describe('the group ride on the picker — #3303', () => {
     expectClean();
   });
 
-  it('on a loop, is unavailable and described by that reason, and audits clean', async () => {
+  it('on a loop, is offered as on any route, on as remembered, with its controls, and audits clean (#3369)', async () => {
     localStorage.setItem(
       GROUP_RIDE_STORAGE_KEY,
       JSON.stringify({ on: true, targetSpeed: 30 / 3.6, bots: 5 }),
     );
     mounted = await picker(false, LOOP);
     const control = groupSwitch(mounted.container);
-    expect(control.disabled).toBe(true);
-    expect(control.checked).toBe(false);
-    expect(description(control)).toBe(GROUP_RIDE_UNAVAILABLE_TEXT.loop);
-    expect(labelled(mounted.container, 'Group average speed, km/h')).toBeUndefined();
-    expect(description(rideButton(mounted.container))).not.toContain('group');
+    expect(control.disabled).toBe(false);
+    expect(control.checked).toBe(true);
+    expect(description(control)).toContain('Nobody is left behind');
+    const speed = labelled<HTMLInputElement>(mounted.container, 'Group average speed, km/h');
+    expect(speed?.value).toBe('30');
+    expect(speed?.getAttribute('aria-invalid')).toBeNull();
+    expect(keyboardReachableElements(document)).toContain(control);
     expectClean();
   });
 });

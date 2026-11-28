@@ -48,3 +48,8 @@ upload-key.*
 apps/instance/deploy/home/.deployed
 # The home deploy's secret files (#2146): the Discord bot token. On the box only.
 apps/instance/deploy/home/secrets/
+
+# The group-ride harness's scores (#3309): numbers and seeds only, written by
+# each run of `pnpm run group-ride:harness` for comparing two runs on one
+# machine. Not a baseline: the scoring tests in `pnpm run test` are the gate.
+apps/web/tools/group-ride-harness/results/

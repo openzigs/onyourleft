@@ -427,6 +427,100 @@ describe('what it refuses as input', () => {
   });
 });
 
+describe('on a loop the plan is ridden lap after lap — #3369', () => {
+  /** The hilly course as a loop: it ends at the height it starts, so its end joins its start. */
+  const loop: RouteProfile = { ...hilly, loop: true };
+  const plan = planned(loop);
+  const lap = loop.totalDistance as number;
+  /** Five points of one lap: the first flat, the climb, the middle flat, the descent, the last flat. */
+  const points = [1_500, 3_750, 5_000, 6_000, 8_500];
+
+  /** Ride `laps` laps of the loop on the ledger, a tick at a time: each tick's odometer and correction. */
+  function rideLaps(laps: number): {
+    readonly seconds: number;
+    readonly odometers: readonly number[];
+    readonly corrections: readonly number[];
+  } {
+    const base = plan.basePower as number;
+    let odometer = 0;
+    let seconds = 0;
+    let ledger: GroupLedger = GROUP_LEDGER_START;
+    const odometers: number[] = [];
+    const corrections: number[] = [];
+    while (odometer < laps * lap) {
+      const power = plan.powerAt(odometer, ledger) as number;
+      const onPlan = plan.powerAt(odometer, { ridingSeconds: plan.plannedSecondsAt(odometer) });
+      odometers.push(odometer);
+      corrections.push((power - (onPlan as number)) / base);
+      odometer += standInSpeed(power, gradeAt(loop, odometer)) * TICK_SECONDS;
+      seconds += TICK_SECONDS;
+      ledger = stepGroupLedger(ledger, TICK_SECONDS, false);
+    }
+    return { seconds, odometers, corrections };
+  }
+
+  it("reads lap 2's speed and power from the road, as lap 1's are", () => {
+    const first = points.map((at) => plan.speedNowAt(at) as number);
+    const second = points.map((at) => plan.speedNowAt(lap + at) as number);
+    // Lap 1 follows the road: slower up the climb, faster down the descent, than on the flats.
+    const [flatOne, climb, flatTwo, descent, flatThree] = first as [
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
+    expect(climb).toBeLessThan(flatOne);
+    expect(descent).toBeGreaterThan(flatTwo);
+    expect(new Set([flatOne, flatTwo, flatThree]).size).toBe(1);
+    // Lap 2 rides the same road at the same speeds, and so does lap 7.
+    expect(second).toStrictEqual(first);
+    expect(points.map((at) => plan.speedNowAt(6 * lap + at) as number)).toStrictEqual(first);
+    for (const at of points) {
+      const onPlan = (odometer: number): number =>
+        plan.powerAt(odometer, { ridingSeconds: plan.plannedSecondsAt(odometer) });
+      expect(onPlan(lap + at)).toBeCloseTo(onPlan(at), 9);
+    }
+  });
+
+  it('keeps the planned time advancing, a whole lap’s planned time for each lap before', () => {
+    const goal = goalOf(loop);
+    expect(plan.plannedSecondsAt(lap)).toBeCloseTo(goal, 6);
+    for (const at of points) {
+      expect(plan.plannedSecondsAt(lap + at)).toBeCloseTo(goal + plan.plannedSecondsAt(at), 6);
+      expect(plan.plannedSecondsAt(2 * lap + at)).toBeCloseTo(
+        2 * goal + plan.plannedSecondsAt(at),
+        6,
+      );
+    }
+    // Lap 2's own points are later and later, as lap 1's are: never frozen at the lap's end.
+    const second = points.map((at) => plan.plannedSecondsAt(lap + at));
+    for (let index = 1; index < second.length; index += 1) {
+      expect(second[index] as number).toBeGreaterThan(second[index - 1] as number);
+    }
+  });
+
+  it('rides two laps in twice distance ÷ target on the ledger, which stays near nought on lap 2', () => {
+    const { seconds, odometers, corrections } = rideLaps(2);
+    expect(Math.abs(seconds - 2 * goalOf(loop)) / (2 * goalOf(loop))).toBeLessThan(0.005);
+    const secondLap = corrections.filter((_, index) => (odometers[index] as number) >= lap);
+    expect(secondLap.length).toBeGreaterThan(100);
+    // A frozen ledger would read the group later and later: its full +5 % band by lap 2's end.
+    for (const correction of secondLap) expect(Math.abs(correction)).toBeLessThan(0.01);
+  });
+
+  it('reads an odometer behind the start at the end of the lap, the road behind it', () => {
+    expect(plan.speedNowAt(-50) as number).toBe(plan.speedNowAt(lap - 50));
+    expect(plan.plannedSecondsAt(-50)).toBeCloseTo(
+      plan.plannedSecondsAt(lap - 50) - goalOf(loop),
+      6,
+    );
+    expect(() => plan.speedNowAt(Number.NaN)).toThrow(
+      expect.objectContaining({ code: 'odometer-not-finite' }),
+    );
+  });
+});
+
 describe('deterministic and room-portable', () => {
   /** Every output of a plan on the hilly course, every 10 m. */
   function everything(): string {

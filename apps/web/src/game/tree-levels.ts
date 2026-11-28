@@ -135,6 +135,22 @@ export function treeLevelAt(rank: number, levels: TreeLevels): TreeLevel {
 }
 
 /**
+ * How many ranks further out every tree is drawn at a quality rung — #3282
+ * (`quality.ts` §`QualitySettings.nearestTrees`). `'full'` is 0: each tree at
+ * its own rank's level. `'middle'` is the full level and its band: the nearest
+ * tree is then drawn as the middle mesh alone, where the full one was, and
+ * every tree after it one level of detail down — so a rung that takes it
+ * draws no full mesh at all.
+ *
+ * A shift of the rank rather than other levels, so the slots, the fades and
+ * {@link TreeHandOver}'s pacing are the same code at every rung: a rung change
+ * is a rank jump, which the hand-over already moves without a pop.
+ */
+export function treeLevelShift(levels: TreeLevels, nearest: 'full' | 'middle'): number {
+  return nearest === 'full' ? 0 : levels.near + (levels.dithered ? 1 : 0);
+}
+
+/**
  * A band tree's fade, from the distances of the trees ranked either side of it
  * (`distances[0]` the nearest, `count` of them known). 0 draws it as the level
  * nearer the rider, 1 as the level further out.

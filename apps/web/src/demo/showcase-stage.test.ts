@@ -195,15 +195,18 @@ describe('the showcase on the stage — #1653', { timeout: RIDE_TIMEOUT_MS }, ()
     // Slow frames walk the ladder off the realistic world after its cue; the
     // timeline loops and its cue comes round again on a device the ladder
     // judged unable to draw it.
+    // #3282: a pass long enough for the ladder to walk all five realistic
+    // rungs after the cue — the settling window and five runs of thirty
+    // 50 ms frames, about 9 s — and leave inside the first pass.
     const timeline: ShowcaseTimeline = {
-      seconds: 6,
+      seconds: 12,
       cues: [
         { at: 0, kind: 'shot', shot: 'behind', into: 'cut' },
         { at: 0, kind: 'world', world: 'stylised' },
         { at: 1, kind: 'world', world: 'realistic' },
       ],
     };
-    const { snapshots, view } = await run({ timeline, seconds: 14, stepMs: 50 });
+    const { snapshots, view } = await run({ timeline, seconds: 28, stepMs: 50 });
     // The cue at 1 s made the world realistic once; the ladder then left it.
     const worlds = view.qualities.map((each) => each.world);
     expect(worlds.slice(worlds.lastIndexOf('realistic'))).toEqual(

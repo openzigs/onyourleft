@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
+import { REALISTIC_FLOOR, REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { STRUCTURE_KINDS, type SceneryKind } from '../../src/game/scatter';
 import { corridorOrigin } from '../../src/game/terrain';
 import { rideFrame } from './frame';
@@ -35,9 +35,9 @@ describe('the realistic page’s frames carry the rung’s scenery budget, as Ga
     }
   });
 
-  it('carries less on the second realistic rung than on the first — the soak’s ladder', () => {
+  it('carries less on the realistic floor than on the top — the soak’s ladder', () => {
     const top = REALISTIC_LADDER[0] as QualitySettings;
-    const reduced = REALISTIC_LADDER[1] as QualitySettings;
+    const reduced = REALISTIC_FLOOR;
     let topTotal = 0;
     let reducedTotal = 0;
     for (const distance of along) {
