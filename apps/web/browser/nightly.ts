@@ -255,6 +255,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '`realistic-textures.test.ts` §"#1623".',
   },
   {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s moving cars — #3283',
+    seconds: 'one more load of the owner’s page',
+    why:
+      'the owner’s page’s `-pacer` lever, for #3283’s by-eye capture: that the free ride’s ' +
+      'oncoming cars are drawn in the parked cars’ belt on a real context, their corners ' +
+      'rewritten in place. An instrument of a page that ships in no build; where the cars go ' +
+      'is held in the required suite by `moving-cars.test.ts` and `moving-cars-scene.test.ts`, ' +
+      'the belt by `parked-car-belt.test.ts`, and the lever by `realistic/town.test.ts`.',
+  },
+  {
     spec: 'reflow.browser.spec.ts',
     describe: 'the dark palette — #672, nightly since #1076',
     seconds: 'about 22 s on the EPYC 7763 (run 37131982824): six walks of every route',

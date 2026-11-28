@@ -2100,6 +2100,37 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`GameView`: every ride but a Delivery round); lever
                         `-parked-cars`, pages `town=houses`, `town=commercial`
                         and `town=streets`.
+    src/game/moving-cars.ts
+                        the moving cars of an ordinary ride (#3283): SCENERY,
+                        never a hazard, no sound and no game event. Oncoming
+                        in the other half (middle 2.05 m out) and crossing a
+                        mapped crossroads whose street runs straight over the
+                        route. ⚠️ **A function of the rider's drawn distance,
+                        never a clock** (the cyclists' rule): a replay at any
+                        frame rate draws the same traffic, and a crossing car
+                        has left the carriageway by `MOVING_CAR_CLEAR_METRES`
+                        when the rider is `JUNCTION_CLEAR_METRES` (40 m) short
+                        at ANY speed; the cost is that a car's speed is a share
+                        of the rider's. Rates by the ridden road's setting
+                        (`trafficSettingAt`, off the mapped way it runs along):
+                        none on a path or cycleway, 0.5 a km on a lane, 2.5 in
+                        a town, 5 on a major road. ⚠️ **One rule for the
+                        oncoming half**: a car is dropped where an oncoming
+                        cyclist or an earlier cell's car would come within the
+                        gap along the road, or where the rider's own line comes
+                        within it at an apex; the cyclists are never moved.
+                        Only on a route ride with map data, at a rung that
+                        draws people, and never in a lap race, a room, a
+                        Delivery round, beside the pacer or a ghost, or on an
+                        open-world ride (#2916). Drawn by §`ParkedCarBelt` in
+                        its one call, ≤ `MOVING_CARS_MAX` (3), each with its
+                        wheels and in a parked car's place, so the belt's worst
+                        frame is #3278's; pose by `deliveryCarPose`, baked on
+                        the CPU, only the moving cars' range re-uploaded a
+                        frame (`realistic-budget.ts`
+                        §`REALISTIC_MOVING_CAR_TRIANGLES`). `SceneFrame.movingCars`,
+                        said by `SceneInput.movingCars` (`GameView`: a free ride
+                        or a workout).
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as

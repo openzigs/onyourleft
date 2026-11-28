@@ -42,6 +42,7 @@ import type { KitColour, RiderBody } from '@onyourleft/store';
 import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
+import type { MovingCar } from './moving-car-frame';
 import type { ParkedCarsInView } from './parked-cars';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { Embankment } from './overpasses';
@@ -614,6 +615,21 @@ export interface SceneFrame {
    * `parked-car-belt.test.ts` off the belt it fills.
    */
   readonly parkedCars?: ParkedCarsInView | undefined;
+  /**
+   * The cars driving on the road — #3283 (`moving-cars.ts`): oncoming in the
+   * other lane and crossing ahead at a mapped crossroads, at most
+   * `moving-cars.ts` §`MOVING_CARS_MAX`, nearest first, each a place, a
+   * heading, a look and how far its wheels have rolled and steer. Drawn by
+   * the parked cars' belt, in its one call and inside its caps
+   * (`three-renderer.ts` §`ParkedCarBelt`). Scenery: no simulation, event,
+   * score or trainer reads one. Realistic world only. **Absent on every frame
+   * with none**, and on every frame `scene.ts` §`SceneInput.movingCars` rules out.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `moving-cars-scene.test.ts` reads it back off `sceneFrame`, and
+   * `parked-car-belt.test.ts` off the belt it fills.
+   */
+  readonly movingCars?: readonly MovingCar[] | undefined;
 }
 
 /**

@@ -113,6 +113,7 @@ import {
   lineOffsetAt,
   lineSlopeAt,
   racingLine,
+  ROAD_SIDE,
   type RacingLine,
 } from './racing-line';
 import { ghostClock, type GameState } from './simulation';
@@ -242,6 +243,17 @@ import {
   type SceneryCyclist,
 } from './scenery-cyclists';
 import { NO_URBAN_CLASS, type UrbanClassMap } from './urban-class';
+import {
+  crossingCarsInReach,
+  movingCarsClearOf,
+  MOVING_CAR_LANE_METRES,
+  MOVING_CARS_MAX,
+  oncomingCarsInReach,
+  trafficSettingAt,
+  type TrafficSettingAt,
+} from './moving-cars';
+import type { MovingCar } from './moving-car-frame';
+import type { TownAt } from './scenery-cyclists';
 import { positionAt, type GeographicPosition, type RouteProfile } from '@onyourleft/domain';
 
 /** One junction of an open-world ride. @see SceneInput.junctionsSeen */
@@ -612,6 +624,23 @@ export interface SceneInput {
    * §"#3278" reads it back off what `GameView` asked `sceneFrame` for.
    */
   readonly parkedCars?: boolean | undefined;
+  /**
+   * Whether this ride may put moving cars on the road — #3283
+   * (`moving-cars.ts`): oncoming in the other lane and crossing ahead at a
+   * mapped crossroads. `GameView` says so on a free ride or a workout, as it
+   * says {@link sceneryCyclists}, and on nothing else: never in a lap race, a
+   * room, a Delivery round, or beside the pacer or a ghost. They are placed
+   * only on a route ride with map data ({@link worldCorridor}, and never an
+   * open-world view, which #2916 decides for), at a rung that draws
+   * {@link people}, and never where any of {@link botDistance}, {@link ghost},
+   * {@link remoteRiders}, {@link raceBots} or {@link steeredLateral} is given,
+   * whatever this says. Scenery only: no simulation, event or trainer reads a car.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it has no traffic. `realistic-choice.test.tsx`
+   * §"#3283" reads it back off what `GameView` asked `sceneFrame` for.
+   */
+  readonly movingCars?: boolean | undefined;
   /**
    * #2973's nearby streets left undrawn: only the route, its junctions'
    * stubs and its overpasses' roads (`nearby-streets.ts`) — the realistic
@@ -1060,6 +1089,11 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     seed,
     input.landClass ?? NO_LAND_CLASS,
   );
+  // #3278: read once, because #3283's moving cars are kept clear of them.
+  const parked =
+    input.worldCorridor === undefined || input.parkedCars !== true
+      ? undefined
+      : parkedCars(input, input.worldCorridor, nearbyFound, seed, riderDistance);
   return {
     // #1549: the ride's mapped buildings, and where the rider is among them.
     ...(input.mappedBuildings === undefined
@@ -1090,11 +1124,12 @@ export function sceneFrame(given: SceneInput): SceneFrame {
       : { parkDressing: parkDressing(input, input.worldCorridor, seed, camera, ground) }),
     // #3278: the cars parked on the mapped driveways, aprons and side streets
     // about the road ahead of the rider — scenery, and none in a Delivery round.
-    ...(input.worldCorridor === undefined || input.parkedCars !== true
-      ? {}
-      : {
-          parkedCars: parkedCars(input, input.worldCorridor, nearbyFound, seed, riderDistance),
-        }),
+    ...(parked === undefined ? {} : { parkedCars: parked }),
+    // #3283: and the cars driving on the road, clear of the rider, the other
+    // cyclists and every parked car this frame draws.
+    ...movingCarsOf(
+      movingCarsClearOf(placedMovingCars(input, corridor, riders), parked?.cars ?? []),
+    ),
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
@@ -1586,6 +1621,182 @@ function cyclistOn(
     along: each.along,
     look: cyclistLook(encounter.key),
   };
+}
+
+/** The frame's moving cars, where there are any: a frame with none carries no key for them. */
+function movingCarsOf(cars: readonly MovingCar[]): { movingCars?: readonly MovingCar[] } {
+  return cars.length === 0 ? {} : { movingCars: cars };
+}
+
+/**
+ * Whether a frame may carry moving cars — #3283: the ride says so, it is a
+ * route ride with map data and not an open-world view, its rung draws people,
+ * and nothing on the road means something. @see SceneInput.movingCars
+ */
+function movingCarsAllowed(
+  input: SceneInput,
+): input is SceneInput & { readonly worldCorridor: WorldCorridor } {
+  return (
+    input.movingCars === true &&
+    input.worldCorridor !== undefined &&
+    sceneryAnchor(input.profile) === undefined &&
+    (input.people ?? 0) > 0 &&
+    input.botDistance === undefined &&
+    input.ghost === undefined &&
+    input.remoteRiders === undefined &&
+    input.raceBots === undefined &&
+    input.steeredLateral === undefined
+  );
+}
+
+/** The last ride's traffic settings, and everything they were read from. @see trafficOf */
+let lastTraffic:
+  | {
+      readonly profile: RouteProfile;
+      readonly corridor: WorldCorridor;
+      readonly seed: number;
+      readonly urban: UrbanClassMap;
+      readonly setting: TrafficSettingAt;
+      readonly town: TownAt;
+    }
+  | undefined;
+
+/**
+ * A ride's traffic settings and towns — #3283: one reading for the ride,
+ * kept while the road, the corridor, the seed and the urban class are the
+ * ones it was read from, so a stretch of road is read off the map once.
+ */
+function trafficOf(
+  input: SceneInput,
+  corridor: WorldCorridor,
+  seed: number,
+): { readonly setting: TrafficSettingAt; readonly town: TownAt } {
+  const urban = input.mappedTown?.urban ?? NO_URBAN_CLASS;
+  const last = lastTraffic;
+  if (
+    last !== undefined &&
+    last.profile === input.profile &&
+    last.corridor === corridor &&
+    last.seed === seed &&
+    last.urban === urban
+  ) {
+    return last;
+  }
+  const town = townAt(input.profile, seed, urban);
+  const setting = trafficSettingAt(input.profile, input.origin, corridor, town);
+  lastTraffic = { profile: input.profile, corridor, seed, urban, setting, town };
+  return lastTraffic;
+}
+
+/** How far apart a car's axles are taken to be when its pitch is read off the road, metres: **2.6**. */
+const MOVING_PITCH_SPAN_METRES = 2.6;
+
+/**
+ * The moving cars a frame draws — #3283 (`moving-cars.ts`): each kept
+ * oncoming car in reach of the rider's DRAWN place and on the corridor this
+ * frame built, stood in the other half of the road and facing against it,
+ * and each kept crossing car on its cross street, stood on the drawn ground;
+ * the `moving-cars.ts` §`MOVING_CARS_MAX` nearest. Only after the riders are
+ * placed, and read from the rider's own line (`riders`, {@link placedRiders}'
+ * on the same corridor): a car never moves the rider.
+ *
+ * Its own export for {@link placedCyclists}' reason: a test sweeping
+ * thousands of rider positions places them without building the scenery.
+ * `moving-cars-scene.test.ts` checks that it and `sceneFrame` agree.
+ */
+export function placedMovingCars(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  riders: readonly PlacedRider[],
+): readonly MovingCar[] {
+  if (!movingCarsAllowed(input)) return [];
+  const first = corridor.centre[0];
+  const last = corridor.centre[corridor.centre.length - 1];
+  if (first === undefined || last === undefined || riders[0] === undefined) return [];
+  const { profile, origin } = input;
+  const rider = drawnRider(input).distance;
+  const seed = scatterSeed(profile);
+  const { setting, town } = trafficOf(input, input.worldCorridor, seed);
+  // The rider's own line, which is where they are drawn: nobody else is on the road.
+  const line = input.centreline === true ? undefined : (easingLine(input) ?? racingLine(profile));
+  const lateralAt = (at: number): number => (line === undefined ? 0 : lineOffsetAt(line, at));
+  const speed = input.state.ride.speed as number;
+  const placed: { readonly car: MovingCar; readonly distance: number }[] = [];
+  for (const each of oncomingCarsInReach(profile, origin, seed, setting, town, lateralAt, rider)) {
+    if (each.along < first.along || each.along > last.along) continue;
+    const at = (along: number): RiderMarker =>
+      markerAt(
+        corridor,
+        along,
+        'bot',
+        { metres: -ROAD_SIDE * MOVING_CAR_LANE_METRES, rate: 0 },
+        { bicycle: 0, body: 0 },
+        undefined,
+        { pedalling: 0, rideSeconds: 0 },
+      );
+    const middle = at(each.along);
+    // Its nose is back along the route, the way it drives.
+    const nose = at(each.along - MOVING_PITCH_SPAN_METRES / 2);
+    const tail = at(each.along + MOVING_PITCH_SPAN_METRES / 2);
+    placed.push({
+      distance: Math.abs(each.along - rider),
+      car: {
+        kind: 'oncoming',
+        x: middle.x,
+        y: middle.y,
+        z: middle.z,
+        heading: Math.atan2(-middle.headingX, -middle.headingZ),
+        pitch: Math.atan2(nose.y - tail.y, MOVING_PITCH_SPAN_METRES),
+        look: each.car.key,
+        travelled: each.travelled,
+        speed: each.car.pace * speed,
+        curvature: each.curvature,
+      },
+    });
+  }
+  const junctions = mappedJunctions(
+    input.worldCorridor,
+    profile,
+    origin,
+    seed,
+    input.landClass ?? NO_LAND_CLASS,
+  );
+  const crossing = crossingCarsInReach({ profile, origin }, seed, setting, town, junctions, rider);
+  if (crossing.length > 0) {
+    const ground = routeGround(profile, origin, seed, input.landClass ?? NO_LAND_CLASS);
+    const half = MOVING_PITCH_SPAN_METRES / 2;
+    for (const each of crossing) {
+      const about = ground.about(each.x, each.z);
+      const noseX = each.x + each.ux * half;
+      const noseZ = each.z + each.uz * half;
+      const tailX = each.x - each.ux * half;
+      const tailZ = each.z - each.uz * half;
+      // None over water or off the drawn ground, at its middle or either end.
+      if (about === undefined) continue;
+      if (ground.about(noseX, noseZ) === undefined || ground.about(tailX, tailZ) === undefined) {
+        continue;
+      }
+      const noseY = about(noseX, noseZ);
+      const tailY = about(tailX, tailZ);
+      placed.push({
+        distance: each.distance,
+        car: {
+          kind: 'crossing',
+          x: each.x,
+          y: (noseY + tailY) / 2,
+          z: each.z,
+          heading: Math.atan2(each.ux, each.uz),
+          pitch: Math.atan2(noseY - tailY, MOVING_PITCH_SPAN_METRES),
+          look: each.car.key,
+          travelled: each.travelled,
+          speed: each.car.pace * speed,
+          curvature: each.curvature,
+        },
+      });
+    }
+  }
+  placed.sort((a, b) => a.distance - b.distance);
+  return placed.slice(0, MOVING_CARS_MAX).map((each) => each.car);
 }
 
 /**

@@ -849,6 +849,8 @@ async function run(): Promise<void> {
       parkDressingOff: config.leversOff.includes('park-dressing'),
       // #3278's pair: no parked car — and none in a Delivery round, whatever the lever.
       parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
+      // #3283's pair: no pacer, and the free ride's moving cars in its place.
+      pacerOff: config.leversOff.includes('pacer'),
       // #2973's pair: the mapped streets off the route undrawn.
       nearbyStreetsOff: !nearbyStreetsWithLevers(config.leversOff),
       // #2972's pair: the mapped footways and zebras undrawn.

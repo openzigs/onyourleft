@@ -702,6 +702,37 @@ describe('which rides get scenery cyclists — #2722', () => {
   });
 });
 
+describe('which rides get moving cars — #3283', () => {
+  /**
+   * `GameView`'s mode conditions on `SceneInput.movingCars`, read off what
+   * `sceneFrame` was asked, for #2722's reason: `scene.ts` has its own
+   * backstop, so the ask is the only place a dropped condition shows.
+   */
+  const asked = (): readonly (boolean | undefined)[] =>
+    vi.mocked(sceneFrame).mock.calls.map(([input]) => input.movingCars);
+
+  it('asks on a free ride', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+  });
+
+  it('does not ask beside the pacer', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: true, intensity: '0.5' });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
+  });
+
+  it('does not ask beside a ghost', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false, ghost: true });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
+  });
+});
+
 describe('a phone backgrounded mid-ride (#254)', () => {
   /**
    * The wiring #254 was about, driven the way a rider would produce it: frames

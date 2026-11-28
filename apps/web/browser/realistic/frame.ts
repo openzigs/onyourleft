@@ -58,6 +58,12 @@ export function rideFrame(input: {
    * are its own obstacles, as `GameView` says of a round.
    */
   readonly parkedCarsOff?: boolean;
+  /**
+   * #3283's lever, `levers=-pacer`: no pacer, and the moving cars a free ride
+   * carries asked for, as `GameView` asks for them (`scene.ts`
+   * §`SceneInput.movingCars`). Without a `town` there is no map, and none.
+   */
+  readonly pacerOff?: boolean;
   /** #2973's lever, `levers=-nearby-streets`: only the route, its stubs and its overpasses' roads. */
   readonly nearbyStreetsOff?: boolean;
   /** #2972's lever, `levers=-footways`: the mapped footways, cycleways, park paths, steps and zebras undrawn. */
@@ -98,7 +104,12 @@ export function rideFrame(input: {
       ridden: seconds(input.elapsed),
     },
     // #1972: a race's bots take the pacer's place.
-    botDistance: input.race === undefined ? input.distance + PACER_LEAD_METRES : undefined,
+    botDistance:
+      input.race === undefined && input.pacerOff !== true
+        ? input.distance + PACER_LEAD_METRES
+        : undefined,
+    // #3283: the free ride's traffic, where nothing else is on the road.
+    movingCars: input.race === undefined && input.pacerOff === true,
     ...(input.race === undefined
       ? {}
       : { raceBots: input.race.bots, riderHit: input.race.riderHit }),
