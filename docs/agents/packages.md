@@ -106,7 +106,12 @@ packages/             Apache-2.0, without exception
                         rider a standing and nothing else. Since #3303
                         `GROUP_RIDE_CODE_VERSION` (`version.ts`), kept with
                         a ride's `RideFacts.groupRide`: raise it with any
-                        change to what the line decides or how a bot rides
+                        change to what the line decides or how a bot rides.
+                        Since #3305 a tick hands back what the rotation read
+                        (`GroupRideTick.line`), which with its answer is
+                        what `stepCues` reads; and the scripted line
+                        (`line-testing.ts`) is exported for tests as
+                        `./group-ride-line-testing`
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

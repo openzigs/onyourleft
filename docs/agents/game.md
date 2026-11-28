@@ -1671,6 +1671,36 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/group-ride-hud.ts, src/game/hud/GroupRideCue.tsx
+                        an AI group ride on the HUD (#3305, ADR 0101 D-5).
+                        **The role strip** is two fields in a lap race's two
+                        places and under its class (a ride runs one mode):
+                        *In line* (place of how many; under it the pull's
+                        countdown ONLY while the rider is on the front, else
+                        the gap to the wheel ahead) and *Group* (the group's
+                        speed now; under it the average chosen). With no
+                        power reading both values are a dash, never a zero.
+                        **The cue line** is one sentence per kind of domain
+                        `CUE_KINDS` (`GROUP_RIDE_CUE_TEXT`, a record, so a
+                        kind without one is a type error; ⚠️ every sentence
+                        is the owner's to approve), a labelled notice drawn
+                        as the AI pacer's line, on the HUD for 8 s of the
+                        group's clock. `ride-group.ts` steps domain
+                        `stepCues` on each tick's rotation and the view it
+                        read (`GroupRideTick.line`) with the rider's power
+                        (no reading, no cue) and keeps the last cue;
+                        `groupRideStrip` builds the strip. The sentence is
+                        offered to `announce.ts` ONCE, as `group-ride-cue`
+                        (rank 5d′: below every safety and workout sentence,
+                        above a lap and every reading; follows the
+                        announcement setting): behind a higher sentence it
+                        is dropped, never queued, and stays on the line.
+                        The countdown is never offered.
+                        `group-ride-hud.test.tsx` rides a scripted rotation
+                        (domain `./group-ride-line-testing`) through the
+                        real selector onto the real HUD and screens every
+                        sentence; `browser/lap-race-hud.browser.spec.ts`
+                        §"#3305" holds the layout (`?group=ride`)
     src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
                         the room a race's standings have on a tablet (#2599):
                         the list is as tall as the whole lines that fit above

@@ -383,6 +383,7 @@ import {
   groupRideFact,
   groupRideFinished,
   groupRideTimed,
+  groupRideStrip,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
@@ -398,6 +399,12 @@ import {
   type RoomLapRaceRide,
 } from './lap-race/room-race';
 import { lapRaceInView } from './lap-race/in-view';
+import {
+  groupRideCueEvent,
+  groupRideCueShowing,
+  type GroupRideCueShown,
+} from './hud/group-ride-hud';
+import { groupCueNotice } from './hud/GroupRideCue';
 import { lapRaceStandings, riderEntry, type LapRaceHud } from './hud/lap-race-hud';
 import {
   deliveryEvents,
@@ -2512,6 +2519,16 @@ function GameScreen({
    * `undefined` on every other ride. @see GroupRideSession
    */
   const groupRideRef = useRef<GroupRideSession | undefined>(undefined);
+  /**
+   * #3305: the group ride's cue on the HUD line, for
+   * `GROUP_RIDE_CUE_SHOWN_SECONDS` of the group's clock, as {@link pacerSay}
+   * is the pacer's; and the cue last offered to the announcer, so each is
+   * offered once (`hud/group-ride-hud.ts`). Both follow the ride on its
+   * first frame: a new ride's cue is a new object, and its line starts empty.
+   */
+  const [groupCue, setGroupCue] = useState<string | undefined>();
+  const groupCueRef = useRef<string | undefined>(undefined);
+  const groupCueOfferedRef = useRef<GroupRideCueShown | undefined>(undefined);
   /**
    * The lap race this ride runs IN A ROOM, while it runs one — #1911: from
    * the room's first frame of a room whose welcome says it is a lap race, to
@@ -4752,6 +4769,22 @@ function GameScreen({
       // #2712, ADR 0072 D-4: the AI pacer's line, screened twice, said only
       // with announcements on (`announce.ts` rank 5i).
       if (pacerArrived !== undefined) events.push({ kind: 'pacer-say', text: pacerArrived });
+      // #3305, ADR 0101 D-5.5: the group ride's cue, to the HUD line for its
+      // shown time and to the announcer once, on the frame it was selected
+      // (`announce.ts` rank 5d′): behind a higher sentence it is dropped, not
+      // queued, and stays on the line. The pull's countdown is never offered.
+      const groupCued = groupRideRef.current;
+      const groupCueNow =
+        groupCued === undefined
+          ? undefined
+          : groupRideCueShowing(groupCued.cue, groupCued.state.atMs / 1_000);
+      if (groupCueNow !== groupCueRef.current) {
+        groupCueRef.current = groupCueNow;
+        setGroupCue(groupCueNow);
+      }
+      const groupCueOffer = groupRideCueEvent(groupCued?.cue, groupCueOfferedRef.current);
+      groupCueOfferedRef.current = groupCueOffer.offered;
+      if (groupCueOffer.event !== undefined) events.push(groupCueOffer.event);
       // #2546: no power on its cadence while the rider is held on a race's
       // line, in a room's lobby or a countdown, as on `main` where this clock
       // stood still there: a reading would also close the window "Go." needs.
@@ -5000,6 +5033,9 @@ function GameScreen({
             speedMps: simulation.state.ride.speed,
           },
           riderStopped: !sensors.rider.live || trainerPortRef.current?.recordingPaused?.() === true,
+          // #3305: what the cue selector reads. No live reading, no cue (D-6.11).
+          powerWatts: sensors.rider.live ? sensors.rider.power : null,
+          thresholdWatts: ownThresholdsRef.current.power ?? null,
         });
         // Tied to the recording's timeline from the first frame one is read.
         const timed = groupRideTimed(ridden, trainerPortRef.current?.rideElapsedSeconds?.());
@@ -6287,6 +6323,15 @@ function GameScreen({
                 steering: steerPortRef.current,
                 items: itemPortRef.current,
               })}
+        // #3305, ADR 0101: a group ride's role strip — place in the line, the
+        // gap or the pull's countdown, the group's speed now and the average
+        // chosen — only on a ride with a group. Read during render, as the
+        // race above is; dashes while the power reading is not live.
+        groupRide={
+          groupRideRef.current === undefined
+            ? undefined
+            : groupRideStrip(groupRideRef.current, state?.input.live === true)
+        }
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
             ? undefined
@@ -6718,6 +6763,12 @@ function GameScreen({
               {pacerSay}
             </StatusMessage>
           ),
+          // #3305, ADR 0101 D-5: the group ride's cue, one sentence written in
+          // this repository, for GROUP_RIDE_CUE_SHOWN_SECONDS of the group's
+          // clock and then gone. Drawn as the pacer's line is, which a ride
+          // with a group never has. Not `live`: the HUD's one region says it,
+          // with announcements on (`announce.ts` rank 5d′).
+          groupCueNotice(groupCue),
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of

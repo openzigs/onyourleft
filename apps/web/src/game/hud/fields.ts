@@ -75,6 +75,7 @@ import type { GameState } from '../simulation';
 
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import type { HudPowerView } from './hud-layout-preference';
+import { groupRideReadings, type GroupRideHud } from './group-ride-hud';
 import { lapRaceReadings, type LapRaceHud } from './lap-race-hud';
 import { planLap, planProgress } from './plan';
 
@@ -559,6 +560,12 @@ export interface HudInput {
    */
   readonly lapRace?: LapRaceHud | undefined;
   /**
+   * An AI group ride's role strip, on a ride with a group — #3305 (ADR 0101).
+   * Absent on every other ride, and chosen at the start of the ride and held
+   * for it, as {@link lapRace} is.
+   */
+  readonly groupRide?: GroupRideHud | undefined;
+  /**
    * Which units the rider reads in (#238).
    *
    * ⚠️ **An ordinary parameter, not a React context.** This file is pure —
@@ -873,6 +880,8 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...deliveryReadings(input.delivery, units),
     // #1904: a lap race's, last for the same reason. A ride runs one mode.
     ...lapRaceReadings(input.lapRace),
+    // #3305: a group ride's role strip, in a lap race's places. A ride runs one mode.
+    ...groupRideReadings(input.groupRide, units),
   ];
 }
 

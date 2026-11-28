@@ -69,6 +69,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
+import { isGroupRideReading } from './group-ride-hud';
 import { isLapRaceReading, riderFinished, riderHolds } from './lap-race-hud';
 import {
   GRADE_BANDS,
@@ -289,7 +290,13 @@ export const TOTALS_STRIP_NAME = 'Ride totals';
  * arrangement never changes under a rider mid-ride.
  */
 function isModeReading(reading: HudReading): boolean {
-  return isRoomReading(reading) || isDeliveryReading(reading) || isLapRaceReading(reading);
+  return (
+    isRoomReading(reading) ||
+    isDeliveryReading(reading) ||
+    isLapRaceReading(reading) ||
+    // #3305: a group ride's role strip, a mode's readings as a race's are.
+    isGroupRideReading(reading)
+  );
 }
 
 /**
@@ -1033,6 +1040,12 @@ function fieldClass(reading: HudReading): string {
     // #1904: and a lap race's, the same way; and a field warning of a hit
     // coming is outlined (`theme.css` §"A LAP RACE ON THE HUD").
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
+    // #3305: a group ride's role strip takes a lap race's two places, under
+    // its class, so every layout measured for a race holds for it; a ride
+    // runs one mode (`group-ride-hud.ts` §"The role strip").
+    ...(isGroupRideReading(reading)
+      ? ['oyl-hud__field--lap-race', 'oyl-hud__field--group-ride']
+      : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
     // #2426: in the draft, a heavier SOLID outline (`theme.css` §"IN THE
     // DRAFT"): a shape, beside the shelter mark and the words.

@@ -24,6 +24,12 @@
  *   once the line is paced to them** (the amendment of 2026-11-27). The log
  *   keeps it; the HUD's strip (#3305) reads it here.
  * - the line's phase and the rider's role, for the log (below).
+ * - **{@link GroupRideSession.cue}**, the rider's cue (#3305): each tick's
+ *   rotation and what it read go to `@onyourleft/domain` §`stepCues` with the
+ *   rider's power, and the last cue it selected is kept with its instant on
+ *   the group's clock. The HUD's cue line and the announcer read it
+ *   (`hud/group-ride-hud.ts`); {@link groupRideStrip} is the HUD's role strip.
+ *   **With no power reading the selector says nothing** (ADR 0101 D-6.11).
  *
  * ## The rider has stopped
  *
@@ -98,8 +104,11 @@ import {
   GROUP_RIDE_CODE_VERSION,
   nextUnit,
   raceRandom,
+  startCues,
   startGroupRide,
+  stepCues,
   stepGroupRide,
+  type CueState,
   type GroupRideState,
   type GroupRoad,
   type LineMember,
@@ -124,6 +133,11 @@ import {
 } from '../lap-race/pack-layout';
 import type { LapRaceDrawing } from '../lap-race/ride-race';
 import { botSkinFor, seededRiderBody } from '../rider-body';
+import {
+  groupRideCueSelected,
+  type GroupRideCueShown,
+  type GroupRideHud,
+} from '../hud/group-ride-hud';
 import type { RaceBotInput } from '../scene';
 import { SIMULATION_STEP_SECONDS } from '../simulation';
 
@@ -224,6 +238,10 @@ export interface GroupRideSession {
   readonly phase: LinePhase;
   /** The rider's role as the last tick left it, their standing included. */
   readonly role: RiderRole;
+  /** The cue selector between windows (#3305). */
+  readonly cues: CueState;
+  /** The last cue selected, `undefined` before the ride's first. @see GroupRideCueShown */
+  readonly cue: GroupRideCueShown | undefined;
   /** Where the pack layout draws each bot. */
   readonly pack: PackLayout;
   /**
@@ -389,6 +407,8 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     ),
     riderSteer,
     steeredBefore: LINE_LATERAL,
+    cues: startCues(0),
+    cue: undefined,
     log: [{ at: 0, phase, role, groupSpeed: groupSpeedMps }],
     logCut: false,
     startedAt: undefined,
@@ -438,6 +458,21 @@ export interface GroupRideSessionStep {
    * ride's auto-pause and its sensor state (ADR 0101 D-4.4, D-6.11).
    */
   readonly riderStopped: boolean;
+  /**
+   * The rider's power now, watts, or `null` with no live reading: what the
+   * cue selector reads (#3305). Absent is `null`, and **with no reading no
+   * cue is selected** (ADR 0101 D-6.11).
+   */
+  readonly powerWatts?: number | null | undefined;
+  /** The rider's own threshold power, watts, or `null` where they set none (`GamePort.ownThresholdPower`). */
+  readonly thresholdWatts?: number | null | undefined;
+}
+
+/** A power the cue selector takes: finite watts of at least zero, or `null`. */
+function cueWatts(value: number | null | undefined): number | null {
+  return value !== null && value !== undefined && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
 }
 
 /**
@@ -460,9 +495,11 @@ export function stepGroupRideSession(
   if (ticks === 0) return session;
   const from = session.rider;
   const to = step.rider;
-  let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut } = session;
+  let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut, cues, cue } = session;
   let { riderSteer, steeredBefore } = session;
   let log = session.log;
+  const powerWatts = cueWatts(step.powerWatts);
+  const thresholdWatts = cueWatts(step.thresholdWatts);
   for (let tick = 0; tick < ticks; tick += 1) {
     const share = tick / ticks;
     const rider: MemberView = {
@@ -478,6 +515,15 @@ export function stepGroupRideSession(
     state = ridden.state;
     riderDraft = ridden.draft[GROUP_RIDE_RIDER_ID] ?? 1;
     groupSpeedMps = ridden.groupSpeedMps;
+    // #3305: the rider's cue, on the rotation's answer and the view it read.
+    const chosen = stepCues(cues, {
+      rotation: ridden.rotation,
+      line: ridden.line,
+      powerWatts,
+      thresholdWatts,
+    });
+    cues = chosen.state;
+    cue = groupRideCueSelected(cue, chosen.cue, ridden.line.atMs / 1_000);
     const phaseNow = ridden.rotation.state.phase;
     const roleNow = ridden.rotation.roles[GROUP_RIDE_RIDER_ID] ?? role;
     if (phaseNow !== phase || roleNow !== role) {
@@ -517,11 +563,45 @@ export function stepGroupRideSession(
     groupSpeedMps,
     phase,
     role,
+    cues,
+    cue,
     pack,
     riderSteer,
     steeredBefore,
     log,
     logCut,
+  };
+}
+
+/**
+ * The group as the HUD's role strip reads it (#3305, `hud/group-ride-hud.ts`):
+ * the rider's place in the line, the gap to the wheel ahead, the pull's
+ * seconds left **only while the rider is on the front**, the group's speed
+ * now and the average chosen. `live` is whether the rider's power reading is.
+ *
+ * A rider aside, drifting back or latching on, is out of the line's order
+ * until they are on the last wheel: their place is the back, where they are
+ * going, and their wheel the last one.
+ */
+export function groupRideStrip(session: GroupRideSession, live: boolean): GroupRideHud {
+  const { rotation, atMs, bots } = session.state;
+  const { order, pull } = rotation;
+  const at = order.indexOf(GROUP_RIDE_RIDER_ID);
+  const wheel = at > 0 ? order[at - 1] : at < 0 ? order[order.length - 1] : undefined;
+  const wheelAt = wheel === undefined ? undefined : bots[wheel]?.distanceM;
+  const gap = wheelAt === undefined ? undefined : wheelAt - session.rider.distanceM;
+  const pulling =
+    session.role === 'on-front' && pull !== null && pull.by === GROUP_RIDE_RIDER_ID
+      ? Math.max(0, Math.ceil((pull.endsAtMs - atMs) / 1_000))
+      : undefined;
+  return {
+    place: at < 0 ? rotation.line.length : at + 1,
+    of: rotation.line.length,
+    gapMetres: gap !== undefined && gap > 0 ? gap : undefined,
+    pullLeftSeconds: pulling,
+    groupSpeed: session.groupSpeedMps,
+    targetSpeed: session.choice.targetSpeed,
+    live,
   };
 }
 
