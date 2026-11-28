@@ -8713,6 +8713,8 @@ function planFootprint(
   // for it (`facade-kit.ts` §`kitKindOf`): a commercial footprint, or a terrace's house,
   // beside a town's or a city centre's street. Only a whole building with a front and a flat
   // roof, which is what the wrap draws, so its far level — this extrusion — is the same shape.
+  // #3350: and with no courtyard: the wrap roofs its outer ring alone, so a holed footprint's
+  // roof would close over the courtyard its extrusion keeps open, at the near level's reach.
   // Never where a house model fits (the owner's ruling on #3273: the brick shop stays), nor a
   // mapped type that is not a shop's or a house's, nor a landmark.
   const kitKind =
@@ -8720,6 +8722,7 @@ function planFootprint(
     model === undefined &&
     front !== undefined &&
     roof === 'flat' &&
+    !holed &&
     !part &&
     !outbuilding &&
     !pole &&
