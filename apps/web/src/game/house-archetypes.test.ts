@@ -70,8 +70,13 @@ interface Town {
 function plan(town: Town, options: FootprintPlanOptions = {}): readonly FootprintPlan[] {
   const land = landClassMask(town.corridor);
   const urban = urbanClassMap(town.corridor, land, town.profile);
-  return footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, options)
-    .plans;
+  // #3251: with the choice by setting off. This file holds #1782's and #1783's archetypes, which a
+  // village's and a town's footprints no longer take: there they are contemporary
+  // (`contemporary-houses.test.ts`). Off, every plan is as it was.
+  return footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, {
+    houseStyles: false,
+    ...options,
+  }).plans;
 }
 
 /** One vertex of a plan, as the belt uploads it. */

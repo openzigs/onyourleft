@@ -5,6 +5,9 @@
 export type { GroupRideErrorCode } from './errors';
 export { GroupRideError } from './errors';
 
+// The version of these rules a ride was ridden under (#3303), kept with the ride.
+export { GROUP_RIDE_CODE_VERSION } from './version';
+
 // The line's phases and each member's role (#3299): closed lists, exhaustive switches.
 export type { LinePhase, LineSeats, RiderRole } from './roles';
 export { asideRole, isLineRole, LINE_PHASES, lineRoles, RIDER_ROLES } from './roles';
@@ -46,6 +49,10 @@ export {
   stepRotation,
 } from './rotation';
 
+// The climb the front is told of (#3348): 0 from a climb's start to its crest,
+// which `courseHillsAhead` alone stops reporting 200 m before the top.
+export { lineClimbAheadM } from './climb-ahead';
+
 // The rider's cue (#3302): at most one a window, events said once,
 // corrections out of band for a dwell and rate limited. Kinds, never
 // sentences; none urges more effort, and none carries a power.
@@ -83,3 +90,39 @@ export {
   startCues,
   stepCues,
 } from './cues';
+
+// The group stepped through the one physics (#3300): the plan's power on the
+// front, the lap race's wheel rule behind it, one draft call for every rider.
+// The rider is read and never written; the physics is the caller's.
+export type {
+  GroupBot,
+  GroupPhysics,
+  GroupRideInput,
+  GroupRideSetup,
+  GroupRideState,
+  GroupRideTick,
+  GroupRoad,
+} from './step';
+export { GROUP_LEDGER_RESUME_SHARE, startGroupRide, stepGroupRide } from './step';
+
+// No-drop (#3301): where the rider stands, the sweep, and a line that holds
+// for the rider at a speed with no lower limit. Decided once a window, ridden
+// by `stepGroupRide`; nothing for the rider but a standing.
+export type { NoDropHold, NoDropState, NoDropStep, NoDropView, RiderStanding } from './no-drop';
+export {
+  NO_DROP_FULL_EASE_SECONDS,
+  NO_DROP_GAPPED_METRES,
+  NO_DROP_PACE_GAP_SECONDS,
+  NO_DROP_PACE_MARGIN,
+  NO_DROP_PACE_MEMORY_SECONDS,
+  NO_DROP_PACE_MOST,
+  NO_DROP_PACE_SECONDS,
+  NO_DROP_PACE_SLIP_METRES,
+  NO_DROP_PACE_SLIP_STEP,
+  NO_DROP_REACH_METRES,
+  NO_DROP_SETTLE_MS,
+  noDropRole,
+  RIDER_STANDINGS,
+  startNoDrop,
+  stepNoDrop,
+} from './no-drop';

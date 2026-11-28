@@ -4454,6 +4454,9 @@ describe('what the realistic structures cost in meshes — #482', () => {
     for (const [kind, parts] of Object.entries(REALISTIC_BOUNDARY_PARTS)) {
       for (const surface of parts) pairs.add(`${surface}:${kind}`);
     }
+    // #3252: and the fence's second shape, the built fences' one mesh — the
+    // timber fence and the noise barrier, in the planks the fence wears.
+    pairs.add('planks:fence:built');
     expect(built).toBe(pairs.size);
     expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
     belts.dispose();

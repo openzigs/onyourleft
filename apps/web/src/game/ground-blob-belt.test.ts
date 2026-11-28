@@ -234,8 +234,14 @@ describe('GroundBlobBelt.update — #1674', () => {
     // beside a seam from rising and lets it fall past the line (`landform.ts`
     // §`SEAM_CREST_FADE_METRES`): only the ground moved, and the count did
     // not. `0886e568…7e6b53` before it.
+    // Re-taken for #3336, which draws the road on past a route's end: one of
+    // these nine frames, 900 m along the 893 m hairpin, is 7 m past its end,
+    // and drew the world gathered to one point there; it draws the road on
+    // now, and 24 more blobs beside it. Each of the other eight frames' own
+    // digest was taken on `main` and on the change and is the same.
+    // `2622 1d9fb5d1…70c7ac` before it.
     expect(`${drawn} ${hash.digest('hex')}`).toBe(
-      '2622 1d9fb5d10f8a68be7d4be4ea6bf964612a6ef013a7916aa98dc7f52e2f70c7ac',
+      '2646 7cf6bd147706ba7e6395a071bec3a1de5ee42e5f82cd6bda11555c55dbd950d4',
     );
   });
 });

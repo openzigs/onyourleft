@@ -1165,10 +1165,13 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // the drawn path the rider rides, its eye held in from the kerb: 21 and
       // 298 until then. Re-pinned by #2989, whose heading settles in 0.04 s
       // rather than 0.1 s and whose look-ahead eases onto its 25 m: 25 and
-      // 442 until then. The cull drops every one of them (above).
+      // 442 until then. Re-pinned by #3251, whose kerbside town's houses are
+      // contemporary where their setting is modern, so one fewer piece of
+      // one meets the plane: 25 and 432 until then. The cull drops every one
+      // of them (above).
       expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
         person: 25,
-        'mapped building': 432,
+        'mapped building': 431,
       });
     },
     ALL_RIDES_TIMEOUT,

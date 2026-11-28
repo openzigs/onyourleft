@@ -19,7 +19,7 @@
  * | `steady` | `changing` | a bot's pull timer ends or it is tired; the rider presses pull off; the rider fades on the front |
  * | `changing` | `latching` | the old front rider is behind the last wheel |
  * | `latching` | `steady` | the old front rider's gap to the last wheel is inside the wheel band |
- * | `waiting`, `regrouping` | — | declared; their transitions are #3301's, and here they hold |
+ * | `waiting`, `regrouping` | — | `no-drop.ts` (#3301) moves the line into and out of them; here they hold |
  *
  * ## A bot's pull
  *
@@ -175,7 +175,11 @@ export interface RotationView {
   readonly members: Readonly<Record<string, MemberView>>;
   /** Every bot's reserve now, by id (`lap-race/wbal.ts`). */
   readonly energy: Readonly<Record<string, BotEnergy>>;
-  /** Metres to the next climb's start from the front, 0 on one, `null` with none ahead (`courseHillsAhead`). */
+  /**
+   * Metres to the next climb's start from the front, 0 from a climb's start to
+   * its crest, `null` with none ahead: `lineClimbAheadM` (`climb-ahead.ts`).
+   * Not `courseHillsAhead` alone, which reports no climb in one's last 200 m (#3348).
+   */
   readonly climbAheadM: number | null;
   /** The tightest bend radius on the road just ahead, metres, `null` where it is straight. */
   readonly bendRadiusM: number | null;
@@ -549,7 +553,7 @@ function decide(state: RotationState, view: RotationView, signal: boolean): Deci
       }
       return { ...same('steady'), order: [...order, aside], aside: null };
     }
-    // #3301 moves the line into and out of these; here they hold.
+    // `no-drop.ts` (#3301) moves the line into and out of these; here they hold.
     case 'waiting':
     case 'regrouping':
       return same(state.phase);

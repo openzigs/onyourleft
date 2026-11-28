@@ -92,7 +92,26 @@ packages/             Apache-2.0, without exception
                         that reaches a trainer. Lint refuses `Date` and
                         `Math.random` here. Since #3302 the rider's cue: a
                         kind a window, never a sentence, none that urges more
-                        effort, silent with no power reading
+                        effort, silent with no power reading. Since #3300
+                        `stepGroupRide`: the bots ridden a tick at a time
+                        through a physics the caller passes (physics'
+                        `groupRidePhysics`), one draft call for every rider;
+                        the rider is read and never written. Since #3301
+                        no-drop (`no-drop.ts`): a sweep bot for a gapped
+                        rider, a line that waits or regroups at a speed
+                        with no lower limit, and after the first wait a
+                        line paced to the rider's remembered pace (ADR
+                        0101's amendment of 2026-11-27); the ledger books
+                        none of the eased pace as riding. It hands the
+                        rider a standing and nothing else. Since #3303
+                        `GROUP_RIDE_CODE_VERSION` (`version.ts`), kept with
+                        a ride's `RideFacts.groupRide`: raise it with any
+                        change to what the line decides or how a bot rides.
+                        Since #3305 a tick hands back what the rotation read
+                        (`GroupRideTick.line`), which with its answer is
+                        what `stepCues` reads; and the scripted line
+                        (`line-testing.ts`) is exported for tests as
+                        `./group-ride-line-testing`
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, the player itself, which emits an

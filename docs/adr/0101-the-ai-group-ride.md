@@ -569,3 +569,59 @@ recorded here when the ADR is accepted.
   row 1 says.** The owner decides again.
 - **Anyone reads D-7 as clearance.** It is a risk decision and a note of search excerpts and
   earlier spikes, written by an engineer on one day.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-27** — **D-3.2's *"Each rider's factor is ADR 0038 D-3's"* is no longer the whole of
+  what a bot rides at.** The physics has no brake: a power is at least zero. Down a steep descent a
+  sheltered bot that coasts is faster than the front that pedals, and it would roll through the
+  wheel ahead. So a group-ride bot that its wheel rule asks for **less than zero watts** pedals
+  nothing and **sits up**: it rides at a drag multiplier above its draft factor, by the share of
+  the open air's extra drag that the missing watts are, and **never past 1**, so never at more
+  drag than riding alone, and never below its factor, so never with more shelter than the model
+  offers. The factor itself is still ADR 0038 D-3's, from the one call for every rider, and it is
+  what the ride reports for each member; the draft model, its inputs and `physicsVersion` are
+  unchanged (D-3.3 holds as written). The rule is the bots' alone: the rider is ridden at the
+  model's factor and nothing here changes their speed (D-4.5). Accepted by the owner, 2026-11-27,
+  on [#3347](https://github.com/openzigs/onyourleft/pull/3347): *"Decision 1 is accepted."* Built
+  in `packages/domain/src/group-ride/step.ts`. (#3300)
+- **2026-11-27** — **D-4.1's *"The rest of the line does not ease yet"* and D-4.2's waiting are no
+  longer the whole of no-drop, and D-2.6 covers more than waiting.** Built as D-4 states it, a
+  line released from a wait rode away at the plan's pace and waited again: a scripted rider at a
+  quarter of the group's power spent the ride in a cycle of about a minute and was beyond the
+  draft's reach each time. The owner ruled on
+  [#3359](https://github.com/openzigs/onyourleft/pull/3359#issuecomment-7228951594): *"after the
+  first wait, the group slows to the rider's sustained pace (a memory of what the rider can
+  hold), so the rider stays on a wheel. This replaces the repeating ride-away-and-wait cycle …
+  The wait and regroup still apply to a one-off gap. The group's plan speed recovers if the
+  rider's pace rises."* So:
+  1. **The rider's pace is remembered from the first wait or regroup**: what they can hold, as a
+     share of the plan's speed, seeded with their speed in that wait. A rider who has stopped
+     does not move it.
+  2. **From then on the line is asked a 5 % margin over that pace**, never above the plan's
+     speed, and **gives the speed back as the rider comes off the wheel**, all of it at 2 s of the
+     rider's own speed (and never nearer than 5 m). So after the first wait the line does ease
+     for a rider who is merely off the wheel, which D-4.1 said it did not. Before the first wait
+     D-4.1 holds as written.
+  3. **It recovers for as long as the rider keeps up, at any gap inside the 5 m wheel band.** A
+     rider with the line rides the line's own speed, so their speed says nothing of what they can
+     hold, and a pace fed on it would feed on itself. So the pace reads whether the rider keeps
+     their gap: keeping it, the pace rises by the margin over about 20 s; losing ground, it comes
+     down half as fast again; off the wheel, it follows the rider's own speed. The line rides the
+     plan again once they hold it.
+  4. **A one-off gap still ends in a wait or a regroup** (D-4.2, D-4.3), with no floor in either.
+  5. **D-2.6 reaches the paced line too: the eased pace is the rider's ride.** A tick in which the
+     line is held or paced is not booked as riding time, nor is one after it until the front is
+     back at 98 % of the plan's speed, nor is a rider's own pull under that speed. The ledger is
+     then exactly as late when the group rides the plan again as it was before, so a dropped
+     rider is never chased by the ledger's 5 % band. The ride page still shows the stated average
+     beside the average ridden.
+
+  Every figure is a feel parameter for the harness (#3309) and the owner's ride. The rule is the
+  bots' alone: it hands the rider a standing and nothing else, and nothing here changes their
+  speed (D-4.5); nothing reaches a trainer (D-6.1). Built in
+  `packages/domain/src/group-ride/no-drop.ts` and `step.ts`. (#3301)

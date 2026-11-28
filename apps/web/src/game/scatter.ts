@@ -101,8 +101,9 @@ import {
   type ParkLook,
 } from './land-class';
 import { terrainHeightAt } from './landform';
-import { sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
+import { routeOf, sceneryAnchor, sceneryGrid, wrappedCell } from './scenery-anchor';
 import { distanceToDrawnRoad } from './road-grid';
+import type { ScenerySetting } from './scenery-plan';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import { inWater, waterways } from './waterways';
 import {
@@ -256,6 +257,24 @@ export interface ScatterItem {
    * the variant it changes what stands somewhere, never where.
    */
   readonly chainLink?: true;
+  /**
+   * A `fence` that is a close-board timber fence or a highway noise barrier —
+   * #3252, `chain-link.ts` §`timberFencePieces` and §`noiseBarrierPieces`.
+   * Its `variant` is the shape the realistic world draws it as
+   * (`scenery-plan.ts` §`FENCE_VARIANTS`), the built fences' one mesh; the
+   * stylised world has one fence and draws that. Like the variant it changes what
+   * stands somewhere, never where.
+   */
+  readonly boundary?: 'timber-fence' | 'noise-barrier';
+  /**
+   * What the ground is where a tree, shrub or rock stands — #3252: the
+   * mapped land it grows on, which decides the SPECIES its variant is drawn
+   * as and how big it stands there (`scenery-plan.ts` §`SCENERY_PLAN`,
+   * §`ageScale`). Absent where no map data says: the procedural world, drawn
+   * as it was. A word, never a shape, for {@link ScatterKind}'s reason, and
+   * like the variant it changes what stands somewhere, never where.
+   */
+  readonly setting?: ScenerySetting;
   /**
    * The setting a mapped town's lot stands in — #3287, `settlements.ts`
    * §`lotsAt`, a `building` only, and only where it is not `rural`: absent is
@@ -918,9 +937,12 @@ const SEED_COORDINATE_SCALE = 1e5;
  * ⚠️ **An open-world view's is the ride's** (#3055, `scenery-anchor.ts`): a
  * view is a new profile, of a new length, after every change, and seeding
  * from it regenerated the world on each.
+ *
+ * #3336: and a route drawn past its end seeds as the route, or its scenery
+ * would all be placed afresh as the frame began to draw the extension.
  */
 export function scatterSeed(profile: RouteProfile): number {
-  return sceneryAnchor(profile)?.seed ?? routeSeed(profile);
+  return sceneryAnchor(profile)?.seed ?? routeSeed(routeOf(profile));
 }
 
 /**
@@ -1610,6 +1632,11 @@ function fillCell(
       }
       const kind =
         keep >= kept ? 'rock' : pickKind(planting?.weights ?? weights, uniform(base, STREAM_KIND));
+      // #3252: what the ground is here, for the species drawn on it. Mapped
+      // land no land use names is open countryside; no map at all is nothing.
+      const setting: ScenerySetting | undefined =
+        planting?.setting ??
+        (mapped && countryside.planting && cover === 'other' ? 'open' : undefined);
       // #1546: nothing grows on mapped built-up land or water, nor since #2662
       // on bare ground (sand, rock, ice, an airfield, a pier). Dropped after
       // every draw and before {@link thin}, as the water and the road above.
@@ -1653,6 +1680,7 @@ function fillCell(
             SCATTER_VARIANT_SLOTS - 1,
             Math.floor(uniform(base, STREAM_VARIANT) * SCATTER_VARIANT_SLOTS),
           ),
+          ...(setting === undefined ? {} : { setting }),
         },
         rank: uniform(base, STREAM_RANK),
         along,
@@ -1690,6 +1718,8 @@ function fillCell(
 interface LandPlanting {
   readonly density: number;
   readonly weights: readonly number[];
+  /** #3252: what its items say they stand on. @see ScatterItem.setting */
+  readonly setting: ScenerySetting;
 }
 
 /** One cell's plantings, built once a cell so an item allocates nothing. */
@@ -1706,7 +1736,11 @@ interface LandPlantings {
 }
 
 /** Nothing grows: a pitch's even green, and a golf course's fairway between its stands. */
-const BARE: LandPlanting = Object.freeze({ density: 0, weights: Object.freeze([1, 0, 0, 0, 0]) });
+const BARE: LandPlanting = Object.freeze({
+  density: 0,
+  weights: Object.freeze([1, 0, 0, 0, 0]),
+  setting: 'park',
+});
 
 /** How far into a wood its edge's scrub reaches, in metres: **8**. */
 export const WOOD_EDGE_METRES = 8;
@@ -1799,14 +1833,14 @@ function landPlantings(place: Place, procedural: readonly number[]): LandPlantin
   };
   const plain = densityAt(place);
   return {
-    wood: { density: plain, weights: procedural },
-    woodEdge: { density: plain, weights: mix(5, 2) },
-    hedgerow: { density: plain * HEDGEROW_TREE_SHARE, weights: mix(7, 1) },
-    pasture: { density: plain * PASTURE_TREE_SHARE, weights: mix(5, 1) },
-    park: { density: plain * PARK_TREE_SHARE, weights: mix(6, 1) },
-    golfStand: { density: plain * GOLF_STAND_TREE_SHARE, weights: mix(7, 1) },
-    cemetery: { density: plain * CEMETERY_TREE_SHARE, weights: mix(1, 0) },
-    playground: { density: plain * PLAYGROUND_TREE_SHARE, weights: mix(1, 0) },
+    wood: { density: plain, weights: procedural, setting: 'wood' },
+    woodEdge: { density: plain, weights: mix(5, 2), setting: 'wood-edge' },
+    hedgerow: { density: plain * HEDGEROW_TREE_SHARE, weights: mix(7, 1), setting: 'hedgerow' },
+    pasture: { density: plain * PASTURE_TREE_SHARE, weights: mix(5, 1), setting: 'pasture' },
+    park: { density: plain * PARK_TREE_SHARE, weights: mix(6, 1), setting: 'park' },
+    golfStand: { density: plain * GOLF_STAND_TREE_SHARE, weights: mix(7, 1), setting: 'park' },
+    cemetery: { density: plain * CEMETERY_TREE_SHARE, weights: mix(1, 0), setting: 'park' },
+    playground: { density: plain * PLAYGROUND_TREE_SHARE, weights: mix(1, 0), setting: 'park' },
   };
 }
 

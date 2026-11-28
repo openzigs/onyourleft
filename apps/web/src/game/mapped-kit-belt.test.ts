@@ -65,6 +65,7 @@ import {
   kitGeometriesOf,
   MappedBuildingBelt,
   refillMappedBuildings,
+  setMappedBuildingsMerged,
   type RealisticHouses,
 } from './three-renderer';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
@@ -1251,10 +1252,13 @@ describe('the belt, with the committed kit — #3334', () => {
     // Among its shops: the lots the brick shop fits, and the ones it does not.
     // ⚠️ On this street the house models take most of the frame's triangles (seven of them
     // are 20 622), and a wrap is never drawn at a building's cost: at 1 250 m, among the
-    // models, none is. At 1 220 m one fits beside eight models.
+    // models, none is. At 1 160 m one fits beside six models.
+    // #3251: 1 220 m and eight models until a town's houses were planned contemporary and
+    // only its shops kept a model (the brick shop, the owner's ruling on #3273): the models
+    // in reach are now the shops', and from 1 180 m on, seven of them leave a wrap no room.
     const among = roadAt(1_250, richmond);
     expect(belt.refill(among.x, among.z, MAPPED_BUILDING_TRIANGLES).kitted).toBe(0);
-    const rider = roadAt(1_220, richmond);
+    const rider = roadAt(1_160, richmond);
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     expect(stats.modelled).toBeGreaterThan(0);
     expect(stats.kitted).toBeGreaterThan(0);
@@ -1280,5 +1284,86 @@ describe('the belt, with the committed kit — #3334', () => {
       expect(drawn.modelAt >= wraps.start).toBe(plan.kit !== undefined);
       expect(plan.model !== undefined).toBe(plan.kit === undefined);
     }
+  });
+});
+
+describe('the per-building control, with the kit loaded — #3349', () => {
+  afterEach(() => {
+    setMappedBuildingsMerged(true);
+  });
+
+  /**
+   * The control's groups, read off the mesh three draws: none starts below 0, none
+   * overlaps another, and between them they draw every vertex the refill wrote, each
+   * once — an extrusion's walls, roof and spire, and a paved wrap's apron.
+   */
+  function expectEveryVertexGroupedOnce(belt: MappedBuildingBelt): void {
+    const geometry = belt.mesh.geometry;
+    const groups = [...geometry.groups].sort((a, b) => a.start - b.start);
+    expect(groups.length).toBeGreaterThan(0);
+    let end = 0;
+    for (const group of groups) {
+      expect(group.start).toBeGreaterThanOrEqual(0);
+      expect(group.start).toBe(end);
+      expect(group.count).toBeGreaterThan(0);
+      end = group.start + group.count;
+    }
+    expect(end).toBe(geometry.drawRange.count);
+  }
+
+  it('groups no wrap as an extrusion: a call a surface for each extrusion and paved apron, and the wraps’ one', () => {
+    const belt = aBelt(buildings, withKit);
+    let paved = 0;
+    for (const along of [1_150, 1_250]) {
+      setMappedBuildingsMerged(true);
+      const rider = roadAt(along);
+      const merged = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+      setMappedBuildingsMerged(false);
+      const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+      // The same buildings, the same wraps: only the grouping differs.
+      expect({ ...stats, drawCalls: 0 }).toEqual({ ...merged, drawCalls: 0 });
+      expect(stats.kitted).toBe(MAPPED_KIT_NEAR_MAX);
+      expect(stats.modelled).toBe(0);
+      expectEveryVertexGroupedOnce(belt);
+      // Each extrusion's wall and roof (and a spire's slate, where it has one), and at
+      // most one group a wrap, its paved apron: a wrap's pieces are the kit's one call.
+      let extrusions = 0;
+      for (let place = 0; ; place += 1) {
+        const drawn = belt.drawnAt(place);
+        if (drawn === undefined) break;
+        if (drawn.modelAt >= 0) continue;
+        const plan = plans[drawn.plan] as FootprintPlan;
+        extrusions += 2 + (roleTriangles(plan, 'spire') > 0 ? 1 : 0);
+      }
+      const aprons = belt.mesh.geometry.groups.length - extrusions;
+      expect(aprons).toBeGreaterThanOrEqual(0);
+      expect(aprons).toBeLessThanOrEqual(stats.kitted);
+      paved += aprons;
+      expect(stats.drawCalls).toBe(belt.mesh.geometry.groups.length + 1);
+      expect(stats.drawCalls).toBeGreaterThan(MAPPED_BUILDING_DRAW_CALLS);
+    }
+    // 1 250 m is where `writes a wrapped shop’s paved apron` finds an apron drawn.
+    expect(paved).toBeGreaterThan(0);
+  });
+
+  it('counts the models’ one call and the wraps’ one call beside the extrusions’ groups', () => {
+    const richmond = richmondStreetFixture();
+    const richmondPlans = footprintPlans(
+      richmond.corridor,
+      landClassMask(richmond.corridor),
+      richmond.profile,
+      richmond.origin,
+      undefined,
+      everywhere('town'),
+    ).plans;
+    const belt = aBelt(mappedBuildingsOf(richmondPlans), withKit);
+    setMappedBuildingsMerged(false);
+    // Where models and a wrap are drawn together (`draws house models and wraps together`).
+    const rider = roadAt(1_160, richmond);
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.modelled).toBeGreaterThan(0);
+    expect(stats.kitted).toBeGreaterThan(0);
+    expectEveryVertexGroupedOnce(belt);
+    expect(stats.drawCalls).toBe(belt.mesh.geometry.groups.length + 2);
   });
 });

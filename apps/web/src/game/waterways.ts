@@ -109,7 +109,7 @@ import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyou
 import { BRIDGED_WATER_LINE_KINDS, type WaterLineFeature } from '@onyourleft/map-features';
 
 import type { LandClassMask } from './land-class';
-import { sceneryAnchor } from './scenery-anchor';
+import { extendedRoute, sceneryAnchor } from './scenery-anchor';
 import { slotHash, uniformFrom } from './seeded';
 import {
   ROAD_WIDTH_METRES,
@@ -555,6 +555,10 @@ const computed = new WeakMap<LandClassMask, WeakMap<RouteProfile, Waterways>>();
  * world with no corridor, and gives exactly the waterways of before #2658.
  */
 export function waterways(profile: RouteProfile, seed: number, land: LandClassMask): Waterways {
+  // #3336: a route drawn past its end has the route's waterways, at the same
+  // distances, and none of its own past the end, whose road is level.
+  const route = extendedRoute(profile);
+  if (route !== undefined) return waterways(route, seed, land);
   let byProfile = computed.get(land);
   if (byProfile === undefined) {
     byProfile = new WeakMap();

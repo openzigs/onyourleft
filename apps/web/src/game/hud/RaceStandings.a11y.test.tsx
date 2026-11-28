@@ -153,6 +153,44 @@ describe('a race’s standings on the HUD — #1347', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('sets the leader’s line before a window further back, marked for the compact standings alone (#2286)', async () => {
+    const back = STANDINGS.lines.map((line) => ({ ...line, place: line.place + 28 }));
+    const leader = {
+      riderId: 11,
+      place: 1,
+      who: 'Cai',
+      gap: '−8 s',
+      figure: '3.9 W/kg',
+      flagged: true,
+      you: false,
+    };
+    await hud({ ...STANDINGS, lines: back, leader });
+    const items = [
+      ...document.querySelectorAll<HTMLLIElement>('section[aria-label="Race standings"] li'),
+    ];
+    // First, by its own place, and the only line marked as the leader's.
+    expect(items.map((item) => item.value)).toEqual([1, 29, 30, 31]);
+    expect(text(items[0])).toBe('1 Cai −8 s 3.9 W/kg Flagged');
+    expect(items.map((item) => item.className)).toEqual([
+      'oyl-hud__standings-line oyl-hud__standings-line--leader oyl-hud__standings-line--leader-only',
+      'oyl-hud__standings-line',
+      'oyl-hud__standings-line oyl-hud__standings-line--you',
+      'oyl-hud__standings-line',
+    ]);
+    // The list's numbering still starts at the window, as before.
+    expect(
+      document.querySelector('section[aria-label="Race standings"] ol')?.getAttribute('start'),
+    ).toBe('29');
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('marks first place as the leader’s line where the window starts at the front (#2286)', async () => {
+    await hud(STANDINGS);
+    const leaders = document.querySelectorAll('.oyl-hud__standings-line--leader');
+    expect([...leaders].map(text)).toEqual(['1 Ann −8 s 3.9 W/kg Flagged']);
+    expect(document.querySelector('.oyl-hud__standings-line--leader-only')).toBeNull();
+  });
+
   it('is never a live region: the standings are read on request, not announced every second', async () => {
     await hud(STANDINGS);
     const section = document.querySelector('section[aria-label="Race standings"]');

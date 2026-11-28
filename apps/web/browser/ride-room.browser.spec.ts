@@ -31,11 +31,13 @@ import {
   UNANCHORED,
   bothWays,
   TABLET_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
 } from './ride-stage';
 import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 import { HORIZON_HAZE } from '../src/game/world';
+import { STANDINGS_CLEARANCE_PIXELS } from '../src/game/hud/standings-room';
 
 import type { StageItem, StageMeasurement, VoiceMeasurement } from './ride-harness';
 
@@ -83,8 +85,13 @@ test.describe('a race’s standings on the HUD — #1347', () => {
       page,
     }) => {
       await openRide(page, viewport, WITH_STANDINGS);
-      const lines = await page.locator('.oyl-hud__standings li').count();
+      // Seven, less #2286's leader's line, which only a laptop's compact
+      // standings display and which is `display: none` here.
+      const lines = await page
+        .locator('.oyl-hud__standings li:not(.oyl-hud__standings-line--leader-only)')
+        .count();
       expect(lines).toBe(7);
+      await expect(page.locator('.oyl-hud__standings-line--leader-only')).toBeHidden();
       for (const [how, seen] of await bothWays(page)) {
         await test.step(how, () => {
           const panel = standingsPanel(seen);
@@ -1607,5 +1614,187 @@ test.describe('a lap race in a room on the HUD — #1912', () => {
       panels.some((each) => overlap(each.box, rider)) ||
       panels.some((each) => !inside(each.box, viewport));
     expect(crossed).toBe(true);
+  });
+});
+
+/**
+ * #2286 — a room race's standings in a laptop's window, COMPACT (`theme.css`
+ * §"A ROOM RACE'S STANDINGS IN A LAPTOP'S WINDOW"). The owner's request of
+ * 2026-11-06: in a 1280×720 or 1366×657 window a room race drew no standings
+ * at all, because they were drawn only at 47 rem tall and above.
+ *
+ * ## What is held
+ *
+ * At both windows, both ways (#1120), in a race, with *Report*'s reasons
+ * open, sounds on and a side camera, and in a room's lap race:
+ * - the panel drawn, its summary on the stage, and of its lines exactly the
+ *   leader's, the one ahead, the rider's own and the one behind. The
+ *   harness's rider is 5th of 9, so places 1, 4, 5 and 6, the leader set
+ *   before a window that starts at 2 (`room-ride.ts` §`windowedStandings`);
+ * - the owner's 16 px between the panel and the actions panel;
+ * - what gives way for it, in the room order (#419): the pacer, the ghost
+ *   and the wind, then the ride so far, and nothing else;
+ * - and the ride's invariants: every reading and control on the stage and
+ *   uncovered, every panel whole, none over another or the leaning rider.
+ *
+ * In a room's lap race with the sound row the standings give way, as on
+ * `main`, and the ride so far is drawn again. Under 40 rem tall (1024×600)
+ * the panel gives way, as on `main`; and a tablet's list is the window it
+ * was, with the leader's extra line not drawn.
+ */
+const COMPACT_WINDOWS = LAPTOP_VIEWPORTS.filter((each) => each.height >= 640);
+
+/** The places the compact standings draw for the harness's rider, 5th of 9. */
+const COMPACT_PLACES = ['1', '4', '5', '6'];
+
+/** The ride so far, which gives way to the compact standings second. */
+const RIDE_SO_FAR_NAMES = [
+  'reading: Distance',
+  'reading: Climbed',
+  'reading: Avg power',
+  'reading: Calories',
+];
+
+/** The room's references, which give way to the compact standings first. */
+const COMPACT_GIVES_WAY = ['reading: Pacer', 'reading: Your best', 'reading: Wind'];
+
+/** The standings as drawn: the panel's box, the summary's, and each drawn line's place. */
+async function compactStandings(page: Page): Promise<{
+  readonly panel: { readonly top: number; readonly bottom: number; readonly width: number };
+  readonly summaryShown: boolean;
+  readonly places: readonly string[];
+  readonly actionsTop: number;
+  /** Whether the list is a scroller, and so a tab stop (#2599). */
+  readonly scrolls: boolean;
+  /** Whether every line drawn is wholly inside the list's box. */
+  readonly allShown: boolean;
+}> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('.oyl-hud > .oyl-hud__standings');
+    const actions = document.querySelector('.oyl-hud__actions');
+    if (panel === null || actions === null) throw new Error('no standings or actions panel');
+    const box = panel.getBoundingClientRect();
+    const summary = panel.querySelector('.oyl-hud__standings-summary')?.getBoundingClientRect();
+    return {
+      panel: { top: box.top, bottom: box.bottom, width: box.width },
+      summaryShown:
+        summary !== undefined &&
+        summary.height > 1 &&
+        summary.top >= 0 &&
+        summary.bottom <= window.innerHeight,
+      places: [...panel.querySelectorAll('li')]
+        .filter((line) => line.getBoundingClientRect().height > 1)
+        .map((line) => line.querySelector('.oyl-hud__standings-place')?.textContent ?? '?'),
+      actionsTop: actions.getBoundingClientRect().top,
+      scrolls: panel.querySelector('[data-oyl-scrolls]') !== null,
+      allShown: (() => {
+        const scroller = panel.querySelector('.oyl-hud__standings-scroll')?.getBoundingClientRect();
+        if (scroller === undefined) return false;
+        return [...panel.querySelectorAll('li')]
+          .map((line) => line.getBoundingClientRect())
+          .filter((line) => line.height > 1)
+          .every((line) => line.top >= scroller.top - 0.5 && line.bottom <= scroller.bottom + 0.5);
+      })(),
+    };
+  });
+}
+
+/** The layout's faults, less those of an item or a panel clipped to a pixel. */
+function laptopFaults(seen: StageMeasurement, viewport: Viewport): string[] {
+  const faults: string[] = [];
+  const clipped = (box: StageItem['box']): boolean => box.width * box.height <= 1;
+  for (const each of seen.items.filter((item) => !clipped(item.box))) {
+    if (!inside(each.box, viewport) || !each.onTop) faults.push(`lost: ${describeItem(each)}`);
+  }
+  const panels = seen.panels.filter((each) => !clipped(each.box));
+  const rider = riderBox(viewport);
+  panels.forEach((a, index) => {
+    if (!inside(a.box, viewport)) faults.push(`not whole: ${describeItem(a)}`);
+    if (overlap(a.box, rider)) faults.push(`over the rider: ${describeItem(a)}`);
+    for (const b of panels.slice(index + 1)) {
+      if (overlap(a.box, b.box)) faults.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  return faults;
+}
+
+test.describe('a room race’s standings in a laptop’s window, compact — #2286', () => {
+  for (const viewport of COMPACT_WINDOWS) {
+    for (const query of [
+      '?room=standings',
+      '?room=report&sounds=on&side=filming',
+      '?room=lap-race',
+      '?room=lap-race-report',
+      '?room=lap-race-following&side=filming',
+    ]) {
+      test(`drawn, compact, 16 px above the actions panel — ${query} — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, query);
+        for (const [how, seen] of await bothWays(page)) {
+          expect(laptopFaults(seen, viewport), how).toEqual([]);
+          const clipped = seen.items
+            .filter((each) => each.box.width * each.box.height <= 1)
+            .map((each) => each.name);
+          // The pacer, the ghost and the wind are clipped items; the ride so
+          // far is the harness's `givenWay` (`ride-harness.tsx` §`measure`).
+          const present = COMPACT_GIVES_WAY.filter((name) =>
+            seen.items.some((each) => each.name === name),
+          );
+          expect([...clipped].sort(), `${how}: what gives way`).toEqual([...present].sort());
+          for (const name of RIDE_SO_FAR_NAMES) {
+            expect(seen.givenWay, `${how}: ${name}`).toContain(name);
+          }
+        }
+        const standings = await compactStandings(page);
+        console.log(
+          `#2286 ${query} ${viewport.name}: panel ${String(Math.round(standings.panel.top))}–${String(Math.round(standings.panel.bottom))}, actions ${String(Math.round(standings.actionsTop))}, places ${standings.places.join(' ')}`,
+        );
+        expect(standings.panel.width).toBeGreaterThan(1);
+        expect(standings.summaryShown).toBe(true);
+        expect(standings.places).toEqual(COMPACT_PLACES);
+        // A scroller, and a tab stop, only where a line drawn is cut: with
+        // room for the four, none, as `standings-room.ts` counts the lines
+        // drawn and not the window's seven.
+        if (standings.allShown) expect(standings.scrolls).toBe(false);
+        expect(standings.actionsTop - standings.panel.bottom).toBeGreaterThanOrEqual(
+          STANDINGS_CLEARANCE_PIXELS - SUBPIXEL_TOLERANCE,
+        );
+      });
+    }
+
+    test(`a room's lap race with the sound row gives the standings way, as on main — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport, '?room=lap-race-report&sounds=on');
+      // ⚠️ Not the ride's invariants: on `main` this state already runs the
+      // actions panel off both windows (115 px at 1366×657), with or without
+      // any standings, and that is a defect of its own (#3295).
+      for (const [how, seen] of await bothWays(page)) {
+        // The ride so far is drawn again: nothing gives way for a panel not drawn.
+        for (const name of ['reading: Distance', 'reading: Calories']) {
+          const reading = named(seen.items, name);
+          expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeGreaterThan(1);
+        }
+      }
+      expect((await compactStandings(page)).panel.width).toBeLessThanOrEqual(1);
+    });
+  }
+
+  test('under 40 rem tall the standings give way, as on main — 1024×600', async ({ browser }) => {
+    const viewport = LAPTOP_VIEWPORTS.find((each) => each.height === 600) as Viewport;
+    const page = await sharedRide(browser, viewport, '?room=standings');
+    expect((await compactStandings(page)).panel.width).toBeLessThanOrEqual(1);
+  });
+
+  test('a tablet’s list is the window it was, with no leader’s line added — 1280×800', async ({
+    browser,
+  }) => {
+    const viewport = TABLET_VIEWPORTS.find(
+      (each) => each.width === 1280 && each.height === 800,
+    ) as Viewport;
+    const page = await sharedRide(browser, viewport, '?room=standings');
+    const standings = await compactStandings(page);
+    expect(standings.places).toEqual(['2', '3', '4', '5', '6', '7', '8']);
   });
 });

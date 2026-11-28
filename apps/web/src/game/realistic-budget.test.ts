@@ -46,6 +46,8 @@ import {
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
+  REALISTIC_HOUSE_MODEL_IDS,
+  houseModelFile,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_DELIVERY_CAR_BODIES,
   TOWN_STRUCTURE_SURFACES,
@@ -68,6 +70,7 @@ import {
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_BUILDING_MODEL_TRIANGLES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -110,6 +113,7 @@ import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
 import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
+import { HOUSE_MODELS } from './house-models';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { ScatterItem } from './scatter';
 import { drawnRoadFrame } from './terrain';
@@ -261,6 +265,33 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
     }
     expect(riderTriangles).toBeGreaterThan(0);
     expect(riderTriangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.rider);
+  });
+
+  it('keeps every building model at or under one building’s triangles — #3251, ADR 0099 D-4.2', () => {
+    // Read off the committed bytes, never off `house-models.ts`' table: a heavier
+    // file with an unchanged row is the defect this is for.
+    const counted = REALISTIC_HOUSE_MODEL_IDS.map((id) => ({
+      file: houseModelFile(id),
+      triangles: modelFacts(at(houseModelFile(id))).triangles,
+    }));
+    expect(counted.length).toBe(HOUSE_MODELS.length);
+    for (const { file, triangles } of counted) {
+      expect(triangles, file).toBeGreaterThan(0);
+      expect(triangles, file).toBeLessThanOrEqual(REALISTIC_BUILDING_MODEL_TRIANGLES);
+    }
+    // ADR 0099 D-4.2's own words: no heavier than the heaviest house committed when it was
+    // set, 2 946. So the ceiling is that house's, to the next round figure and no further.
+    const heaviest = Math.max(...counted.map((model) => model.triangles));
+    expect(REALISTIC_BUILDING_MODEL_TRIANGLES).toBe(3_000);
+    expect(heaviest).toBeGreaterThan(REALISTIC_BUILDING_MODEL_TRIANGLES - 100);
+    // And the table the fit and the frame's ranking read says what the files do.
+    for (const model of HOUSE_MODELS) {
+      expect(model.triangles, model.id).toBe(
+        counted.find((each) => each.file === houseModelFile(model.id))?.triangles,
+      );
+    }
+    // Seven of the heaviest building the ceiling allows still fit the term every structure shares.
+    expect(REALISTIC_BUILDING_MODEL_TRIANGLES * 7).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
   });
 
   it('keeps every roadside model under its class, with no picture and a colour a vertex — #1274', () => {
@@ -1574,6 +1605,18 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
           ? Math.min(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))
           : lightestPackedHouse();
       expect(lightestStylised, kind).toBeGreaterThan(0);
+      if (kind === 'wall') {
+        // #3252: the one structure the realistic world builds heavier than
+        // the stylised one — a drystone wall, battered and coped, where the
+        // stylised wall is a block of 12. What bounds it is the structure
+        // class, which the frame's structures term prices every slot at.
+        expect(lightestStylised).toBe(12);
+        expect(realisticStructureTriangles(kind)).toBe(168);
+        expect(realisticStructureTriangles(kind)).toBeLessThanOrEqual(
+          REALISTIC_TRIANGLES.structure,
+        );
+        continue;
+      }
       expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(
         packed === undefined
           ? Math.max(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))

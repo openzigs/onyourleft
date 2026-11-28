@@ -744,7 +744,8 @@ describe('absent tags change nothing — #1790', () => {
 
   it('plans every untagged town as before, storeys and all', () => {
     // Since #2848 the shops' aprons are off: the plans before #1790 had none.
-    const before = { shopAprons: false } as const;
+    // Since #3251 the choice by setting is off too: the plans before had no contemporary house.
+    const before = { shopAprons: false, houseStyles: false } as const;
     expect(planFingerprint(classed(mixedTownFixture(), before))).toBe(BEFORE.mixed);
     expect(planFingerprint(classed(houseStreetFixture(), before))).toBe(BEFORE.houses);
     expect(planFingerprint(classed(commercialStreetFixture(), before))).toBe(BEFORE.commercial);

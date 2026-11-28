@@ -188,6 +188,15 @@ export interface RaceStandingsView {
   readonly of: number;
   /** A line under the summary: whether a solo race's AI bots are racing (#2710). */
   readonly note?: string | undefined;
+  /**
+   * The leader's line, where {@link lines} does not start at the front — #2286.
+   * A laptop's window draws the standings compact (`theme.css` §"A ROOM
+   * RACE'S STANDINGS IN A LAPTOP'S WINDOW"): the rider's place, the riders
+   * just ahead and behind, and the leader, as #1967 keeps the leader in a
+   * solo lap race's list. A tablet's list and a screen reader's are
+   * {@link lines}, unchanged.
+   */
+  readonly leader?: StandingsLine | undefined;
 }
 
 /** What the list says, ⚠️ draft wording for the owner. */
@@ -294,7 +303,10 @@ export function windowedStandings(
     const from = Math.min(centre - half, all.length - rest);
     return { lines: [...all.slice(0, 1), ...all.slice(from, from + rest)], place, of: all.length };
   }
-  return { lines: all.slice(first, first + most), place, of: all.length };
+  const lines = all.slice(first, first + most);
+  // #2286: the leader beside a window that does not start at the front.
+  const leader = first > 0 ? all[0] : undefined;
+  return { lines, place, of: all.length, ...(leader === undefined ? {} : { leader }) };
 }
 
 /** A room ride's memory between frames. */

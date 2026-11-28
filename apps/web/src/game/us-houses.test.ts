@@ -80,7 +80,7 @@ import {
   ringBeside,
 } from './footprint-fixtures-testing';
 import { FOUNDATION_METRES } from './buildings';
-import { ARCHETYPE_FEATURES } from './house-archetypes';
+import { archetypeFeaturesOf } from './house-archetypes';
 import { landClassMask } from './land-class';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
 import { rectanglesOf } from './rectilinear-roofs';
@@ -614,8 +614,7 @@ describe('gutters, a downpipe and dormers — #1588', () => {
     // #1786: a Foursquare's hipped dormer and a bungalow's shed one are held in
     // `dormer-variants.test.ts`; this is #1588's gabled one.
     const gabled = town.filter((plan) => {
-      const call =
-        plan.archetype === 'unknown' ? 'none' : ARCHETYPE_FEATURES[plan.archetype].dormers;
+      const call = archetypeFeaturesOf(plan.archetype)?.dormers ?? 'none';
       return call === 'none' || call[0] === 'gabled';
     });
     expect(gabled.length).toBeGreaterThan(town.length - 20);
