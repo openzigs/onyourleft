@@ -156,18 +156,24 @@ pnpm run test
 # command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
 
-# The same report as CI takes it since #2285 (§4c §"Two coverage jobs"): two
-# halves on two runners, then one merge. The first half is
-# `apps/web/src/game/`, the second every other file; each writes a Vitest blob
+# The same report as CI takes it since #3341 (§4c §"Five coverage jobs"): five
+# parts on five runners, then one merge. The first three are
+# `apps/web/src/game/`, divided by the first letter of each name so that each
+# holds about a third of its measured time, the fourth every other `apps/web`
+# file and the fifth every file outside `apps/web`; each writes a Vitest blob
 # (its results and its coverage) to `coverage-blobs/coverage-<n>.json`, and
 # `test:coverage:merge` reads every blob there and writes the one report to
-# `coverage/`, as `test:coverage` does, exiting non-zero if a half had a red
+# `coverage/`, as `test:coverage` does, exiting non-zero if a part had a red
 # case. Divided by PATH, not `--project`: a project filter keeps only that
-# project's own files in the report. `check:test-split` fails a half of any
-# other shape, a half over no file, and a file in no half or in two. Locally
-# `test:coverage` is the whole of both.
+# project's own files in the report. `check:test-split` fails a part of any
+# other shape, a part over no file, and a file in no part or in two — a new
+# package is one, until it is named in the fifth. Locally `test:coverage` is
+# the whole of them.
 pnpm run test:coverage:shard-1
 pnpm run test:coverage:shard-2
+pnpm run test:coverage:shard-3
+pnpm run test:coverage:shard-4
+pnpm run test:coverage:shard-5
 pnpm run test:coverage:merge
 
 # The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):

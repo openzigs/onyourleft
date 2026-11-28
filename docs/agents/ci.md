@@ -534,9 +534,10 @@ the table (§"Coverage out of the required job — #1280"). ⚠️ **Since
 [#1701](https://github.com/openzigs/onyourleft/issues/1701) the three are the `coverage` job, on a
 runner of its own** (§"Coverage in a job of its own — #1701" below); a reviewer who remembers them
 as the last steps of `heavy` is reading the old file. ⚠️ **Since
-[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is two jobs, `coverage-1` and
-`coverage-2`, and `coverage` merges their results into the one report** (§"Two coverage jobs —
-#2285" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
+[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is divided between jobs — since
+[#3341](https://github.com/openzigs/onyourleft/issues/3341) five, `coverage-1` to `coverage-5` —
+and `coverage` merges their results into the one report** (§"Two coverage jobs — #2285" and
+§"Five coverage jobs — #3341" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
 when they followed the browser checks, so a red coverage run still publishes what it measured. A test
 that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
 same test passed in the required job, so it is one that passes only without instrumentation.
@@ -677,8 +678,9 @@ no browser either, and its stop is 30 minutes. `heavy` keeps its own 30 minutes,
 and `nightly-split.test.ts` refuses a coverage run that shares a job with any other suite.
 `nightly-split.test.ts` also holds **every nightly job's slowest measured run at or under 60 % of
 its own stop**. It reads the figures from the table between the two `nightly-measurements`
-markers, one column per job id — ⚠️ since #2285 the table in §"Two coverage jobs — #2285" below;
-the one here is #1701's, kept as it was measured. `report` is left
+markers, one column per job id — ⚠️ since #3341 the table in §"Five coverage jobs — #3341" below
+(#2285's, in §"Two coverage jobs — #2285", before it); the one here is #1701's, kept as it was
+measured. `report` is left
 out because it runs only after a red run. A new job needs a column, and the table needs at least
 three rows. Each figure is the job's own seconds, from its start to its end, as the Actions API
 gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not counting the time it
@@ -776,6 +778,9 @@ fewer Vitest workers on the two-core runner — and those are the owner's to cho
 
 #### Two coverage jobs — #2285
 
+⚠️ **Five since [#3341](https://github.com/openzigs/onyourleft/issues/3341)** (§"Five coverage jobs
+— #3341" below): the game half outgrew its stop. This section is the two-job split as #2285 made it.
+
 ⚠️ **The nightly coverage report is three jobs since
 [#2285](https://github.com/openzigs/onyourleft/issues/2285)**, and a reviewer who remembers one
 `coverage` job running `test:coverage` is reading the old file. `coverage-1` (`Nightly tests under
@@ -847,10 +852,10 @@ timeout under coverage, and with two it took 925 and 939 s on the 7763 (runs 423
 not a stop, and putting the third worker back is one line of `nightly.yml`.
 
 **Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
-§"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
-reads** (between the `nightly-measurements` markers), one column per job.
+§"Coverage in a job of its own — #1701" defines them. ⚠️ Since #3341 this is **not** the table
+`nightly-split.test.ts` reads: that is §"Five coverage jobs — #3341"'s, which has a column for each
+of the five parts; this one is #2285's, kept as it was measured.
 
-<!-- nightly-measurements:start -->
 | Run | Event | heavy | coverage-1 | coverage-2 | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|
 | [42312238591](https://github.com/openzigs/onyourleft/actions/runs/42312238591) | `pull_request` | 456 | 454 | 733 | 29 | 337 | 319 | 261 | 195 |
@@ -859,7 +864,6 @@ reads** (between the `nightly-measurements` markers), one column per job.
 | [42318412519](https://github.com/openzigs/onyourleft/actions/runs/42318412519) | `workflow_dispatch` | 406 | 766 | 495 | 34 | 585 | 319 | 273 | 251 |
 | [42318409493](https://github.com/openzigs/onyourleft/actions/runs/42318409493) | `workflow_dispatch` | 421 | 615 | 756 | 28 | 545 | 326 | 323 | 237 |
 | [42318592284](https://github.com/openzigs/onyourleft/actions/runs/42318592284) | `pull_request` | 696 | 669 | 684 | 38 | 488 | 266 | 262 | 200 |
-<!-- nightly-measurements:end -->
 
 The first three are of commit 3ffa4ac5, and in each every job was green but `coverage-2` and
 `coverage`, red on one case alone: this table's own, before it had these columns. **The last three
