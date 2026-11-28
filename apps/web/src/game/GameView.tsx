@@ -384,6 +384,8 @@ import {
   groupRideFinished,
   groupRideTimed,
   groupRideStrip,
+  pressGroupPullOff,
+  setGroupSitIn,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
@@ -2519,6 +2521,8 @@ function GameScreen({
    * `undefined` on every other ride. @see GroupRideSession
    */
   const groupRideRef = useRef<GroupRideSession | undefined>(undefined);
+  /** #3307: counts the sit-in choices, so one is drawn at once and not on the loop's next frame. */
+  const [, setGroupChoices] = useState(0);
   /**
    * #3305: the group ride's cue on the HUD line, for
    * `GROUP_RIDE_CUE_SHOWN_SECONDS` of the group's clock, as {@link pacerSay}
@@ -6189,6 +6193,31 @@ function GameScreen({
                   );
                   // Drawn at once, without waiting for the loop's next frame.
                   setJunctionPresses((presses) => presses + 1);
+                },
+              };
+        })()}
+        // #3307, ADR 0101 D-3.7: a group ride's pull-off press and sit-in
+        // choice, as the line stands on this frame, and where each goes: the
+        // group's session, which the next simulation step reads. A key, a
+        // tap and a pad all reach it through the HUD. Neither is handed to
+        // the simulation, the gradient session or the trainer's port (D-6.5).
+        groupRideInput={(() => {
+          const grouped = groupRideRef.current;
+          return grouped === undefined
+            ? undefined
+            : {
+                onFront: grouped.role === 'on-front',
+                sittingIn: grouped.sittingIn,
+                pullOff: () => {
+                  const now = groupRideRef.current;
+                  if (now !== undefined) groupRideRef.current = pressGroupPullOff(now);
+                },
+                sitIn: (sittingIn: boolean) => {
+                  const now = groupRideRef.current;
+                  if (now === undefined) return;
+                  groupRideRef.current = setGroupSitIn(now, sittingIn);
+                  // Drawn at once, without waiting for the loop's next frame.
+                  setGroupChoices((choices) => choices + 1);
                 },
               };
         })()}

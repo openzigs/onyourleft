@@ -81,8 +81,22 @@
  * version, where the group's clock begins on the recording's
  * ({@link groupRideTimed}), and a log with an entry each time the line's
  * phase or the rider's role changed, each with the group's speed then
- * (`@onyourleft/store` §`GroupRideFact`). Numbers and words from closed
- * lists: no place, no coordinate, no text.
+ * (`@onyourleft/store` §`GroupRideFact`), and what the rider told the
+ * group. Numbers and words from closed lists: no place, no coordinate, no
+ * text.
+ *
+ * ## What the rider can tell the group (#3307, ADR 0101 D-3.7)
+ *
+ * - **Pull off**, {@link pressGroupPullOff}: a discrete press, taken only
+ *   while the rider's role is `on-front`, handed to the rotation as
+ *   `riderSignal` on the next frame's steps. One flag, so a held key or a
+ *   mashed button is one pull-off. The drawn lane follows from the rotation
+ *   putting the rider aside (above).
+ * - **Sit in**, {@link setGroupSitIn}: a choice held while on, handed to the
+ *   rotation as `riderSittingIn` on every step.
+ *
+ * Every press taken and every sit-in choice goes in
+ * {@link GroupRideSession.presses} with its ride time, and so in the fact.
  *
  * ## The group ride ends at the finish
  *
@@ -118,7 +132,12 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 import { groupRidePhysics } from '@onyourleft/physics';
-import { GROUP_RIDE_LOG_MOST, type GroupRideFact, type GroupRideLogEntry } from '@onyourleft/store';
+import {
+  GROUP_RIDE_LOG_MOST,
+  type GroupRideFact,
+  type GroupRideLogEntry,
+  type GroupRidePress,
+} from '@onyourleft/store';
 
 import { LANE_OFFSETS_METRES, sidewaysSpeedOf, stepSteer, type SteerState } from '../lanes';
 import {
@@ -261,6 +280,18 @@ export interface GroupRideSession {
    * `undefined` until a recording has been read. @see groupRideTimed
    */
   readonly startedAt: number | undefined;
+  /** Whether the rider has chosen to sit in. @see setGroupSitIn */
+  readonly sittingIn: boolean;
+  /** A pull-off press the rotation has not been handed yet: one flag, never a count. */
+  readonly pullOffPressed: boolean;
+  /**
+   * Whether the rider pressed pull off on this turn on the front: drawn in the
+   * pull-off lane from the press, before the rotation's next window has them
+   * aside, as #3307 draws it. Cleared once they are off the front.
+   */
+  readonly pullOffAsked: boolean;
+  /** Every press taken and every sit-in choice so far, oldest first. @see GroupRideFact.presses */
+  readonly presses: readonly GroupRidePress[];
 }
 
 /** What {@link startGroupRideSession} reads. */
@@ -412,7 +443,47 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     log: [{ at: 0, phase, role, groupSpeed: groupSpeedMps }],
     logCut: false,
     startedAt: undefined,
+    sittingIn: false,
+    pullOffPressed: false,
+    pullOffAsked: false,
+    presses: [],
   };
+}
+
+/** `session` with `press` kept, at the ride time its last step ended; past the most kept, the cut is said. */
+function pressKept(
+  session: GroupRideSession,
+  press: GroupRidePress['press'],
+): Pick<GroupRideSession, 'presses' | 'logCut'> {
+  return session.presses.length < GROUP_RIDE_LOG_MOST
+    ? {
+        presses: [...session.presses, { at: session.state.atMs / 1_000, press }],
+        logCut: session.logCut,
+      }
+    : { presses: session.presses, logCut: true };
+}
+
+/**
+ * The session after the rider pressed pull off (#3307): on the front, the
+ * press waits for the next simulation step, which hands it to the rotation.
+ * In any other role, the same session: no rotation starts and nothing moves.
+ */
+export function pressGroupPullOff(session: GroupRideSession): GroupRideSession {
+  if (session.role !== 'on-front' || session.pullOffPressed) return session;
+  return {
+    ...session,
+    ...pressKept(session, 'pull-off'),
+    pullOffPressed: true,
+    pullOffAsked: true,
+    riderSteer: { ...session.riderSteer, lane: GROUP_PULL_OFF_LANE },
+  };
+}
+
+/** The session with the rider sitting in, or not (#3307): read by every step from the next on. */
+export function setGroupSitIn(session: GroupRideSession, sittingIn: boolean): GroupRideSession {
+  return session.sittingIn === sittingIn
+    ? session
+    : { ...session, ...pressKept(session, sittingIn ? 'sit-in' : 'sit-out'), sittingIn };
 }
 
 /**
@@ -496,7 +567,7 @@ export function stepGroupRideSession(
   const from = session.rider;
   const to = step.rider;
   let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut, cues, cue } = session;
-  let { riderSteer, steeredBefore } = session;
+  let { riderSteer, steeredBefore, pullOffAsked } = session;
   let log = session.log;
   const powerWatts = cueWatts(step.powerWatts);
   const thresholdWatts = cueWatts(step.thresholdWatts);
@@ -509,7 +580,15 @@ export function stepGroupRideSession(
     const before = state;
     const ridden = stepGroupRide(
       state,
-      { elapsedSeconds: SIMULATION_STEP_SECONDS, rider, riderStopped: step.riderStopped },
+      {
+        elapsedSeconds: SIMULATION_STEP_SECONDS,
+        rider,
+        riderStopped: step.riderStopped,
+        // #3307: a press since the last frame's steps, which the rotation
+        // holds as one flag; the choice, for as long as it is on.
+        riderSignal: session.pullOffPressed,
+        riderSittingIn: session.sittingIn,
+      },
       session.road,
     );
     state = ridden.state;
@@ -545,7 +624,9 @@ export function stepGroupRideSession(
     // a tick before; and the rider's own lane a tick on, by the steer's step.
     const out = membersOut({ botIds: session.botIds, pack, riderSteer }, state, riderAtEnd);
     steeredBefore = riderSteer.offset;
-    riderSteer = stepSteer({ ...riderSteer, lane: riderLane(out) }, SIMULATION_STEP_SECONDS);
+    if (role !== 'on-front') pullOffAsked = false;
+    const lane = pullOffAsked ? GROUP_PULL_OFF_LANE : riderLane(out);
+    riderSteer = stepSteer({ ...riderSteer, lane }, SIMULATION_STEP_SECONDS);
     pack = stepPackLayout(
       packField({ botIds: session.botIds, pack, riderSteer }, state, riderAtEnd, out, before),
       GROUP_RIDE_RIDER_ID,
@@ -570,6 +651,8 @@ export function stepGroupRideSession(
     steeredBefore,
     log,
     logCut,
+    pullOffPressed: false,
+    pullOffAsked,
   };
 }
 
@@ -674,5 +757,6 @@ export function groupRideFact(session: GroupRideSession): GroupRideFact | undefi
     bots: session.choice.bots,
     log: session.log,
     ...(session.logCut ? { logCut: true as const } : {}),
+    ...(session.presses.length === 0 ? {} : { presses: session.presses }),
   };
 }

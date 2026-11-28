@@ -1088,6 +1088,49 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         line's shelter the same watts are faster than the
                         line, so a simulated rider drifts through the bots
                         and off the front, then back
+    src/game/group-ride/rider-input.ts, hud/GroupRideControls.tsx
+                        what the rider can tell the group (#3307, ADR 0101
+                        D-3.7, D-6.5): **pull off**, a discrete press taken
+                        only while the rider's role is `on-front`, and **sit
+                        in**, a toggle. `GameView` hands the HUD a
+                        `GroupRideRiderInput` on a group ride
+                        (`HudPanelProps.groupRide`); the HUD draws *Pull off
+                        left* (72 px, `aria-disabled` off the front) and
+                        *Sit in* (the design toggle at the 48 px ride size)
+                        in the actions panel, inside the touch lock, held
+                        drawn while the rider is on the front
+                        (`controlsHeld`). Three inputs, one press: the lane
+                        key toward `GROUP_RIDE_PULL_OFF_SIDE` (**A**, left,
+                        one fixed side), the button, and a pad through
+                        `GamepadIntents` (`pullOffPadPorts`: a lane change
+                        left, and every button a lap race uses its item
+                        on). The press goes to `ride-group.ts`
+                        §`pressGroupPullOff`: ONE flag, handed to the
+                        rotation as `riderSignal` on the next step, so a
+                        held key or a mashed button is one pull-off; it
+                        also moves the rider's DRAWN lane a lane left
+                        through `lanes.ts` (`SceneInput.steeredLateral`),
+                        back to the line's once they are neither on the
+                        front nor drifting back. ⚠️ A press as the rider
+                        ARRIVES on the front, before the line is steady,
+                        is held by the rotation and ends the pull as soon
+                        as it is. Sit-in is `setGroupSitIn`, handed as
+                        `riderSittingIn` on every step. Neither choice
+                        outlives the ride, and **what was pressed is kept
+                        with it**: each press taken and each sit-in choice,
+                        with its ride time, in `GroupRideFact.presses`
+                        (`pull-off`, `sit-in`, `sit-out`; absent when
+                        nothing was pressed; a mashed button is one entry),
+                        because the line replays from them as well as the
+                        seed, and `GROUP_RIDE_CODE_VERSION` is **2** from
+                        here. Neither reaches the simulation, the gradient
+                        session or the trainer's port.
+                        `group-ride-wiring.test.tsx` §"#3307" ends a pull by
+                        each input through the real `GameView`, with a rider
+                        who holds a wheel. ⚠️ A group ride now mounts
+                        `GamepadIntents`, which asks for ONE animation
+                        frame at mount: a test that hands out frames one
+                        callback at a time loses a ride frame to it
     src/game/group-ride/group-ride-cannot-reach-trainer.test.tsx
                         ADR 0101 D-6.6, the owner's ruling 4: **its first
                         case** (#3303). In simulation mode a ride with the
@@ -1095,8 +1138,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         release included, what the same ride sends without
                         the group at the same draft factors (kept from the
                         first ride and handed to the second by a wrapped
-                        `GameSimulation`). #3307 adds the presses and #3308
-                        completes it (ERG, the worst case)
+                        `GameSimulation`). **The presses** (#3307): a ride
+                        that presses pull off before every frame, ends a
+                        pull by a press, toggles sit-in and eases off the
+                        back is held, write for write, to the same power on
+                        the same frames at the same factors with no group.
+                        #3308 completes it (ERG, the worst case)
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says

@@ -703,6 +703,21 @@ export interface GroupRideLogEntry {
   readonly groupSpeed: number;
 }
 
+/** Every press a group ride keeps. @see GroupRidePress */
+export const GROUP_RIDE_PRESSES = ['pull-off', 'sit-in', 'sit-out'] as const;
+
+/**
+ * One thing the rider told the group (#3307, ADR 0101 D-3.7): a pull-off
+ * press that was taken, so one made on the front, or the sit-in choice
+ * turned on (`sit-in`) or off (`sit-out`). A word from a closed list and a
+ * time, and no text.
+ */
+export interface GroupRidePress {
+  /** Seconds of the group ride ridden when it was made, from nought. */
+  readonly at: number;
+  readonly press: (typeof GROUP_RIDE_PRESSES)[number];
+}
+
 /** @see RideFacts.groupRide */
 export interface GroupRideFact {
   /** The rules it was ridden under (`@onyourleft/domain` §`GROUP_RIDE_CODE_VERSION`). */
@@ -726,8 +741,19 @@ export interface GroupRideFact {
    * {@link GROUP_RIDE_LOG_MOST} entries.
    */
   readonly log: readonly GroupRideLogEntry[];
-  /** `true` when the ride had more changes than the log holds, and the rest were not kept. */
+  /**
+   * `true` when the ride had more changes than the log holds, or more presses
+   * than {@link presses} does, and the rest were not kept.
+   */
   readonly logCut?: true;
+  /**
+   * What the rider told the group, oldest first (#3307): what the line
+   * decided depends on these as well as on the seed, so a ride is replayed
+   * with them. At most {@link GROUP_RIDE_LOG_MOST}. Absent for a ride in
+   * which the rider pressed nothing, and for every ride kept under rules
+   * version 1, which had no press.
+   */
+  readonly presses?: readonly GroupRidePress[];
 }
 
 /**
