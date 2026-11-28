@@ -13,7 +13,7 @@ import {
 } from '../quantities';
 import { courseHillsAhead } from '../route/course-ahead';
 import { routeProfile, type RouteProfile } from '../route/profile';
-import { LINE_CLIMB_EASING_METRES, lineClimbAheadM } from './climb-ahead';
+import { LINE_CLIMB_EASED_METRES, LINE_CLIMB_EASING_METRES, lineClimbAheadM } from './climb-ahead';
 import { GroupRideError } from './errors';
 import { courseOf, type Stretch } from './fixtures/courses';
 import { rideLine, type LineWindow } from './line-testing';
@@ -281,6 +281,91 @@ describe('a stepped climb is held to its top, over an easing shorter than LINE_C
   });
 });
 
+describe(`the easings a climb goes on over add up to under ${LINE_CLIMB_EASED_METRES} m (owner ruling, 2026-11-27)`, () => {
+  for (const eased of [60, 90]) {
+    it(`holds a climb with a ${eased} m easing to its crest`, () => {
+      // 6 % from 300 m to 700 m, ${eased} m at 1 %, 150 m at 6 % to the crest.
+      const crest = 700 + eased + 150;
+      const climb = course([
+        [300, 0],
+        [400, 6],
+        [eased, 1],
+        [150, 6],
+        [1_000, 0],
+      ]);
+      expect(misses(climb, across(310, crest - 5, 0.5), 0)).toEqual([]);
+      expect(misses(climb, across(crest + 5, crest + 990, 0.5), null)).toEqual([]);
+    });
+  }
+
+  /** Level to 300 m, 200 m at 5 %, then `ramps` times 90 m level and 150 m at 5 %, then level. */
+  const rolling = (ramps: number, loop = false): RouteProfile =>
+    course(
+      [
+        [300, 0],
+        [200, 5],
+        ...Array.from({ length: ramps }, (): readonly Stretch[] => [
+          [90, 0],
+          [150, 5],
+        ]).flat(),
+        [1_000, 0],
+      ],
+      loop,
+    );
+
+  it('ends the hold on a long rolling road at the third 90 m easing, and holds nothing after', () => {
+    // The climb's 200 m stretch is 300–500 m; easings 500–590, 740–830, 980–1 070, …
+    const road = rolling(20);
+    const end = 300 + 200 + 20 * 240;
+    expect(misses(road, across(310, 975, 0.5), 0)).toEqual([]);
+    expect(misses(road, across(985, end + 990, 0.5), null)).toEqual([]);
+  });
+
+  it('is not held throughout a rolling loop that has one 200 m stretch, and its line changes', () => {
+    // The review's loop: before this cap every one of its 5 090 positions read 0, and no pull changed.
+    const loop = course(
+      [
+        [200, 5],
+        ...Array.from({ length: 20 }, (): readonly Stretch[] => [
+          [90, 0],
+          [150, 5],
+        ]).flat(),
+        [90, 0],
+      ],
+      true,
+    );
+    const total = loop.totalDistance as number;
+    const held = across(0, total, 1).filter((at) => lineClimbAheadM(loop, at) === 0);
+    expect(held.length).toBeLessThan(total / 4);
+    const windows = rideLine({
+      line: FIVE_BOTS,
+      seed: 2,
+      seconds: 1_200,
+      climbAheadM: (at) => lineClimbAheadM(loop, at),
+    }).windows;
+    expect(changes(windows).length).toBeGreaterThan(0);
+  });
+
+  it('starts the sum again at a second 200 m stretch: a long stepped climb is held to its crest', () => {
+    const stepped = course([
+      [300, 0],
+      [200, 5],
+      [90, 0],
+      [150, 5],
+      [90, 0],
+      [200, 5],
+      [90, 0],
+      [150, 5],
+      [90, 0],
+      [150, 5],
+      [1_000, 0],
+    ]);
+    const crest = 300 + 200 + 90 + 150 + 90 + 200 + 90 + 150 + 90 + 150;
+    expect(misses(stepped, across(310, crest - 5, 0.5), 0)).toEqual([]);
+    expect(misses(stepped, across(crest + 5, crest + 990, 0.5), null)).toEqual([]);
+  });
+});
+
 describe('on a profile routeProfile built (#3362)', () => {
   it('is 0 up a smoothed climb to near its crest, and null past it', () => {
     // 5 % from 1 000 m to 1 600 m. The smoothed grade crosses 3 % a few metres inside each end.
@@ -382,8 +467,9 @@ describe('the end of a route that is not a loop (#3362)', () => {
   });
 });
 
-describe('a profile with no spacing is refused (#3362)', () => {
-  for (const resolution of [0, -10, Number.NaN, Number.POSITIVE_INFINITY]) {
+describe('a profile with no spacing, or one finer than a metre, is refused (#3362)', () => {
+  // A spacing a fraction of a metre made each walk, counted in metres, millions of steps long.
+  for (const resolution of [0, -10, Number.NaN, Number.POSITIVE_INFINITY, 1e-4, 0.999]) {
     it(`throws view-out-of-range for a resolution of ${resolution}, on a climb or off one`, () => {
       // Cast past `metres`, which refuses most of these: a stored or hand-built profile need not have passed it.
       const bad = { ...CLIMB, resolution } as unknown as RouteProfile;

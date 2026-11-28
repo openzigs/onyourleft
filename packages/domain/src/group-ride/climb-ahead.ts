@@ -41,6 +41,14 @@
  * through each easing on the way. A road of short ramps with no 200 m stretch
  * is still no climb, as it is for `courseHillsAhead`.
  *
+ * The easings a climb goes on over add up, and **under
+ * {@link LINE_CLIMB_EASED_METRES} of them in all**, counted from the last 200 m
+ * stretch, the climb goes on; the easing that takes the sum to it ends the
+ * climb (owner ruling, 2026-11-27). So a long rolling road of short ramps and
+ * short easings after one 200 m stretch is not one endless climb: the hold
+ * ends at the next flat, and the rotation's pull change, deferred over a
+ * climb, is not dropped. A second 200 m stretch starts the sum again.
+ *
  * ## The ends of the road
  *
  * A route that is not a loop has no road before its start or past its end. At
@@ -67,10 +75,26 @@ import { GroupRideError } from './errors';
 export const LINE_CLIMB_EASING_METRES = COURSE_HILL_LEAST_METRES / 2;
 
 /**
+ * The easings a climb goes on over add up to less than this, metres: **200**,
+ * a climb's least length, counted back from the front (the whole of an easing
+ * it stands on included) to the last 200 m stretch. Two easings of 90 m are
+ * the same climb; the third ends it. See the file comment.
+ */
+export const LINE_CLIMB_EASED_METRES = COURSE_HILL_LEAST_METRES;
+
+/**
+ * The finest profile spacing read, metres: **1**. `routeProfile` samples about
+ * every 10 m. Each walk here is counted in metres, so a spacing a fraction of
+ * a metre makes it, and `courseHillsAhead`, millions of steps long.
+ */
+const LEAST_SPACING_METRES = 1;
+
+/**
  * Whether the sample `nearest` is on a climb: on a stretch of
  * {@link COURSE_HILL_LEAST_METRES} or more at {@link COURSE_HILL_GRADE_PERCENT}
  * or steeper, or on steep road or an easing joined back to one by easings each
- * shorter than {@link LINE_CLIMB_EASING_METRES}. See the file comment.
+ * shorter than {@link LINE_CLIMB_EASING_METRES} and together shorter than
+ * {@link LINE_CLIMB_EASED_METRES}. See the file comment.
  */
 function onClimb(profile: RouteProfile, nearest: number, step: number): boolean {
   const last = profile.grades.length - 1;
@@ -98,12 +122,15 @@ function onClimb(profile: RouteProfile, nearest: number, step: number): boolean 
   };
 
   let at = nearest;
+  /** The samples of easing bridged so far, back from the front. */
+  let eased = 0;
   if (!steep(at)) {
     // On an easing: on the climb only when steep road resumes before it is too long.
     const behind = easing(at, -1);
     const ahead = easing(at, 1);
     if (behind === undefined || ahead === undefined) return false;
-    if ((behind + ahead - 1) * step >= LINE_CLIMB_EASING_METRES) return false;
+    eased = behind + ahead - 1;
+    if (eased * step >= LINE_CLIMB_EASING_METRES) return false;
     at -= behind;
   }
   // The steep stretch through `at`, ahead and behind; then back over each easing to the one before.
@@ -116,6 +143,8 @@ function onClimb(profile: RouteProfile, nearest: number, step: number): boolean 
     if (enough(at - first + 1 + forward)) return true;
     const gap = easing(first - 1, -1);
     if (gap === undefined) return false;
+    eased += gap;
+    if (eased * step >= LINE_CLIMB_EASED_METRES) return false;
     walked += at - first + 1 + gap;
     at = first - 1 - gap;
     forward = 0;
@@ -130,16 +159,17 @@ function onClimb(profile: RouteProfile, nearest: number, step: number): boolean 
  * at or past its end. What `RotationView.climbAheadM` is given.
  *
  * @throws {GroupRideError} `view-out-of-range` for a profile whose
- *   `resolution` is not a finite number of metres above zero. A hand-built or
- *   stored profile need not have come through `routeProfile`, and on one
- *   neither this nor `courseHillsAhead` would leave its loop.
+ *   `resolution` is not a finite number of metres, one metre or more. A
+ *   hand-built or stored profile need not have come through `routeProfile`;
+ *   on a spacing of 0 neither this nor `courseHillsAhead` would leave its
+ *   loop, and on a fraction of a metre each would take seconds.
  */
 export function lineClimbAheadM(profile: RouteProfile, from: number): number | null {
   const step = profile.resolution as number;
-  if (!Number.isFinite(step) || !(step > 0)) {
+  if (!Number.isFinite(step) || !(step >= LEAST_SPACING_METRES)) {
     throw new GroupRideError(
       'view-out-of-range',
-      "a course profile's spacing must be a finite number of metres above zero",
+      "a course profile's spacing must be a finite number of metres, a metre or more",
     );
   }
   if (!profile.loop && from >= (profile.totalDistance as number)) return null;

@@ -245,7 +245,7 @@ export function startGroupRide(setup: GroupRideSetup): GroupRideState {
  *
  * @throws {GroupRideError} `view-out-of-range` for a tick that does not cover
  *   a finite time above zero, for a course whose spacing is not a finite
- *   number of metres above zero (`lineClimbAheadM`), and as `stepRotation`
+ *   number of metres, one metre or more (`lineClimbAheadM`), and as `stepRotation`
  *   for a rider who is not somewhere finite.
  */
 export function stepGroupRide(
