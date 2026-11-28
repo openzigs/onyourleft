@@ -86,6 +86,18 @@ if ! grep -qx 'packages/analysis/' <<< "${PORT_ROOT_DIRECTORIES}"; then
   exit 1
 fi
 
+# Every directory TRAINER_SEALED_PREFIXES names, read the same way and for the
+# same reason: since #3308 a sealed prefix naming no directory is a hard failure.
+SEALED_DIRECTORIES="$(
+  awk '/^const TRAINER_SEALED_PREFIXES = \[/ { on = 1 } on { print } on && /\];/ { exit }' "${CHECK}" |
+    grep -o "'[^']*'" |
+    tr -d "'"
+)"
+if ! grep -qx 'apps/web/src/game/group-ride/' <<< "${SEALED_DIRECTORIES}"; then
+  printf 'check-wiring.test: could not read apps/web/src/game/group-ride/ out of TRAINER_SEALED_PREFIXES in %s\n' "${CHECK}" >&2
+  exit 1
+fi
+
 # new_fixture -- a repository with one app, its page, and an empty entry module.
 #
 # ⚠️ Every watched directory is created even when a case writes into none of
@@ -97,7 +109,7 @@ new_fixture() {
   tmp="$(mktemp -d)"
   while IFS= read -r watched; do
     mkdir -p "${tmp}/${watched}"
-  done <<< "${WATCHED_DIRECTORIES}"$'\n'"${PORT_ROOT_DIRECTORIES}"
+  done <<< "${WATCHED_DIRECTORIES}"$'\n'"${PORT_ROOT_DIRECTORIES}"$'\n'"${SEALED_DIRECTORIES}"
   printf '{"name":"onyourleft","private":true}' > "${tmp}/package.json"
   printf '{"name":"@onyourleft/web","private":true}' > "${tmp}/apps/web/package.json"
   cat > "${tmp}/apps/web/index.html" <<'HTML'
@@ -1704,6 +1716,93 @@ TS
 run_check
 assert_red 'a port root that has been renamed away is a failure, not a quiet skip'
 assert_says 'and names the root that is missing' 'port root missing: packages/analysis/'
+
+# --- WIRE005: a sealed mode may not import the trainer (#3308) ---------------
+#
+# ADR 0101 D-6.1: nothing in the AI group ride writes to the trainer. Each case
+# is the group ride's directory importing one of the forbidden modules, in the
+# three ways a module can: by its path, by a name a workspace barrel re-exports
+# from the seam, and as a type only, which is erased and passes. The tree is
+# green but for the import under test, so each red is WIRE005's alone.
+sealed_fixture() {
+  new_fixture
+  seam_stubs
+  write apps/web/src/main.tsx <<'TS'
+import { createErgWriter } from '@onyourleft/sensors/protocol';
+import { ride } from './game/group-ride/ride-group';
+import { portOver, type GamePort } from './game/trainer-port';
+const port: GamePort | undefined = undefined;
+createErgWriter();
+ride();
+portOver();
+void port;
+TS
+  write apps/web/src/game/trainer-port.ts <<'TS'
+export interface GamePort {
+  readonly id: string;
+}
+export function portOver(): void {}
+TS
+  printf '{"name":"@onyourleft/sensors","private":true,"exports":{"./protocol":"./protocol/src/index.ts"}}' \
+    > "${tmp}/packages/sensors/package.json"
+  write packages/sensors/protocol/src/index.ts <<'TS'
+export { createErgWriter } from './erg-writer';
+export { ERG_LEAST_WATTS } from './erg-range';
+TS
+  write packages/sensors/protocol/src/erg-writer.ts <<'TS'
+export function createErgWriter(): void {}
+TS
+  write packages/sensors/protocol/src/erg-range.ts <<'TS'
+export const ERG_LEAST_WATTS = 0;
+TS
+}
+
+sealed_fixture
+write apps/web/src/game/group-ride/ride-group.ts <<'TS'
+import { portOver } from '../trainer-port';
+export function ride(): void {
+  portOver();
+}
+TS
+run_check
+assert_red '#3308: a group-ride module importing the trainer port fails'
+assert_says '#3308: and names the rule, the module, the line and what it imported' 'WIRE005 apps/web/src/game/group-ride/ride-group.ts:1 — imports `apps/web/src/game/trainer-port.ts`'
+
+sealed_fixture
+write apps/web/src/game/group-ride/ride-group.ts <<'TS'
+import { createErgWriter } from '@onyourleft/sensors/protocol';
+export function ride(): void {
+  createErgWriter();
+}
+TS
+run_check
+assert_red '#3308: a seam module taken by name through a workspace barrel fails'
+assert_says '#3308: and names the seam module behind the barrel' 'imports `packages/sensors/protocol/src/erg-writer.ts` (as `@onyourleft/sensors/protocol`)'
+
+sealed_fixture
+write apps/web/src/game/group-ride/ride-group.ts <<'TS'
+import { ERG_LEAST_WATTS } from '@onyourleft/sensors/protocol';
+import type { GamePort } from '../trainer-port';
+export function ride(port?: GamePort): number {
+  return port === undefined ? ERG_LEAST_WATTS : 1;
+}
+TS
+run_check
+assert_green '#3308: a type from the trainer port and a name the barrel takes from outside the seam pass'
+assert_says '#3308: and the success line counts the sealed modules' '1 modules sealed from the trainer'
+
+new_fixture
+rmdir "${tmp}/apps/web/src/game/group-ride"
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_red '#3308: a sealed directory renamed away is a failure, not a quiet skip'
+assert_says '#3308: and names the directory that is missing' 'sealed directory missing: apps/web/src/game/group-ride/'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

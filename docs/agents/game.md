@@ -1143,7 +1143,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         pull by a press, toggles sit-in and eases off the
                         back is held, write for write, to the same power on
                         the same frames at the same factors with no group.
-                        #3308 completes it (ERG, the worst case)
+                        **The worst case** (#3308): one ride selects every
+                        cue kind and takes a pull, a press, sit-in, a gap,
+                        off the back, the sweep, a wait to a stop and a
+                        regroup over a climb, held write for write to its
+                        twin at the same factors, the release included;
+                        ridden a part a case. **ERG**: a workout with the
+                        group forced beside it sends the same bytes at the
+                        same frames, and the same release after *End ride*.
+                        ⚠️ No sound yet: #3306 adds its ride here
+    src/game/group-ride/group-ride-imports-cannot-reach-trainer.test.ts
+                        its static half (#3308): the shared walk and
+                        forbidden set over `game/group-ride/`,
+                        `packages/domain/src/group-ride/`, the physics and
+                        the three HUD modules. `check:wiring`'s WIRE005
+                        refuses a direct import of a seam or game trainer
+                        module from `game/group-ride/` besides
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says
