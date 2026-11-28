@@ -17,9 +17,9 @@
  * ## Unavailable off the front
  *
  * A press is taken only while the rider is on the front, and there the button
- * is lit: the HUD's ink as its fill (#3371, `theme.css`
+ * is lit: a 4 px edge in the HUD's ink (#3371, `theme.css`
  * §`.oyl-hud__pull-off`). Anywhere else the button is `aria-disabled`, drawn
- * in the HUD's muted ink on its surface with a dashed edge, and described by
+ * in the HUD's muted ink with a dashed edge, and described by
  * {@link PULL_OFF_NOT_ON_FRONT_SENTENCE}, a sentence off the screen; a press
  * then asks nothing. `aria-disabled` and not `disabled`, for
  * `ItemControl.tsx`'s reason: it stays in the tab order and says why. The key

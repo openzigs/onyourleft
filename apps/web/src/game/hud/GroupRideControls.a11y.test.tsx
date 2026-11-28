@@ -28,7 +28,7 @@ import {
 
 import { auditAccessibility, formatViolations, tabbableElements } from '../../a11y/audit';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
-import { AA_TEXT, contrastRatio } from '../../design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../../design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../../design/ride-time-controls';
 import { tap } from '../../design/touch-lock-testing';
 import { TOUCH_LOCK_NAME } from '../../design/TouchLockButton';
@@ -225,16 +225,30 @@ describe('the group-ride controls on the HUD — #3307', () => {
   it('lights the button on the front and dashes its edge off it, its words AA either way — #3371', async () => {
     const lit = `.oyl-hud__item .oyl-hud__pull-off:not([aria-disabled='true'])`;
     const unlit = `.oyl-hud__item .oyl-hud__pull-off[aria-disabled='true']`;
-    // On the front: the HUD's own pair turned round, ink as the fill.
-    expect(declared(lit, 'background')).toEqual(['var(--oyl-color-hud-ink)']);
-    expect(declared(lit, 'color')).toEqual(['var(--oyl-color-hud-surface)']);
+    // On the front: a 4 px edge in the HUD's ink, its border and a ring inside it.
     expect(declared(lit, 'border-color')).toEqual(['var(--oyl-color-hud-ink)']);
-    // Off it: a dashed edge, beside the muted ink on the surface the case above holds.
+    expect(declared(lit, 'box-shadow')).toEqual(['inset 0 0 0 2px var(--oyl-color-hud-ink)']);
+    // Off it: a dashed edge, beside the muted ink the case above holds.
     expect(declared(unlit, 'border-style')).toEqual(['dashed']);
+    // The panel's own surface either way (`hud-surface.a11y.test.ts`).
+    expect(declared(lit, 'background')).toEqual([]);
     expect(declared(unlit, 'background')).toEqual([]);
+    expect(declared('.oyl-hud__control', 'border')).toEqual([
+      '2px solid var(--oyl-color-hud-border)',
+    ]);
     for (const theme of THEMES) {
       const palette = paletteColours(theme);
-      expect(contrastRatio(palette.hudSurface, palette.hudInk)).toBeGreaterThanOrEqual(AA_TEXT);
+      // The lit edge, and the unlit one, against the surface they are drawn on (SC 1.4.11).
+      expect(contrastRatio(palette.hudInk, palette.hudSurface)).toBeGreaterThanOrEqual(
+        AA_LARGE_TEXT_OR_NON_TEXT,
+      );
+      expect(contrastRatio(palette.hudBorder, palette.hudSurface)).toBeGreaterThanOrEqual(
+        AA_LARGE_TEXT_OR_NON_TEXT,
+      );
+      // And the one edge against the other, so the two states differ by more than a hue.
+      expect(contrastRatio(palette.hudInk, palette.hudBorder)).toBeGreaterThanOrEqual(
+        AA_LARGE_TEXT_OR_NON_TEXT,
+      );
     }
 
     // Both rules are the pull-off button's, in both states, and *Sit in* is not it.

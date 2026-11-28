@@ -1211,6 +1211,8 @@ test.describe('#3371 the pull-off button says whether it can be used', () => {
     readonly fill: string;
     readonly ink: string;
     readonly edge: string;
+    readonly edgeColour: string;
+    readonly ring: string;
     readonly disabled: string | null;
     readonly width: number;
     readonly height: number;
@@ -1225,6 +1227,8 @@ test.describe('#3371 the pull-off button says whether it can be used', () => {
           fill: style.backgroundColor,
           ink: style.color,
           edge: style.borderTopStyle,
+          edgeColour: style.borderTopColor,
+          ring: style.boxShadow,
           disabled: button.getAttribute('aria-disabled'),
           width: box.width,
           height: box.height,
@@ -1243,14 +1247,18 @@ test.describe('#3371 the pull-off button says whether it can be used', () => {
     );
     expect(on.disabled).toBeNull();
     expect(off.disabled).toBe('true');
-    // A different fill, and a different edge: told apart by shape as well as colour.
+    // A different edge: told apart by shape as well as colour. Lit, a ring
+    // inside the border doubles it; unlit, none, and the border dashed.
     expect(on.edge).toBe('solid');
     expect(off.edge).toBe('dashed');
-    // The lit fill stands out from the unlit one as a non-text difference must (SC 1.4.11).
-    expect(contrastRatio(hexOfComputed(on.fill), hexOfComputed(off.fill))).toBeGreaterThanOrEqual(
-      AA_LARGE_TEXT_OR_NON_TEXT,
-    );
-    // Its words AA on its own fill either way.
+    expect(on.ring).toContain('inset');
+    expect(off.ring).toBe('none');
+    // The lit edge stands out from the unlit one as a non-text difference must (SC 1.4.11).
+    expect(
+      contrastRatio(hexOfComputed(on.edgeColour), hexOfComputed(off.edgeColour)),
+    ).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+    // The panel's own fill either way, and its words AA on it.
+    expect(on.fill).toBe(off.fill);
     expect(contrastRatio(hexOfComputed(on.ink), hexOfComputed(on.fill))).toBeGreaterThanOrEqual(
       AA_TEXT,
     );
