@@ -208,7 +208,6 @@ test.describe('the realistic page’s moving cars — #3283', { tag: NIGHTLY }, 
   test('draws the free ride’s oncoming cars in the parked cars’ belt with the pacer off', async ({
     page,
   }) => {
-    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
     // Held on `neighbourhoodFixture`'s grid where an oncoming car is in reach:
     // `moving-cars.ts` places one there from 995 m to 1 255 m.
     const free = await ride(page, '?ladder=0&panel=0&seconds=1&town=streets&at=1030&levers=-pacer');
