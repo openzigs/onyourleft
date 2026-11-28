@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { metres, type RouteProfile } from '@onyourleft/domain';
+import { altitudeMetres, metres, routeProfile, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, StreetFeature } from '@onyourleft/map-features';
 
 import { realisticRoute, villageRoute, VILLAGE_HOLD_METRES } from '../demo/synthetic-road';
@@ -438,6 +438,86 @@ describe('never on a side-road mouth, a driveway or a pavement — #3279', () =>
     expect(signsClearOf([off], [], UNCACHED_SIDE_ROAD_CLEARANCE, [street], undefined)).toEqual([
       off,
     ]);
+  });
+});
+
+describe('the signs sceneFrame hands on, read back through the frame — #3279', () => {
+  const climbSigns = (frame: ReturnType<typeof frameAt>) =>
+    (frame.signs ?? []).filter((sign) => sign.kind === 'climb');
+
+  /** The village road, its level raised into an 8 % climb at `foot` — the villages stay where they were. */
+  function villageClimb(foot: number): RouteProfile {
+    const base = villageRoute();
+    return routeProfile(
+      base.positions.map((position, index) => {
+        const along = index * base.resolution;
+        const rise = along <= foot ? 0 : Math.min(along - foot, 500) * 0.08;
+        return { position, elevation: altitudeMetres(30 + rise) };
+      }),
+    );
+  }
+
+  it('drops the climb sign that stands on a village street’s pavement, and keeps it where none does', () => {
+    // A foot 998 m along puts the climb sign on the first village's pavement.
+    const route = villageClimb(998);
+    const origin = corridorOrigin(route);
+    const frame = frameAt(route, origin, 958);
+    const raw = roadSignsAt(route, origin, SEED, 0, 10_000, NO_LAND_CLASS);
+    const bands = frame.streets.map((street) => pavementBands(street));
+    // Non-vacuity: the sign IS on a pavement the frame carries, before the filter.
+    expect(raw.some((sign) => sign.kind === 'climb' && onPavement(bands, sign.x, sign.z))).toBe(
+      true,
+    );
+    expect(climbSigns(frame)).toEqual([]);
+    // THE CONTROL: the same climb 32 m further on stands clear of it, and stays.
+    const clear = villageClimb(1_030);
+    expect(climbSigns(frameAt(clear, corridorOrigin(clear), 990))).toHaveLength(1);
+  });
+
+  /** A climb at 1 000 m on a north road, the first house's driveway `shift` m along. */
+  function houseClimb(shift: number) {
+    const profile = northRoute(
+      3_000,
+      (along) => 10 + Math.min(Math.max(along - 1_000, 0), 400) * 0.08,
+    );
+    const origin = corridorOrigin(profile);
+    const houses = Array.from({ length: 6 }, (_, index) =>
+      buildingBeside(profile, origin, [rectangleBeside(shift + index * 40, 30, 13, 8)], 6),
+    );
+    const land = (kind: string, near: number, far: number) =>
+      landBeside(profile, origin, 'landuse', kind, 500, 2_000, near, far);
+    const world: WorldCorridor = {
+      routeId: 'road-signs-houses',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [land('residential', 15, 300), land('farmland', -300, -4)],
+      buildings: houses,
+      paths: [],
+      streets: [],
+    };
+    const plans = footprintPlans(world, landClassMask(world), profile, origin).plans;
+    const buildings = mappedBuildingsOf(plans);
+    return {
+      profile,
+      origin,
+      buildings,
+      frame: frameAt(profile, origin, 960, { mappedBuildings: buildings }),
+    };
+  }
+
+  it('drops the climb sign that stands on a mapped driveway, and keeps it between two', () => {
+    const on = houseClimb(1_004);
+    const raw = roadSignsAt(on.profile, on.origin, SEED, 0, 10_000, NO_LAND_CLASS);
+    const sign = raw.find((each) => each.kind === 'climb');
+    if (sign === undefined) throw new Error('no climb sign');
+    // Non-vacuity: the sign IS on a driveway before the filter.
+    expect(onDriveway(on.buildings, sign, SIGN_FOOTPRINT, SIDE_ROAD_STRUCTURE_MARGIN_METRES)).toBe(
+      true,
+    );
+    expect(climbSigns(on.frame)).toEqual([]);
+    // THE CONTROL: the houses 30 m on leave it clear, and it stays.
+    expect(climbSigns(houseClimb(1_034).frame)).toHaveLength(1);
   });
 });
 
