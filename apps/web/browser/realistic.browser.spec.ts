@@ -27,6 +27,12 @@
  * The default URL's road is read back too, by its fingerprint, on the #616
  * load (#1559): the same road every validation 0002 row was taken on.
  *
+ * And since #3283, **the moving cars**: `town=streets` with `levers=-pacer`
+ * puts the free ride's oncoming cars in the frame, so real WebGL draws them in
+ * the parked cars' one belt with their corners rewritten in place. One load:
+ * the shard's last (`nightly-split.test.ts` §"#1698"); the pacer's side, none,
+ * is `realistic/town.test.ts` §"the realistic page's `pacer` lever".
+ *
  * ⚠️ **The page's other describes are in two more files since #1698**: the
  * tree levers (#1283, #1294, #1523) in `realistic-trees.browser.spec.ts`, and
  * the village road (#1559), the mapped-blobs lever (#1657) and the holiday
@@ -43,12 +49,16 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import { MOVING_CARS_MAX } from '../src/game/moving-cars';
+import {
+  REALISTIC_PARKED_CAR_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
 import { realisticRoute, routeDigest } from '../src/demo/synthetic-road';
-import { HELD, REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { HELD, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
 
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
@@ -188,5 +198,34 @@ test.describe('the route’s own season, in the realistic world — #1623', { ta
     costsNothing(january, july);
     // The ground and the roofs are drawn under the route's own winter.
     expect(january.shot.equals(july.shot)).toBe(false);
+  });
+});
+
+test.describe('the realistic page’s moving cars — #3283', { tag: NIGHTLY }, () => {
+  // Counts, not pixels: the canvas's size decides none of them (`SIXTEENTH_PAGE`).
+  test.use({ viewport: SIXTEENTH_PAGE });
+
+  test('draws the free ride’s oncoming cars in the parked cars’ belt with the pacer off', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    // Held on `neighbourhoodFixture`'s grid where an oncoming car is in reach:
+    // `moving-cars.ts` places one there from 995 m to 1 255 m.
+    const free = await ride(page, '?ladder=0&panel=0&seconds=1&town=streets&at=1030&levers=-pacer');
+    const belt = free.page.parkedCars;
+    console.log(
+      `#3283 town=streets at=1030 levers=-pacer: belt ${JSON.stringify(belt)}, ` +
+        `${String(free.result.lastFrame.calls)} calls`,
+    );
+    expect(free.result.leversOff).toEqual(['pacer']);
+    // The lever reaches the belt: a moving car drawn with its wheels, inside
+    // the cap and inside the parked cars' ceiling.
+    expect(belt?.moving ?? 0).toBeGreaterThan(0);
+    expect(belt?.moving ?? 0).toBeLessThanOrEqual(MOVING_CARS_MAX);
+    expect(belt?.near ?? 0).toBeGreaterThanOrEqual(belt?.moving ?? 0);
+    expect(belt?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_PARKED_CAR_TRIANGLES);
+    // Frame after frame their corners were rewritten in place on a real
+    // context (`addUpdateRange`), the street not rebuilt for them.
+    expect(belt?.moves ?? 0).toBeGreaterThan(0);
   });
 });
