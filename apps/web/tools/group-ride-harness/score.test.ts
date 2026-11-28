@@ -11,13 +11,20 @@ import {
   ROTATION_FADE_DWELL_MS,
   ROTATION_RIDER_GRACE_MS,
   ROTATION_RIDER_PULL_MS,
+  ROTATION_WINDOW_MS,
 } from '@onyourleft/domain';
 import { DRAFT_REACH_METRES } from '@onyourleft/physics';
 import { describe, expect, it } from 'vitest';
 
 import { GROUP_RIDE_RIDER_ID } from '../../src/game/group-ride/ride-group';
 
-import { holds, markRide, RECOVERY_SECONDS, STUCK_ON_FRONT_SECONDS } from './marks';
+import {
+  holds,
+  markRide,
+  ON_TIME_PULL_SECONDS,
+  RECOVERY_SECONDS,
+  STUCK_ON_FRONT_SECONDS,
+} from './marks';
 import type { RideRecord, WindowSample } from './ride';
 import {
   COHESION_BAND_METRES,
@@ -229,33 +236,41 @@ describe('the marks', () => {
     expect(reach(behind(RECOVERY_SECONDS + 1))).toBe(false);
   });
 
-  it('the steady rider is held to the average on the hilly course only, and to no correction and the ceiling everywhere', () => {
+  it('the steady rider is held to the average on the hilly course only, and to pulling on time, no correction and the ceiling everywhere', () => {
     expect(
       markRide('steady', 'flat', scoreRide(record(seconds(600)))).map((each) => each.mark),
-    ).toEqual(['no-correction', 'cue-ceiling']);
+    ).toEqual(['pulls-on-time', 'no-correction', 'cue-ceiling']);
     const nagged = scoreRide(
-      record(seconds(60), {
-        cues: Array.from({ length: Math.floor(CUE_CEILING_PER_MINUTE) + 1 }, (_, at) => ({
-          kind: 'next-up' as const,
-          seconds: at,
+      record(
+        seconds(60, (at) => ({
+          front: GROUP_RIDE_RIDER_ID,
+          role: at < ON_TIME_PULL_SECONDS + 1 ? 'on-front' : 'in-line',
         })),
-        marks: { ...NO_MARKS, 'close-gap': 1 },
-        groupFinishSeconds: 600 * 1.02,
-        riderFinishSeconds: 60,
-      }),
+        {
+          cues: Array.from({ length: Math.floor(CUE_CEILING_PER_MINUTE) + 1 }, (_, at) => ({
+            kind: 'next-up' as const,
+            seconds: at,
+          })),
+          marks: { ...NO_MARKS, 'close-gap': 1 },
+          groupFinishSeconds: 600 * 1.02,
+          riderFinishSeconds: 60,
+        },
+      ),
     );
     expect(markRide('steady', 'hilly', nagged).map((each) => [each.mark, each.passed])).toEqual([
       ['makes-the-average', false],
+      ['pulls-on-time', false],
       ['no-correction', false],
       ['cue-ceiling', false],
     ]);
   });
 
-  it("the bound on a turn on the front is the rotation's pull, grace and fade dwell as they stand", () => {
-    // A change to any of the three is a change to the mark: move it in the same change, on purpose.
+  it("the bounds on a turn on the front are the rotation's pull, grace and fade dwell as they stand", () => {
+    // A change to any of these is a change to the marks: move them in the same change, on purpose.
     expect(STUCK_ON_FRONT_SECONDS * 1_000).toBe(
       ROTATION_RIDER_PULL_MS + ROTATION_RIDER_GRACE_MS + ROTATION_FADE_DWELL_MS,
     );
+    expect(ON_TIME_PULL_SECONDS * 1_000).toBe(ROTATION_RIDER_PULL_MS + ROTATION_WINDOW_MS);
   });
 
   it('a rider who never presses is held to a turn on the front and to being passed within the bound', () => {

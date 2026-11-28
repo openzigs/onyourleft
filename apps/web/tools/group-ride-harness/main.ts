@@ -14,7 +14,8 @@
  *     pnpm run group-ride:harness -- --results <directory>
  *
  * - Every scripted rider of `riders.ts` rides every course of `courses.ts`
- *   through the shipped session (`ride.ts`), on the harness's one seed.
+ *   on the rules the game rides, set up as the game sets them up (`ride.ts`),
+ *   on the harness's one seed.
  *   `--rider` and `--course` ride only those named; the marks of the rides
  *   left out are not asked.
  * - It prints a score table, numbers only, then each pass mark of

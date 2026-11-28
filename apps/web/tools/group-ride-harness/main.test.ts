@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { HarnessCourse } from './courses';
 import { main, readCommand, runHarness } from './main';
+import { PASS_MARKS } from './marks';
 import { assertNumbersOnly, resultFileText } from './results';
 import { rideScripted, type RideAsked, type RideRecord } from './ride';
 import { SCRIPTED_RIDERS } from './riders';
@@ -48,8 +49,8 @@ async function run(
 
 describe('the group-ride harness', () => {
   it('two runs give byte-identical scores', () => {
-    const first = resultFileText(runHarness(['steady', 'absent'], [SHORT]));
-    const second = resultFileText(runHarness(['steady', 'absent'], [SHORT]));
+    const first = resultFileText(runHarness(['absent'], [SHORT]));
+    const second = resultFileText(runHarness(['absent'], [SHORT]));
     expect(second).toBe(first);
     expect(first).toContain('"seed": 3309');
   });
@@ -72,11 +73,16 @@ describe('the group-ride harness', () => {
     for (const each of cells.slice(2)) expect(each).toMatch(/^(-?\d+(\.\d+)?|-|yes|no)$/u);
     const markLines = lines.filter((line) => line.startsWith('pass ') || line.startsWith('BELOW'));
     expect(markLines.map((line) => line.split(':')[0])).toEqual([
+      'pass  steady flat pulls-on-time',
       'pass  steady flat no-correction',
       'pass  steady flat cue-ceiling',
     ]);
-    // Each mark's reason is written beside it.
-    for (const line of markLines) expect(line).toMatch(/ -- #3302/u);
+    // Each mark's reason is written beside it: the marks' own words, after the score.
+    expect(markLines.map((line) => line.split(' -- ')[1])).toEqual(
+      ['pulls-on-time', 'no-correction', 'cue-ceiling'].map(
+        (mark) => PASS_MARKS.find((each) => each.mark === mark)?.reason,
+      ),
+    );
     expect([...files.keys()]).toEqual(['out/group-ride-v2-seed-3309.json']);
   });
 

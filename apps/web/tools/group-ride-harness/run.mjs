@@ -3,7 +3,7 @@
 /**
  * #3309's harness for the AI group ride: runs `main.ts` through Vite's module
  * runner, as `model-tactics-spike/run-harness.mjs` runs its own, because the
- * shipped session it rides imports the game's TypeScript and TSX. See
+ * game modules it rides import the game's TypeScript and TSX. See
  * `main.ts` for the command.
  */
 

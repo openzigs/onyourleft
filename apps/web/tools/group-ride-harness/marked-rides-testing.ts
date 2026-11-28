@@ -4,7 +4,7 @@
  * Test support for #3309: **the pass marks, held in `pnpm run test`**. Each
  * `marks.<course>.test.ts` calls {@link holdMarksOn} for its course, so the
  * three courses run in parallel; each rider with a mark there is one case,
- * ridden through the shipped session exactly as the command rides it
+ * ridden exactly as the command rides it
  * (`main.ts` §`runHarness`), and goes red when a mark is broken.
  */
 

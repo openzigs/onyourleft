@@ -18,6 +18,7 @@
  * | `surging-said` | `surger` | flat, hilly | `surging` said or marked at least once |
  * | `no-correction` | `steady` | all | no correction said or marked |
  * | `cue-ceiling` | `steady` | all | cues a minute at or below #3302's ceiling |
+ * | `pulls-on-time` | `steady` | all | no turn on the front longer than the pull and the window its press waits for |
  *
  * `surging-said` is not asked of the rolling course: there the rider's turns
  * are cut short by the rotation's fade rule at a crest, where the group's
@@ -64,6 +65,14 @@ export interface PassMark {
  * `score.test.ts` says when the three no longer add up to it.
  */
 export const STUCK_ON_FRONT_SECONDS = 45;
+
+/**
+ * The longest a rider who presses on time is on the front, seconds: **31**,
+ * the rider's pull (`ROTATION_RIDER_PULL_MS`, 30 s) and the one decision
+ * window the press waits for. A number, for the reason
+ * {@link STUCK_ON_FRONT_SECONDS} is one.
+ */
+export const ON_TIME_PULL_SECONDS = 31;
 
 /**
  * The longest a rider the group waits for may be beyond the draft's reach,
@@ -126,6 +135,15 @@ export const PASS_MARKS: readonly PassMark[] = [
     reason: '#3302: a rider who lifts on the front is told to hold the speed',
     scored: (score) => score.corrections.surging,
     least: 1,
+  },
+  {
+    mark: 'pulls-on-time',
+    rider: 'steady',
+    courses: ALL_COURSES,
+    reason:
+      "ADR 0101 D-3.7, the rider's press: a rider who presses pull off when the pull's time is up is off the front within a window of it",
+    scored: (score) => score.riderLongestPullSeconds,
+    most: ON_TIME_PULL_SECONDS,
   },
   {
     mark: 'no-correction',

@@ -35,11 +35,14 @@ import {
   gradeAt,
   ROTATION_EASE_SHARE,
   type GroupBot,
+  type GroupRideState,
+  type GroupRoad,
   type MemberView,
+  type RiderRole,
 } from '@onyourleft/domain';
 import type { GroupRidePhysics } from '@onyourleft/physics';
 
-import { GROUP_RIDE_RIDER_ID, type GroupRideSession } from '../../src/game/group-ride/ride-group';
+import { GROUP_RIDE_RIDER_ID } from '../../src/game/group-ride/ride-group';
 
 /** The scripted riders, in the score table's order. */
 export const SCRIPTED_RIDERS = [
@@ -98,12 +101,28 @@ export const FADE_KMH = 3;
 /** The `fixed-power` rider's watts: the owner's simulated rider of note (3). */
 export const FIXED_WATTS = 120;
 
+/**
+ * The group as the last tick left it: what `ride-group.ts` keeps of each tick
+ * (`GroupRideSession`'s `state`, `road`, `role`, `riderDraft` and
+ * `groupSpeedMps`), and all a scripted rider reads of it.
+ */
+export interface GroupNow {
+  readonly state: GroupRideState;
+  readonly road: GroupRoad;
+  /** The rider's role, their standing included. */
+  readonly role: RiderRole;
+  /** The rider's draft multiplier from the last tick. */
+  readonly riderDraft: number;
+  /** The group's speed now, m/s. */
+  readonly groupSpeedMps: number;
+}
+
 /** What a scripted rider reads as a tick begins. */
 export interface RiderMoment {
   /** Ride time, seconds. */
   readonly seconds: number;
   /** The group as the tick begins. */
-  readonly session: GroupRideSession;
+  readonly group: GroupNow;
   /** The rider as the tick begins. */
   readonly rider: MemberView;
   /** The grade under the rider, percent. */
@@ -125,15 +144,15 @@ export interface RiderAction {
 }
 
 /** The grade at `odometer` on the course, percent; held to the course's ends. */
-function gradeUnder(course: GroupRideSession['road']['course'], odometer: number): number {
+function gradeUnder(course: GroupRoad['course'], odometer: number): number {
   return gradeAt(course, Math.min(Math.max(0, odometer), course.totalDistance));
 }
 
 /** The wheel rule: what holds the rider `furtherM` behind the wheel `id`'s usual gap. */
 function onWheel(moment: RiderMoment, id: string, furtherM: number): number {
-  const { session, rider, grade, own } = moment;
-  const { course, physics } = session.road;
-  const wheel = session.state.bots[id] as GroupBot;
+  const { group, rider, grade, own } = moment;
+  const { course, physics } = group.road;
+  const wheel = group.state.bots[id] as GroupBot;
   // The wheel's own surplus over holding its speed, at the rider's mass: so
   // the rider goes with a wheel that is speeding up, as a bot behind it does.
   const surplus =
@@ -150,30 +169,30 @@ function onWheel(moment: RiderMoment, id: string, furtherM: number): number {
   return botWheelWatts({
     gapMetres: wheel.distanceM - rider.distanceM - furtherM,
     closingMetresPerSecond: rider.speedMps - wheel.speedMps,
-    holdWatts: own.holdWatts(wheel.speedMps, grade, session.riderDraft) + surplus,
+    holdWatts: own.holdWatts(wheel.speedMps, grade, group.riderDraft) + surplus,
     cpWatts: RIDER_CP_WATTS,
   });
 }
 
 /** What brings the rider to `speedMps` and holds them there: the wheel rule with no wheel. */
 function heldAt(moment: RiderMoment, speedMps: number): number {
-  const { rider, grade, own, session } = moment;
+  const { rider, grade, own, group } = moment;
   return botWheelWatts({
     gapMetres: BOT_TACTIC_WHEEL_GAP_METRES,
     closingMetresPerSecond: rider.speedMps - speedMps,
-    holdWatts: own.holdWatts(speedMps, grade, session.riderDraft),
+    holdWatts: own.holdWatts(speedMps, grade, group.riderDraft),
     cpWatts: RIDER_CP_WATTS,
   });
 }
 
 /** Whether the rider's own pull's time is up. */
-function pullIsUp(session: GroupRideSession): boolean {
-  const { pull } = session.state.rotation;
+function pullIsUp(group: GroupNow): boolean {
+  const { pull } = group.state.rotation;
   return (
-    session.role === 'on-front' &&
+    group.role === 'on-front' &&
     pull !== null &&
     pull.by === GROUP_RIDE_RIDER_ID &&
-    session.state.atMs >= pull.endsAtMs
+    group.state.atMs >= pull.endsAtMs
   );
 }
 
@@ -187,14 +206,14 @@ type Pedalled = Pick<RiderAction, 'wanted' | 'brakes'>;
  * and then onto its last wheel.
  */
 function wheelHolder(moment: RiderMoment, frontKmh: number, furtherM: number): Pedalled {
-  const { session } = moment;
-  const { order } = session.state.rotation;
+  const { group } = moment;
+  const { order } = group.state.rotation;
   const seat = order.indexOf(GROUP_RIDE_RIDER_ID);
   if (seat === 0) {
-    return { wanted: heldAt(moment, session.groupSpeedMps + frontKmh / 3.6), brakes: false };
+    return { wanted: heldAt(moment, group.groupSpeedMps + frontKmh / 3.6), brakes: false };
   }
   // Behind the sweep, which comes back to sit a wheel gap ahead, they take its wheel.
-  const further = (id: string): number => (id === session.state.noDrop.sweep ? 0 : furtherM);
+  const further = (id: string): number => (id === group.state.noDrop.sweep ? 0 : furtherM);
   if (seat > 0) {
     const wheel = order[seat - 1] as string;
     return { wanted: onWheel(moment, wheel, further(wheel)), brakes: true };
@@ -203,9 +222,9 @@ function wheelHolder(moment: RiderMoment, frontKmh: number, furtherM: number): P
   const latch = onWheel(moment, last, further(last));
   return {
     wanted:
-      session.role === 'latching'
+      group.role === 'latching'
         ? latch
-        : Math.max(latch, heldAt(moment, session.groupSpeedMps * (1 - ROTATION_EASE_SHARE))),
+        : Math.max(latch, heldAt(moment, group.groupSpeedMps * (1 - ROTATION_EASE_SHARE))),
     brakes: true,
   };
 }
@@ -219,28 +238,27 @@ export function driftAt(seconds: number): number {
 
 /** What `who` does in the tick that `moment` begins. */
 export function riderAction(who: ScriptedRider, moment: RiderMoment): RiderAction {
-  const { session, seconds } = moment;
+  const { group, seconds } = moment;
   const riding = { stopped: false, press: false };
   switch (who) {
     case 'steady':
-      return { ...riding, ...wheelHolder(moment, 0, 0), press: pullIsUp(session) };
+      return { ...riding, ...wheelHolder(moment, 0, 0), press: pullIsUp(group) };
     case 'surger':
-      return { ...riding, ...wheelHolder(moment, SURGE_KMH, 0), press: pullIsUp(session) };
+      return { ...riding, ...wheelHolder(moment, SURGE_KMH, 0), press: pullIsUp(group) };
     case 'gap-opener':
-      return { ...riding, ...wheelHolder(moment, 0, driftAt(seconds)), press: pullIsUp(session) };
+      return { ...riding, ...wheelHolder(moment, 0, driftAt(seconds)), press: pullIsUp(group) };
     case 'weak':
       return {
         ...riding,
         brakes: false,
-        wanted:
-          WEAK_SHARE * session.road.plan.powerAt(moment.rider.distanceM, session.state.ledger),
+        wanted: WEAK_SHARE * group.road.plan.powerAt(moment.rider.distanceM, group.state.ledger),
       };
     case 'absent':
       return seconds >= ABSENT_FROM_SECONDS && seconds < ABSENT_TO_SECONDS
         ? { wanted: 0, brakes: false, stopped: true, press: false }
-        : { ...riding, ...wheelHolder(moment, 0, 0), press: pullIsUp(session) };
+        : { ...riding, ...wheelHolder(moment, 0, 0), press: pullIsUp(group) };
     case 'never-presses':
-      return { ...riding, ...wheelHolder(moment, pullIsUp(session) ? -FADE_KMH : 0, 0) };
+      return { ...riding, ...wheelHolder(moment, pullIsUp(group) ? -FADE_KMH : 0, 0) };
     case 'fixed-power':
       return { ...riding, brakes: false, wanted: FIXED_WATTS };
     default:

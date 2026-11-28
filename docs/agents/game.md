@@ -138,9 +138,11 @@ ride: `pnpm run group-ride:harness` from `apps/web` (`node tools/group-ride-harn
 rides: `packages/domain/src/group-ride/` (plan, rotation, no-drop, cues, step), the draft and the
 group physics, and `src/game/group-ride/ride-group.ts`. It rides seven scripted riders (`steady`,
 `surger`, `gap-opener`, `weak` at 60 %, `absent` for three minutes, `never-presses`, and the owner's
-`fixed-power` at 120 W) over three synthetic 6 km courses (flat, hilly, rolling) through the shipped
-session, one call of `stepGroupRideSession` per simulation step as `GameView` makes it, on one seed
-fixed in the harness. It prints a score table, numbers only (cohesion, rotations, cues a minute,
+`fixed-power` at 120 W) over three synthetic 6 km courses (flat, hilly, rolling) on the line and plan
+the session builds (`groupLine`, `groupRidePlan`) and the two calls it makes each tick
+(`stepGroupRide`, then `stepCues`), on one seed fixed in the harness. ⚠️ Its tick is 0.25 s, the
+scripted rides' of #3300 and #3301, not the game's 0.05 s: the rules decide once a 1 s window either
+way, and at the game's tick a marked ride ran past a case's 5 s under the nightly coverage run. It prints a score table, numbers only (cohesion, rotations, cues a minute,
 corrections, time beyond the draft reach, the average made, and the four of the owner's note on the
 issue: the slip after a rejoin, cohesion at a crawl, `past-front` a minute, the group's speed swing),
 then each pass mark with its reason beside it, writes the scores, numbers and seeds only, under
