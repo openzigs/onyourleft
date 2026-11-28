@@ -2514,8 +2514,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Drawn at the near level only, as a model is
                         (`FootprintPlan.kit`; its extrusion is its far level
                         and the same height); never where a house model fits
-                        (the brick shop stays), on a part, or under a pitched
-                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        (the brick shop stays), on a part, under a pitched
+                        roof, or round a courtyard (#3350: the wrap roofs
+                        its outer ring alone, and the extrusion keeps the
+                        courtyard open). A city centre's own lots (#1637) ARE wrapped,
                         as a mapped shop is. One more draw call for
                         every wrap in view, counted INSIDE
                         `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
