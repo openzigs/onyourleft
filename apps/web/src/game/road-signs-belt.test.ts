@@ -7,7 +7,6 @@
  * of a sign reads.
  */
 
-import { Texture } from 'three';
 import { describe, expect, it } from 'vitest';
 
 import { GlslProgram } from './glsl-program-testing';
@@ -30,6 +29,16 @@ import {
   SIGN_PLATE_ATTRIBUTE,
   SIGN_SHIFT_GLSL,
 } from './three-renderer';
+
+/**
+ * A stand-in for the loaded atlas: the belt only hands it to the material.
+ *
+ * ⚠️ Not `new Texture()` from `three`: `three-seam.test.ts` allows exactly one
+ * file to import the rendering library, and a test is not that file.
+ */
+const ATLAS = { isTexture: true, name: 'the signs’ atlas' } as unknown as ConstructorParameters<
+  typeof RoadSignBelt
+>[0];
 
 const climb: RoadSign = {
   kind: 'climb',
@@ -86,7 +95,7 @@ describe('one sign’s geometry — #3279', () => {
 
 describe('the belt — #3279', () => {
   it('draws every sign as one instance of one mesh, its cells in its instance attributes', () => {
-    const belt = new RoadSignBelt(new Texture());
+    const belt = new RoadSignBelt(ATLAS);
     belt.update([climb, chevron]);
     const mesh = belt.mesh;
     expect(mesh.visible).toBe(true);
@@ -128,7 +137,7 @@ describe('the belt — #3279', () => {
   });
 
   it('draws no more than its room, and none while hidden', () => {
-    const belt = new RoadSignBelt(new Texture());
+    const belt = new RoadSignBelt(ATLAS);
     belt.update(Array.from({ length: SIGNS_PER_FRAME + 5 }, () => chevron));
     expect(belt.mesh.count).toBe(SIGNS_PER_FRAME);
     belt.setShown(false);
@@ -139,7 +148,7 @@ describe('the belt — #3279', () => {
   });
 
   it('splices its cells into the material’s vertex shader', () => {
-    const belt = new RoadSignBelt(new Texture());
+    const belt = new RoadSignBelt(ATLAS);
     const material = belt.mesh.material as unknown as {
       onBeforeCompile: (shader: unknown, renderer: unknown) => void;
       customProgramCacheKey(): string;

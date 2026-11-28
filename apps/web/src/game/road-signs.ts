@@ -9,7 +9,7 @@
  *
  * No map data and no place data (ADR 0009): every sign is a function of the
  * route, its origin and its seed, so lap two's are lap one's and the next
- * ride's are this one's. The slopes are `hud/climb-ahead.ts` §`slopesOf` over
+ * ride's are this one's. The slopes are `hud/slopes.ts` §`slopesOf` over
  * the ride's own profile, the function the HUD's climb caption and the
  * announcer read, and the number a sign wears is §`wholePercent` of the
  * slope's grade — the same whole percent the HUD says for the same stretch.
@@ -75,7 +75,7 @@ import {
   type SideRoad,
   type SideRoadClearance,
 } from './cross-streets';
-import { slopesOf, wholePercent } from './hud/climb-ahead';
+import { slopesOf, wholePercent } from './hud/slopes';
 import type { SignFace } from './road-sign-atlas';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
