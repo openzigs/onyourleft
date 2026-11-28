@@ -90,6 +90,12 @@ import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './deliv
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
+import {
+  GROUP_RIDE_LEAST_BOTS,
+  GROUP_RIDE_MOST_BOTS,
+  type GroupRideAsked,
+  type GroupRideChoice,
+} from './group-ride/choice';
 import { isOpenWorldRouteId } from './open-world/route-id';
 import {
   PREVIEW_DEFAULT_WATTS,
@@ -118,11 +124,16 @@ export interface RidableRoute {
    */
   readonly attempts: number;
   /**
-   * The moving time, in seconds, of the rider's fastest attempt: the figure
-   * the Games tab reads as "your best" (#2292). Each attempt's summary already
-   * carries it, so it costs no stream decode. Absent: no attempt yet.
+   * The rider's fastest lap of this loop in a lap race on this device, in
+   * seconds of moving time — #2319, `@onyourleft/store` §`RouteRecord.bestLap`.
+   * The Games tab's Lap race card and its course picker read it as "your best
+   * lap". Absent: no lap raced yet, a route that is not a loop, or a built-in
+   * circuit, which keeps none.
+   *
+   * It replaces #2292's `bestSeconds`, the fastest whole attempt's moving
+   * time, which was the card's "your best" until a lap was kept.
    */
-  readonly bestSeconds?: number | undefined;
+  readonly bestLapSeconds?: number | undefined;
 }
 
 /**
@@ -152,6 +163,16 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
  * to render, so the rider would be told about one problem and blocked by two.
  */
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
+
+/** The same, for the group ride's refusal (#3303): a third id, for the same reason. */
+const GROUP_PROBLEM_ID = 'oyl-game-group-problem';
+
+/** Why the group ride is not offered now (#3303): what its switch is described by. */
+const GROUP_UNAVAILABLE_ID = 'oyl-game-group-unavailable';
+
+/** The group ride's speed box and size select (#3303), labelled by a `<label for>` as the boxes below are. */
+const GROUP_SPEED_ID = 'oyl-game-group-speed';
+const GROUP_SIZE_ID = 'oyl-game-group-size';
 
 /**
  * The three number boxes' ids — #994. Each box is labelled by a `<label for>`
@@ -234,6 +255,34 @@ export type DeliveryCourse =
   | { readonly kind: 'counted'; readonly houses: number }
   | { readonly kind: 'unread'; readonly state: Exclude<CorridorState, { kind: 'ready' }> }
   | { readonly kind: 'failed' };
+
+/**
+ * A group ride, as the chooser offers it — #3303 (epic #3296, ADR 0101 D-1):
+ * a choice in *Your ride* beside the pacer, with an average speed and a group
+ * size. Not offered on a built-in circuit, a level or the open world, and
+ * {@link unavailable} says why where it is not offered for another reason.
+ */
+export interface GroupRideOffer {
+  /** Whether the rider switched the group ride on. */
+  readonly chosen: boolean;
+  readonly onChoose: (value: boolean) => void;
+  /** The average speed, as typed, in {@link speedUnit}. */
+  readonly speed: string;
+  readonly onSpeed: (value: string) => void;
+  /** The label the speed box is in, from `units/format.ts`. */
+  readonly speedUnit: string;
+  /** How many bots ride in the line. */
+  readonly bots: number;
+  readonly onBots: (value: number) => void;
+  /** The group asked for on the chosen route, or why it cannot be made there. */
+  readonly asked: GroupRideAsked;
+  /**
+   * Why a group ride is not offered now, in a sentence: a workout holding
+   * the trainer at a set power, the draft switched off (ADR 0101 D-1.5), or
+   * a loop route (#3369). Present, the switch is disabled and described by it.
+   */
+  readonly unavailable: string | undefined;
+}
 
 /**
  * A lap race, as the chooser offers it — #1907 (epic #1894, ADR 0060): on a
@@ -532,6 +581,8 @@ interface RoutePickerProps {
    * whatever Settings chose (#2362); `undefined` draws nothing. @see DeliveryOffer
    */
   readonly delivery?: DeliveryOffer | undefined;
+  /** A group ride to offer — #3303. `undefined` draws nothing. @see GroupRideOffer */
+  readonly groupRide?: GroupRideOffer | undefined;
   /** A lap race to offer — #1907. `undefined` draws nothing. @see LapRaceOffer */
   readonly lapRace?: LapRaceOffer | undefined;
   /**
@@ -560,6 +611,8 @@ interface RoutePickerProps {
     delivery?: boolean,
     /** #1907: ride this lap race. A route that is not a loop rides none (the press decides). */
     lapRace?: LapRaceChoice,
+    /** #3303: ride with this group. Never on a circuit, a level or the open world. */
+    groupRide?: GroupRideChoice,
   ) => Promise<void>;
 }
 
@@ -686,16 +739,26 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
   // ride, and nor can it the open world's.
   const pacerRefused = !onCircuit && !onOpenWorld && props.choice.problem !== undefined;
   const windRefused = props.air.problem !== undefined;
-  const refused = pacerRefused || windRefused;
-  const describedBy =
-    [pacerRefused ? PACER_PROBLEM_ID : undefined, windRefused ? WIND_PROBLEM_ID : undefined]
-      .filter((id) => id !== undefined)
-      .join(' ') || undefined;
   const headingId = `${ids}-heading`;
   // #2362: a built-in level is chosen, which rides in the realistic world
   // whatever Settings chose; and the rider's own routes, without it.
   const levelId = props.level?.routeId;
   const onLevel = levelId !== undefined && chosen.id === levelId;
+  // #3303, ADR 0101 D-1: a group ride is offered on a route of the rider's
+  // own, whose road is fixed for the group's plan. A group the setup cannot
+  // make blocks the ride as a pacer's does: a ride that quietly had no group
+  // in it would be #237's defect again.
+  const groupRide = onCircuit || onOpenWorld || onLevel ? undefined : props.groupRide;
+  const groupRefused = groupRide?.asked.problem !== undefined;
+  const refused = pacerRefused || windRefused || groupRefused;
+  const describedBy =
+    [
+      pacerRefused ? PACER_PROBLEM_ID : undefined,
+      windRefused ? WIND_PROBLEM_ID : undefined,
+      groupRefused ? GROUP_PROBLEM_ID : undefined,
+    ]
+      .filter((id) => id !== undefined)
+      .join(' ') || undefined;
   const ownRoutes = props.routes.filter((route) => route.id !== levelId);
   // #1818: offered with the realistic world only (DL6), so asked for only
   // then, or on a built-in level, which rides in it for that ride (#2362).
@@ -868,6 +931,8 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
                 // #1907: the race switched on. The press decides on the
                 // route: one that is not a loop rides no race (`GameView`).
                 props.lapRace?.chosen === true ? props.lapRace.choice : undefined,
+                // #3303: the group asked for, as the setup made it.
+                groupRide?.asked.ride,
               );
             }}
           >
@@ -969,6 +1034,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             aiPacer={props.aiPacer}
           />
         )}
+        {groupRide === undefined ? null : <GroupRideControl offer={groupRide} />}
         <PositionControl position={props.position} onPosition={props.onPosition} />
         <WindControls
           withWind={props.withWind}
@@ -1858,14 +1924,18 @@ export const LAP_RACE_CHOICE_TEXT = {
    * that has spent its W′ at it until it recovers (ADR 0067 D-1, D-2). The
    * standings show the tick's figure. Since #2455 each bot also has its own
    * pace (`@onyourleft/domain` §`pace.ts`), which its name in the standings
-   * says. ⚠️ Draft wording for the owner's approval (#2455, #2458).
+   * says. Since #2463 a bot's tactics read the race (ADR 0067 D-0): on a
+   * wheel it sits in under its figure, and it rides over it to close a gap,
+   * so "holds it on the flat" is true only of a bot riding on its own (#2541).
+   * ⚠️ Draft wording for the owner's approval (#2455, #2458, #2541).
    * `lap-race/bot-figure.test.ts` holds each clause to what the HUD shows.
    */
   tierLive:
-    'The figure beside a bot in the race moves around that: a bot holds it on the flat, eases ' +
-    'downhill and goes harder on climbs and in the final sprint, and one that goes too hard ' +
-    'for too long fades back to it until it recovers. Each bot paces the race its own way, ' +
-    'and its name says how.',
+    'The figure beside a bot in the race moves around that. Riding on its own, a bot holds it ' +
+    'on the flat, eases downhill and goes harder on climbs. On a wheel it sits in and rides ' +
+    'easier; it goes harder to close a gap to the racer ahead, and in the final sprint. One ' +
+    'that goes too hard for too long fades back to it until it recovers. Each bot paces the ' +
+    'race its own way, and its name says how.',
   items: 'Race with items',
   assistedOn: 'Your assisted race setting is on.',
   assistedOff: 'An assisted race setting can make a race easier.',
@@ -2013,6 +2083,103 @@ function LapRaceControl(props: {
           </p>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/** The group ride's words on the chooser — #3303; drafts for the owner's approval (ADR 0101 Q16). */
+const GROUP_RIDE_CHOICE_TEXT = {
+  label: 'Ride with a group',
+  hint: 'A line of riders takes turns on the front and shelters you. Nobody is left behind: the group waits for you.',
+  speed: (unit: string): string => `Group average speed, ${unit}`,
+  size: 'Riders in the group, besides you',
+} as const;
+
+/**
+ * Whether to ride with a group, at what average speed and with how many —
+ * #3303, ADR 0101 D-1, D-2.1 and D-3.4. In the loadout beside the pacer, for
+ * the pacer's reason: a group belongs to the ride.
+ *
+ * Where it is not offered ({@link GroupRideOffer.unavailable}) the switch is
+ * disabled, off, and **described by the reason**, so the reason travels with
+ * the control every time it is reached and is not only text near it (#255).
+ * The refusal is the pacer's shape: `role="alert"`, and the speed box is
+ * `aria-invalid` and described by it.
+ */
+function GroupRideControl(props: { readonly offer: GroupRideOffer }): JSX.Element {
+  const { offer } = props;
+  const offered = offer.unavailable === undefined;
+  const on = offered && offer.chosen;
+  const problem = offer.asked.problem;
+  const sizes = Array.from(
+    { length: GROUP_RIDE_MOST_BOTS - GROUP_RIDE_LEAST_BOTS + 1 },
+    (_, index) => GROUP_RIDE_LEAST_BOTS + index,
+  );
+  return (
+    <div className="oyl-game__group-ride tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={on}
+          disabled={!offered}
+          aria-describedby={offered ? `${GROUP_UNAVAILABLE_ID}-hint` : GROUP_UNAVAILABLE_ID}
+          onChange={(event) => {
+            offer.onChoose(event.target.checked);
+          }}
+        />
+        {GROUP_RIDE_CHOICE_TEXT.label}
+      </label>
+      {offered ? (
+        <p id={`${GROUP_UNAVAILABLE_ID}-hint`} className="tw:m-0">
+          {GROUP_RIDE_CHOICE_TEXT.hint}
+        </p>
+      ) : (
+        <p id={GROUP_UNAVAILABLE_ID} className="tw:m-0">
+          {offer.unavailable}
+        </p>
+      )}
+      {on ? (
+        <div className="tw:flex tw:flex-col tw:items-start tw:gap-xs">
+          <label htmlFor={GROUP_SPEED_ID}>{GROUP_RIDE_CHOICE_TEXT.speed(offer.speedUnit)}</label>
+          <Stepper name="group average speed" step={1} min={1}>
+            <input
+              id={GROUP_SPEED_ID}
+              className="oyl-input"
+              type="number"
+              inputMode="decimal"
+              min={1}
+              step={1}
+              value={offer.speed}
+              aria-invalid={problem === undefined ? undefined : true}
+              aria-describedby={problem === undefined ? undefined : GROUP_PROBLEM_ID}
+              onChange={(event) => {
+                offer.onSpeed(event.target.value);
+              }}
+            />
+          </Stepper>
+          <label htmlFor={GROUP_SIZE_ID}>{GROUP_RIDE_CHOICE_TEXT.size}</label>
+          <select
+            id={GROUP_SIZE_ID}
+            className="oyl-input"
+            value={String(offer.bots)}
+            onChange={(event) => {
+              offer.onBots(Number(event.target.value));
+            }}
+          >
+            {sizes.map((size) => (
+              <option key={size} value={String(size)}>
+                {String(size)}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      {problem === undefined ? null : (
+        <p className="oyl-game__problem tw:m-0" id={GROUP_PROBLEM_ID} role="alert">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

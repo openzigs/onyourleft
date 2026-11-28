@@ -24,16 +24,18 @@
  *
  * The lap race lists every saved route, a loop as a course and any other
  * route with the reason it is not one (a race is laps of a loop, ADR 0060
- * D-11.1), and the built-in circuits between them. Delivery with no counts
+ * D-11.1), and the built-in circuits between them. A loop with a lap kept
+ * says its best lap (#2319); a circuit keeps none. Delivery with no counts
  * (no corridor port) lists every saved route, and the ride decides at the
  * press, as from the setup.
  *
- * ⚠️ **Pure, and importing nothing but the stage chooser's words**, which
- * import no planner (`stage-chooser-imports.test.ts`), so the Games group's
+ * ⚠️ **Pure, and importing nothing but the stage chooser's words** and
+ * `format.ts`'s durations (#2319), which import no planner (`stage-chooser-imports.test.ts`), so the Games group's
  * chunk carries no renderer, map or network. The count itself is loaded by
  * the picker with `import()`, only when Delivery's courses are counted.
  */
 
+import { formatDuration } from '../format';
 import type { GameMode } from '../shell/routes';
 
 import type { WeekProgress } from './delivery/round';
@@ -65,6 +67,11 @@ export interface DeliveryCounts {
 /** The rider-facing words of the lists' refusals: the project's own, naming no other game. */
 export const COURSE_TEXT = {
   notALoop: 'Not a loop. A lap race needs a route that ends where it starts.',
+  /**
+   * #2319: the fastest lap a lap race has kept on this loop. ⚠️ Draft wording
+   * for the owner's approval with the screenshots.
+   */
+  bestLap: (lapSeconds: number): string => `Your best lap ${formatDuration(lapSeconds)}`,
 } as const;
 
 /**
@@ -89,7 +96,14 @@ export function coursesFor(
       return line.holds === false ? { route, unavailable: line.text } : { route, line: line.text };
     });
   }
-  const loops = saved.filter((route) => route.profile.loop).map((route) => ({ route }));
+  // #2319: a loop with a lap kept says its best lap.
+  const loops = saved
+    .filter((route) => route.profile.loop)
+    .map((route) =>
+      route.bestLapSeconds === undefined
+        ? { route }
+        : { route, line: COURSE_TEXT.bestLap(route.bestLapSeconds) },
+    );
   const others = saved
     .filter((route) => !route.profile.loop)
     .map((route) => ({ route, unavailable: COURSE_TEXT.notALoop }));

@@ -29,10 +29,19 @@
  * 6. **`fadeShot(id, back, across, fade)`** — #2596: a real view's frame with
  *    a bot `back` metres behind the rider and `across` to their right, among
  *    the race's bots ahead, on a canvas the spec photographs for the owner.
+ * 7. **`groupRideLine()`** — #3304: a group ride's frame. A scripted line of
+ *    six (`group-ride/line-testing.ts`, the rules' own bots on the real
+ *    physics) ridden to a moment in a change of front, drawn by
+ *    `group-ride/ride-group.ts` §`groupRideDrawing` as `GameView` draws it,
+ *    through `scene.ts` §`sceneFrame` onto a real view; what comes back is
+ *    every rider the frame drew and where, and the draw calls it made. The
+ *    lap race's page, because the group ride draws its bots as a race's.
  */
 
 import { createItemRace, metres, raceCourse, type Hazard } from '@onyourleft/domain';
 
+import { rideLine } from '../src/game/group-ride/line-testing';
+import { groupRideDrawing } from '../src/game/group-ride/ride-group';
 import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { GameView, RaceHitLook, SceneFrame } from '../src/game/port';
 import { qualitySettings, RIDER_SHADOW_MAP_RUNG } from '../src/game/quality';
@@ -66,6 +75,26 @@ export interface LapRaceViewCalls {
   readonly racers: number;
 }
 
+/** One rider {@link groupRideLine}'s frame drew. */
+export interface GroupRideLineRider {
+  readonly kind: string;
+  /** Metres up the road from the rider. */
+  readonly ahead: number;
+  /** Metres across the road from the rider, positive to the rider's right. */
+  readonly across: number;
+}
+
+/** What {@link groupRideLine} drew. */
+export interface GroupRideLineRead {
+  /** Every rider on the frame, the rider first. */
+  readonly riders: readonly GroupRideLineRider[];
+  /** The line's phase at the frame, and who the rules had aside. */
+  readonly phase: string;
+  readonly aside: string | null;
+  /** The draw calls the view made for the frame: above zero, it was drawn. */
+  readonly calls: number;
+}
+
 declare global {
   interface Window {
     __oylLapRace?: {
@@ -78,6 +107,7 @@ declare global {
       readonly pickUpSeenFrom: number;
       fadeSeen(shadows: 'contact' | 'map'): RiderFadeReading;
       fadeShot(id: string, back: number, across: number, fade: 'fade' | 'off'): void;
+      groupRideLine(): GroupRideLineRead;
     };
   }
 }
@@ -348,8 +378,40 @@ function fadeShot(id: string, back: number, across: number, fade: 'fade' | 'off'
   view.render({ ...base, markers: [...base.markers, behind(rider, back, across)] });
 }
 
+/** #3304: how long the scripted line is ridden: its first bot pulled off at 29 s and is drifting back. */
+const GROUP_RIDE_SECONDS = 34;
+
+function groupRideLine(): GroupRideLineRead {
+  const frames = rideLine({ seconds: GROUP_RIDE_SECONDS });
+  const { session } = frames[frames.length - 1]!;
+  const drawing = groupRideDrawing(session, session.rider.distanceM, 0);
+  const course = session.road.course;
+  const start = atStartLine(course);
+  const frame = sceneFrame({
+    profile: course,
+    origin: corridorOrigin(course),
+    state: { ...start, ride: { ...start.ride, distance: metres(session.rider.distanceM) } },
+    raceBots: drawing.raceBots,
+    steeredLateral: drawing.steeredLateral,
+  });
+  const shown = canvas(960, 540);
+  shown.id = 'group-ride-line';
+  const view = threeGameRenderer.create(shown, qualitySettings(0));
+  view.resize(960, 540);
+  const calls = callsOf(view, frame);
+  const rider = frame.markers.find((marker) => marker.kind === 'rider') ?? frame.markers[0]!;
+  // The scripted road runs north: `+z` is up the road and `+x` is to the rider's left (#583).
+  const riders = frame.markers.map((marker) => ({
+    kind: marker.kind,
+    ahead: marker.z - rider.z,
+    across: rider.x - marker.x,
+  }));
+  return { riders, phase: session.phase, aside: session.state.rotation.aside, calls };
+}
+
 window.__oylLapRace = {
   ready: true,
+  groupRideLine,
   viewCalls,
   probeCalls,
   showcase,

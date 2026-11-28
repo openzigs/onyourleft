@@ -92,6 +92,25 @@
  *   position `rider.ts` offers. Making the two agree is a real improvement and
  *   a real change to what a rider feels, which is its own issue rather than a
  *   rider-visible side effect of wiring the gradient up.
+ *
+ * ## Past a route's end, flat — #3345
+ *
+ * Past a point-to-point route's end the road is drawn on level
+ * (`past-the-finish.ts`, #3336), and the owner's ruling of 2026-11-26 is that
+ * the trainer eases to 0 % to match. `distanceOnRoute` clamps there, so the
+ * driver alone would hold the route's last grade for as long as the rider
+ * rode on. So past the end the grade written walks toward a target that falls
+ * from the route's last grade to 0 % over {@link PAST_THE_END_EASE_METRES} of
+ * riding, and then holds 0 %.
+ *
+ * ⚠️ **Bounded the way every grade change this file did not choose is
+ * bounded** (`CORRECTION_GRADE_STEP_PERCENT_PER_SECOND`, 1 % a second, at most
+ * one write a second): a rider fast enough to cover the 100 m before the walk
+ * does is eased over a little more road, never stepped. And it only ever moves
+ * toward flat: a write past the end is never further from 0 % than the one
+ * before it, so the ramp is monotonic whatever the trainer was last asked for.
+ * Exactly where the drawing draws on and nowhere else: not on a loop, and not
+ * on an open-world view, which has a road of its own ahead.
  */
 
 import {
@@ -120,6 +139,15 @@ import {
 import type { GradientTrainer } from './trainer-port';
 import { TargetHeldBack } from '../ride/held-back';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
+import { sceneryAnchor } from './scenery-anchor';
+
+/**
+ * How far past a point-to-point route's end the trainer is eased to 0 % over
+ * — #3345: **100 m** of riding, the owner's "about 100 m". Where it and the
+ * rate bound (`CORRECTION_GRADE_STEP_PERCENT_PER_SECOND`) disagree, the bound
+ * wins.
+ */
+export const PAST_THE_END_EASE_METRES = 100;
 
 export interface GradientSessionOptions {
   /** The route being ridden. The driver reads its grade at the rider's distance. */
@@ -341,6 +369,61 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
     onChange?.(snapshot());
   };
 
+  /**
+   * How far past the end of the road followed `distance` is, where the drawing
+   * draws on past it (`past-the-finish.ts` §`drawnPastTheFinish`'s own test):
+   * `undefined` short of the end, on a loop and on an open-world view.
+   */
+  const pastTheEnd = (distance: number): number | undefined => {
+    const { profile, origin } = road;
+    if (profile.loop || sceneryAnchor(profile) !== undefined) return undefined;
+    const past = distance - origin - profile.totalDistance;
+    return past > 0 ? past : undefined;
+  };
+
+  /** #3345: one sample `past` metres past the end. @see the module note. */
+  const easeToFlat = (at: number, past: number): void => {
+    // The route's last grade, as the driver clamps it, falling to 0 % over the ease.
+    const target = roadGrade(road) * Math.max(0, 1 - past / PAST_THE_END_EASE_METRES);
+    const first = sent === undefined;
+    const last =
+      sent ??
+      (options.walkFrom === undefined
+        ? undefined
+        : { grade: options.walkFrom, at: Number.NEGATIVE_INFINITY });
+    let grade = target;
+    if (last !== undefined) {
+      if (!(at - last.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
+      const step =
+        CORRECTION_GRADE_STEP_PERCENT_PER_SECOND *
+        Math.min(at - last.at, SIMULATION_SETPOINT_INTERVAL_SECONDS);
+      const toward = Math.max(last.grade - step, Math.min(last.grade + step, target));
+      // Only ever toward flat: never further from 0 % than the last write.
+      // (`+ 0`: flat from below is 0 %, not −0 %.)
+      grade =
+        (last.grade >= 0
+          ? Math.max(0, Math.min(last.grade, toward))
+          : Math.min(0, Math.max(last.grade, toward))) + 0;
+      // The deadband — except for the last step onto 0 % itself, and the
+      // first write, which is made whatever it is.
+      const moved = Math.abs(grade - last.grade);
+      if (!first && (moved === 0 || (grade !== 0 && moved < SIMULATION_GRADE_DEADBAND_PERCENT))) {
+        return;
+      }
+    }
+    // With nothing written and nothing to walk from, the target itself, which
+    // is never further from flat than the road's own grade the driver would
+    // have written. The driver is told nothing it would believe it wrote.
+    driver.restart();
+    sent = { grade, at };
+    // #932: the walk is owed, so a fault mid-ease replaces a waiting write
+    // (walked from the refused grade) with the confirmed grade itself.
+    owed = true;
+    fault = undefined;
+    offer(gradePercent(grade));
+    changed();
+  };
+
   return {
     state: snapshot,
 
@@ -353,6 +436,12 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       // the trainer is on the road's own grade again — which is usually AFTER
       // the correction: the rider is moved before the road under them turns.
       if (bounded) owed = true;
+      // #3345: past a point-to-point route's end, eased to flat.
+      const past = pastTheEnd(distance);
+      if (past !== undefined) {
+        easeToFlat(at, past);
+        return;
+      }
       // #2899, ADR 0087 D-6.4: with nothing written (the start of the ride, or
       // a write refused before any was confirmed) and a grade to walk from,
       // the first write is a step from that grade, never the road's at once.

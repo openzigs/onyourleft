@@ -21,7 +21,9 @@
  * Since #1794 `-landmark-churches`: the street of churches' naves under their
  * steep gables without it, and every one planned as before with it. Since
  * #1795 `-landmark-civic`: the town halls' and schools' odd-bayed brick fronts
- * without it, and every one planned as before with it.
+ * without it, and every one planned as before with it. Since #3251
+ * `-house-styles`: the model street, a town's, drawn with none of #1585's
+ * traditional models without it, and with them, as before, with it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -37,6 +39,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import {
   churchStreetFixture,
+  cityStreetscapeFixture,
   civicStreetFixture,
   commercialStreetFixture,
   datedStreetFixture,
@@ -47,6 +50,8 @@ import {
   neighbourhoodFixture,
   planFingerprint,
   poiStreetFixture,
+  richmondStreetFixture,
+  terraceStreetFixture,
   typedStreetFixture,
   untaggedStreetFixture,
 } from '../../src/game/footprint-fixtures-testing';
@@ -58,11 +63,17 @@ import {
   mappedBuildingsOf,
   onMappedGround,
 } from '../../src/game/mapped-buildings';
+import {
+  PARKED_CAR_NEAR_METRES,
+  PARKED_CARS_NEAR_MAX,
+  type ParkedCar,
+} from '../../src/game/parked-cars';
 import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 import type { ScatterItem } from '../../src/game/scatter';
 import { sideRoadNaturalMargin } from '../../src/game/scene';
 import { SETTLEMENT_CLEARED_KINDS } from '../../src/game/settlements';
+import { drawnRoadPosition } from '../../src/game/terrain';
 
 import { parseConfig } from './config';
 import { rideFrame } from './frame';
@@ -126,8 +137,13 @@ describe('the realistic page’s `house-archetypes` lever — #1782', () => {
 describe('the realistic page’s `roof-variants` lever — #1785', () => {
   const street = houseStreetFixture();
 
-  it('gives the street of houses every roof variant on the product’s page', () => {
-    const { plans } = plannedTown(street, parseConfig('?town=houses').leversOff);
+  it('gives the street of houses every roof variant on the page', () => {
+    // #3251: with `-house-styles`, the look pair this lever is taken on. On the product's page
+    // most of this village street is contemporary, and a contemporary house wears no variant.
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=houses&levers=-house-styles').leversOff,
+    );
     const variants = new Set(plans.map((plan) => plan.roofVariant));
     for (const variant of ROOF_VARIANTS) expect(variants).toContain(variant);
   });
@@ -216,6 +232,87 @@ describe('the realistic page’s `start-year` lever — #1793', () => {
     }).plans;
     expect(planFingerprint(plans)).toBe(planFingerprint(off));
     expect(plans.some((plan) => plan.archetype === 'foursquare')).toBe(false);
+  });
+});
+
+describe('the realistic page’s `house-styles` lever — #3251', () => {
+  const street = richmondStreetFixture();
+  const modelled = (plans: readonly FootprintPlan[]): number =>
+    plans.filter((plan) => plan.model !== undefined).length;
+
+  it('draws the model street’s village stretch with few of #1585’s models and its rural stretch with all of them', () => {
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    ).plans;
+    expect(on.length).toBe(off.length);
+    const drawn = { village: { on: 0, off: 0 }, rural: { on: 0, off: 0 } };
+    on.forEach((plan, index) => {
+      const before = off[index];
+      if (before?.model === undefined) {
+        // The style never gives a footprint a model it did not have.
+        expect(plan.model).toBeUndefined();
+        return;
+      }
+      // The page classes this street a village's and then a rural stretch, and nothing else.
+      if (plan.urban !== 'village' && plan.urban !== 'rural') throw new Error(plan.urban);
+      drawn[plan.urban].on += plan.model === undefined ? 0 : 1;
+      drawn[plan.urban].off += 1;
+      // Every committed model is traditional: beside the rural stretch, the model it had.
+      if (plan.urban === 'rural') expect(plan.model?.model).toBe(before.model.model);
+    });
+    expect(drawn.rural.off).toBeGreaterThan(5);
+    expect(drawn.rural.on).toBe(drawn.rural.off);
+    // The village stretch: its houses' seeded traditional half keeps a model, and its shops all do.
+    expect(drawn.village.off).toBeGreaterThan(10);
+    expect(drawn.village.on).toBeLessThan(drawn.village.off);
+    expect(drawn.village.on).toBeGreaterThan(0);
+  });
+
+  it('plans the street, with `levers=-house-styles`, as the planner with them off does, its models back', () => {
+    const { land, plans, urban } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-house-styles').leversOff,
+    );
+    const off = footprintPlans(
+      street.corridor,
+      land,
+      street.profile,
+      street.origin,
+      undefined,
+      urban,
+      { houseStyles: false },
+    ).plans;
+    expect(plans.map((plan) => plan.model?.model)).toEqual(off.map((plan) => plan.model?.model));
+    // Not vacuous: on, the street has fewer models.
+    const on = plannedTown(street, parseConfig('?town=richmond').leversOff).plans;
+    expect(modelled(plans)).toBeGreaterThan(30);
+    expect(modelled(on)).toBeLessThan(modelled(plans));
+  });
+
+  it('draws the street of houses and the mixed town contemporary on the product’s page, and not with the lever', () => {
+    for (const [town, query] of [
+      [houseStreetFixture(), 'houses'],
+      [mixedTownFixture(), 'mixed'],
+    ] as const) {
+      const contemporary = (levers: string): number =>
+        plannedTown(town, parseConfig(`?town=${query}${levers}`).leversOff).plans.filter((plan) =>
+          plan.archetype.startsWith('contemporary'),
+        ).length;
+      expect(contemporary(''), query).toBeGreaterThan(10);
+      expect(contemporary('&levers=-house-styles'), query).toBe(0);
+      // And with no class there is no modern setting.
+      expect(contemporary('&levers=-urban-class'), query).toBe(0);
+    }
+  });
+
+  it('draws every footprint traditional with `levers=-urban-class`, which gives the street no class', () => {
+    const { plans } = plannedTown(
+      street,
+      parseConfig('?town=richmond&levers=-urban-class').leversOff,
+    );
+    expect(modelled(plans)).toBe(54);
   });
 });
 
@@ -323,8 +420,9 @@ describe('the realistic page’s `dormer-variants` lever — #1786', () => {
       .plans.filter((plan) => plan.archetype === 'foursquare')
       .reduce((sum, plan) => sum + plan.dormers, 0);
 
-  it('stands a dormer on the street’s Foursquares on the product’s page', () => {
-    expect(foursquareDormers('?town=houses')).toBeGreaterThan(3);
+  it('stands a dormer on the street’s Foursquares on the page', () => {
+    // #3251: with `-house-styles`, for the reason the roof variants' case gives.
+    expect(foursquareDormers('?town=houses&levers=-house-styles')).toBeGreaterThan(3);
   });
 
   it('plans every house as the planner with them off does, with `levers=-dormer-variants`', () => {
@@ -644,6 +742,40 @@ describe('the realistic page’s `shop-aprons` lever — #2848', () => {
   });
 });
 
+describe('the realistic page’s `facade-kit` lever — #3334', () => {
+  it.each([
+    ['terrace', terraceStreetFixture(), 'townhouse'],
+    ['city', cityStreetscapeFixture(), 'office'],
+  ] as const)(
+    'wraps the mapped footprints of `town=%s` on the product’s page, as the press classes the street',
+    (town, street, kind) => {
+      const { plans } = plannedTown(street, parseConfig(`?town=${town}`).leversOff);
+      const wrapped = plans.filter((plan) => plan.kit !== undefined);
+      expect(wrapped.length).toBeGreaterThan(10);
+      expect(wrapped.some((plan) => plan.kit?.kind === kind)).toBe(true);
+      // By setting, as the press read it: every wrap stands beside a town's or a city centre's stretch.
+      for (const plan of wrapped) expect(['town', 'city-centre']).toContain(plan.urban);
+    },
+  );
+
+  it('plans every footprint with no wrap, and otherwise as the product does, with `levers=-facade-kit`', () => {
+    const street = terraceStreetFixture();
+    const on = plannedTown(street, parseConfig('?town=terrace').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=terrace&levers=-facade-kit').leversOff,
+    ).plans;
+    expect(off.length).toBe(on.length);
+    expect(on.some((plan) => plan.kit !== undefined)).toBe(true);
+    off.forEach((plan, index) => {
+      expect(plan.kit).toBeUndefined();
+      for (const role of FOOTPRINT_ROLES) {
+        expect(plan.triangles[role]).toStrictEqual(on[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
 describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
   const street = untaggedStreetFixture();
   const shopsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
@@ -685,6 +817,89 @@ describe('the realistic page’s `map-pois` lever — #2975', () => {
     const { plans } = plannedTown(street, parseConfig('?town=pois&levers=-map-pois').leversOff);
     expect(rowOf(plans, 'shop').some((plan) => plan.shop.front)).toBe(false);
     expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.plinth.length > 0)).toBe(true);
+  });
+});
+
+describe('the realistic page’s `parked-cars` lever — #3278', () => {
+  const town = neighbourhoodFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  /** The cars of the page's frame for `query` at `distance`, as `realistic-harness.ts` builds it. */
+  // The lever changes no plan, so the town is planned once for every frame here.
+  let planned: ReturnType<typeof plannedTown> | undefined;
+  const carsAt = (query: string, distance: number) => {
+    const config = parseConfig(query);
+    planned ??= plannedTown(town, []);
+    const { land, plans, urban } = planned;
+    return rideFrame({
+      profile: town.profile,
+      origin: town.origin,
+      distance,
+      elapsed: 1,
+      rung: top,
+      peopleOff: true,
+      parkedCarsOff: config.leversOff.includes('parked-cars') || config.delivery !== undefined,
+      town: {
+        corridor: town.corridor,
+        land,
+        buildings: mappedBuildingsOf(plans),
+        lots: mappedTown(town.corridor, plans, urban),
+      },
+    }).parkedCars;
+  };
+
+  it('parks cars along the neighbourhood’s streets, and with the lever off parks none', () => {
+    const product = [1_100, 1_900].map((at) => carsAt('?town=streets', at));
+    for (const view of product) expect(view?.cars.length ?? 0).toBeGreaterThan(0);
+    // The streets the route never touches are 50 m and more off it: cars at their kerbs.
+    expect(product.some((view) => view?.cars.some((car) => car.spot === 'kerb'))).toBe(true);
+    expect(carsAt('?town=streets&levers=-parked-cars', 1_100)).toBeUndefined();
+    // A Delivery round's parked cars are its own: the page asks for none of these.
+    expect(carsAt('?town=streets&delivery=3', 1_100)).toBeUndefined();
+  });
+});
+
+describe('which parked cars of the page’s commercial street have their wheels — #3278', () => {
+  const street = commercialStreetFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+
+  it('gives them to the cars nearest the rider, on every frame of the street — the one beside the rider first', () => {
+    const { land, plans, urban } = plannedTown(street, []);
+    const town = {
+      corridor: street.corridor,
+      land,
+      buildings: mappedBuildingsOf(plans),
+      lots: mappedTown(street.corridor, plans, urban),
+    };
+    /** How many frames carried more cars in the near band than may have wheels: the cap at work. */
+    let capped = 0;
+    // The stretch of the page's street that has cars in the near band, 4 m a
+    // frame: four frames to each cell the cars are planned for. Not the whole
+    // 1 800 m at 2 m: that is 901 frames, and 8 s under the nightly's coverage.
+    for (let distance = 1_000; distance <= 1_460; distance += 4) {
+      const cars =
+        rideFrame({
+          profile: street.profile,
+          origin: street.origin,
+          distance,
+          elapsed: 1,
+          rung: top,
+          peopleOff: true,
+          town,
+        }).parkedCars?.cars ?? [];
+      const rider = drawnRoadPosition(street.profile, street.origin, distance);
+      const off = (car: ParkedCar): number => Math.hypot(car.x - rider.x, car.z - rider.z);
+      const inBand = cars.filter((car) => off(car) <= PARKED_CAR_NEAR_METRES);
+      const near = cars.filter((car) => car.level === 'near');
+      if (inBand.length > PARKED_CARS_NEAR_MAX) capped += 1;
+      // As many with wheels as the cap and the band allow, and none outside the band.
+      expect(near).toHaveLength(Math.min(inBand.length, PARKED_CARS_NEAR_MAX));
+      for (const car of near) expect(inBand).toContain(car);
+      // No car left on empty arches is nearer the rider than one with its wheels.
+      const nearestBare = Math.min(...cars.filter((car) => car.level === 'far').map(off));
+      for (const car of near) expect(off(car)).toBeLessThanOrEqual(nearestBare);
+    }
+    // The street has stretches with more cars about the rider than the cap: what the rule is for.
+    expect(capped).toBeGreaterThan(0);
   });
 });
 

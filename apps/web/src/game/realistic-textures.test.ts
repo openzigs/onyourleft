@@ -63,7 +63,13 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { footwaysFixture, mixedTownFixture } from './footprint-fixtures-testing';
+import { KIT_ATLAS_PIXELS, KIT_PIECES, kitCardOf, kitPaletteOf } from './facade-kit';
+import { committedKitPieces } from './facade-kit-testing';
+import {
+  footwaysFixture,
+  mixedTownFixture,
+  terraceStreetFixture,
+} from './footprint-fixtures-testing';
 import { footwayTriangles } from './footway-surfaces';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
@@ -142,6 +148,7 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
+import { GROWN_SPECIES, growTree } from './grown-trees';
 import {
   accessorValues,
   chainLinkFacts,
@@ -3688,7 +3695,7 @@ describe('the generated trees, loaded and drawn through the product’s own path
           Math.round(mesh.instanceMatrix.array[slot * 16 + 14] ?? Number.NaN),
         );
 
-  it('loads the generated broadleaves for a ride, and the scans only when told to', async () => {
+  it('loads the generated trees for a ride, and the scanned firs only when told to', async () => {
     expect(REALISTIC_TREES_DEFAULT).toBe('generated');
     for (const set of [undefined, ...REALISTIC_TREE_SETS]) {
       const renderer = await loadedOn(TABLET, set);
@@ -3697,10 +3704,31 @@ describe('the generated trees, loaded and drawn through the product’s own path
       if (belt === undefined) throw new Error('no world is loaded');
       // One shape a model the set names, in its variant order — read off the
       // belt a view would build, so a set that loaded the other's files is seen.
+      // #3252: and, after them, each species grown in code whose host the set
+      // loaded — none where that tree is a scan.
+      const loadedNames = new Set(
+        REALISTIC_VEGETATION_KINDS.flatMap((kind) => expected[kind].map((model) => model.name)),
+      );
       for (const kind of REALISTIC_VEGETATION_KINDS) {
-        expect(belt.levelsOf(kind).full, `${String(set)} ${kind}`).toHaveLength(
-          expected[kind].length,
+        const grown = GROWN_SPECIES.filter(
+          (species) => species.kind === kind && loadedNames.has(species.host),
         );
+        const full = belt.levelsOf(kind).full as unknown as readonly (readonly DrawnMesh[])[];
+        expect(full, `${String(set)} ${kind}`).toHaveLength(expected[kind].length + grown.length);
+        // Each grown species through the product's own load: one draw a
+        // level, and exactly the triangles its numbers make.
+        grown.forEach((species, at) => {
+          const meshes = full[expected[kind].length + at] ?? [];
+          expect(meshes, species.id).toHaveLength(1);
+          expect((meshes[0]?.geometry.index?.count ?? 0) / 3, species.id).toBe(
+            growTree(species).full.triangles,
+          );
+        });
+      }
+      if (set === undefined || set === 'generated') {
+        expect(belt.levelsOf('tree-broadleaf').full).toHaveLength(7);
+        expect(belt.levelsOf('tree-conifer').full).toHaveLength(3);
+        expect(belt.levelsOf('shrub').full).toHaveLength(4);
       }
       // And the triangles drawn are the committed files', variant by variant
       // — the broadleaves', and since #1294 the conifers', which differ
@@ -3737,7 +3765,23 @@ describe('the generated trees, loaded and drawn through the product’s own path
         readonly impostor: readonly (DrawnMesh | undefined)[];
       };
       const variants = generated.length;
-      expect(levels.full).toHaveLength(variants);
+      // #3252: the committed trees first, then the species grown in code.
+      const grown = GROWN_SPECIES.filter((species) => species.kind === kind);
+      expect(levels.full).toHaveLength(variants + grown.length);
+      grown.forEach((species, at) => {
+        const full = levels.full[variants + at] ?? [];
+        const middle = levels.middle[variants + at] ?? [];
+        // One call a level, the middle level in the full level's material,
+        // and NO impostor mesh of its own: its far band is its host's.
+        expect(full, species.id).toHaveLength(1);
+        expect(middle, species.id).toHaveLength(1);
+        expect(middle[0]?.material, species.id).toBe(full[0]?.material);
+        expect(levels.impostor[variants + at], species.id).toBeUndefined();
+        expect(renderer.materialLayers(full[0]?.material as never), species.id).toBe(2);
+        expect((middle[0]?.geometry.index?.count ?? 0) / 3, species.id).toBe(
+          growTree(species).middle?.triangles,
+        );
+      });
       generated.forEach((model, variant) => {
         const full = levels.full[variant] ?? [];
         const middle = levels.middle[variant] ?? [];
@@ -3934,7 +3978,9 @@ describe('the generated trees, loaded and drawn through the product’s own path
     }[];
     // One pre-pass for every fir mesh at the full and the middle level — two
     // shapes, two levels — and none for a broadleaf.
-    expect(firs).toHaveLength(2 * REALISTIC_CONIFERS.generated.length);
+    // (#3252: and the spruce grown in code, which is a conifer too.)
+    const grownConifers = GROWN_SPECIES.filter((species) => species.kind === 'tree-conifer');
+    expect(firs).toHaveLength(2 * (REALISTIC_CONIFERS.generated.length + grownConifers.length));
     expect(prepasses).toHaveLength(firs.length);
     prepasses.forEach((each, at) => expect(each.full).toBe(firs[at]));
     for (const broadleaf of meshesOf('tree-broadleaf')) expect(broadleaf.children).toEqual([]);
@@ -4770,6 +4816,177 @@ describe('the village-square tree, in the realistic world: no depth pre-pass —
   }, 120_000);
 });
 
+describe('the downtown kit, loaded by the product’s own loader — #3334', () => {
+  /**
+   * The world, loaded once for the case below: the load is nearly all of its
+   * cost, and a per-case timeout is banned (#1688). Served as every case's
+   * `beforeEach` serves the files: a `beforeAll` runs before it.
+   */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const whileServed = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of whileServed.reverse()) each();
+    }
+  });
+
+  it('draws a town’s wrapped footprints from the committed GLB and atlas, in the drawing a view builds', () => {
+    // The whole road a rider's frame takes: the committed GLB through
+    // `GLTFLoader` and the atlas through `KTX2Loader`, into the loaded world;
+    // a street planned as a ride plans it; and `RealisticDrawing.updateMapped`
+    // itself, read back off the belt's own mesh, which is what the GPU is handed.
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const street = terraceStreetFixture();
+      const land = landClassMask(street.corridor);
+      const { plans } = footprintPlans(
+        street.corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        { classAt: () => 'town' },
+      );
+      const start = atStartLine(street.profile);
+      const frame = sceneFrame({
+        profile: street.profile,
+        origin: street.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_150) } },
+        worldCorridor: street.corridor,
+        landClass: land,
+        mappedBuildings: mappedBuildingsOf(plans),
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      // The wraps are drawn: in their own call, in the kit's own picture.
+      expect(mapped.stats.kitted).toBeGreaterThan(0);
+      expect(mapped.kitMesh.visible).toBe(true);
+      const range = mapped.kitMesh.geometry.drawRange;
+      expect(range.count).toBe(mapped.stats.kitTriangles * 3);
+      const picture = (
+        mapped.kitMesh.material as unknown as {
+          readonly map: { readonly image: { readonly width: number; readonly height: number } };
+        }
+      ).map;
+      expect(picture.image.width).toBe(KIT_ATLAS_PIXELS);
+      expect(picture.image.height).toBe(KIT_ATLAS_PIXELS);
+      expect(picture).not.toBe((mapped.modelMesh.material as unknown as { map: unknown }).map);
+      // The first wrapped building drawn: every vertex the belt wrote for it is where
+      // `writeKitWrap` puts the loader's reading of the pieces, and that reading is the
+      // file's, triangle for triangle, as the bytes read without the loader say.
+      const committed = committedKitPieces();
+      const position = mapped.kitMesh.geometry.getAttribute('position');
+      const colour = mapped.kitMesh.geometry.getAttribute('color');
+      let checked = 0;
+      for (let place = 0; ; place += 1) {
+        const drawn = mapped.drawnAt(place);
+        if (drawn === undefined) break;
+        const plan = plans[drawn.plan];
+        const wrap = plan?.kit;
+        if (drawn.modelAt < 0 || plan === undefined || wrap === undefined) continue;
+        const vertices = wrap.triangles * 3;
+        const colours = new Set<string>();
+        const into = {
+          position: new Float32Array(vertices * 3),
+          normal: new Float32Array(vertices * 3),
+          uv: new Float32Array(vertices * 2),
+          colour: new Float32Array(vertices * 3),
+          tint: new Float32Array(vertices),
+        };
+        const end = renderer.writeKitWrap(
+          {
+            pieces: committed,
+            cards: KIT_PIECES.map((_, index) => kitCardOf(index)),
+            atlas: picture as never,
+          },
+          wrap,
+          kitPaletteOf(wrap.style.skin, plan.paint),
+          0,
+          into,
+          0,
+        );
+        expect(end).toBe(vertices);
+        for (let vertex = 0; vertex < vertices; vertex += 1) {
+          const at = drawn.modelAt + vertex;
+          expect(position.getX(at)).toBeCloseTo(into.position[vertex * 3] as number, 3);
+          expect(position.getY(at)).toBeCloseTo(into.position[vertex * 3 + 1] as number, 3);
+          expect(position.getZ(at)).toBeCloseTo(into.position[vertex * 3 + 2] as number, 3);
+          // And its colour: the loader read each vertex's class out of the GLB's second
+          // texture coordinates, and the belt wore the building's own colour for it.
+          expect(colour.getX(at)).toBeCloseTo(into.colour[vertex * 3] as number, 5);
+          expect(colour.getY(at)).toBeCloseTo(into.colour[vertex * 3 + 1] as number, 5);
+          expect(colour.getZ(at)).toBeCloseTo(into.colour[vertex * 3 + 2] as number, 5);
+          colours.add(
+            `${String(colour.getX(at))},${String(colour.getY(at))},${String(colour.getZ(at))}`,
+          );
+        }
+        // More than one colour a building: its wall, its trim and the glass as it is.
+        expect(colours.size).toBeGreaterThanOrEqual(2);
+        checked += 1;
+      }
+      expect(checked).toBe(mapped.stats.kitted);
+    } finally {
+      drawing.dispose();
+    }
+  });
+  it('frees the kit’s atlas, as the house models’, when another world replaces the loaded one', async () => {
+    // ⚠️ Last in this describe: it replaces the world the cases above share.
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    let atlas: { dispose: () => void } | undefined;
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const street = terraceStreetFixture();
+      const land = landClassMask(street.corridor);
+      const { plans } = footprintPlans(
+        street.corridor,
+        land,
+        street.profile,
+        street.origin,
+        undefined,
+        { classAt: () => 'town' },
+      );
+      const start = atStartLine(street.profile);
+      const frame = sceneFrame({
+        profile: street.profile,
+        origin: street.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_150) } },
+        worldCorridor: street.corridor,
+        landClass: land,
+        mappedBuildings: mappedBuildingsOf(plans),
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      atlas = (mapped.kitMesh.material as unknown as { readonly map: { dispose: () => void } }).map;
+    } finally {
+      drawing.dispose();
+    }
+    const freed = vi.spyOn(atlas, 'dispose');
+    const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+    const at = (url: string): string => `${ORIGIN}${url}`;
+    const outcome = await renderer.loadRealisticWorld({
+      model: (url) => inner.model(at(url)),
+      texture: (url) => inner.texture(at(url)),
+      sky: (url) => inner.sky(at(url)),
+      dispose: inner.dispose,
+    });
+    expect(outcome).toEqual({ loaded: true });
+    expect(freed).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the roadside models, loaded by the product’s own loader — #1274', () => {
   it('stands the committed lamp and barrier, as their bytes say, in the drawing a view builds', async () => {
     const renderer = await loadedOn(TABLET);
@@ -4918,9 +5135,11 @@ describe('the litter and the chain-link, loaded by the product’s own loader �
           );
         }
       }
-      // The field fence's ONE mesh, folded with the committed piece and taught it.
+      // The field fence's ONE mesh, folded with the committed piece and taught it:
+      // the first of two since #3252, whose timber fence and noise barrier
+      // are the fence's second variant, in one mesh between them.
       const meshes = drawing.structures.beltOf('planks')?.meshesOf('fence') ?? [];
-      expect(meshes).toHaveLength(1);
+      expect(meshes).toHaveLength(2);
       const mesh = meshes[0] as (typeof meshes)[number];
       const parts = Array.from(
         mesh.geometry.getAttribute(renderer.CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array,

@@ -52,6 +52,12 @@ export function rideFrame(input: {
   readonly countrysideOff?: readonly CountrysideLever[];
   /** #2685's lever, `levers=-park-dressing`: the golf courses and cemeteries as their planting alone. */
   readonly parkDressingOff?: boolean;
+  /**
+   * #3278's lever, `levers=-parked-cars`: no car on a driveway, an apron or
+   * at a side street's kerb — and so on a `delivery=` frame, whose parked cars
+   * are its own obstacles, as `GameView` says of a round.
+   */
+  readonly parkedCarsOff?: boolean;
   /** #2973's lever, `levers=-nearby-streets`: only the route, its stubs and its overpasses' roads. */
   readonly nearbyStreetsOff?: boolean;
   /** #2972's lever, `levers=-footways`: the mapped footways, cycleways, park paths, steps and zebras undrawn. */
@@ -106,6 +112,8 @@ export function rideFrame(input: {
     settlementsWooded: input.settlementsWooded,
     countrysideOff: input.countrysideOff,
     parkDressingOff: input.parkDressingOff,
+    // #3278: as `GameView` passes it — every ride but a Delivery round.
+    parkedCars: input.parkedCarsOff !== true,
     nearbyStreetsOff: input.nearbyStreetsOff,
     footwaysOff: input.footwaysOff,
     ...(input.town === undefined

@@ -887,7 +887,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         measured it does NOT remove the grade — nor did the
                         Reset PR #442 tried** (#372, §4h). ⚠️ It sends the **grade and nothing
                         else** — the rider's wind is out of scope and their drag
-                        area would double-count against the game's own physics
+                        area would double-count against the game's own physics.
+                        Past a point-to-point route's end (#3345) it eases the
+                        grade to 0 % over about 100 m, at 1 % a second at most
+                        and only ever toward flat; not on a loop or an
+                        open-world view (`gradient.test.ts`,
+                        `trainer-wiring.test.tsx` §"#3345")
     src/game/trainer-port.ts
                         what the game may ask of a trainer, and the five things
                         it is told when it may not (#362). ⚠️ A `*-port.ts` on
@@ -1022,6 +1027,128 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `lap-race/bot-weave.test.ts` is the gate, read at
                         60 fps through `lapRaceDrawing` and the scene's
                         markers
+    src/game/group-ride/choice.ts, ride-group.ts
+                        the AI group ride inside a game ride (#3303, epic
+                        #3296, ADR 0101): `GameView` holds one per ride,
+                        asked for by the chooser (`StageChooser.tsx`
+                        §`GroupRideControl`, *Ride with a group* in *Your
+                        ride* beside the pacer: an average speed in the
+                        rider's units and 3 to 7 bots, kept on the device by
+                        `choice.ts`; one mode a ride, so it and the pacer,
+                        the race and the round switch each other off). Not
+                        offered on a circuit, a level or the open world, and
+                        **unavailable, with the reason as the switch's
+                        description**, while a workout holds the trainer,
+                        the draft is switched off, or the route is a loop
+                        (the plan is one pass; laps are #3369). It ends at
+                        a finish: past it, *Keep riding* rides alone. A
+                        target the plan refuses
+                        on the chosen route blocks *Ride* with the most (or
+                        least) the group can average there. Solo only, never
+                        beside a race or a round. Started at the press (the
+                        bots formed up ahead of the rider, the rider on the
+                        last wheel, ONE seed kept with the ride), then
+                        stepped one tick a simulation step that ran through
+                        domain `stepGroupRide` on physics'
+                        `groupRidePhysics`, AFTER the grade is sampled. Out
+                        of each tick: the rider's draft, handed to
+                        `GameSimulation.draftWith` as a race's is (and the
+                        simulation keeps the in-draft state, so the Draft
+                        field and the saved ride's "drafted" are the solo
+                        draft's own); `groupSpeedMps`, which is the paced
+                        speed while the line is paced to the rider; and the
+                        phase and the rider's role, for the log. **The
+                        rider has stopped** (`riderStopped`) while the
+                        recording under the ride is paused, the recorder's
+                        auto-pause included, or the power reading is not
+                        live. The bots are drawn through the lap race's
+                        pack layout **in single file** (#3304:
+                        `stepPackLayout`'s `singleFile`, a row to each
+                        member, a bike length and the wheel gap apart, in
+                        the middle lane) and the rider is never moved along
+                        the road. The member the rules have aside
+                        (`rotation.aside`) is drawn one lane to the LEFT
+                        (`GROUP_PULL_OFF_LANE`), beside the line and no row
+                        of it, and comes back across only once the line has
+                        drawn them a bike length of room; when that member
+                        is the rider it is the rider's own lane that moves,
+                        by `lanes.ts` §`stepSteer`, out through
+                        `steeredLateral`, and the lane follows the role, so
+                        a pull-off press (#3307) needs to reach the rules
+                        only. A drawing only: nothing reads it back
+                        (`line-drawing.test.ts`, every step of a scripted
+                        rotation from `line-testing.ts`; the browser case
+                        is `lap-race.browser.spec.ts` §"#3304"). What
+                        the ride keeps goes through the port's
+                        `groupRideStepped` to the controller's
+                        `noteGroupRide` and is saved as
+                        `RideFacts.groupRide` (seed, average, size, rules'
+                        version, `startedAt` on the recording's clock, a
+                        log of phase and role changes); no fact is handed
+                        until a recording's elapsed time has been read.
+                        `group-ride-wiring.test.tsx` drives the real picker
+                        and reads the simulation's own draft factor, the
+                        frame's bots and what the recording is handed. ⚠️
+                        **A constant-power rider has no brake**: in the
+                        line's shelter the same watts are faster than the
+                        line, so a simulated rider drifts through the bots
+                        and off the front, then back
+    src/game/group-ride/rider-input.ts, hud/GroupRideControls.tsx
+                        what the rider can tell the group (#3307, ADR 0101
+                        D-3.7, D-6.5): **pull off**, a discrete press taken
+                        only while the rider's role is `on-front`, and **sit
+                        in**, a toggle. `GameView` hands the HUD a
+                        `GroupRideRiderInput` on a group ride
+                        (`HudPanelProps.groupRide`); the HUD draws *Pull off
+                        left* (72 px, `aria-disabled` off the front) and
+                        *Sit in* (the design toggle at the 48 px ride size)
+                        in the actions panel, inside the touch lock, held
+                        drawn while the rider is on the front
+                        (`controlsHeld`). Three inputs, one press: the lane
+                        key toward `GROUP_RIDE_PULL_OFF_SIDE` (**A**, left,
+                        one fixed side), the button, and a pad through
+                        `GamepadIntents` (`pullOffPadPorts`: a lane change
+                        left, and every button a lap race uses its item
+                        on). The press goes to `ride-group.ts`
+                        §`pressGroupPullOff`: ONE flag, handed to the
+                        rotation as `riderSignal` on the next step, so a
+                        held key or a mashed button is one pull-off; it
+                        also moves the rider's DRAWN lane a lane left
+                        through `lanes.ts` (`SceneInput.steeredLateral`),
+                        back to the line's once they are neither on the
+                        front nor drifting back. ⚠️ A press as the rider
+                        ARRIVES on the front, before the line is steady,
+                        is held by the rotation and ends the pull as soon
+                        as it is. Sit-in is `setGroupSitIn`, handed as
+                        `riderSittingIn` on every step. Neither choice
+                        outlives the ride, and **what was pressed is kept
+                        with it**: each press taken and each sit-in choice,
+                        with its ride time, in `GroupRideFact.presses`
+                        (`pull-off`, `sit-in`, `sit-out`; absent when
+                        nothing was pressed; a mashed button is one entry),
+                        because the line replays from them as well as the
+                        seed, and `GROUP_RIDE_CODE_VERSION` is **2** from
+                        here. Neither reaches the simulation, the gradient
+                        session or the trainer's port.
+                        `group-ride-wiring.test.tsx` §"#3307" ends a pull by
+                        each input through the real `GameView`, with a rider
+                        who holds a wheel. ⚠️ A group ride now mounts
+                        `GamepadIntents`, which asks for ONE animation
+                        frame at mount: a test that hands out frames one
+                        callback at a time loses a ride frame to it
+    src/game/group-ride/group-ride-cannot-reach-trainer.test.tsx
+                        ADR 0101 D-6.6, the owner's ruling 4: **its first
+                        case** (#3303). In simulation mode a ride with the
+                        group sends the trainer, write for write and the
+                        release included, what the same ride sends without
+                        the group at the same draft factors (kept from the
+                        first ride and handed to the second by a wrapped
+                        `GameSimulation`). **The presses** (#3307): a ride
+                        that presses pull off before every frame, ends a
+                        pull by a press, toggles sit-in and eases off the
+                        back is held, write for write, to the same power on
+                        the same frames at the same factors with no group.
+                        #3308 completes it (ERG, the worst case)
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says
@@ -1596,6 +1723,36 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/group-ride-hud.ts, src/game/hud/GroupRideCue.tsx
+                        an AI group ride on the HUD (#3305, ADR 0101 D-5).
+                        **The role strip** is two fields in a lap race's two
+                        places and under its class (a ride runs one mode):
+                        *In line* (place of how many; under it the pull's
+                        countdown ONLY while the rider is on the front, else
+                        the gap to the wheel ahead) and *Group* (the group's
+                        speed now; under it the average chosen). With no
+                        power reading both values are a dash, never a zero.
+                        **The cue line** is one sentence per kind of domain
+                        `CUE_KINDS` (`GROUP_RIDE_CUE_TEXT`, a record, so a
+                        kind without one is a type error; ⚠️ every sentence
+                        is the owner's to approve), a labelled notice drawn
+                        as the AI pacer's line, on the HUD for 8 s of the
+                        group's clock. `ride-group.ts` steps domain
+                        `stepCues` on each tick's rotation and the view it
+                        read (`GroupRideTick.line`) with the rider's power
+                        (no reading, no cue) and keeps the last cue;
+                        `groupRideStrip` builds the strip. The sentence is
+                        offered to `announce.ts` ONCE, as `group-ride-cue`
+                        (rank 5d′: below every safety and workout sentence,
+                        above a lap and every reading; follows the
+                        announcement setting): behind a higher sentence it
+                        is dropped, never queued, and stays on the line.
+                        The countdown is never offered.
+                        `group-ride-hud.test.tsx` rides a scripted rotation
+                        (domain `./group-ride-line-testing`) through the
+                        real selector onto the real HUD and screens every
+                        sentence; `browser/lap-race-hud.browser.spec.ts`
+                        §"#3305" holds the layout (`?group=ride`)
     src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
                         the room a race's standings have on a tablet (#2599):
                         the list is as tall as the whole lines that fit above
@@ -1868,6 +2025,58 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`
                         (80) nearest first, in their own term
                         §`REALISTIC_PARK_FIELD_TRIANGLES`; page `town=fields`
+    src/game/parked-cars.ts
+                        the parked cars of an ordinary ride (#3278): SCENERY,
+                        never an obstacle and never read by a simulation or
+                        the trainer. Placed from what is already planned — a
+                        mapped house's garage driveway (`FootprintPlan.driveway`),
+                        a shop's apron deep enough for a car and a doorway,
+                        and the kerb of a mapped `minor` or `major` side
+                        street with a building on it (`nearby-streets.ts`'
+                        pieces) — hashed from the ride's seed and the place,
+                        so a replay draws the same street. A car's whole box
+                        keeps `PARKED_CAR_ROAD_CLEAR_METRES` (4.5 m: the
+                        carriageway and a metre) off the middle of ANY
+                        stretch of the ridden road, behind a city centre's
+                        pavement, and clear of every footprint, every other
+                        street's surface, every mapped footway, water and
+                        every other car. ⚠️ **None at the kerb of the ridden
+                        road** (the village's and the city's street of
+                        `streets.ts`): three lanes and the racing line leave
+                        0.4 m inside each kerb, so a procedural village has no
+                        car and its frozen frame is untouched. ⚠️ **None at
+                        any kerb on an open-world ride** (`ParkedCarSite.kerbs`):
+                        every street there may be ridden next, and a car also
+                        keeps 4.5 m off the middle of each. ⚠️ **None on a
+                        `service` road**: the tiles cannot tell a driveway or
+                        a parking aisle from an alley (ADR 0091 D-3).
+                        Streets are read off the map's own lines
+                        (`WorldCorridor.streets`), never a frame's side
+                        roads, so a car does not come and go with them.
+                        `scene.ts` asks about the road 40 m ahead of the
+                        rider, and again only when that enters another 16 m
+                        cell; ≤ `PARKED_CARS_MAX` (36) nearest first, out to
+                        150 m. ⚠️ **Wheels go by the RIDER's place, not the
+                        cell's** (`parkedCarsSeenFrom`, asked every frame, a
+                        distance a car): the ≤ `PARKED_CARS_NEAR_MAX` (12)
+                        nearest the rider within 60 m, the rest the body
+                        alone — by the cell, 40 m up the road, the car beside
+                        the rider stood on empty arches on a dense street. It
+                        hands back the same list until a level changes.
+                        Drawn by `three-renderer.ts`
+                        §`ParkedCarBelt`: ONE merged mesh and one call of its
+                        own, each car its OWN body's triangles (never the
+                        Delivery roster, where every instance submits every
+                        kind), rebuilt only when the list changes, inside
+                        `realistic-budget.ts` §`REALISTIC_PARKED_CAR_TRIANGLES`
+                        (13 440, in the worst frame's sum) and
+                        §`REALISTIC_PARKED_CAR_DRAW_CALLS` (1). Realistic
+                        world only; the bodies and atlas are #2847's committed
+                        `cars.glb` and `cars_atlas_256.ktx2`, no new file.
+                        `SceneFrame.parkedCars`, said by `SceneInput.parkedCars`
+                        (`GameView`: every ride but a Delivery round); lever
+                        `-parked-cars`, pages `town=houses`, `town=commercial`
+                        and `town=streets`.
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
@@ -2131,7 +2340,37 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its triangles pooled in the 23 040. ⚠️ Textures are
                         admitted on the model's grant (ADR 0049's 2026-10-23
                         amendment); the shop's interior photo and door sign are
-                        painted over in `blender/process_house_models.py`
+                        painted over in `blender/process_house_models.py`.
+                        Since #3251 each model has a `style`, and a footprint
+                        takes only a model of the style its setting calls for
+                        (`houseStyleOf`): `modern` beside a `village`, `town` or
+                        `city-centre` stretch, `traditional` on farmland and
+                        beside a `rural` or unclassed one, and a seeded 0.5 of
+                        a village stretch's traditional (the owner's ruling on
+                        #3273: a village is a mix). The style chooses among
+                        RESIDENTIAL models only, so the brick shop still stands
+                        on a town's main street (#3334). ⚠️ All thirteen are
+                        `traditional` and NO modern model is committed, so a
+                        modern footprint is drawn as its extrusion: a modern
+                        model joins as a row with `style: 'modern'`, held to
+                        `realistic-budget.ts` §`REALISTIC_BUILDING_MODEL_TRIANGLES`
+                        (3 000, ADR 0099 D-4.2). A village's plots with no map
+                        data keep the traditional set. The look pair is
+                        `town=richmond` against `levers=-house-styles`.
+                        The modern look itself is built from code, not a file:
+                        a modern footprint's extrusion is a CONTEMPORARY house
+                        (`house-archetypes.ts` §`contemporaryArchetypeOf`,
+                        `contemporary-flat` or `contemporary-low`: plain
+                        windows, a picture window, no shutters, porch, dormer
+                        or chimney, render or boards) and a 3 to 4 storey
+                        residential block in a town the modern flats
+                        (`building-archetypes.ts` §`modernFlatsFit`), both
+                        chosen BEFORE #1782's and #1783's tables, which are
+                        untouched. ⚠️ Their walls stay on the `render` surface:
+                        a surface of their own was a seventh in a frame and
+                        left front-row buildings undrawn
+                        (`mapped-buildings-ahead.test.ts`). Pairs: `town=houses`
+                        and `town=mixed` against `levers=-house-styles`
     src/game/facade.ts  a mapped building's windows and front door, laid out in
                         a bay and a storey (#1581), and since #1588 its US sash
                         windows, shutters, reveal and cladding — drawn by the shader
@@ -2197,6 +2436,78 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         in the glass's otherwise unread `uv`
                         (`buildings.ts` §`glassPaneCoordinates`);
                         `-lot-realism` builds both out
+    src/game/facade-kit.ts
+                        a mapped footprint wrapped in modular facade pieces
+                        (#3334, the owner's direction of 2026-11-26): 39
+                        pieces from Quaternius's CC0 Downtown City MegaKit
+                        (ADR 0099 D-1), in ONE GLB and one 2048 px atlas
+                        (`realistic-assets.ts` §`REALISTIC_DOWNTOWN_KIT`,
+                        `tools/realistic/blender/process_downtown_kit.py`).
+                        `kitKindOf`: beside a `town` or `city-centre` stretch
+                        and never on farmland, a commercial footprint is a
+                        `retail` strip (one storey), a `shop` (two or three)
+                        or an `office` (four or more), and a terrace's house
+                        of two to four storeys a `townhouse`; every other
+                        footprint, and every one beside a `village`, `rural`
+                        or unclassed stretch, keeps what it draws today.
+                        `kitStyleOf` chooses each building's own look, seeded
+                        from its footprint: its skin from its extrusion's
+                        wall (the kit's brick; `render`, the brick pieces
+                        walled in the kit's concrete; `stone`, its cream
+                        trim; `metal`), its window, cornice, shop front,
+                        door, an awning or a sign band, pilasters, and a
+                        fire escape on some brick fronts. `kitPaletteOf`
+                        colours it from the plan's OWN paints: every vertex
+                        carries a class (wall, trim, accent, fixed) and the
+                        atlas is baked neutral where the building colours it.
+                        `wrapFootprint` walks the footprint's OWN outline: 2 m
+                        bays, each piece stretched to its bay and its storey,
+                        a shop front and the door on the edge facing the
+                        street, windows above, plain party walls, a plinth, a
+                        cornice as tall as the parapet, a flat roof.
+                        ⚠️ A wrap holds `REALISTIC_KIT_WRAP_TRIANGLES`, 3 000
+                        (the house models' price a building; it was the
+                        structure class's 640, and most bays were flat
+                        cards): every bay starts as a two-triangle CARD, then
+                        a door, cornice and window are chosen that put the
+                        WHOLE street front in RELIEF, the kit's own geometry,
+                        and the rest is spent a row at a time. ⚠️ A wrap is
+                        some thirty times its extrusion (2 785 against 78 on
+                        the terrace fixture), so `selectMappedBuildings`
+                        draws only the nearest `MAPPED_KIT_NEAR_MAX` (6) as
+                        wraps, a side of the street in turn (by which way
+                        each door faces), nearest the point 14 m up the road
+                        from the RIDER (`nearWraps`; never the road's
+                        ranking), asked again every `MAPPED_KIT_STRIDE_METRES`
+                        (10 m) and the belt refilled when the answer changes,
+                        so wraps keep beside the rider through a 100 m chunk
+                        (⚠️ a refill up to every 10 m on a street of wraps);
+                        `MAPPED_KIT_TRIANGLES` (18 000),
+                        out of the pooled 23 040 which is NOT raised, and one
+                        wrap fewer wherever a wrap would cost the frame a
+                        building or a procedural structure. What they take
+                        is the field boundaries' (31 structures left become
+                        5; `mapped-kit-belt.test.ts` holds each figure).
+                        Drawn at the near level only, as a model is
+                        (`FootprintPlan.kit`; its extrusion is its far level
+                        and the same height); never where a house model fits
+                        (the brick shop stays), on a part, or under a pitched
+                        roof. A city centre's own lots (#1637) ARE wrapped,
+                        as a mapped shop is. One more draw call for
+                        every wrap in view, counted INSIDE
+                        `MAPPED_BUILDING_DRAW_CALLS` as the models' is;
+                        the belt writes the wraps after the models in the
+                        models' own buffer and `kitMesh` draws that range in
+                        the house models' program with the kit's atlas bound
+                        (`three-renderer.ts` §`writeKitWrap`). Its bytes are
+                        `realistic-budget.ts` §`REALISTIC_DOWNTOWN_KIT_SURFACES`.
+                        The look pair is `town=terrace` against
+                        `levers=-facade-kit` (houses to 1 200 m, shops and
+                        offices beyond), or `town=city-street`, whose street
+                        front is #1637's lots (NOT `town=city`: its front is
+                        procedural house lots, which no wrap reaches).
+                        ⚠️ No tablet has drawn it: the frame check and the
+                        owner's look are owed
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

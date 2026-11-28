@@ -205,11 +205,15 @@ function roomFor(
   const actionsBox = actions.getBoundingClientRect();
   const beside = actionsBox.right <= panelBox.left || actionsBox.left >= panelBox.right;
   if (beside || actionsBox.bottom <= panelBox.top) return undefined;
+  // #2286: the lines DRAWN, which a laptop's compact standings make fewer
+  // than the list's (`theme.css` §"A ROOM RACE'S STANDINGS IN A LAPTOP'S
+  // WINDOW"): a line clipped to a pixel takes no room.
+  let drawnLines = 0;
   for (const line of ol.querySelectorAll('li')) {
     const height = line.getBoundingClientRect().height;
     if (height > 1) {
-      lineHeight.current = height;
-      break;
+      if (drawnLines === 0) lineHeight.current = height;
+      drawnLines += 1;
     }
   }
   const listBox = ol.getBoundingClientRect();
@@ -223,5 +227,5 @@ function roomFor(
     },
     drawn,
   );
-  return fit >= lines ? undefined : fit;
+  return fit >= Math.min(lines, drawnLines) ? undefined : fit;
 }

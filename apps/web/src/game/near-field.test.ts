@@ -48,7 +48,9 @@ import {
 import { drawnCamera } from './chase-camera-testing';
 import {
   clearOfTheCamera,
+  FENCE_TOPS,
   intrudes,
+  itemReach,
   nearPyramid,
   peopleClearOfTheCamera,
   sceneryReach,
@@ -68,11 +70,7 @@ import {
   modelTriangles,
   referenceShapeMeets,
 } from './near-field-testing';
-import {
-  REALISTIC_BROADLEAVES,
-  REALISTIC_CONIFERS,
-  REALISTIC_VEGETATION,
-} from './realistic-assets';
+import { REALISTIC_CONIFERS, REALISTIC_VEGETATION } from './realistic-assets';
 import {
   circuitRoute,
   hairpinRoute,
@@ -80,14 +78,22 @@ import {
   plannerRoute,
   sBendRoute,
 } from './route-fixtures-testing';
-import { sceneFrame, type SceneInput } from './scene';
+import { sceneFrame, sideRoadNaturalMargin, type SceneInput } from './scene';
 import { SCENERY_MODELS } from './scenery-models';
+import { drawnScale } from './scenery-plan';
+import { GROWN_SPECIES, growTree } from './grown-trees';
+import { REALISTIC_CHAIN_LINK } from './realistic-assets';
+import { chainLinkFacts } from './realistic-bytes-testing';
 import { SCATTER_KINDS, STRUCTURE_KINDS, type SceneryKind, type ScatterItem } from './scatter';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
 import {
+  builtFenceGeometry,
+  CHAIN_LINK_PART_ATTRIBUTE,
+  chainLinkFenceGeometry,
   realisticStructureGeometry,
   realisticStructureSurfaces,
+  ScatterBelt,
   sceneryFitMetres,
 } from './three-renderer';
 
@@ -168,19 +174,9 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
         }
       }
     }
-    // #1283: and the scanned broadleaves, which a ride no longer draws and the
-    // owner's page still can — the same reach holds them.
-    for (const model of REALISTIC_BROADLEAVES.scanned) {
-      const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
-      expectInside(
-        `scanned ${model.name}`,
-        sceneryReach('tree-broadleaf', 'realistic'),
-        boundsOf(fittedRealistic(triangles, extras, sceneryFitMetres('tree-broadleaf'))),
-        true,
-      );
-      checked += 1;
-    }
-    // #1294: and the scanned firs, for the same reason.
+    // #1294: and the scanned firs, which a ride no longer draws and the
+    // owner's page still can — the same reach holds them. (The scanned
+    // broadleaves were held here too, until #1293 deleted them.)
     for (const model of REALISTIC_CONIFERS.scanned) {
       const { triangles, extras } = modelTriangles(`${REALISTIC_MODELS}${model.file}`);
       expectInside(
@@ -197,11 +193,12 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
     // Every committed natural model, so a table that forgot one is a red count
     // rather than a shape nobody checked: the stylised kit's, and the realistic
     // world's four generated broadleaves, two generated firs, two shrubs and a
-    // rock, with the two scanned broadleaves and the two scanned firs.
+    // rock, with the two scanned firs — 11, where it was 13 with the two
+    // scanned broadleaves #1293 deleted.
     const stylisedFiles = readdirSync(STYLISED_MODELS).filter(
       (file) => file.endsWith('.glb') && !file.startsWith('building-'),
     ).length;
-    expect(checked).toBe(stylisedFiles + 13);
+    expect(checked).toBe(stylisedFiles + 11);
   });
 
   it('holds the stylised house, fitted and centred, as a box turned with the item', () => {
@@ -931,5 +928,252 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
     // A cull on the box, the first thing #545's branch tried, would have
     // dropped a visible tree this many times to prevent nothing.
     expect(boxOnly.get('realistic') ?? 0).toBeGreaterThan(100);
+  });
+});
+
+describe('the bounds hold what #3252 draws — its review', () => {
+  it('holds every species grown in code, fitted as the renderer fits it', () => {
+    for (const species of GROWN_SPECIES) {
+      const grown = growTree(species);
+      const fit = sceneryFitMetres(species.kind) / Math.max(grown.heightMetres, grown.widthMetres);
+      const numbers: number[] = [];
+      for (const part of [grown.full.bark, grown.full.leaves]) {
+        for (const vertex of part.indices) {
+          for (const axis of [0, 1, 2])
+            numbers.push((part.positions[vertex * 3 + axis] as number) * fit);
+        }
+      }
+      const box = boundsOf(Float32Array.from(numbers));
+      // A leaf may hang a little below the foot of a bush: the box's own bottom.
+      expectInside(species.id, sceneryReach(species.kind, 'realistic'), box, true);
+    }
+  });
+
+  /** A geometry's box over the vertices `keep` admits. */
+  const boxOf = (
+    geometry: {
+      getAttribute(name: string): {
+        readonly count: number;
+        getComponent(at: number, axis: number): number;
+      };
+    },
+    keep: (at: number) => boolean = () => true,
+  ) => {
+    const position = geometry.getAttribute('position');
+    const min: [number, number, number] = [Infinity, Infinity, Infinity];
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (let at = 0; at < position.count; at += 1) {
+      if (!keep(at)) continue;
+      for (const axis of [0, 1, 2] as const) {
+        min[axis] = Math.min(min[axis], position.getComponent(at, axis));
+        max[axis] = Math.max(max[axis], position.getComponent(at, axis));
+      }
+    }
+    return { min, max };
+  };
+
+  it('holds EVERY fence, wall and hedge either world draws, each to its own height', () => {
+    const plain = realisticStructureGeometry('fence', 'planks');
+    if (plain === undefined) throw new Error('a realistic fence wears planks');
+    const chained = chainLinkFenceGeometry(
+      plain,
+      chainLinkFacts(`${REALISTIC_MODELS}${REALISTIC_CHAIN_LINK.model}`),
+    );
+    const built = builtFenceGeometry(chained);
+    const partOf = (geometry: typeof chained) => {
+      const parts = geometry.getAttribute(CHAIN_LINK_PART_ATTRIBUTE).array as Float32Array;
+      return (wanted: (part: number) => boolean) => (at: number) => wanted(parts[at] as number);
+    };
+    const fences = [
+      {
+        name: 'field fence',
+        item: {},
+        box: boxOf(
+          chained,
+          partOf(chained)((part) => part === 0),
+        ),
+      },
+      {
+        name: 'chain-link',
+        item: { chainLink: true as const },
+        box: boxOf(
+          chained,
+          partOf(chained)((part) => part > 0),
+        ),
+      },
+      {
+        name: 'timber fence',
+        item: { boundary: 'timber-fence' as const },
+        box: boxOf(
+          built,
+          partOf(built)((part) => part === 0),
+        ),
+      },
+      {
+        name: 'noise barrier',
+        item: { boundary: 'noise-barrier' as const },
+        box: boxOf(
+          built,
+          partOf(built)((part) => part === 1),
+        ),
+      },
+    ];
+    for (const { name, item: mark, box } of fences) {
+      for (const world of WORLDS) {
+        const reach = itemReach({ kind: 'fence', ...mark }, world);
+        expectInside(name, reach, box, false);
+        // The TRUE bound, not a loose one: within 15 cm of the shape's own top.
+        expect(reach.top - box.max[1], `${name}: slack`).toBeLessThan(0.15);
+      }
+    }
+    expect(itemReach({ kind: 'fence' }, 'realistic')).toEqual(sceneryReach('fence', 'realistic'));
+    expect(FENCE_TOPS['noise-barrier']).toBeGreaterThan(sceneryReach('fence', 'realistic').top * 2);
+    // The walls and hedges: the realistic world's own shape, and the stylised one's.
+    const stylised = new ScatterBelt(new Map());
+    for (const kind of ['wall', 'hedge', 'fence'] as const) {
+      const shapes = [
+        ...realisticStructureSurfaces(kind).map((surface) =>
+          realisticStructureGeometry(kind, surface),
+        ),
+        ...stylised.meshesOf(kind).map((mesh) => mesh.geometry),
+      ];
+      expect(shapes.length).toBeGreaterThanOrEqual(2);
+      for (const geometry of shapes) {
+        if (geometry === undefined) throw new Error(`${kind}: no shape`);
+        for (const world of WORLDS) {
+          expectInside(kind, itemReach({ kind }, world), boxOf(geometry), false);
+        }
+      }
+    }
+    stylised.dispose();
+    for (const geometry of [plain, chained, built]) geometry.dispose();
+  });
+
+  it('cuts a noise barrier and a timber fence by its own height, where the field fence’s box is clear', () => {
+    const pyramid = nearPyramid(LEVEL, 16 / 10);
+    const fence = (extra: Partial<ScatterItem>): ScatterItem => ({
+      ...item('fence', 0, 0.2, NEAR_PLANE_METRES),
+      ...extra,
+    });
+    // The eye is 2 m up and the rectangle's bottom edge 1.65 m: the item stands
+    // 0.2 m up, so the field fence's 1.3 m tops out 15 cm under it.
+    expect(intrudes(fence({}), pyramid, 'realistic')).toBe(false);
+    expect(intrudes(fence({ boundary: 'timber-fence', variant: 1 }), pyramid, 'realistic')).toBe(
+      true,
+    );
+    expect(intrudes(fence({ boundary: 'noise-barrier', variant: 1 }), pyramid, 'realistic')).toBe(
+      true,
+    );
+    expect(intrudes(fence({ chainLink: true }), pyramid, 'realistic')).toBe(true);
+  });
+});
+
+describe('every guard reads the size an item is DRAWN at — #3252’s review', () => {
+  /**
+   * A park's tree drawn at its widest, and an eye beside it: far enough off
+   * that the tree's box stops well short of the eye at its `scale` alone, and
+   * near enough that the box reaches it at the size the tree is drawn. Found
+   * by asking place after place, since how old and how stout a tree is
+   * depends on where it stands.
+   */
+  const reach = sceneryReach('tree-broadleaf', 'realistic').x;
+  const found = (() => {
+    for (let place = 0; place < 5_000; place += 1) {
+      const tree: ScatterItem = {
+        ...item('tree-broadleaf', place * 3.7, 0, place * 5.3),
+        setting: 'park',
+      };
+      const { across } = drawnScale(tree);
+      if (across > 1.45) return { tree, across, off: reach * across - 0.1 };
+    }
+    throw new Error('no park tree drawn wide enough');
+  })();
+  const eye = { x: found.tree.x - found.off, y: 2, z: found.tree.z };
+  const pyramid = nearPyramid({ eye, target: { ...eye, z: eye.z + 25 } }, 16 / 10);
+  const bare: ScatterItem = { ...found.tree };
+  delete (bare as { setting?: string }).setting;
+
+  it('non-vacuity: the tree is drawn wider than its scale, and is clear of the eye at its scale', () => {
+    expect(found.across).toBeGreaterThan(1.1);
+    expect(drawnScale(bare).across).toBe(1);
+    // Further off than the near rectangle is wide, which is under a metre at this aspect.
+    expect(found.off - reach).toBeGreaterThanOrEqual(1.2);
+  });
+
+  it('finds the box of the tree as it is drawn', () => {
+    expect(intrudes(found.tree, pyramid, 'realistic')).toBe(true);
+    // CONTROL: the same tree with no setting is drawn at its scale, and is clear.
+    expect(intrudes(bare, pyramid, 'realistic')).toBe(false);
+  });
+
+  it('cuts a triangle of the tree where it is drawn, across and up', () => {
+    // A wall of two triangles at the shape's own edge nearest the eye, from
+    // 0.5 m to 1.9 m up at a scale of 1: under the 2 m eye until it is drawn taller.
+    const near = -(found.off / found.across);
+    const wall = (low: number, high: number): ShapeTriangles => {
+      const [a, b] = [near - 0.2, near + 0.2];
+      return Float32Array.from([
+        ...[a, low, 0.05, b, low, 0.05, b, high, 0.05],
+        ...[a, low, 0.05, b, high, 0.05, a, high, 0.05],
+      ]);
+    };
+    expect(shapeMeets(found.tree, wall(0.5, 3.5), pyramid)).toBe(true);
+    expect(shapeMeets(bare, wall(0.5, 3.5), pyramid)).toBe(false);
+    // And UP by its own number: a tree drawn tall enough lifts a wall under the eye into it.
+    const tall = (() => {
+      // Tall AND slim: its height lifts the wall to the eye, and its girth would not.
+      for (let z = -40; z > -40_000; z -= 1.37) {
+        const tree: ScatterItem = { ...item('tree-broadleaf', 0, 0, z), setting: 'park' };
+        const drawn = drawnScale(tree);
+        if (drawn.up > 1.32 && drawn.across < 1.2) return tree;
+      }
+      throw new Error('no park tree drawn tall enough');
+    })();
+    const up = drawnScale(tall).up;
+    // Stood at the eye's feet, the wall across it at z = 0.05: its top at 1.55 m × up.
+    const across = drawnScale(tall).across;
+    const front = Float32Array.from([
+      ...[
+        -0.5 / across,
+        0.5,
+        0.05 / across,
+        0.5 / across,
+        0.5,
+        0.05 / across,
+        0.5 / across,
+        1.55,
+        0.05 / across,
+      ],
+      ...[
+        -0.5 / across,
+        0.5,
+        0.05 / across,
+        0.5 / across,
+        1.55,
+        0.05 / across,
+        -0.5 / across,
+        1.55,
+        0.05 / across,
+      ],
+    ]);
+    // The hash is of where it stands, so the tall tree is asked where it was found.
+    const eyeAt = nearPyramid(
+      { eye: { x: tall.x, y: 2, z: tall.z }, target: { x: tall.x, y: 2, z: tall.z + 25 } },
+      16 / 10,
+    );
+    expect(1.55 * up).toBeGreaterThan(2.04);
+    expect(1.55 * across).toBeLessThan(1.9);
+    expect(shapeMeets(tall, front, eyeAt)).toBe(true);
+    const plainTall: ScatterItem = { ...tall };
+    delete (plainTall as { setting?: string }).setting;
+    expect(shapeMeets(plainTall, front, eyeAt)).toBe(false);
+  });
+
+  it('keeps it off a side road by its drawn reach', () => {
+    const wide = sideRoadNaturalMargin(found.tree);
+    const plain = sideRoadNaturalMargin(bare);
+    expect(wide).toBeGreaterThan(plain * 1.05);
+    // The sway is added once, not scaled: the difference is the reach's alone.
+    expect(wide - plain).toBeCloseTo(Math.hypot(reach, reach) * (found.across - 1), 6);
   });
 });

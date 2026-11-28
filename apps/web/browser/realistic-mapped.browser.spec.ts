@@ -9,7 +9,9 @@
  *
  * - **The mapped-blobs lever** (#1657): `levers=-mapped-blobs` takes the
  *   mapped buildings' ground blobs out of the mixed town's frame, and nothing
- *   else — on a 320 × 180 page since #1937 (`SIXTEENTH_PAGE`).
+ *   else — on a 320 × 180 page since #1937 (`SIXTEENTH_PAGE`). Since #3278
+ *   the same two frames also read the town's parked cars off the view's belt
+ *   (`three-renderer.ts` §`parkedCarStatsOf`), inside their ceiling.
  * - **The city centre** (#1636): `town=city`, held between its two towers,
  *   draws its shop fronts and its tower inside the page's 35 calls — on a
  *   320 × 180 page since #1915. Since #1638 (validation 0002 AE5) both holds
@@ -26,7 +28,11 @@
 import { expect, test } from '@playwright/test';
 
 import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
-import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import {
+  MAPPED_BUILDING_MAX,
+  REALISTIC_PARKED_CAR_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { frameReading, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
@@ -69,6 +75,16 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
     // No call of its own: the blobs are the one belt's instances.
     expect(grounded.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(1);
     expect(off.result.rung).toBe(grounded.result.rung);
+    // #3278: the town's parked cars are drawn in both frames — the view built
+    // their belt from the frame's cars, on the realistic world's own cars —
+    // inside their ceiling, and the same in both, so the pair above is the
+    // blobs' alone. No load more: the same two frames.
+    const parked = grounded.page.parkedCars;
+    console.log(`#3278 town=mixed at=1300: parked cars ${JSON.stringify(parked)}`);
+    expect(parked?.cars ?? 0).toBeGreaterThan(0);
+    expect(parked?.triangles ?? 0).toBeGreaterThan(0);
+    expect(parked?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_PARKED_CAR_TRIANGLES);
+    expect(off.page.parkedCars?.triangles).toBe(parked?.triangles);
   });
 });
 

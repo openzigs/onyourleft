@@ -242,7 +242,7 @@
     }
   ],
   "writtenByTheBundler": {
-    "rolldown@1.2.13": {
+    "rolldown@1.2.19": {
       "what": "its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk",
       "files": [
         {
@@ -253,7 +253,7 @@
         }
       ]
     },
-    "vite@8.3.2": {
+    "vite@8.3.8": {
       "what": "its module-preload polyfill and its __vitePreload helper, in the entry chunk",
       "files": [
         {

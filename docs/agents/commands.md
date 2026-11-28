@@ -156,18 +156,24 @@ pnpm run test
 # command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
 
-# The same report as CI takes it since #2285 (§4c §"Two coverage jobs"): two
-# halves on two runners, then one merge. The first half is
-# `apps/web/src/game/`, the second every other file; each writes a Vitest blob
+# The same report as CI takes it since #3341 (§4c §"Five coverage jobs"): five
+# parts on five runners, then one merge. The first three are
+# `apps/web/src/game/`, divided by the first letter of each name so that each
+# holds about a third of its measured time, the fourth every other `apps/web`
+# file and the fifth every file outside `apps/web`; each writes a Vitest blob
 # (its results and its coverage) to `coverage-blobs/coverage-<n>.json`, and
 # `test:coverage:merge` reads every blob there and writes the one report to
-# `coverage/`, as `test:coverage` does, exiting non-zero if a half had a red
+# `coverage/`, as `test:coverage` does, exiting non-zero if a part had a red
 # case. Divided by PATH, not `--project`: a project filter keeps only that
-# project's own files in the report. `check:test-split` fails a half of any
-# other shape, a half over no file, and a file in no half or in two. Locally
-# `test:coverage` is the whole of both.
+# project's own files in the report. `check:test-split` fails a part of any
+# other shape, a part over no file, and a file in no part or in two — a new
+# package is one, until it is named in the fifth. Locally `test:coverage` is
+# the whole of them.
 pnpm run test:coverage:shard-1
 pnpm run test:coverage:shard-2
+pnpm run test:coverage:shard-3
+pnpm run test:coverage:shard-4
+pnpm run test:coverage:shard-5
 pnpm run test:coverage:merge
 
 # The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
@@ -833,7 +839,7 @@ bash deploy.sh --image ghcr.io/openzigs/onyourleft-instance@sha256:<digest>
 | `SPIKE001` | two files under `docs/spikes/` declare the same `NNNN` prefix. [#493](https://github.com/openzigs/onyourleft/issues/493). ⚠️ A **new id rather than a widening of `ADR001`**, and the reason is the remedy sentence: `ADR001` tells the reader to renumber the unmerged file, and §7 says of a spike *"Do not renumber one"*. The unmerged file takes the **next free number** and nothing is renumbered — so a collision found after merge has no cheap repair at all, which makes this **strictly worse** than the ADR case `ADR001` exists for. It happened twice, both live on 2026-09-22 (0005 and 0006), and neither was caught by a gate: two differently-named files are two new files and git merges them clean. Both paths are named on one line, for `ADR001`'s own #118 reason |
 | `SPIKE002` | a filename under `docs/spikes/` is not `NNNN-kebab-case.md` — `ADR002`'s check applied to the directory §7 gives the same convention. It runs **first** and `continue`s, which is what makes `SPIKE001`'s string packing safe |
 | `SPIKE003` | `docs/spikes/` is absent, or holds no write-up. ⚠️ This is what stops the two above passing over nothing: a rule that walks a path which is not there reports clean for ever, which is `LIC006`'s reason applied to a directory and #142's shape applied to a selector — failing closed against *deleting* the directory and **open** against *renaming* it. The directory is therefore **asserted**, as `check-wiring.mjs` asserts `WATCHED_PREFIXES` and as `ASSET005` asserts the manifest is present. Measured 2026-09-23: removing its two `report` calls turns exactly two of the suite's 206 cases red and nothing else; pointing the walk at a suffix nothing uses makes it fire on this repository |
-| `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
+| `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`, and since #1761 iOS's `.mobileprovision` and `.cer`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name, which is how an App Store Connect `.p8` key is caught). `.gitignore` ignores the same names. #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
 | `REL002` | any Gradle file under `apps/mobile/android` declares a target API level below **36**, or the project declares none at all. Checked here rather than in Gradle because CI does not build Android — a rule that only fires inside a build nobody runs never fires. ⚠️ Since #95 it reads **every** Gradle file and follows the value rather than the filename: it used to open `variables.gradle`, take the first match and pass silently when that file was absent, so deleting it, overriding the ext property with a literal in `app/build.gradle`, appending a lower value below a compliant one, and AGP's current `targetSdk` spelling were four green regressions |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
 | `XML002` | an XML comment is never closed — the `DOC002` failure mode in XML, where the scanner's state sticks, everything after it is silently skipped, and a parser drops every element that follows |

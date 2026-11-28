@@ -396,7 +396,10 @@ import {
   buildingArchetypeOf,
   GARDEN_APARTMENT_FEATURES,
   MAIN_STREET_AWNING_SHARE,
-  type BuildingArchetype,
+  MODERN_FLATS_FEATURES,
+  modernFlatsFit,
+  type BuildingArchetypeInput,
+  type PlanBuildingArchetype,
 } from './building-archetypes';
 import {
   BARN_FEATURES,
@@ -410,7 +413,14 @@ import {
   type BuildingFamily,
 } from './building-types';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
-import { chainLinkPieces, fencedGrounds, type ChainLinkPiece } from './chain-link';
+import {
+  chainLinkPieces,
+  fencedGrounds,
+  noiseBarrierPieces,
+  timberFencedGrounds,
+  timberFencePieces,
+  type ChainLinkPiece,
+} from './chain-link';
 import {
   JUNCTION_MIN_ANGLE_DEGREES,
   JUNCTION_TOLERANCE_METRES,
@@ -434,7 +444,8 @@ import {
 } from './porch';
 import {
   ARCHETYPE_DROPS,
-  ARCHETYPE_FEATURES,
+  archetypeFeaturesOf,
+  contemporaryArchetypeOf,
   droppedFeatures,
   footprintShapeOf,
   houseArchetypeOf,
@@ -443,10 +454,20 @@ import {
   type FeatureShare,
   type DormerCall,
   type DormerKind,
-  type HouseArchetype,
+  type PlanHouseArchetype,
   type RoofVariant,
 } from './house-archetypes';
-import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
+import { kitKindOf, wrapFootprint, type KitWrap } from './facade-kit';
+import {
+  frontOf,
+  HOUSE_MODELS,
+  houseModelIndexOf,
+  houseModelsFitting,
+  houseStyleOf,
+  placeHouseModel,
+  type HouseModel,
+  type HousePlacement,
+} from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import {
   insidePark,
@@ -479,7 +500,7 @@ import {
   onNearbyStreet,
   type NearbyStreets,
 } from './nearby-streets';
-import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { REALISTIC_KIT_WRAP_TRIANGLES, REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
@@ -941,7 +962,7 @@ export interface FootprintPlan {
    * porch, shutters, dormers, garage and cladding together; `unknown` where
    * none fits, or with `levers=-house-archetypes`, and planned as before.
    */
-  readonly archetype: HouseArchetype;
+  readonly archetype: PlanHouseArchetype;
   /**
    * The commercial or multi-family building it is — #1783
    * (`building-archetypes.ts`): a main-street block, a strip front or a garden
@@ -949,7 +970,7 @@ export interface FootprintPlan {
    * together; `unknown` where none fits, or with `levers=-commercial-archetypes`,
    * and planned as before.
    */
-  readonly buildingArchetype: BuildingArchetype;
+  readonly buildingArchetype: PlanBuildingArchetype;
   /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
@@ -957,6 +978,15 @@ export interface FootprintPlan {
    * and what is drawn where the models are not loaded.
    */
   readonly model: HousePlacement | undefined;
+  /**
+   * The facade pieces it is wrapped in at the near level — #3334
+   * (`facade-kit.ts`): a shop, a retail strip, an office or a townhouse
+   * beside a town's or a city centre's street; `undefined` for every other
+   * plan, and with `levers=-facade-kit`. A wrapped plan keeps its extrusion
+   * as a modelled one does: it is its far level, and what is drawn where the
+   * kit is not loaded. Never both this and a {@link model}.
+   */
+  readonly kit: KitWrap | undefined;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
@@ -1798,6 +1828,12 @@ const STREAM_STOREYS = 32;
 const STREAM_ROOF_VARIANT = 33;
 /** #2021: which end a steeple stands at, where the street cannot tell. */
 const STREAM_STEEPLE = 34;
+/** #3251: whether a footprint beside a village stretch keeps the traditional style. */
+const STREAM_HOUSE_STYLE = 35;
+/** #3251: whether a contemporary house's roof is flat or low-pitched. */
+const STREAM_CONTEMPORARY_ROOF = 36;
+/** #3334: what a wrapped building's facade pieces are chosen by. 35 and 36 are #3273's. */
+const STREAM_FACADE_KIT = 37;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -5341,6 +5377,15 @@ interface PartyWall {
 
 const NO_PARTY_WALLS: readonly PartyWall[] = [];
 
+/** How much of each edge a neighbour shares, metres, by the edge's index — #3334. */
+function sharedLengths(party: readonly PartyWall[]): ReadonlyMap<number, number> {
+  const shared = new Map<number, number>();
+  for (const wall of party) {
+    shared.set(wall.edge, (shared.get(wall.edge) ?? 0) + Math.abs(wall.to - wall.from));
+  }
+  return shared;
+}
+
 /**
  * Two edges of buildings that are not a terrace are one wall within this
  * perpendicular offset: **1 cm** — #3132. Such a wall was drawn by both: their
@@ -5703,6 +5748,9 @@ export function footprintPlans(
         startYear: options.mappedStartYear ?? true,
         churches: options.landmarkChurches ?? true,
         civicLandmarks: options.landmarkCivic ?? true,
+        houseStyles: options.houseStyles ?? true,
+        houseModels: options.houseModels,
+        facadeKit: options.facadeKit ?? true,
       },
     );
     plans.push(plan);
@@ -5754,6 +5802,8 @@ export function footprintPlans(
           terrace: true,
         },
         { split: options.splitRoofs ?? true, flat: false },
+        // #3334: wrapped in the downtown kit's pieces as a mapped shop is, unless the lever is off.
+        options.facadeKit ?? true,
       ),
     );
   }
@@ -6029,6 +6079,7 @@ function terracePlans(
   kept: readonly FootprintPlan[],
   others: PlanNeighbours,
   roofing: RoofSplitting,
+  facadeKit: boolean,
 ): FootprintPlan[] {
   if (land.bytes === 0) return [];
   const index = footprintIndexOf(kept.flatMap(groundRingsOf));
@@ -6134,6 +6185,9 @@ function terracePlans(
       others,
       party.get(block) ?? NO_PARTY_WALLS,
       roofing,
+      // #3334, the maintainer's ruling on PR #3343: a city centre's own street front is
+      // wrapped too, by the mapped footprints' rule and nothing else of their choices.
+      { ...NO_ARCHETYPE, facadeKit },
     ),
   );
 }
@@ -6382,6 +6436,8 @@ export function mappedTown(
   const commercial = new Map<number, Map<number, boolean>>();
   // #1274: the grounds a chain-link fence stands beside, and its pieces by route.
   const grounds = fencedGrounds(corridor.landUse);
+  // #3252: the allotments and gardens a timber fence stands beside.
+  const boarded = timberFencedGrounds(corridor.landUse);
   // Keyed by the profile alone: the pieces' heights also depend on the origin,
   // seed and land, which every caller holds fixed for a whole ride. A caller
   // that varies them for one profile must not share this town.
@@ -6393,15 +6449,22 @@ export function mappedTown(
     chainLinkAt(profile, origin, seed, land) {
       const known = chainLinks.get(profile);
       if (known !== undefined) return known;
-      const pieces = chainLinkPieces(grounds, {
+      const route = {
         profile,
         origin,
         seed,
         land,
         roadside: FIELD_EDGE_LATERAL_METRES,
         piece: BOUNDARY_PIECE_METRES,
-        cityCentre: (along) => urban?.classAt(along) === 'city-centre',
-      });
+        cityCentre: (along: number) => urban?.classAt(along) === 'city-centre',
+      };
+      // #3252: and the timber fences and the highways' noise barriers, which
+      // are fences of the same piece, placed and budgeted as the chain-link is.
+      const pieces = [
+        ...chainLinkPieces(grounds, route),
+        ...timberFencePieces(boarded, route),
+        ...noiseBarrierPieces(corridor.streets, route),
+      ];
       chainLinks.set(profile, pieces);
       return pieces;
     },
@@ -7105,6 +7168,34 @@ export interface FootprintPlanOptions {
    */
   readonly landmarkCivic?: boolean;
   /**
+   * #3251: a footprint's house model chosen by its setting — a modern one
+   * beside a village, town or city-centre stretch, a traditional one on
+   * farmland and beside a rural or unclassed stretch (`house-models.ts`
+   * §`houseStyleOf`); `true` by default. Off, a footprint takes any model
+   * that fits it, as before (`?levers=-house-styles`).
+   */
+  readonly houseStyles?: boolean;
+  /**
+   * The models a footprint is FITTED from; absent, `house-models.ts`
+   * §`HOUSE_MODELS`. A set may restyle or leave out the committed models and
+   * may not add one: the model chosen is placed as the committed model of
+   * its id (`house-models.ts` §`houseModelIndexOf`), so a plan's
+   * `model.model` is always a place in `HOUSE_MODELS`, which is what the
+   * renderer draws, whatever set was passed.
+   *
+   * @test-facing a test's own set, so the choice by setting (#3251) is held
+   * with modern models while the committed set has traditional ones only
+   */
+  readonly houseModels?: readonly HouseModel[];
+  /**
+   * #3334: a shop, a retail strip, an office or a townhouse beside a town's or
+   * a city centre's street wrapped in the downtown kit's facade pieces
+   * (`facade-kit.ts`); `true` by default. Off, no plan has a
+   * {@link FootprintPlan.kit} and every plan is as before
+   * (`?levers=-facade-kit`).
+   */
+  readonly facadeKit?: boolean;
+  /**
    * #2848: a paved apron before a mapped commercial footprint's front, from
    * its wall to the kerb, where no footway is mapped before it
    * (`shop-aprons.ts`); `true` by default. Off, no plan has one and every
@@ -7174,6 +7265,12 @@ interface ArchetypeChoice {
   readonly churches?: boolean;
   /** #1795: whether a mapped town hall or school is drawn as one (`-landmark-civic` off). */
   readonly civicLandmarks?: boolean;
+  /** #3251: whether its house model is chosen by its setting (`-house-styles` off). */
+  readonly houseStyles?: boolean;
+  /** #3251: the models it may be drawn as; absent, `HOUSE_MODELS`. */
+  readonly houseModels?: readonly HouseModel[] | undefined;
+  /** #3334: whether it is wrapped in the downtown kit's facade pieces (`-facade-kit` off). */
+  readonly facadeKit?: boolean;
 }
 
 /** No archetype: a terraced block's, which is commercial, and `-house-archetypes`. */
@@ -7450,6 +7547,7 @@ function canopyPlanOf(
     archetype: 'unknown',
     buildingArchetype: 'unknown',
     model: undefined,
+    kit: undefined,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount: count(),
@@ -7618,6 +7716,17 @@ function planFootprint(
   };
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
+  // #3251: the style its setting calls for — modern beside a village, town or city-centre
+  // stretch, traditional on farmland and beside a rural or unclassed one — which chooses its
+  // house model, its contemporary archetype and the modern flats; none with the lever off.
+  const houseStyle =
+    choice.houseStyles === true
+      ? houseStyleOf({
+          urban: urbanClass,
+          farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
+          share: share(STREAM_HOUSE_STYLE),
+        })
+      : undefined;
   // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
   // #3132: a terrace's party wall; a flush wall shared outside one changes no roof.
   const terraced = party.some((wall) => wall.terrace);
@@ -7700,20 +7809,25 @@ function planFootprint(
       : family === 'apartments'
         ? apartmentArchetypeOf
         : undefined;
-  const buildingArchetype: BuildingArchetype =
+  const buildingCues: BuildingArchetypeInput = {
+    area,
+    aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
+    rectangularity,
+    fourCorners: drawn.length / 2 === 4,
+    storeys,
+    use,
+    urban: urbanClass,
+    terraced,
+  };
+  // #3251: a modern block of flats first, where the setting calls for the modern style.
+  const buildingArchetype: PlanBuildingArchetype =
     choice.buildings === true && !part && archetypeOfBuilding !== undefined
-      ? archetypeOfBuilding({
-          area,
-          aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
-          rectangularity,
-          fourCorners: drawn.length / 2 === 4,
-          storeys,
-          use,
-          urban: urbanClass,
-          terraced,
-        })
+      ? houseStyle === 'modern' && modernFlatsFit(buildingCues)
+        ? 'modern-flats'
+        : archetypeOfBuilding(buildingCues)
       : 'unknown';
-  const pitched =
+  // The roof by the plan's own rule, before #3251's contemporary house may flatten it.
+  const pitchedByRule =
     !roofing.flat &&
     // #1794: a church's nave is pitched, at any size or height.
     (church ||
@@ -7731,16 +7845,54 @@ function planFootprint(
           // #1783: a garden apartment's low roof, over its whole band, where its walls are low enough.
           (buildingArchetype === 'garden-apartment' &&
             wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES)));
+  const residential = use === 'residential' && !outbuilding;
+  const shape = footprintShapeOf(drawn.length / 2, split?.length);
+  // #3251: a contemporary house, first, where the setting calls for the modern style: an
+  // untyped footprint or a mapped house that no building archetype took, while #1782's
+  // archetypes are on. A mapped bungalow, a church and every other mapped type keep theirs: a
+  // church is a mapped civic type, so the family test is the one that keeps it out. A part has
+  // no front and is no house; and the modern flats, chosen above, are not a house either.
+  const contemporary =
+    choice.on &&
+    houseStyle === 'modern' &&
+    frontFrame !== undefined &&
+    (family === undefined || family === 'house') &&
+    buildingArchetype === 'unknown'
+      ? contemporaryArchetypeOf(
+          {
+            area,
+            rectangularity,
+            shape,
+            storeys,
+            residential,
+            terraced,
+            pitched: pitchedByRule,
+            roofMapped: mappedRoof !== undefined,
+            share: share(STREAM_CONTEMPORARY_ROOF),
+          },
+          choice.startYear === true ? building.startYear : null,
+        )
+      : undefined;
+  // #3251: flat under a contemporary flat roof and over the modern flats, but for a mapped
+  // roof, which is the building's own.
+  const pitched =
+    pitchedByRule &&
+    !(
+      mappedRoof === undefined &&
+      (contemporary === 'contemporary-flat' || buildingArchetype === 'modern-flats')
+    );
+  // #3251: plain windows, no shingle and its own walls: a contemporary house's and the flats'.
+  const modernLook = contemporary !== undefined || buildingArchetype === 'modern-flats';
   // #3132: and a flush wall shared outside a terrace, drawn once as a party wall is.
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = party.length > 0 ? { party: { walls: party, eaves } } : {};
-  const residential = use === 'residential' && !outbuilding;
   // #1782: the US house it is, from what the plan already has, which sets its features
   // together; `unknown` keeps every independent share, as before. #1791: a mapped house
   // by the same rule, a mapped bungalow the bungalow alone, and every other mapped type none.
-  const archetype: HouseArchetype =
-    choice.on &&
+  const archetype: PlanHouseArchetype =
+    contemporary ??
+    (choice.on &&
     frontFrame !== undefined &&
     (family === undefined || family === 'house' || family === 'bungalow')
       ? houseArchetypeOf(
@@ -7748,7 +7900,7 @@ function planFootprint(
             area,
             aspect: rectangle.halfShort > 0 ? rectangle.halfLong / rectangle.halfShort : 0,
             rectangularity,
-            shape: footprintShapeOf(drawn.length / 2, split?.length),
+            shape,
             storeys,
             residential,
             urban: urbanClass,
@@ -7762,23 +7914,26 @@ function planFootprint(
           // #1793: its mapped year, which only narrows the candidates.
           choice.startYear === true ? building.startYear : null,
         )
-      : 'unknown';
+      : 'unknown');
   const features = droppedFeatures(
     // #1794: a church's nave under its steep gable.
     church
       ? CHURCH_FEATURES
       : archetype !== 'unknown'
-        ? ARCHETYPE_FEATURES[archetype]
-        : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
-          // block's, so none has a garage.
-          buildingArchetype === 'garden-apartment' || family === 'apartments'
-          ? GARDEN_APARTMENT_FEATURES
-          : family === undefined
-            ? SEEDED_FEATURES
-            : // #2024: an inferred barn's gambrel on a seeded share only.
-              measured.inferred && family === 'barn'
-              ? INFERRED_BARN_FEATURES
-              : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
+        ? (archetypeFeaturesOf(archetype) ?? SEEDED_FEATURES)
+        : // #3251: the modern flats' own.
+          buildingArchetype === 'modern-flats'
+          ? MODERN_FLATS_FEATURES
+          : // #1783: a garden apartment's, as a house's are; #1791: and every mapped apartment
+            // block's, so none has a garage.
+            buildingArchetype === 'garden-apartment' || family === 'apartments'
+            ? GARDEN_APARTMENT_FEATURES
+            : family === undefined
+              ? SEEDED_FEATURES
+              : // #2024: an inferred barn's gambrel on a seeded share only.
+                measured.inferred && family === 'barn'
+                ? INFERRED_BARN_FEATURES
+                : (TYPED_FEATURES[family] ?? SEEDED_FEATURES),
     choice.dropped,
   );
   const pitches = features.pitches === 'seeded' ? ROOF_PITCHES_DEGREES : features.pitches;
@@ -7889,7 +8044,8 @@ function planFootprint(
   const shingled =
     roofMaterial !== null
       ? roofMaterial === 'asphalt'
-      : roof !== 'flat' && !pole && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+      : // #3251: nor a contemporary house's low roof, which is its plain grey.
+        roof !== 'flat' && !pole && !modernLook && share(STREAM_SHINGLE) < SHINGLE_SHARE;
   const { least, most } = CLAPBOARD_COURSE_METRES;
   const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
   const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
@@ -7898,7 +8054,8 @@ function planFootprint(
     share(STREAM_FOUNDATION) < shareOf(features.brickFoundation, BRICK_FOUNDATION_SHARE);
   const flags =
     // #1783: a main-street block's upper windows are sashes, in the bays' rhythm.
-    (residential || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
+    // #3251: but a contemporary house's and the modern flats' are plain panes.
+    ((residential && !modernLook) || buildingArchetype === 'main-street' ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < shareOf(features.shutters, SHUTTER_SHARE)
       ? STYLE_SHUTTERS
       : 0) +
@@ -8094,8 +8251,9 @@ function planFootprint(
         )
       : undefined;
   const middle = (frontBays - 1) / 2;
+  // #3251: and on a contemporary house of two storeys too.
   const picture =
-    storeys === 1 &&
+    (storeys === 1 || contemporary !== undefined) &&
     residential &&
     shop === undefined &&
     frontBays >= 3 &&
@@ -8521,27 +8679,61 @@ function planFootprint(
   // #1585: a house model, where one fits the footprint (`house-models.ts`) — and since
   // #1635 never on a terraced one, which a detached model would stand apart from its row;
   // since #1791 nor on a mapped garage or shed, which no house model is.
+  // #3251: and only a model of the style its setting calls for — modern beside a village,
+  // town or city-centre stretch, traditional on farmland and beside a rural or unclassed one.
+  const houseModels = choice.houseModels ?? HOUSE_MODELS;
   const fitting =
     part || terraced || frontFrame === undefined || outbuilding
       ? []
-      : houseModelsFitting({
-          long: 2 * rectangle.halfLong,
-          short: 2 * rectangle.halfShort,
-          rectangularity,
-          storeys,
-          use,
-          front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
-        });
+      : houseModelsFitting(
+          {
+            long: 2 * rectangle.halfLong,
+            short: 2 * rectangle.halfShort,
+            rectangularity,
+            storeys,
+            use,
+            front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
+            style: houseStyle,
+          },
+          houseModels,
+        );
+  // The model chosen, of the set it was fitted from, placed as the committed model of its id.
+  const chosen = houseModels[fitting[seededEntry(share(STREAM_HOUSE_MODEL), fitting.length)] ?? -1];
   const model =
-    fitting.length === 0
+    chosen === undefined
       ? undefined
       : placeHouseModel(
-          fitting[seededEntry(share(STREAM_HOUSE_MODEL), fitting.length)] as number,
+          houseModelIndexOf(chosen.id),
           rectangle,
           frontFrame?.nx ?? 0,
           frontFrame?.nz ?? 0,
           base,
         );
+  // #3334: wrapped in the downtown kit's facade pieces, where its setting and its kind call
+  // for it (`facade-kit.ts` §`kitKindOf`): a commercial footprint, or a terrace's house,
+  // beside a town's or a city centre's street. Only a whole building with a front and a flat
+  // roof, which is what the wrap draws, so its far level — this extrusion — is the same shape.
+  // Never where a house model fits (the owner's ruling on #3273: the brick shop stays), nor a
+  // mapped type that is not a shop's or a house's, nor a landmark.
+  const kitKind =
+    choice.facadeKit === true &&
+    model === undefined &&
+    front !== undefined &&
+    roof === 'flat' &&
+    !part &&
+    !outbuilding &&
+    !pole &&
+    !church &&
+    civicLandmark === undefined &&
+    (family === undefined || family === 'commercial' || family === 'terrace' || family === 'house')
+      ? kitKindOf({
+          urban: urbanClass,
+          farmland: land.classAt(centroid.x, centroid.z) === 'farmland',
+          use,
+          storeys,
+          terraced,
+        })
+      : undefined;
   const wallMaterialSurface =
     wallMaterial === null ? undefined : MAPPED_WALL_SURFACES[wallMaterial];
   const roofMaterialSurface =
@@ -8554,16 +8746,40 @@ function planFootprint(
       : // #1795: a town hall's and a school's brick.
         civicLandmark !== undefined
         ? 'brick'
-        : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
-          buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
-          ? 'brick'
-          : // #1791: a mapped barn's planks, under any roof.
-            family === 'barn'
-            ? 'planks'
-            : // #2024: a pole building's metal sheet.
-              pole
-              ? 'corrugated'
-              : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+        : // #3251: a contemporary house's and the modern flats' render — and under clapboard
+          // its boards, which are drawn on render too. Never a surface of their own: a seventh
+          // surface in a frame is a building that waits for a refill (`mapped-buildings.ts`).
+          modernLook
+          ? 'render'
+          : // #1783: a main-street block's brick, and a garden apartment's where it is not clapboard.
+            buildingArchetype === 'main-street' || buildingArchetype === 'garden-apartment'
+            ? 'brick'
+            : // #1791: a mapped barn's planks, under any roof.
+              family === 'barn'
+              ? 'planks'
+              : // #2024: a pole building's metal sheet.
+                pole
+                ? 'corrugated'
+                : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  const kit =
+    kitKind === undefined || front === undefined
+      ? undefined
+      : wrapFootprint({
+          kind: kitKind,
+          ring: drawn,
+          base,
+          floor,
+          eaves,
+          storeys,
+          // What it is walled in and painted is its extrusion's, so the two levels are one building.
+          surface: wallSurface,
+          seed: Math.floor(share(STREAM_FACADE_KIT) * 0x1_0000_0000),
+          awning: shop !== undefined && shop.awning > 0,
+          parapet: PARAPET_METRES,
+          frontEdge: front.edge,
+          shared: sharedLengths(party),
+          budget: REALISTIC_KIT_WRAP_TRIANGLES,
+        });
   // #2024: a pole building's roof grey `slate`, the nearest the belt has to a metal one.
   // #2100: and a church's with a steeple, flat or not, so its spire is slate and never
   // the flat roof's gravel: the roof role is one surface, and its top is behind the parapet.
@@ -8572,7 +8788,8 @@ function planFootprint(
     ? SHINGLE_SURFACE
     : roofMaterialSurface !== undefined
       ? roofMaterialSurface
-      : (pole && roof !== 'flat') || drew.steeple
+      : // #3251: and a contemporary house's low roof.
+        (pole && roof !== 'flat') || drew.steeple || (contemporary !== undefined && roof !== 'flat')
         ? 'slate'
         : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
@@ -8629,6 +8846,7 @@ function planFootprint(
     archetype,
     buildingArchetype,
     model,
+    kit,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,

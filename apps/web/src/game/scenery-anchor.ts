@@ -111,6 +111,39 @@ export function sceneryAnchor(profile: RouteProfile): SceneryAnchor | undefined 
 }
 
 /**
+ * The routes drawn on past their end — #3336, `past-the-finish.ts`: each
+ * extension, keyed on its object as an anchor is and for the same reason, to
+ * the route it carries on from.
+ */
+const extensions = new WeakMap<RouteProfile, RouteProfile>();
+
+/**
+ * Keys `extended`'s scenery on `route`, the route it is drawn on past the end
+ * of — #3336. Its seed is the route's, its cells the route's own stretched
+ * cells, counted on past its end, and everything read off a whole profile —
+ * the waterways, the world's colours, the hills on the horizon, the relief —
+ * is read off the route: so the world short of the route's end is the one the
+ * route itself draws, to the item, and nothing moves when a frame starts
+ * drawing the extension.
+ */
+export function extendScenery(extended: RouteProfile, route: RouteProfile): void {
+  extensions.set(extended, route);
+}
+
+/** The route `profile` carries on from, when it is one drawn past its end (#3336). */
+export function extendedRoute(profile: RouteProfile): RouteProfile | undefined {
+  return extensions.get(profile);
+}
+
+/**
+ * The profile whole-profile readings are taken from — #3336: the route an
+ * extension carries on from, and every other profile itself.
+ */
+export function routeOf(profile: RouteProfile): RouteProfile {
+  return extensions.get(profile) ?? profile;
+}
+
+/**
  * A grid of whole cells along a profile. Cell `i` covers profile distance
  * `[i·span − shift, (i+1)·span − shift)`.
  */
@@ -136,13 +169,21 @@ export interface SceneryGrid {
  * The grid of `nominal`-metre cells `profile`'s scenery is placed on: on a
  * route, stretched to divide it evenly, and at least one cell; on an anchored
  * profile, `nominal` itself, counted from the ride's start.
+ *
+ * #3336: on a route drawn past its end, the route's own cells, and on past its
+ * end at the same span; `count` stays the route's, so what is counted in
+ * cells across a whole route (a cluster's nodes) is the route's too.
  */
 export function sceneryGrid(profile: RouteProfile, nominal: number): SceneryGrid {
   const total: number = profile.totalDistance;
   const anchor = anchors.get(profile);
   if (anchor === undefined) {
-    const count = Math.max(1, Math.round(total / nominal));
-    return { span: total / count, shift: 0, count, first: 0, last: count - 1, anchored: false };
+    const route = routeOf(profile);
+    const lap: number = route.totalDistance;
+    const count = Math.max(1, Math.round(lap / nominal));
+    const span = lap / count;
+    const last = route === profile ? count - 1 : Math.max(count - 1, Math.ceil(total / span) - 1);
+    return { span, shift: 0, count, first: 0, last, anchored: false };
   }
   const shift = anchor.origin;
   const first = Math.floor(shift / nominal);
@@ -150,7 +191,13 @@ export function sceneryGrid(profile: RouteProfile, nominal: number): SceneryGrid
   return { span: nominal, shift, count: last - first + 1, first, last, anchored: true };
 }
 
-/** The cell a lap of a loop holds `cell` at: `cell` itself, but on a route that loops. */
+/**
+ * The cell a lap of a loop holds `cell` at: `cell` itself, but on a route that
+ * loops. #3336: and itself on a route drawn past its end, whose cells there
+ * are new ones, placed past the end rather than back at the start.
+ */
 export function wrappedCell(grid: SceneryGrid, cell: number): number {
-  return grid.anchored ? cell : ((cell % grid.count) + grid.count) % grid.count;
+  return grid.anchored || grid.last >= grid.count
+    ? cell
+    : ((cell % grid.count) + grid.count) % grid.count;
 }

@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./hpke-testing": "./src/hpke/hpke-testing.ts",
-    "./rolling-testing": "./src/route/rolling-testing.ts"
+    "./rolling-testing": "./src/route/rolling-testing.ts",
+    "./group-ride-testing": "./src/group-ride/fixtures/courses.ts",
+    "./group-ride-line-testing": "./src/group-ride/line-testing.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",

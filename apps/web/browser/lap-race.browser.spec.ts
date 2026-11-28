@@ -192,3 +192,40 @@ test.describe('a bot between the camera and the rider — #2596', () => {
     }
   });
 });
+
+/** #3304: a road bicycle, nose to tail, metres (`lap-race/pack-layout.ts` §`BIKE_LENGTH_METRES`). */
+const BIKE_LENGTH_METRES = 1.75;
+/** #3304: a lane across, metres (`lanes.ts` §`LANE_OFFSETS_METRES`): the pull-off lane is one to the left. */
+const LANE_METRES = 1.75;
+
+test.describe('a group ride’s line — #3304', () => {
+  test('draws the rider and five bots on a real view’s frame: four in the rider’s lane nose to tail, one a lane to the left', async ({
+    page,
+  }, testInfo) => {
+    await open(page);
+    const read = await page.evaluate(() => window.__oylLapRace?.groupRideLine());
+    console.log(`#3304 group ride frame: ${JSON.stringify(read)}`);
+    expect(read?.calls).toBeGreaterThan(0);
+    // The frame is in a change of front, the first bot aside.
+    expect(read?.phase).toBe('changing');
+    expect(read?.aside).toBe('bot-1');
+    const riders = read?.riders ?? [];
+    expect(riders).toHaveLength(6);
+    expect(riders.filter((each) => each.kind === 'rider')).toHaveLength(1);
+    const bots = riders.filter((each) => each.kind === 'bot');
+    expect(bots).toHaveLength(5);
+    const inLine = bots.filter((bot) => Math.abs(bot.across) < 0.05);
+    const aside = bots.filter((bot) => Math.abs(bot.across + LANE_METRES) < 0.05);
+    expect(inLine).toHaveLength(4);
+    expect(aside).toHaveLength(1);
+    // The line: ahead of the rider, each a bike length and a wheel gap behind the one ahead.
+    const line = [0, ...inLine.map((bot) => bot.ahead)].sort((a, b) => a - b);
+    line.slice(1).forEach((ahead, index) => {
+      const gap = ahead - (line[index] ?? 0);
+      expect(gap).toBeGreaterThan(BIKE_LENGTH_METRES);
+      expect(gap).toBeLessThan(BIKE_LENGTH_METRES + 1.5);
+    });
+    const shot = await page.locator('#group-ride-line').screenshot();
+    await testInfo.attach('group-ride-line', { body: shot, contentType: 'image/png' });
+  });
+});

@@ -1885,6 +1885,50 @@ test.describe('#2068 — a stacked chart is read when it scrolls into view', () 
 });
 
 /**
+ * #2194, #2261 — a chart's slot whose read failed holds its warning and keeps
+ * no chart's height (`theme.css` §`.oyl-trace-slot--failed`, the owner's
+ * ruling of 2026-11-06). A layout claim, so measured here: jsdom lays nothing
+ * out, and the unit suite could only search the stylesheet's text for the
+ * rule. `?failread=power` refuses the populated ride's power read
+ * (`testing/populated-shell.tsx` §`detailPort`). ⚠️ The control is a slot
+ * that drew, on the same page: it keeps the chart's 12rem.
+ */
+test.describe('#2194 — a slot whose read failed keeps no chart’s height', () => {
+  for (const viewport of [TABLET_IN_THE_SHELL, PHONE]) {
+    test(`at ${viewport.name}, the failed power slot is its warning’s height`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&failread=power');
+      await page.evaluate(() => {
+        window.location.hash = '#/activities/ride-0';
+      });
+      const failed = page.locator('[data-oyl-trace-slot="power"]');
+      await failed.scrollIntoViewIfNeeded();
+      await expect(failed).toContainText('Could not read this ride’s power.');
+      const drawn = page.locator('[data-oyl-trace-slot="heartRate"]');
+      await drawn.scrollIntoViewIfNeeded();
+      await expect(drawn.locator('svg.oyl-trace')).toHaveCount(1);
+      const sizes = await page.evaluate(() => {
+        const height = (element: Element | null | undefined): number =>
+          element?.getBoundingClientRect().height ?? Number.NaN;
+        const slot = document.querySelector('[data-oyl-trace-slot="power"]');
+        return {
+          rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+          failed: height(slot),
+          warning: height(slot?.querySelector('.oyl-status--warning')),
+          drawn: height(document.querySelector('[data-oyl-trace-slot="heartRate"]')),
+        };
+      });
+      const chart = 12 * sizes.rem;
+      // The control: a slot that drew keeps at least the chart's height.
+      expect(sizes.drawn, JSON.stringify(sizes)).toBeGreaterThanOrEqual(chart - 0.5);
+      // The failed slot is as tall as its warning, and nothing like a chart.
+      expect(sizes.warning, JSON.stringify(sizes)).toBeGreaterThan(0);
+      expect(sizes.failed, JSON.stringify(sizes)).toBeLessThan(chart);
+      expect(Math.abs(sizes.failed - sizes.warning), JSON.stringify(sizes)).toBeLessThanOrEqual(1);
+    });
+  }
+});
+
+/**
  * #2081 — a tap on a chart moves the ride page's one cursor to the moment
  * under it, the laps are bands at one x down the stack, and the power curve
  * is drawn inside the page's column.

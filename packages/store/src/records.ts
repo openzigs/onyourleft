@@ -34,10 +34,12 @@ import type {
   Kilocalories,
   Kilograms,
   LapRaceModelRecord,
+  LinePhase,
   Metres,
   PacerDecisionRecord,
   ReplanRecord,
   RevolutionsPerMinute,
+  RiderRole,
   Seconds,
   SegmentSport,
   SegmentVisibility,
@@ -659,6 +661,99 @@ export interface RideFacts {
    * without it is matched exactly as before.
    */
   readonly openWorld?: boolean;
+  /**
+   * The AI group ride this ride was ridden in — #3303, epic #3296, ADR 0101:
+   * the line's seed, the average the rider chose, the size of the group, the
+   * rules' version and the line's log, so the ride page can say what happened
+   * (#3310) and the line replays under the rules it was ridden with. Known
+   * only while riding, like {@link drafted}; absent for every other ride, and
+   * for one brought in from a file or recovered after a crash. It stays on
+   * this device: no sync rule sends it.
+   *
+   * Optional, so it stays off the migration path for the reason above: a ride
+   * saved before #3303 reads back with the field absent.
+   *
+   * ⚠️ **A fact that does not read is dropped whole, never the ride**, as
+   * {@link pacerModel} is: an entry missing from the middle of the log would
+   * be a different ride.
+   */
+  readonly groupRide?: GroupRideFact;
+}
+
+/** The most entries a group ride's log holds: {@link GroupRideFact.log}. */
+export const GROUP_RIDE_LOG_MOST = 5_000;
+
+/**
+ * One entry of a group ride's log: what the line was doing and where the
+ * rider stood in it, from `at` until the next entry. Words from closed lists
+ * and numbers, and no text.
+ */
+export interface GroupRideLogEntry {
+  /** Seconds of the group ride ridden when this began, from nought: @see GroupRideFact.startedAt */
+  readonly at: number;
+  /** The line's phase (`@onyourleft/domain` §`LINE_PHASES`). */
+  readonly phase: LinePhase;
+  /** The rider's role in the line (`@onyourleft/domain` §`RIDER_ROLES`). */
+  readonly role: RiderRole;
+  /**
+   * The group's speed then, metres a second: the plan's on the road under the
+   * front, or the eased speed while the line held for the rider or was paced
+   * to them (ADR 0101's amendment of 2026-11-27).
+   */
+  readonly groupSpeed: number;
+}
+
+/** Every press a group ride keeps. @see GroupRidePress */
+export const GROUP_RIDE_PRESSES = ['pull-off', 'sit-in', 'sit-out'] as const;
+
+/**
+ * One thing the rider told the group (#3307, ADR 0101 D-3.7): a pull-off
+ * press that was taken, so one made on the front, or the sit-in choice
+ * turned on (`sit-in`) or off (`sit-out`). A word from a closed list and a
+ * time, and no text.
+ */
+export interface GroupRidePress {
+  /** Seconds of the group ride ridden when it was made, from nought. */
+  readonly at: number;
+  readonly press: (typeof GROUP_RIDE_PRESSES)[number];
+}
+
+/** @see RideFacts.groupRide */
+export interface GroupRideFact {
+  /** The rules it was ridden under (`@onyourleft/domain` §`GROUP_RIDE_CODE_VERSION`). */
+  readonly version: number;
+  /** The line's seed: every draw the line made came from it. */
+  readonly seed: number;
+  /**
+   * The recording's elapsed seconds, pauses included, when the group's clock
+   * read nought: a log entry's `at` plus this is where it falls on the saved
+   * ride's timeline. About nought when the recording began at the press, and
+   * less than nought when it began part-way through the group ride.
+   */
+  readonly startedAt: number;
+  /** The average speed the rider chose for the whole ride, metres a second (ADR 0101 D-2.1). */
+  readonly targetSpeed: number;
+  /** How many bots rode in the line beside the rider. */
+  readonly bots: number;
+  /**
+   * The line's log, oldest first: an entry each time the line's phase or the
+   * rider's role changed, the first at the start. At most
+   * {@link GROUP_RIDE_LOG_MOST} entries.
+   */
+  readonly log: readonly GroupRideLogEntry[];
+  /**
+   * `true` when the ride had more changes than the log holds, or more presses
+   * than {@link presses} does, and the rest were not kept.
+   */
+  readonly logCut?: true;
+  /**
+   * What the rider told the group, oldest first (#3307): what the line
+   * decided depends on these as well as on the seed, so a ride is replayed
+   * with them. At most {@link GROUP_RIDE_LOG_MOST}. Absent for a ride in
+   * which the rider pressed nothing, and for every ride kept under rules
+   * version 1, which had no press.
+   */
+  readonly presses?: readonly GroupRidePress[];
 }
 
 /**
@@ -1325,6 +1420,22 @@ export interface RouteRecord {
    * survive as far as the export.
    */
   readonly elevation?: RouteElevationRecord | undefined;
+  /**
+   * The rider's fastest lap of this loop in a lap race on this device, moving
+   * time — #2319, ADR 0060's amendment of 2026-11-26. Written only by
+   * `ActivityStore.recordBestLap`, which keeps the faster of the two.
+   *
+   * **A lap time and nothing else**: no place, no bot, no race (ADR 0060
+   * D-12.2 stands). On the route, so it goes where the route goes: in the
+   * export's manifest with it, erased with it and with the rider, and never
+   * synced, as no route is. A rename keeps it; a new line for the route is a
+   * different lap, and `routing/route-edit.ts` §`replaceRouteLine` drops it.
+   *
+   * ⚠️ **Optional, so it is not a migration** (README §"An optional field is
+   * not a migration"): a route saved before #2319, or never raced, reads back
+   * with it absent, and absent is "no lap yet", never a lap of nought.
+   */
+  readonly bestLap?: Seconds | undefined;
   /**
    * ADR 0004 decision A's default applies here too, and it matters more.
    *
@@ -2029,12 +2140,14 @@ export type WorldCorridorTileState =
  * (#2688, proposed); water polygons; water lines
  * with `kind`, a river, a stream, a canal (#2659, proposed), a ditch or a
  * drain (#2974, proposed); footway lines
- * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
- * whether each is a bridge or a tunnel; railway lines with `kind_detail` and
- * whether each is a bridge or a tunnel (#2660, proposed); place points with
+ * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail`,
+ * whether each is a bridge or a tunnel and, where the glyph atlas can paint
+ * it, the street's mapped name (#3245, ADR 0100, proposed); railway lines
+ * with `kind_detail` and whether each is a bridge or a tunnel (#2660,
+ * proposed); place points with
  * `kind`, `kind_detail` and `population_rank` (ADR 0055 D-6.1, #1632); and
  * which tiles were read and
- * when — no OSM identifier, no name, no address.
+ * when — no OSM identifier, no address, and no name but a street's.
  *
  * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
  * sync, no instance call. That is the only thing keeping ODbL §4.4

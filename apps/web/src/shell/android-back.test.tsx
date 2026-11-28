@@ -148,6 +148,34 @@ describe('the shell answers MainActivity’s back press (#1512)', () => {
     expect(installed()).toBeUndefined();
   });
 
+  it('installs nothing in the iOS app, which has no MainActivity to call it (#1755)', async () => {
+    globalThis.location.hash = hrefFor(routeById('routes'));
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        nativeShell
+        shellKind="ios"
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    expect(installed()).toBeUndefined();
+  });
+
+  it('installs it in the Android shell named as such (#1755)', async () => {
+    globalThis.location.hash = hrefFor(routeById('routes'));
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        nativeShell
+        shellKind="android"
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    expect(installed()).toBeTypeOf('function');
+  });
+
   it('goes back through the history on a screen below Home', async () => {
     await openShell(hrefFor(routeById('routes')));
     const back = vi.spyOn(globalThis.history, 'back').mockImplementation(() => undefined);

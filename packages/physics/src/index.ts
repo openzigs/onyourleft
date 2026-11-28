@@ -130,6 +130,15 @@ export {
   stepBotRace,
 } from './lap-race-bot';
 
+// --- The physics an AI group ride's bots ride through (#3300, ADR 0101) ------
+//
+// What `@onyourleft/domain` §`stepGroupRide` is handed: `fieldDraftFactors`,
+// `advance` and the steady-state power above, on the game's own conditions at
+// the bot's mass. No new physics, and no lateral input to the draft.
+
+export type { GroupRidePhysics } from './group-ride';
+export { groupRidePhysics } from './group-ride';
+
 // --- The coefficient set a ride runs, and the version of the answer (#487) --
 //
 // Moved here from `apps/web/src/game/rider.ts` so that a race room, which may
