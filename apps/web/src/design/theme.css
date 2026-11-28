@@ -13591,7 +13591,8 @@ html:has(.oyl-open-world__go) {
  * to within a few pixels of the leaning rider and of its own tracks at the
  * size it has (§"THE CLOCK ROW", §"THE MOVING TIME ON AN UPRIGHT PHONE"), and
  * a primary reading a quarter larger is a third primary row or a value past
- * its track on every one. ⚠️ **And only the primary readings grow**, and on
+ * its track on every one. ⚠️ **And only the primary readings grow** (but for
+ * extra large on a wide landscape tablet, #2287, below), and on
  * the 4:3 tablet the gradient stays the secondary size, as it is there at the
  * normal size: the secondary tier's tracks and rows are what a room's
  * standings and a Delivery round are fitted around on a tablet, and the
@@ -13622,6 +13623,36 @@ html:has(.oyl-open-world__go) {
     .oyl-hud__fields--secondary
     > .oyl-hud__field--average-power {
     grid-area: auto;
+  }
+}
+
+/* ⚠️ **#2287, the owner's request of 2026-11-06: at extra large the
+   secondary readings grow too, where they fit** — 2.7 rem from 2.45, 1.1
+   times, on a landscape tablet 78 rem wide and 50 rem tall or more (the
+   owner's 1280×800). Measured in the pinned Chromium with the widest
+   ordinary values (`metric-numerals.browser.spec.ts`), Barlow being the
+   page's own font: *To go*'s `99.99 km` is 125.8 px in its 128 px track
+   there (116 in 116 at 2.45 rem), every unit on its number's line and the
+   owner's 8 px between readings; a race's
+   standings keep 29 px or more above the actions panel
+   (`ride-hud-layout.browser.spec.ts` §"#2079"). The tier's tracks, rows and
+   what gives way in a room are unchanged.
+   - **What gives way, recorded as #419 asks: on the 4:3 tablet (1024×768)
+     and upright (800×1280) the secondary readings keep 2.45 rem at every
+     size.** At 2.7 rem there, *Speed*'s, *To go*'s and *Distance*'s units
+     fell under their numbers in the tracks those layouts have.
+   - **Large keeps 2.45 rem everywhere**, so the two sizes stay apart: at
+     large only the primary readings grow, as before.
+   - The clock row in the primary panel keeps its size, which its
+     reservation there is cut for: grown, *Clock* and *Elapsed* ran over
+     *Power* and the gradient. */
+@media (min-width: 78rem) and (min-height: 50rem) {
+  .oyl-game--riding
+    .oyl-hud--text-extra-large
+    .oyl-hud__fields--secondary
+    > :not(.oyl-hud__field--clock, .oyl-hud__field--elapsed)
+    .oyl-hud__value:not(.oyl-hud__value--word) {
+    font-size: 2.7rem;
   }
 }
 

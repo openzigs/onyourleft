@@ -80,6 +80,25 @@ const TABLET_NORMAL_PRIMARY_PIXELS = 61.04;
  */
 const PRIMARY_PIXELS = { large: 70, 'extra-large': 80 } as const;
 
+/** A secondary value's size in px on a phone, at every text size: 1.5 rem. */
+const PHONE_SECONDARY_PIXELS = 24;
+
+/** A secondary value's size in px on a tablet: #2130's 2.45 rem. */
+const TABLET_SECONDARY_PIXELS = 39.2;
+
+/**
+ * #2287: at extra large, on a landscape tablet 78 rem wide and 50 rem tall or
+ * more (the owner's 1280×800), the secondary readings grow too: 2.7 rem
+ * (`theme.css` §"THE HUD'S TEXT SIZE"). The 4:3 and upright tablets keep
+ * 2.45 rem, and so does large.
+ */
+const WIDE_TABLET_EXTRA_LARGE_SECONDARY_PIXELS = 43.2;
+
+/** Where #2287's larger secondary readings fit. */
+function secondaryGrows(viewport: Viewport): boolean {
+  return viewport.width >= 1248 && viewport.height >= 800;
+}
+
 /** The owner's least clearance between a race's standings and the actions panel. */
 const STANDINGS_MARGIN_PIXELS = 16;
 
@@ -174,6 +193,14 @@ for (const size of ['large', 'extra-large'] as const) {
           // phone, which Settings says has no room for it.
           expect(seen.primaryValuePixels, how).toBe(
             tablet ? PRIMARY_PIXELS[size] : PHONE_PRIMARY_PIXELS,
+          );
+          // #2287: and the secondary readings at extra large where they fit.
+          expect(seen.secondaryValuePixels, how).toBe(
+            !tablet
+              ? PHONE_SECONDARY_PIXELS
+              : size === 'extra-large' && secondaryGrows(viewport)
+                ? WIDE_TABLET_EXTRA_LARGE_SECONDARY_PIXELS
+                : TABLET_SECONDARY_PIXELS,
           );
         }
       });
