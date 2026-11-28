@@ -132,9 +132,10 @@ const PAIRED_BY_2190: readonly string[] = ['route-builder', 'activity-detail'];
 /**
  * The screens in `.oyl-sections--halves` (#2197): two tracks and never three.
  * Analysis and Segments choose it by what they hold; the Games page (#2292)
- * always, for its two cards.
+ * always, for its two cards; Credits (#3360) always, for the two sections
+ * beside its lists of works, which span.
  */
-const HALVES: readonly string[] = ['analysis', 'games', 'segments'];
+const HALVES: readonly string[] = ['analysis', 'credits', 'games', 'segments'];
 
 /** Upright, these keep one column of sections — and why is in the file header. */
 const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices', ...PAIRED_BY_2190];
@@ -1001,6 +1002,116 @@ function widened(id: RouteId): RouteDefinition {
   return route;
 }
 
+/** Credits' lists of works, by their section's `data-terms` — #3360. */
+const WORK_LISTS = ['attribution', 'licence-copy', 'nothing'] as const;
+
+/** How many works {@link addedWorksCost} adds to a list. */
+const ADDED_WORKS = 12;
+
+/**
+ * The most a work added to Credits may cost the page in columns, as a share of
+ * what it costs on the reading measure — #3360. A work is mostly wrapped text,
+ * which costs about the same area at any width, so three tracks bring it to
+ * about half (49–59 % locally) rather than a third. Before #3360 a courtesy
+ * credit cost 144 %, one work wide in a third of the width, and a required
+ * one 73 %, one work wide across all of it: so each new courtesy credit took
+ * height out of the gate above, and that is what this holds. Whether the
+ * works lie in tracks at all is the reading-order check beside it.
+ */
+const WORK_COST_SHARE = 0.75;
+
+/** A work of this many files or more takes a whole row of its list (`theme.css`, #3360). */
+const MANY_FILES = 6;
+
+/** One list straight inside a section of Credits that spans — #3360. */
+interface LongList {
+  readonly list: string;
+  /** Where each item is drawn, in DOM order: its works, or its packages. */
+  readonly places: { top: number; left: number }[];
+  /** The works of {@link MANY_FILES} files or more. */
+  readonly kits: number;
+  /** The works of {@link MANY_FILES} files or more that are narrower than the list. */
+  readonly narrowKits: number;
+}
+
+async function longLists(page: Page): Promise<LongList[]> {
+  return page.evaluate(
+    (many) =>
+      [...document.querySelectorAll('main .oyl-sections > .oyl-sections__long')].flatMap(
+        (section) =>
+          [...section.querySelectorAll(':scope > ul')].map((list, index) => {
+            const items = [...list.children];
+            // The width its items are given: the list's, less its padding.
+            const style = getComputedStyle(list);
+            const width =
+              list.getBoundingClientRect().width -
+              Number.parseFloat(style.paddingLeft) -
+              Number.parseFloat(style.paddingRight);
+            return {
+              list: `${section.getAttribute('data-terms') ?? '?'} list ${String(index + 1)}`,
+              places: items
+                .map((item) => item.getBoundingClientRect())
+                .map((box) => ({ top: box.top, left: box.left })),
+              kits: items.filter((item) => item.querySelectorAll(':scope > ul > li').length >= many)
+                .length,
+              narrowKits: items.filter(
+                (item) =>
+                  item.querySelectorAll(':scope > ul > li').length >= many &&
+                  item.getBoundingClientRect().width < width - 1,
+              ).length,
+            };
+          }),
+      ),
+    MANY_FILES,
+  );
+}
+
+/** The paragraphs of Credits' spanning sections wider than the line under the title. */
+async function wideLongProse(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const summary = document.querySelector('main > .oyl-view-head > h1 + p');
+    const measure =
+      summary === null
+        ? Number.POSITIVE_INFINITY
+        : Number.parseFloat(getComputedStyle(summary).maxWidth);
+    // A pixel for the engine's rounding of the measure's `ch`, as `readLayout`.
+    return [...document.querySelectorAll('main .oyl-sections > .oyl-sections__long > p')]
+      .filter((each) => each.getBoundingClientRect().width > measure + 1)
+      .map(
+        (each) =>
+          `${String(Math.round(each.getBoundingClientRect().width))} px: ` +
+          `"${(each.textContent ?? '').trim().slice(0, 40)}"`,
+      );
+  });
+}
+
+/**
+ * How much taller the page is with {@link ADDED_WORKS} copies of the last
+ * work of one file in the `terms` list, read and then put back. The copies
+ * are made in the page because the manifest is built into the bundle, and
+ * removed before the next list is measured.
+ */
+async function addedWorksCost(page: Page, terms: string): Promise<number> {
+  return page.evaluate(
+    ([list, count]) => {
+      const works = document.querySelector(`main [data-terms="${list}"] > ul`);
+      const work = [...(works?.children ?? [])]
+        .reverse()
+        .find((each) => each.querySelectorAll(':scope > ul > li').length === 1);
+      if (works === null || work === undefined) {
+        throw new Error(`${list}: no work of one file to copy`);
+      }
+      const before = document.documentElement.scrollHeight;
+      const copies = Array.from({ length: count }, () => work.cloneNode(true) as Element);
+      works.append(...copies);
+      const after = document.documentElement.scrollHeight;
+      for (const copy of copies) copy.remove();
+      return after - before;
+    },
+    [terms, ADDED_WORKS] as const,
+  );
+}
+
 test.describe('#2067 — the single-column screens use a tablet’s width', () => {
   test(`every route not a ride route or list–detail, at ${TABLET_IN_THE_SHELL.name}`, async ({
     page,
@@ -1085,6 +1196,83 @@ test.describe('#2067 — the single-column screens use a tablet’s width', () =
       expect(wide, `${id} is taller in columns than on the reading measure`).toBeLessThanOrEqual(
         narrow,
       );
+    }
+  });
+
+  // #3360: the gate above held Credits by 108 px on CI once #3329 credited
+  // its models, because each list of works was one work wide in columns as
+  // on the measure. What holds it as works are added is what one more costs,
+  // so this adds some — copies of a list's last single-file work, the shape
+  // of a newly credited asset — to each list, both ways, and compares.
+  test(`a newly credited work costs Credits less in columns than on the measure, at ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    const costs = async (extra: string): Promise<Map<string, number>> => {
+      await open(page, TABLET_IN_THE_SHELL, extra);
+      await layoutAt(page, await hashOf(page, widened('credits')), 'main');
+      const seen = new Map<string, number>();
+      for (const terms of WORK_LISTS) {
+        seen.set(terms, await addedWorksCost(page, terms));
+      }
+      return seen;
+    };
+    const columns = await costs('');
+    const prose = await costs('&sections=prose');
+    for (const terms of WORK_LISTS) {
+      const wide = columns.get(terms) ?? Number.NaN;
+      const narrow = prose.get(terms) ?? Number.NaN;
+      console.log(
+        `[#3360] ${String(ADDED_WORKS)} more works in ${terms}: ${wide.toFixed(0)} px, on the ` +
+          `measure ${narrow.toFixed(0)} px (${((wide / narrow) * 100).toFixed(0)} %)`,
+      );
+      expect(narrow, `${terms}: the works added cost nothing on the measure`).toBeGreaterThan(0);
+      expect
+        .soft(
+          wide,
+          `${terms}: a work costs the columns more than ${String(WORK_COST_SHARE)} of the measure`,
+        )
+        .toBeLessThanOrEqual(narrow * WORK_COST_SHARE);
+    }
+  });
+
+  // The control is the measure: there, every list is one item wide.
+  test(`Credits' long lists lie in tracks in reading order, at ${TABLET_IN_THE_SHELL.name}`, async ({
+    page,
+  }) => {
+    for (const [extra, tracked] of [
+      ['', true],
+      ['&sections=prose', false],
+    ] as const) {
+      await open(page, TABLET_IN_THE_SHELL, extra);
+      await layoutAt(page, await hashOf(page, widened('credits')), 'main');
+      const lists = await longLists(page);
+      // Its works in three sections, and its packages in two lists.
+      expect(lists.map((each) => each.list).sort(), extra).toEqual([
+        'attribution list 1',
+        'licence-copy list 1',
+        'nothing list 1',
+        'software list 1',
+        'software list 2',
+      ]);
+      for (const { list, places, narrowKits } of lists) {
+        const lefts = new Set(places.map((place) => Math.round(place.left))).size;
+        if (tracked) {
+          expect(lefts, `${list}: its items are not side by side`).toBeGreaterThanOrEqual(2);
+          expect(outOfOrder(places), list).toEqual([]);
+          expect(narrowKits, `${list}: a work of many files in one track`).toBe(0);
+        } else {
+          expect(lefts, `${list}: side by side on the measure`).toBe(1);
+        }
+      }
+      // The apparatus: the kits this holds are there to hold.
+      expect(
+        lists.reduce((sum, each) => sum + each.kits, 0),
+        `${extra}: no work of many files`,
+      ).toBeGreaterThan(0);
+      expect(
+        await wideLongProse(page),
+        `${extra}: prose in a spanning section left the measure`,
+      ).toEqual([]);
     }
   });
 
