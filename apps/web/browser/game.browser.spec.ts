@@ -5155,11 +5155,12 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(measured.foliageOrderChangedPixels).toBe(0);
   });
 
-  test('samples the photographs one mip coarser on the second rung only — #619 lever 2', async ({
+  test('samples the photographs one mip coarser on the realistic floor only — #619 lever 2', async ({
     harnessRun,
   }) => {
     const measured = await realistic(harnessRun);
-    // The second realistic rung carries the bias, and the shaders read it:
+    // The realistic floor carries the bias (rung 4 since #3282, the second rung
+    // before), and the shaders read it:
     // taking it away changes the picture.
     expect(measured.textureBiasReducedShare).toBeGreaterThan(0.01);
     // THE CONTROL: the top rung carries none, so taking it away changes nothing.
@@ -5170,7 +5171,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // draws" holds it, at the material.
     console.log(
       `#619: a mip coarser changes ${(measured.textureBiasReducedShare * 100).toFixed(1)} % of the ` +
-        `second realistic rung's wooded frame; foliage ${String(measured.foliageOrder.cut)} cut draws ` +
+        `realistic floor's wooded frame; foliage ${String(measured.foliageOrder.cut)} cut draws ` +
         `after ${String(measured.foliageOrder.opaque)} opaque, against ` +
         `${String(measured.foliageOrderControl.cutBeforeOpaque)} before an opaque draw unasked`,
     );

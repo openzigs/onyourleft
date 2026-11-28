@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isBuiltKind } from './buildings';
 import { CAMERA_TARGET_AHEAD_METRES } from './camera';
-import { REALISTIC_LADDER, type QualitySettings } from './quality';
+import { REALISTIC_FLOOR, REALISTIC_LADDER, type QualitySettings } from './quality';
 import {
   blobCasters,
   GROUND_BLOB_CORE,
@@ -505,6 +505,29 @@ describe('the trees’ three levels and the dithered hand-over — #617', () => 
     for (const z of [75, 85, 95]) expect(levelsOfZ(belt, z), String(z)).toEqual(['impostor']);
     // Every tree counted once, however many levels it was submitted at.
     expect(belt.drawnItems).toBe(trees.length);
+  });
+
+  it('draws every tree one level of detail down on a rung that asks, and no full mesh — #3282', () => {
+    const belt = beltWith();
+    belt.setNearestTrees('middle');
+    belt.update(trees, POSE);
+    // Nearest first: 10 to 35 middle, where 10 was full and 18 the band; 45
+    // the middle-to-impostor band, where it was middle; beyond, impostors.
+    for (const z of [10, 18, 25, 35]) expect(levelsOfZ(belt, z), String(z)).toEqual(['middle']);
+    expect(levelsOfZ(belt, 45)).toEqual(['middle', 'impostor']);
+    for (const z of [55, 65, 75, 85, 95]) {
+      expect(levelsOfZ(belt, z), String(z)).toEqual(['impostor']);
+    }
+    for (const kind of ['tree-broadleaf', 'tree-conifer'] as const) {
+      expect(submitted(belt, kind).full, kind).toEqual([]);
+    }
+    expect(belt.drawnItems).toBe(trees.length);
+    // Back to the full rung: the nearest is the full mesh again.
+    const back = beltWith();
+    back.setNearestTrees('middle');
+    back.setNearestTrees('full');
+    back.update(trees, POSE);
+    expect(levelsOfZ(back, 10)).toEqual(['full']);
   });
 
   it('draws a band tree’s levels with ONE matrix and complementary keeps', () => {
@@ -1302,8 +1325,8 @@ describe('the rung’s scenery budget, spent by both realistic belts together �
 
   const rungBudget = (rung: QualitySettings): number => rung.scatterItems + rung.structureItems;
 
-  it('draws no more than the second realistic rung allows, trees and posts together', () => {
-    const reduced = rungBudget(REALISTIC_LADDER[1] as QualitySettings);
+  it('draws no more than the realistic floor allows, trees and posts together', () => {
+    const reduced = rungBudget(REALISTIC_FLOOR);
     const top = rungBudget(REALISTIC_LADDER[0] as QualitySettings);
     expect(reduced).toBeLessThan(top);
     const items = frame(top);

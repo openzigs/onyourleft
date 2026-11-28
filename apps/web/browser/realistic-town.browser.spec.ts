@@ -23,7 +23,9 @@
  * - **The village frame's freeze** (#1689): the decorated village hold draws
  *   exactly `realistic-budget.ts` §`REALISTIC_VILLAGE_DRAW_CALLS` calls, so a
  *   feature that adds a village call is red until it removes one, and a merge
- *   that saves one lowers the number.
+ *   that saves one lowers the number. Since #3282 the same load draws the
+ *   hold at every realistic rung, each costing less than the one above
+ *   (`realistic-rungs.ts`).
  * - **The village's house models** (#1566): on that same hold the houses and
  *   main-street blocks in view are #1585's models, in one call (the page's
  *   `villageHouses`), and with `levers=-village-models` none is and the frame
@@ -53,6 +55,7 @@ import {
 } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
+import { holdsEveryRung } from './realistic-rungs';
 import {
   realisticRoute,
   routeDigest,
@@ -287,6 +290,11 @@ test.describe('the realistic page’s village frame, frozen — #1689', { tag: N
     expect(village.result.lastFrame.calls).toBe(REALISTIC_VILLAGE_DRAW_CALLS);
     // A held frame's mean is its count (#1294).
     expect(village.result.drawCalls).toBe(village.result.lastFrame.calls);
+    // #3282, on the same load: the decorated hold at every realistic rung,
+    // each shedding triangles the one above draws — the litter (1), the
+    // decorations and the far people (2), the trees (3) and the scenery
+    // budget (4). @see realistic-rungs.ts
+    await holdsEveryRung(page, `village at=${String(VILLAGE_HOLD_METRES)}`, [1, 2, 3, 4]);
   });
 });
 

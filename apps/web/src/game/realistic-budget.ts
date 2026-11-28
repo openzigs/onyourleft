@@ -844,9 +844,9 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 };
 
 /**
- * How many structures a realistic frame may carry: **36** — on both
- * `quality.ts` §`REALISTIC_LADDER` rungs, where the stylised rungs they are
- * copied from carry 240 and 120. #506, option 2 of the three it names.
+ * How many structures a realistic frame may carry: **36** — on every
+ * `quality.ts` §`REALISTIC_LADDER` rung (five since #3282), where the
+ * stylised rungs its top and floor are copied from carry 240 and 120. #506, option 2 of the three it names.
  *
  * ## Where 36 comes from
  *
