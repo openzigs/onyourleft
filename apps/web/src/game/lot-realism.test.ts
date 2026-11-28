@@ -304,8 +304,9 @@ describe('each lot pane knows its own rectangle — #1665', () => {
     wall?.dispose();
   });
 
-  it('adds no mesh: the structure belts still build REALISTIC_STRUCTURE_MESHES, 35', () => {
-    expect(REALISTIC_STRUCTURE_MESHES).toBe(35);
+  it('adds no mesh: the structure belts still build REALISTIC_STRUCTURE_MESHES, 36', () => {
+    // 35 when #1665 landed. #3252 added one, the built fences': no lot's pane did.
+    expect(REALISTIC_STRUCTURE_MESHES).toBe(36);
   });
 });
 

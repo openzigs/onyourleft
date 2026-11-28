@@ -1314,7 +1314,11 @@ export interface MappedTown extends MappedFootprintIndex {
    * The chain-link fence beside the corridor's industrial, school and sports
    * grounds — #1274, `chain-link.ts` §`chainLinkPieces` — for a route, built
    * on its first ask and kept. Absent is none: a ride with no corridor, and
-   * the owner's page's `-chain-link` before.
+   * the owner's page's `-chain-link` before. Since #3252 the same list
+   * carries the timber fences beside allotments and gardens and the
+   * highways' noise barriers (`chain-link.ts` §`timberFencePieces`,
+   * §`noiseBarrierPieces`): fences of the same piece, placed and budgeted
+   * alike.
    */
   readonly chainLinkAt?: (
     profile: RouteProfile,

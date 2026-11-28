@@ -1481,6 +1481,69 @@ export function yardsFixture(latitude = FIXTURE_LATITUDE): {
 }
 
 /**
+ * #3252's fixture: every setting the scenery plan names beside 3 km of level
+ * road, and the grounds its fences and its noise barrier stand beside, for
+ * the owner's by-eye frames (`?town=scenery`). **Rectangles and one straight
+ * line from arithmetic, no real place.**
+ *
+ * - **Right, 900–1 100 m**: allotments, 12 m to 80 m back — a timber fence.
+ * - **Right, 1 100–1 300 m**: a park, from 4 m back.
+ * - **Right, 1 300–1 700 m**: residential land, 8 m to 120 m back, and from
+ *   1 200 m to 2 400 m a highway 40 m out along the road — a noise barrier
+ *   where the houses are, and none through the field after them.
+ * - **Right, 1 900–2 300 m**: a field, the same shape.
+ * - **Left, 900–1 300 m**: a field with a wood behind it from 60 m.
+ * - **Left, 1 300–1 700 m**: a wood from 4 m back.
+ * - **Left, 1 700–2 300 m**: a park, then open ground no land use names.
+ */
+export function sceneryFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'scenery',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('allotments', 900, 1_100, 12, 80),
+        land('park', 1_100, 1_300, 4, 200),
+        land('residential', 1_300, 1_700, 8, 120),
+        land('farmland', 1_900, 2_300, 8, 120),
+        land('farmland', 900, 1_300, -60, -4),
+        land('wood', 900, 1_300, -300, -60),
+        land('wood', 1_300, 1_700, -300, -4),
+        land('park', 1_700, 2_000, -300, -4),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [
+        {
+          ...streetBeside(
+            profile,
+            origin,
+            [
+              [1_200, 40],
+              [2_400, 40],
+            ],
+            'motorway',
+          ),
+          kind: 'highway',
+        },
+      ],
+    },
+  };
+}
+
+/**
  * #2688's fixture: pitches and a playground beside 3 km of level road, for
  * the owner's by-eye frames (`?town=fields`, whose before is
  * `levers=-park-dressing`). **Rectangles from arithmetic, no real place.**
