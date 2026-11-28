@@ -91,6 +91,14 @@ import {
   type WorldQualityState,
 } from './quality';
 import {
+  MODE_ENDED_LABEL,
+  modeEndedText,
+  RIDE_STOPPED_LABEL,
+  rideFaultLog,
+  rideStoppedText,
+  type RideMode,
+} from './ride-fault';
+import {
   REALISTIC_WORLD_LEFT_NOTICE,
   realisticWorldNotice,
   type RealisticWorldOutcome,
@@ -368,6 +376,28 @@ import {
 } from './lap-race/ride-race';
 import { raceLapToKeep } from './lap-race/best-lap';
 import { DEFAULT_LAP_RACE_CHOICE, type LapRaceChoice } from './lap-race/choice';
+import {
+  GROUP_RIDE_UNAVAILABLE_TEXT,
+  groupRideAsked,
+  groupRideUnavailable,
+  groupSpeedText,
+  groupSpeedTyped,
+  readGroupRideKept,
+  writeGroupRideKept,
+  type GroupRideChoice,
+} from './group-ride/choice';
+import {
+  groupRideDrawing,
+  groupRideFact,
+  groupRideFinished,
+  groupRideTimed,
+  groupRideStrip,
+  pressGroupPullOff,
+  setGroupSitIn,
+  startGroupRideSession,
+  stepGroupRideSession,
+  type GroupRideSession,
+} from './group-ride/ride-group';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
 import {
   askRoomItem,
@@ -379,6 +409,12 @@ import {
   type RoomLapRaceRide,
 } from './lap-race/room-race';
 import { lapRaceInView } from './lap-race/in-view';
+import {
+  groupRideCueEvent,
+  groupRideCueShowing,
+  type GroupRideCueShown,
+} from './hud/group-ride-hud';
+import { groupCueNotice } from './hud/GroupRideCue';
 import { lapRaceStandings, riderEntry, type LapRaceHud } from './hud/lap-race-hud';
 import {
   deliveryEvents,
@@ -1675,14 +1711,97 @@ function GameScreen({
   tacticsRef.current = props.tactics;
   /** The trace of the last race with AI bots whose record was kept, so a second teardown keeps none. */
   const lapRaceKeptRef = useRef<object | undefined>(undefined);
-  const chooseDelivery = useCallback((value: boolean) => {
-    setWithDelivery(value);
-    if (value) setWithLapRace(false);
-  }, []);
-  const chooseLapRace = useCallback((value: boolean) => {
-    setWithLapRace(value);
-    if (value) setWithDelivery(false);
-  }, []);
+  /**
+   * The group ride's setup — #3303, ADR 0101 D-1: the switch, the average
+   * speed as typed in the rider's units, and the size of the group, as this
+   * device kept them (`group-ride/choice.ts`). Read once, on mount, by the
+   * path that writes it; one mode a ride, so a course opened for a game
+   * starts with the group off, and switching the group on switches the race,
+   * the round and the pacer off, as each of those switches the group off.
+   */
+  const [groupSetup, setGroupSetup] = useState(() => {
+    const kept = readGroupRideKept(keptStorage());
+    return {
+      on: kept.on && played === undefined,
+      speed: groupSpeedText(kept.targetSpeed, units),
+      bots: kept.bots,
+      targetSpeed: kept.targetSpeed,
+    };
+  });
+  const groupSetupRef = useRef(groupSetup);
+  /** The rider's units now, for a speed typed after they changed. */
+  const unitsOfGroupRef = useRef(units);
+  unitsOfGroupRef.current = units;
+  /** Change the setup and keep it on the device: a speed that does not read keeps the last that did. */
+  const changeGroup = useCallback(
+    (change: { readonly on?: boolean; readonly speed?: string; readonly bots?: number }) => {
+      const before = groupSetupRef.current;
+      const speed = change.speed ?? before.speed;
+      const next = {
+        on: change.on ?? before.on,
+        speed,
+        bots: change.bots ?? before.bots,
+        targetSpeed: groupSpeedTyped(speed, unitsOfGroupRef.current) ?? before.targetSpeed,
+      };
+      if (next.on === before.on && next.speed === before.speed && next.bots === before.bots) {
+        return;
+      }
+      groupSetupRef.current = next;
+      setGroupSetup(next);
+      writeGroupRideKept(keptStorage(), next);
+    },
+    [keptStorage],
+  );
+  const chooseDelivery = useCallback(
+    (value: boolean) => {
+      setWithDelivery(value);
+      if (value) {
+        setWithLapRace(false);
+        changeGroup({ on: false });
+      }
+    },
+    [changeGroup],
+  );
+  const chooseLapRace = useCallback(
+    (value: boolean) => {
+      setWithLapRace(value);
+      if (value) {
+        setWithDelivery(false);
+        changeGroup({ on: false });
+      }
+    },
+    [changeGroup],
+  );
+  const choosePacer = useCallback(
+    (value: boolean) => {
+      setWithPacer(value);
+      if (value) changeGroup({ on: false });
+    },
+    [changeGroup],
+  );
+  const chooseGroup = useCallback(
+    (value: boolean) => {
+      changeGroup({ on: value });
+      if (value) {
+        setWithLapRace(false);
+        setWithDelivery(false);
+        setWithPacer(false);
+      }
+    },
+    [changeGroup],
+  );
+  const chooseGroupSpeed = useCallback(
+    (speed: string) => {
+      changeGroup({ speed });
+    },
+    [changeGroup],
+  );
+  const chooseGroupBots = useCallback(
+    (bots: number) => {
+      changeGroup({ bots });
+    },
+    [changeGroup],
+  );
   const [intensity, setIntensity] = useState(
     String(captureScene?.pacer?.wattsPerKilogram ?? DEFAULT_PACER_INTENSITY),
   );
@@ -1874,6 +1993,19 @@ function GameScreen({
   const [worldNotice, setWorldNotice] = useState<
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
+  /**
+   * #3404: the optional modes a fault in a frame ended, said for
+   * STANDING_NOTICE_SECONDS of ride from when it ended, on the world notice's
+   * rule. @see ride-fault.ts
+   */
+  const [modeEnded, setModeEnded] = useState<
+    { readonly text: string; readonly from: number } | undefined
+  >(undefined);
+  /**
+   * #3404: what the rider is told once the core of the ride failed and the
+   * loop stopped, the trainer let go. Stands until the ride ends. @see ride-fault.ts
+   */
+  const [rideStopped, setRideStopped] = useState<string | undefined>(undefined);
   /**
    * What the HUD says of a Delivery round asked for and not ridden, and the
    * ride time it says it from — #1818, on the world notice's rule: too few
@@ -2405,6 +2537,24 @@ function GameScreen({
    */
   const lapRaceRef = useRef<LapRaceRide | undefined>(undefined);
   /**
+   * The group this ride is ridden in — #3303, ADR 0101: stepped on the
+   * simulation's own steps, read for the rider's draft and the drawing.
+   * `undefined` on every other ride. @see GroupRideSession
+   */
+  const groupRideRef = useRef<GroupRideSession | undefined>(undefined);
+  /** #3307: counts the sit-in choices, so one is drawn at once and not on the loop's next frame. */
+  const [, setGroupChoices] = useState(0);
+  /**
+   * #3305: the group ride's cue on the HUD line, for
+   * `GROUP_RIDE_CUE_SHOWN_SECONDS` of the group's clock, as {@link pacerSay}
+   * is the pacer's; and the cue last offered to the announcer, so each is
+   * offered once (`hud/group-ride-hud.ts`). Both follow the ride on its
+   * first frame: a new ride's cue is a new object, and its line starts empty.
+   */
+  const [groupCue, setGroupCue] = useState<string | undefined>();
+  const groupCueRef = useRef<string | undefined>(undefined);
+  const groupCueOfferedRef = useRef<GroupRideCueShown | undefined>(undefined);
+  /**
    * The lap race this ride runs IN A ROOM, while it runs one — #1911: from
    * the room's first frame of a room whose welcome says it is a lap race, to
    * the end of the ride. The room decides it (`lap-race/room-race.ts`); this
@@ -2884,6 +3034,13 @@ function GameScreen({
         ) ??
         routes[0] ??
         circuits[0]);
+  // #3303: the group asked for on the route chosen, or why it cannot be made
+  // there. The plan is solved here, once per choice, and never in a press.
+  const groupCourse = corridorRoute?.profile;
+  const groupAsked = useMemo(
+    () => groupRideAsked(groupSetup.on, groupSetup.speed, groupSetup.bots, units, groupCourse),
+    [groupSetup.on, groupSetup.speed, groupSetup.bots, units, groupCourse],
+  );
   useEffect(() => {
     corridorStateRef.current = undefined;
     setCorridorState(undefined);
@@ -2989,6 +3146,7 @@ function GameScreen({
       riderGhost = false,
       delivery = false,
       lapRace: LapRaceChoice | undefined = undefined,
+      groupRide: GroupRideChoice | undefined = undefined,
     ): Promise<void> => {
       // #2982: an open-world ride rides a rolling route of its own from the
       // session's snapped start, whose first view is the card's, and follows
@@ -3132,6 +3290,14 @@ function GameScreen({
         lapRaceChoiceRaceable(raceAsked)
           ? raceAsked
           : undefined;
+      // #3303, ADR 0101 D-1: a group ride is a solo ride and one mode of
+      // one: never beside a race or a round, and never in a room, whose road
+      // and whose `k` are the room's. The chooser hands none on a circuit, a
+      // level or the open world, with a workout holding the trainer, or with
+      // the draft switched off (`StageChooser.tsx` §`GroupRideControl`), and
+      // it switches the pacer off with the group on.
+      const groupChoice =
+        raceChoice === undefined && !deliveryWanted && roomId === undefined ? groupRide : undefined;
       // #2381, the owner's ruling of 2026-11-08: a game ride is RECORDED by
       // default, through the one way the game starts a recording
       // (`trainer-port.ts` §`recordGameRide`, the ride controller's
@@ -3200,6 +3366,9 @@ function GameScreen({
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
       setWorldNotice(undefined);
+      // #3404: a new ride starts with no fault said of the last.
+      setModeEnded(undefined);
+      setRideStopped(undefined);
       shadowMapRef.current = !realistic && readShadowMapChoice(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
@@ -3244,11 +3413,14 @@ function GameScreen({
         // state for the Draft field and the mark (D-3.7). With the switch off,
         // or with nobody to give a draft, nothing is handed and the ride is
         // today's to the bit.
+        // #3303, ADR 0101 D-3.2: and in a group ride the `k` is the line's
+        // own, from the one call its bots are ridden at
+        // (`stepGroupRideSession`), handed in as a race's is.
         ...soloDraftOf(
           roomId === undefined && readSoloDraftChoice(deviceStorage()),
           pacer !== undefined && raceChoice === undefined,
           ghostRiderRef.current === undefined ? ghostRef.current : undefined,
-          raceChoice !== undefined,
+          raceChoice !== undefined || groupChoice !== undefined,
         ),
       });
       simulationRef.current = simulation;
@@ -3675,6 +3847,18 @@ function GameScreen({
               // last said this rider's consent names its model (D-5.2).
               model: raceChoice.aiBots === true && aiBotsConsented(tacticsStatusRef.current),
             });
+      // #3303, ADR 0101: a group ride's line, formed up around the rider at
+      // the press, on the road this ride reads. Its seed is drawn inside and
+      // kept with the ride. Nothing of it is asked of the trainer.
+      groupRideRef.current =
+        groupChoice === undefined
+          ? undefined
+          : startGroupRideSession({
+              choice: groupChoice,
+              profile,
+              riderDistance: simulation.state.ride.distance,
+              riderSpeed: simulation.state.ride.speed,
+            });
       // #3153: the field a capture's seed dealt, for its log.
       const dealt = lapRaceRef.current;
       if (dealt !== undefined && captureScene !== undefined) {
@@ -3750,6 +3934,7 @@ function GameScreen({
       riderGhost?: boolean,
       delivery?: boolean,
       lapRace?: LapRaceChoice,
+      groupRide?: GroupRideChoice,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -3771,6 +3956,7 @@ function GameScreen({
           riderGhost === true && !alone,
           delivery === true && !alone,
           lapRace,
+          alone ? undefined : groupRide,
         );
       } finally {
         startingRef.current = false;
@@ -4011,10 +4197,14 @@ function GameScreen({
       observer?.observe(canvas);
     }
 
-    const tick = (): void => {
+    /**
+     * One animation frame of the ride. Returns whether the loop goes on: it
+     * stops when the ride has gone. A throw is {@link tick}'s to answer.
+     */
+    const rideFrame = (): boolean => {
       const simulation = simulationRef.current;
       if (simulation === undefined) {
-        return;
+        return false;
       }
       const at = clock();
       // ⚠️ **The frame cap decides whether this animation frame is DRAWN — #476
@@ -4611,6 +4801,22 @@ function GameScreen({
       // #2712, ADR 0072 D-4: the AI pacer's line, screened twice, said only
       // with announcements on (`announce.ts` rank 5i).
       if (pacerArrived !== undefined) events.push({ kind: 'pacer-say', text: pacerArrived });
+      // #3305, ADR 0101 D-5.5: the group ride's cue, to the HUD line for its
+      // shown time and to the announcer once, on the frame it was selected
+      // (`announce.ts` rank 5d′): behind a higher sentence it is dropped, not
+      // queued, and stays on the line. The pull's countdown is never offered.
+      const groupCued = groupRideRef.current;
+      const groupCueNow =
+        groupCued === undefined
+          ? undefined
+          : groupRideCueShowing(groupCued.cue, groupCued.state.atMs / 1_000);
+      if (groupCueNow !== groupCueRef.current) {
+        groupCueRef.current = groupCueNow;
+        setGroupCue(groupCueNow);
+      }
+      const groupCueOffer = groupRideCueEvent(groupCued?.cue, groupCueOfferedRef.current);
+      groupCueOfferedRef.current = groupCueOffer.offered;
+      if (groupCueOffer.event !== undefined) events.push(groupCueOffer.event);
       // #2546: no power on its cadence while the rider is held on a race's
       // line, in a room's lobby or a countdown, as on `main` where this clock
       // stood still there: a reading would also close the window "Go." needs.
@@ -4710,7 +4916,8 @@ function GameScreen({
       // when this loop does not run. It READS the ride and writes nothing the
       // trainer is sent (DL5): the gradient above samples the simulation alone, and
       // is sampled BEFORE this, so a fault in the round cannot stop the loop
-      // short of this frame's grade write.
+      // short of this frame's grade write — and since #3404 it does not stop
+      // the loop at all: `tick` ends the round and rides on.
       // #3153: a capture's scripted presses, through the HUD's own ports, so
       // each is taken as a rider's press is.
       const cues = captureCuesRef.current;
@@ -4844,6 +5051,42 @@ function GameScreen({
         // sees it. `1` with the switch off: the ride before #2461.
         simulation.draftWith(raced.riderDraft);
       }
+      // #3303, ADR 0101: the group, stepped on exactly the simulation steps
+      // that ran, as the race above: AFTER the grade is sampled, from the
+      // simulation's own odometer and speed, which it reads and never writes
+      // (D-4.5). The rider has stopped, for the line, while the recording
+      // under the ride is paused (the rider's pause or the recorder's
+      // auto-pause) or the power reading is not live (D-4.4, D-6.11).
+      const grouped = groupRideRef.current;
+      if (grouped !== undefined && stepsRun > 0) {
+        const ridden = stepGroupRideSession(grouped, {
+          ticks: stepsRun,
+          rider: {
+            distanceM: simulation.state.ride.distance,
+            speedMps: simulation.state.ride.speed,
+          },
+          riderStopped: !sensors.rider.live || trainerPortRef.current?.recordingPaused?.() === true,
+          // #3305: what the cue selector reads. No live reading, no cue (D-6.11).
+          powerWatts: sensors.rider.live ? sensors.rider.power : null,
+          thresholdWatts: ownThresholdsRef.current.power ?? null,
+        });
+        // Tied to the recording's timeline from the first frame one is read.
+        const timed = groupRideTimed(ridden, trainerPortRef.current?.rideElapsedSeconds?.());
+        // The review of PR #3364: the group ride ends at the finish of a
+        // route with one, as the plan does. *Keep riding* rides on alone.
+        const finished = groupRideFinished(timed);
+        groupRideRef.current = finished ? undefined : timed;
+        // D-3.2: the rider's draft from the line, ridden from the next step
+        // on as a race's is: a multiplier on the rider's drag in the
+        // simulation and nothing else. After the grade above was sampled, so
+        // this frame's write never sees it. `1` once the group ride ended.
+        simulation.draftWith(finished ? 1 : timed.riderDraft);
+        // What the ride keeps of its group, to the recording under it: every
+        // frame, so a recording begun part-way through the ride has it too,
+        // the frame it ended at the finish included.
+        const fact = groupRideFact(timed);
+        if (fact !== undefined) trainerPortRef.current?.groupRideStepped?.(fact);
+      }
       // #1911: a room's lap race, on the same steps and after the same grade:
       // the rider's inputs sent, what the room's newest frame covers dropped,
       // and the drawn offset eased toward the room's. It reads the room and
@@ -4889,16 +5132,25 @@ function GameScreen({
         // #1906: a lap race draws the rider at their race position, effort
         // distance plus race offset (ADR 0060 D-3.3), and its bots beside
         // them. The drawing only: the grade above was read at the odometer.
+        // #3303: a group ride draws its bots through the same pack layout,
+        // and the rider where the ride has them. One mode a ride.
         const racing = lapRaceRef.current;
+        const grouping = groupRideRef.current;
         const raceDrawn =
-          racing === undefined
-            ? undefined
-            : lapRaceDrawing(
+          racing !== undefined
+            ? lapRaceDrawing(
                 racing,
                 drawn.riderDistance,
                 SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
                 reducedMotionRef.current,
-              );
+              )
+            : grouping !== undefined
+              ? groupRideDrawing(
+                  grouping,
+                  drawn.riderDistance,
+                  SIMULATION_STEP_SECONDS - simulation.pendingSecondsAt(at),
+                )
+              : undefined;
         // #1911: a room's lap race draws the rider at their effort distance
         // plus the offset the room gave them (eased), and every other rider at
         // theirs. The drawing only: the grade above was read at the odometer.
@@ -5369,6 +5621,84 @@ function GameScreen({
           setWorldNotice({ text: REALISTIC_WORLD_LEFT_NOTICE, from: simulation.state.elapsed });
         }
       }
+      return true;
+    };
+    /**
+     * #3404: a frame that threw. The optional modes it was running end and the
+     * loop goes on; with none running, the core of the ride failed, so the
+     * trainer is let go as *End ride* lets it go, the loop stops and the
+     * rider is told. Returns whether the loop goes on. @see ride-fault.ts
+     */
+    const frameFailed = (error: unknown): boolean => {
+      const ended: RideMode[] = [];
+      if (groupRideRef.current !== undefined) {
+        groupRideRef.current = undefined;
+        ended.push('group-ride');
+      }
+      const racing = lapRaceRef.current;
+      if (racing !== undefined) {
+        lapRaceRef.current = undefined;
+        // #2710's hold on the instance's model, let go as `teardown` lets it go.
+        if (racing.model !== undefined) void tacticsRef.current?.endTacticsRace();
+        ended.push('lap-race');
+      }
+      if (deliveryRef.current !== undefined) {
+        deliveryRef.current = undefined;
+        throwAskedRef.current = undefined;
+        crashRef.current = undefined;
+        crashShownRef.current = undefined;
+        ended.push('delivery');
+      }
+      // ⚠️ The pacer's clean-up writes its log through the trainer port, the
+      // call a fault may have come from, so it can throw a second time. A
+      // throw here must not escape `tick`: the ride would freeze with the
+      // trainer holding its grade. It takes the core answer below instead.
+      let cleanedUp = true;
+      const directed = modelPacerRef.current;
+      if (directed !== undefined) {
+        modelPacerRef.current = undefined;
+        pacerSayRef.current = undefined;
+        pacerDoingRef.current = undefined;
+        try {
+          directed.director.end();
+          ended.push('ai-pacer');
+        } catch {
+          cleanedUp = false;
+        }
+        setPacerSay(undefined);
+      }
+      const simulation = simulationRef.current;
+      if (cleanedUp && ended.length > 0) {
+        // A race's or a group's shelter ends with it: the rider rides alone.
+        if (ended.includes('group-ride') || ended.includes('lap-race')) simulation?.draftWith(1);
+        console.error(rideFaultLog(ended, error));
+        const text = modeEndedText(ended);
+        setModeEnded({ text, from: simulation?.state.elapsed ?? 0 });
+        setAnnouncement(text);
+        return true;
+      }
+      // ⚠️ **First**, for `teardown`'s reason: no load left on the rider.
+      const gradient = gradientRef.current;
+      gradient?.stop();
+      loopRunningRef.current = false;
+      console.error(rideFaultLog([], error));
+      const text = rideStoppedText(gradient !== undefined);
+      setRideStopped(text);
+      setAnnouncement(text);
+      return false;
+    };
+    /**
+     * The loop's one callback, asking for the next frame only at its end.
+     * ⚠️ **#3404: it catches.** Before it did, a throw anywhere in a frame
+     * escaped, the next frame was never asked for, and the ride froze with the
+     * trainer holding the last grade it was sent.
+     */
+    const tick = (): void => {
+      try {
+        if (!rideFrame()) return;
+      } catch (error: unknown) {
+        if (!frameFailed(error)) return;
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -5616,7 +5946,7 @@ function GameScreen({
           riderGhostOffered={port?.riderGhostOffered?.() === true}
           riderGhostProblem={riderGhostProblem}
           withPacer={withPacer}
-          onPacer={setWithPacer}
+          onPacer={choosePacer}
           // #2712: the AI pacer, offered only where this device's instance can
           // be sealed to; absent, never drawn and nothing sent.
           aiPacer={
@@ -5658,6 +5988,28 @@ function GameScreen({
             // either world.
             courses,
           }}
+          // #3303, ADR 0101 D-1: a group ride, beside the pacer. Whether it is
+          // offered is read here, as the trainer notice is: a workout started
+          // on the Ride screen, or the draft switched off in Settings, is seen
+          // at once.
+          groupRide={((unavailable) => ({
+            chosen: groupSetup.on,
+            onChoose: chooseGroup,
+            speed: groupSetup.speed,
+            onSpeed: chooseGroupSpeed,
+            bots: groupSetup.bots,
+            onBots: chooseGroupBots,
+            speedUnit: speedUnit(units),
+            asked: unavailable === undefined ? groupAsked : { ride: undefined, problem: undefined },
+            unavailable:
+              unavailable === undefined ? undefined : GROUP_RIDE_UNAVAILABLE_TEXT[unavailable],
+          }))(
+            groupRideUnavailable(
+              trainerNow?.kind === 'workout',
+              readSoloDraftChoice(deviceStorage()),
+              groupCourse?.loop === true,
+            ),
+          )}
           // #1907: a lap race, offered on a loop; the assisted setting read
           // here, as the week is, so one changed in Settings is seen at once.
           lapRace={{
@@ -5951,6 +6303,31 @@ function GameScreen({
                 },
               };
         })()}
+        // #3307, ADR 0101 D-3.7: a group ride's pull-off press and sit-in
+        // choice, as the line stands on this frame, and where each goes: the
+        // group's session, which the next simulation step reads. A key, a
+        // tap and a pad all reach it through the HUD. Neither is handed to
+        // the simulation, the gradient session or the trainer's port (D-6.5).
+        groupRideInput={(() => {
+          const grouped = groupRideRef.current;
+          return grouped === undefined
+            ? undefined
+            : {
+                onFront: grouped.role === 'on-front',
+                sittingIn: grouped.sittingIn,
+                pullOff: () => {
+                  const now = groupRideRef.current;
+                  if (now !== undefined) groupRideRef.current = pressGroupPullOff(now);
+                },
+                sitIn: (sittingIn: boolean) => {
+                  const now = groupRideRef.current;
+                  if (now === undefined) return;
+                  groupRideRef.current = setGroupSitIn(now, sittingIn);
+                  // Drawn at once, without waiting for the loop's next frame.
+                  setGroupChoices((choices) => choices + 1);
+                },
+              };
+        })()}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         // #1111: the RECORDER's moving time — never the simulation's
@@ -6082,6 +6459,15 @@ function GameScreen({
                 steering: steerPortRef.current,
                 items: itemPortRef.current,
               })}
+        // #3305, ADR 0101: a group ride's role strip — place in the line, the
+        // gap or the pull's countdown, the group's speed now and the average
+        // chosen — only on a ride with a group. Read during render, as the
+        // race above is; dashes while the power reading is not live.
+        groupRide={
+          groupRideRef.current === undefined
+            ? undefined
+            : groupRideStrip(groupRideRef.current, state?.input.live === true)
+        }
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
             ? undefined
@@ -6313,6 +6699,14 @@ function GameScreen({
               }
         }
         notices={[
+          // #3404: the core of the ride failed, and the loop has stopped.
+          // First, above the Trainer fault, which says a refused release.
+          // Not `live`: the HUD's one region said it as it happened.
+          rideStopped === undefined ? undefined : (
+            <StatusMessage key="ride-stopped" tone="danger" label={RIDE_STOPPED_LABEL}>
+              {rideStopped}
+            </StatusMessage>
+          ),
           gradient?.fault === undefined ? undefined : (
             // Not `live` since #445, for the road notice's reason above.
             <StatusMessage key="fault" tone="danger" label="Trainer">
@@ -6467,6 +6861,14 @@ function GameScreen({
               {worldNotice.text}
             </StatusMessage>
           ),
+          // #3404: the modes a fault ended, on the world notice's rule. Not
+          // `live`: the HUD's one region said it as it happened.
+          modeEnded === undefined ||
+          (state?.elapsed ?? 0) - modeEnded.from >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="mode-ended" tone="warning" label={MODE_ENDED_LABEL}>
+              {modeEnded.text}
+            </StatusMessage>
+          ),
           // #2710: a solo race's AI bots, in the race notice's word, for
           // STANDING_NOTICE_SECONDS of ride: @see aiBotsNotice. Not `live`:
           // the standings carry the same line for a screen reader on request,
@@ -6513,6 +6915,12 @@ function GameScreen({
               {pacerSay}
             </StatusMessage>
           ),
+          // #3305, ADR 0101 D-5: the group ride's cue, one sentence written in
+          // this repository, for GROUP_RIDE_CUE_SHOWN_SECONDS of the group's
+          // clock and then gone. Drawn as the pacer's line is, which a ride
+          // with a group never has. Not `live`: the HUD's one region says it,
+          // with announcements on (`announce.ts` rank 5d′).
+          groupCueNotice(groupCue),
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of

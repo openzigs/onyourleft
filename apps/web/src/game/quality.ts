@@ -42,7 +42,7 @@
 
 import { TERRAIN_BANDS } from './landform';
 import { PEOPLE_NEAR_MAX } from './people';
-import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
+import { MAPPED_BUILDING_REACH_METRES, REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { SCATTER_MAX_ITEMS } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
@@ -318,11 +318,14 @@ export interface QualitySettings {
    * `people.ts` §`PEOPLE_NEAR_MAX` (16) within 60 m of the rider, and
    * impostors beyond. **0 draws nobody**, near or far.
    *
-   * **16 on {@link REALISTIC_LADDER}'s top rung and 0 everywhere else.** The
-   * body is MakeHuman's, which only the realistic world loads; and the first
-   * step down inside the realistic world gives the people up whole, with the
-   * resolution and the scenery, rather than thinning them, because a street
-   * with three people on it reads as emptier than one with none.
+   * **16 on {@link REALISTIC_LADDER}'s rungs 0 to 3 and 0 everywhere else.**
+   * The body is MakeHuman's, which only the realistic world loads; and the
+   * step down to the reduced resolution inside the realistic world gives the
+   * near people up whole, with the resolution and the scenery, rather than
+   * thinning them, because a street with three people on it reads as emptier
+   * than one with none. ⚠️ **Since #3282 the far band goes first**, on rung 2
+   * (`scenery.farPeople`): an impostor a hundred metres off is a cheaper loss
+   * than the person walking past.
    *
    * ## ⚠️ Provenance — the owner's ruling of 2026-10-24, not a measurement
    *
@@ -361,8 +364,8 @@ export interface QualitySettings {
   /**
    * How many mip levels coarser the realistic world's photographs are sampled
    * on this rung — [#619](https://github.com/openzigs/onyourleft/issues/619)
-   * lever 2: **0** everywhere but {@link REALISTIC_LADDER}'s second rung, which
-   * takes **1**, so a hot tablet sheds texture bandwidth before it sheds the
+   * lever 2: **0** everywhere but {@link REALISTIC_LADDER}'s floor (rung 4 since
+   * #3282, its second rung before), which takes **1**, so a hot tablet sheds texture bandwidth before it sheds the
    * world.
    *
    * It is a level-of-detail BIAS, added to the mip level the GPU would pick,
@@ -452,11 +455,10 @@ export interface QualitySettings {
    *
    * ## ⚠️ The realistic ladder, and the one place this is not monotonic
    *
-   * {@link REALISTIC_LADDER}'s two rungs are stylised levels 0 and 1 with the
-   * world swapped, so they inherit `true` and `false` from them — and the heat
-   * walk `nextWorldQuality` takes is realistic full → realistic reduced →
-   * **stylised full** → stylised reduced, which means capture comes back on the
-   * third step. That is stated rather than smoothed over, and it is not the
+   * {@link REALISTIC_LADDER}'s top rung permits it and its four rungs below do
+   * not (#3282) — and the heat walk `nextWorldQuality` takes is realistic full
+   * → realistic rungs 1 to 4 → **stylised full** → stylised reduced, which
+   * means capture comes back on the step that leaves realism. That is stated rather than smoothed over, and it is not the
    * flap {@link keepsShadowMap} exists to prevent: leaving realism is a larger
    * saving than the reduced-resolution step inside it — ADR 0026 D-3's own
    * ordering, *"a hot device gives up realism before it gives up frame rate"* —
@@ -512,9 +514,107 @@ export interface QualitySettings {
    * indicator goes on telling the room the truth.
    */
   readonly presence: boolean;
+  /**
+   * Which of the realistic world's optional belts this rung draws — #3282.
+   * One key a belt, `true` drawn and `false` not drawn at all: the scenery
+   * cyclists, the litter, the park dressing, the holiday decorations, the far
+   * band of people and the parked cars. {@link SCENERY_STOPS_AT} is where
+   * each one stops, and every rung's record is made from it by
+   * {@link sceneryAt}, so a belt added to {@link OPTIONAL_SCENERY} without a
+   * stop is a type error rather than a belt that is always on.
+   *
+   * **Every key `true` on every stylised rung.** All but the decorations are
+   * the realistic world's alone, and the stylised decorations stay as they
+   * were: the stylised ladder is not changed by #3282.
+   */
+  readonly scenery: SceneryShown;
+  /**
+   * What the nearest realistic trees are drawn at — #3282: `'full'`, the
+   * full mesh for the nearest (`realistic-budget.ts` §`REALISTIC_TREE_LEVELS`),
+   * or `'middle'`, every tree one level of detail down, the middle mesh where
+   * the full one was (`tree-levels.ts` §`treeLevelShift`). The stylised world
+   * reads none of it.
+   */
+  readonly nearestTrees: 'full' | 'middle';
+  /**
+   * How far from the rider a mapped building is drawn at all, in metres —
+   * #3282: `realistic-budget.ts` §`MAPPED_BUILDING_REACH_METRES` (400) but on
+   * the realistic rungs from {@link REDUCED_MAPPED_BUILDING_REACH_METRES} down.
+   * What goes is the far end of a town, which the fog has mostly taken; a
+   * building nearer than `MAPPED_BUILDING_NEAR_METRES` (150) is never what
+   * goes, and a Delivery round's houses are drawn when the rider is near them
+   * (`delivery/targets.ts`), well inside either reach.
+   */
+  readonly mappedBuildingReach: number;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
+
+/**
+ * The realistic world's optional belts, each a key of
+ * {@link QualitySettings.scenery} — #3282. ⚠️ **A belt added under #3249**
+ * (the railway track, #3253; the road signs, #3279) adds its key here and its
+ * stop to {@link SCENERY_STOPS_AT}, and `three-renderer.ts` reads it; the
+ * belt census in `quality-rungs.test.ts` is red for a belt that does not.
+ */
+export const OPTIONAL_SCENERY = [
+  'sceneryCyclists',
+  'litter',
+  'parkDressing',
+  'decorations',
+  'farPeople',
+  'parkedCars',
+] as const;
+
+/** One of {@link OPTIONAL_SCENERY}. */
+export type OptionalScenery = (typeof OPTIONAL_SCENERY)[number];
+
+/** Whether each optional belt is drawn. @see QualitySettings.scenery */
+export type SceneryShown = Readonly<Record<OptionalScenery, boolean>>;
+
+/**
+ * The first rung of {@link REALISTIC_LADDER} that does NOT draw each optional
+ * belt — #3282, cheapest loss first: the scenery cyclists and the litter at
+ * rung 1, then the park dressing, the decorations, the far band of people and
+ * the parked cars at rung 2.
+ *
+ * ## ⚠️ Provenance — the issue's proposal, for the owner to approve by screenshot
+ *
+ * #3282 proposes the order and the owner approves it by screenshot; none of
+ * it is a measurement. The parked cars (#3278) are not named in the
+ * proposal: they go at rung 2 with the park dressing, the other standing
+ * dressing a rider does not ride past, and after the cyclists, who move and so
+ * draw the eye. The browser gate's per-rung counts are in
+ * `browser/realistic-rungs.ts`, and validation 0002 holds the tablet's
+ * frame times.
+ */
+export const SCENERY_STOPS_AT: Readonly<Record<OptionalScenery, number>> = {
+  sceneryCyclists: 1,
+  litter: 1,
+  parkDressing: 2,
+  decorations: 2,
+  farPeople: 2,
+  parkedCars: 2,
+};
+
+/** The optional belts rung `level` of {@link REALISTIC_LADDER} draws. @see SCENERY_STOPS_AT */
+export function sceneryAt(level: number): SceneryShown {
+  return Object.fromEntries(
+    OPTIONAL_SCENERY.map((key) => [key, level < SCENERY_STOPS_AT[key]]),
+  ) as Record<OptionalScenery, boolean>;
+}
+
+/** Every optional belt drawn: the realistic top rung's, and every stylised rung's. */
+export const ALL_SCENERY: SceneryShown = sceneryAt(0);
+
+/**
+ * The mapped buildings' reach from {@link REALISTIC_LADDER}'s rung 3 down —
+ * #3282: **250 m**, against `MAPPED_BUILDING_REACH_METRES`' 400. Chosen, not
+ * measured: a hundred metres beyond `MAPPED_BUILDING_NEAR_METRES`, so the
+ * buildings drawn whole are untouched and what goes is the far level beyond
+ * 250 m, in a fog that has taken most of it.
+ */
+export const REDUCED_MAPPED_BUILDING_REACH_METRES = 250;
 
 /**
  * A frame cap of "the display's own rate": draw on every animation frame the
@@ -555,6 +655,9 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
   capture: false,
   // #390, with capture and for the converse reason. @see QualitySettings.presence
   presence: false,
+  scenery: ALL_SCENERY,
+  nearestTrees: 'full',
+  mappedBuildingReach: MAPPED_BUILDING_REACH_METRES,
   label: 'reduced resolution and scenery',
 };
 
@@ -616,12 +719,13 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
  *
  * ## Where the realistic rungs sit — ADR 0026 D-3
  *
- * {@link REALISTIC_LADDER} is this ladder's levels 0 and 1 with the world
- * swapped, figure for figure but the structures (#506 — it says why), so
- * both realistic rungs draw at the display's rate and neither needs an
- * exception any more. The heat walk from the
- * realistic top is realistic full (display) → realistic reduced (display) →
- * stylised full (display) → stylised reduced (display) → 30 → 24 → 20:
+ * {@link REALISTIC_LADDER} starts at this ladder's level 0 with the world
+ * swapped, figure for figure but the structures (#506 — it says why), and
+ * ends at its level 1 inside the realistic world, with three rungs between
+ * since #3282 that each shed one named belt. Every realistic rung draws at the
+ * display's rate. The heat walk from the realistic top is realistic full
+ * (display) → realistic rungs 1 to 4 (display) → stylised full (display) →
+ * stylised reduced (display) → 30 → 24 → 20:
  * realism is given up two steps before any frame rate is, which is D-3's order
  * with room to spare.
  */
@@ -651,6 +755,9 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     capture: true,
     // #390. @see QualitySettings.presence
     presence: true,
+    scenery: ALL_SCENERY,
+    nearestTrees: 'full',
+    mappedBuildingReach: MAPPED_BUILDING_REACH_METRES,
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
@@ -681,6 +788,9 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     world: 'stylised',
     capture: false,
     presence: false,
+    scenery: ALL_SCENERY,
+    nearestTrees: 'full',
+    mappedBuildingReach: MAPPED_BUILDING_REACH_METRES,
     label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
@@ -709,6 +819,9 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     world: 'stylised',
     capture: false,
     presence: false,
+    scenery: ALL_SCENERY,
+    nearestTrees: 'full',
+    mappedBuildingReach: MAPPED_BUILDING_REACH_METRES,
     label: 'minimum',
   },
 ];
@@ -960,23 +1073,43 @@ export function readShadowMapChoice(
  * {@link nextWorldQuality} and never re-entered, is the same latch the shadow
  * map has, for a whole world.
  *
- * ## The two rungs, and what the second gives up
+ * ## Five rungs, each shedding one named thing — #3282
  *
- * The first is the stylised target rung's every figure with the world
- * swapped — the structure budget apart, below — so a measurement of it
- * against level 0 is a measurement of realism and nothing else. The second
- * takes the stylised ladder's first step down — resolution, scenery, the far
- * ground and the water shader — **inside** the realistic world, before the
- * world itself is given up: D-3's *"the realistic rungs reduce within
- * themselves"*. Neither lowers the frame cap, so a hot
- * device gives up realism before it gives up frame rate, which is what the
- * owner's brief for #430's pull request asked of the ladder. ⚠️ **Since #482
- * both are exact copies of stylised levels 0 and 1 with the world swapped.**
- * Between #476 and #482 the second kept the top rung's cap by exception,
- * because the stylised level 1 it copied capped at 30; that level now draws at
- * the display's rate itself, so the exception is gone, and the realistic walk
- * reaches its first capped rung two steps after it leaves realism —
- * {@link QUALITY_LADDER} §"Where the realistic rungs sit".
+ * Until #3282 there were two: full, then the stylised ladder's first step
+ * down inside the realistic world, and then the stylised world for the rest
+ * of the ride. A slower tablet lost realism while its frames were still
+ * drawing what a rider gives up first. Now, cheapest loss first:
+ *
+ * | Rung | Label | What that step gives up |
+ * |---|---|---|
+ * | 0 | realistic | — |
+ * | 1 | realistic, no cyclists or litter | the scenery cyclists, the litter; capture and presence checking |
+ * | 2 | realistic, no park dressing or decorations | the park dressing, the holiday decorations, the far band of people, the parked cars |
+ * | 3 | realistic, simpler trees and a shorter town | the nearest trees one level of detail down; mapped buildings beyond {@link REDUCED_MAPPED_BUILDING_REACH_METRES} |
+ * | 4 | realistic, reduced resolution and scenery | the stylised ladder's first step down: resolution, scenery, variety, far ground, water shader, surface detail, the near people; one mip coarser (#619) |
+ *
+ * and then the stylised top. **No rung lowers the frame cap**, so a hot
+ * device still gives up realism before it gives up frame rate (D-3), and a
+ * ride that recovers climbs back up these rungs exactly as the stylised
+ * ladder climbs: {@link nextWorldQuality} moves within them by
+ * {@link SUSTAINED_SAMPLES}, and only a step past rung 4 leaves realism, for
+ * good. `quality-rungs.test.ts` holds that each rung differs from the one
+ * above in exactly the fields named here, and walks them.
+ *
+ * ⚠️ **Capture and presence go on rung 1**, with the first thing the world
+ * gives up and never after it: #382's and #390's ordering, the work that is
+ * not the world before any of it.
+ *
+ * ⚠️ **Rung 4 is the second rung there was before #3282**, its every figure
+ * kept, plus what rungs 1 to 3 shed: so a device that reaches it draws less
+ * than it did, never more, before the world is given up.
+ *
+ * ## ⚠️ Provenance — the issue's proposal, not a measurement
+ *
+ * The order is #3282's proposal, for the owner to approve by screenshot. What
+ * each rung submits is measured in the pinned Chromium
+ * (`browser/realistic-rungs.ts`), and what it saves on the tablet is
+ * validation 0002's frame-time rows for #3282.
  *
  * ⚠️ **Selected only by the rider, since #475.** D-12: the realistic world is
  * offered to riders only when it is whole, and it has been whole since layer 3
@@ -1001,31 +1134,76 @@ export function readShadowMapChoice(
  * it is BR-1 exactly as they are. What realism costs on the tablet is #457's
  * device run and `realistic-budget.ts`; the soak is validation 0002 Part Z.
  */
+/** The realistic top rung — the stylised target with the world swapped. @see REALISTIC_LADDER */
+const REALISTIC_TOP: QualitySettings = {
+  ...(QUALITY_LADDER[0] as QualitySettings),
+  // #506. @see REALISTIC_STRUCTURE_ITEMS
+  structureItems: REALISTIC_STRUCTURE_ITEMS,
+  // #1541: the people, down to rung 4. @see QualitySettings.people
+  people: PEOPLE_NEAR_MAX,
+  world: 'realistic',
+  label: 'realistic',
+};
+
+/** #3282 rung 1: the scenery cyclists and the litter, and the work that is not the world. */
+const REALISTIC_NO_CYCLISTS: QualitySettings = {
+  ...REALISTIC_TOP,
+  scenery: sceneryAt(1),
+  // #382 and #390: before any of the world. @see QualitySettings.capture
+  capture: false,
+  presence: false,
+  label: 'realistic, no cyclists or litter',
+};
+
+/** #3282 rung 2: the park dressing, the decorations, the far people and the parked cars. */
+const REALISTIC_NO_DRESSING: QualitySettings = {
+  ...REALISTIC_NO_CYCLISTS,
+  scenery: sceneryAt(2),
+  label: 'realistic, no park dressing or decorations',
+};
+
+/** #3282 rung 3: the trees one level of detail down, and a shorter town. */
+const REALISTIC_SIMPLER: QualitySettings = {
+  ...REALISTIC_NO_DRESSING,
+  scenery: sceneryAt(3),
+  nearestTrees: 'middle',
+  mappedBuildingReach: REDUCED_MAPPED_BUILDING_REACH_METRES,
+  label: 'realistic, simpler trees and a shorter town',
+};
+
 export const REALISTIC_LADDER: readonly QualitySettings[] = [
+  REALISTIC_TOP,
+  REALISTIC_NO_CYCLISTS,
+  REALISTIC_NO_DRESSING,
+  REALISTIC_SIMPLER,
+  // The stylised first step down, at the display's rate, inside the realistic
+  // world — #482, and the second rung there was before #3282. The heat walk
+  // never raises the cap: realistic 60 → … → 60 → stylised full 60 → 30 → 24 → 20.
   {
-    ...(QUALITY_LADDER[0] as QualitySettings),
-    // #506. @see REALISTIC_STRUCTURE_ITEMS
-    structureItems: REALISTIC_STRUCTURE_ITEMS,
-    // #1541: the people, on this rung only. @see QualitySettings.people
-    people: PEOPLE_NEAR_MAX,
-    world: 'realistic',
-    label: 'realistic',
-  },
-  // The stylised first step down, at the display's rate, with the world
-  // swapped — #482. The heat walk never raises the cap: realistic 60 → 60 →
-  // stylised full 60 → reduced 60 → 30 → 24 → 20.
-  {
-    ...(QUALITY_LADDER[1] as QualitySettings),
-    // #506: the same figure as the rung above, not a smaller one: 36 is
-    // already a whole village (at most 22 buildings and two signposts) and a
-    // few walls, so a cut here would start taking houses.
-    structureItems: REALISTIC_STRUCTURE_ITEMS,
+    ...REALISTIC_SIMPLER,
+    scenery: sceneryAt(4),
+    renderScale: REDUCED_AT_DISPLAY_RATE.renderScale,
+    scatterItems: REDUCED_AT_DISPLAY_RATE.scatterItems,
+    sceneryVariants: REDUCED_AT_DISPLAY_RATE.sceneryVariants,
+    terrainBands: REDUCED_AT_DISPLAY_RATE.terrainBands,
+    water: REDUCED_AT_DISPLAY_RATE.water,
+    surfaceDetail: REDUCED_AT_DISPLAY_RATE.surfaceDetail,
+    // #1541: the near people go with the resolution, whole. @see QualitySettings.people
+    people: 0,
     // #619 lever 2: one mip coarser, the only rung that is. @see QualitySettings.textureLodBias
     textureLodBias: 1,
-    world: 'realistic',
     label: 'realistic, reduced resolution and scenery',
   },
 ];
+
+/**
+ * The realistic ladder's floor — #3282: the last rung a ride draws before it
+ * leaves realism.
+ *
+ * @test-facing the suites name the floor by this rather than by an index that
+ * #3282 moved from 1 to 4; the product reaches it through {@link worldRung}
+ */
+export const REALISTIC_FLOOR = REALISTIC_LADDER[REALISTIC_LADDER.length - 1] as QualitySettings;
 
 /** Where a ride that may be realistic is on the two ladders. */
 export interface WorldQualityState {

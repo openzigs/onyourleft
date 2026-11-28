@@ -7,7 +7,7 @@
  * §"#2508" reads a real frame back, clear against dusk and rain.
  */
 
-import { getHeapStatistics, GCProfiler } from 'node:v8';
+import { getHeapSpaceStatistics, GCProfiler } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
@@ -282,6 +282,21 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
   const WINDOWS = 8;
   /** Windows tried before a weather fails, so that a collection may spoil some. */
   const MAX_ATTEMPTS = 16;
+  /**
+   * The young generation, where what a frame makes is put: a small object or
+   * array the frame drops goes to `new_space`, a large one to
+   * `new_large_object_space`.
+   */
+  const YOUNG_SPACES = new Set(['new_space', 'new_large_object_space']);
+
+  /** The bytes in use in the young generation. */
+  function youngBytes(): number {
+    let bytes = 0;
+    for (const space of getHeapSpaceStatistics()) {
+      if (YOUNG_SPACES.has(space.space_name)) bytes += space.space_used_size;
+    }
+    return bytes;
+  }
 
   it('allocates nothing on a frame, in every weather', () => {
     for (const weather of WEATHERS) {
@@ -291,32 +306,42 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
       const frames = (count: number): void => {
         for (let i = 0; i < count; i += 1) light.update(DAY, weather);
       };
-      /** Heap growth across `count` frames, and the collections that ran meanwhile. */
+      /** Young-generation growth across `count` frames, and the collections that ran meanwhile. */
       const measure = (count: number): { grew: number; collected: number } => {
         const profiler = new GCProfiler();
         profiler.start();
-        const before = getHeapStatistics().used_heap_size;
+        const before = youngBytes();
         frames(count);
-        const after = getHeapStatistics().used_heap_size;
+        const after = youngBytes();
         return { grew: after - before, collected: profiler.stop().statistics.length };
       };
       // Warm up, so the measured windows run optimised code as a ride does.
       frames(300_000);
       // The first measurement of anything costs the harness its own first use.
       measure(0);
-      // #2637: one window was one sample, and on a busy runner it carried
-      // 107 232 bytes the frames did not make (a compiler installing code
-      // late, the harness's own bookkeeping). So the frames are measured over
-      // several windows and the bound is held by the lot of them: what they
-      // left behind together, under the windows' bounds together, which is
-      // the same 64 KiB for 100 000 frames. A one-off is shared with the
-      // windows that carry none. An allocation on every frame is in every
-      // window, or forces a collection that spoils it; growth that comes in
-      // steps (an array whose store is copied as it doubles) is in some
-      // windows only, and is in the sum. Each window is less an empty window
-      // taken just before it, so what the measuring itself costs is taken
-      // off. A window in which the heap shrank (a compiler dropping code)
-      // counts as none, so that it cannot hide what another left behind.
+      // #3370: the whole heap's growth over eight windows, summed, failed on
+      // CI at 744 584, 0, 0, 6 072, 0, 0, 0, 0 B, and passed on a rerun. One
+      // window carried three quarters of a megabyte that no frame made, and
+      // the sum let that one window fail the lot. Two things make the
+      // measure the frames' own:
+      //
+      // - **The young generation only.** A frame's garbage is made there, by
+      //   the thread running the frames. The old spaces also take what a
+      //   compiler thread may allocate while the frames run, and the code it
+      //   installs, which is neither the frames' nor in step with them.
+      // - **The median window, not the sum.** An allocation on every frame is
+      //   in every window, or forces a collection that spoils it and the
+      //   weather runs out of attempts; either fails. A one-off lands in one
+      //   window and leaves the median where it was.
+      //
+      // What this cannot see is what a frame keeps rather than drops: growth
+      // that comes in steps in fewer than half the windows (an array whose
+      // store is copied as it doubles), or objects kept long enough to be
+      // allocated old. `WeatherShading` keeps nothing but two fixed tuples,
+      // and the test below holds it to handing out the same two every frame.
+      //
+      // Each window is less an empty window taken just before it, so what
+      // the measuring itself costs is taken off.
       const attempts: string[] = [];
       const leftBehind: number[] = [];
       for (let attempt = 0; attempt < MAX_ATTEMPTS && leftBehind.length < WINDOWS; attempt += 1) {
@@ -328,12 +353,13 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
           continue;
         }
         attempts.push(`${run.grew - empty.grew} B`);
-        leftBehind.push(Math.max(0, run.grew - empty.grew));
+        leftBehind.push(run.grew - empty.grew);
       }
       const said = `${JSON.stringify(weather)}: ${attempts.join(', ')}`;
       expect(leftBehind.length, said).toBe(WINDOWS);
-      const total = leftBehind.reduce((sum, bytes) => sum + bytes, 0);
-      expect(total, said).toBeLessThan(WINDOWS * WINDOW_BYTES);
+      // The upper median: more than half the windows are at or under it.
+      const median = [...leftBehind].sort((a, b) => a - b)[WINDOWS / 2] as number;
+      expect(median, said).toBeLessThan(WINDOW_BYTES);
       // Non-vacuity: the frames worked out this weather's shade and share.
       expect(light.shade).toEqual(sceneryShadeIn(DAY, weather));
       expect(light.share).toEqual(sunShareIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather));

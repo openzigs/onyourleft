@@ -844,9 +844,9 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 };
 
 /**
- * How many structures a realistic frame may carry: **36** — on both
- * `quality.ts` §`REALISTIC_LADDER` rungs, where the stylised rungs they are
- * copied from carry 240 and 120. #506, option 2 of the three it names.
+ * How many structures a realistic frame may carry: **36** — on every
+ * `quality.ts` §`REALISTIC_LADDER` rung (five since #3282), where the
+ * stylised rungs its top and floor are copied from carry 240 and 120. #506, option 2 of the three it names.
  *
  * ## Where 36 comes from
  *
@@ -1277,8 +1277,8 @@ export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
  * draws no more cars than that, and each car submits its OWN body's triangles
  * at its own level and no other's. That is the difference from a Delivery
  * round's cars, where every obstacle instance submits the whole roster
- * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 640 an
- * instance): 36 cars there would be 59 040. A street's cars are mostly the
+ * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 637 an
+ * instance since #3288): 36 cars there would be 58 932. A street's cars are mostly the
  * lighter saloon (200 and 312), so a real frame is well under this.
  *
  * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, by that constant's own

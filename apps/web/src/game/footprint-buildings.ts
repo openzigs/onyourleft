@@ -6030,6 +6030,26 @@ export const TERRACE_STOREYS: readonly number[] = [3, 4];
 /** The key a terraced block's storeys are hashed under, apart from every other draw. */
 const TERRACE_KEY = 0x16_37;
 
+/**
+ * How far toward its centroid a terraced block's ring is drawn in before it is
+ * tested against the blocks already placed, as a share of the way: **0.05** —
+ * #3416. Drawn in, a block meets a neighbour it only shares a side wall with
+ * not at all (it stands at least 0.3 m off a plot's 12 m depth), and still
+ * meets one planned on the same place, or across part of it.
+ */
+const TERRACE_TWIN_SHRINK = 0.05;
+
+/** The ring drawn in by {@link TERRACE_TWIN_SHRINK} toward its own centroid. */
+function drawnIn(ring: Ring): Float32Array {
+  const { x, z } = centroidOf(ring);
+  const into = new Float32Array(ring.length);
+  for (let at = 0; at + 1 < ring.length; at += 2) {
+    into[at] = (ring[at] as number) + (x - (ring[at] as number)) * TERRACE_TWIN_SHRINK;
+    into[at + 1] = (ring[at + 1] as number) + (z - (ring[at + 1] as number)) * TERRACE_TWIN_SHRINK;
+  }
+  return into;
+}
+
 /** The road's stretches near the block `terracePlans` is deciding. */
 const terraceSegments: number[] = [];
 
@@ -6064,7 +6084,14 @@ const terraceScratch = new Float64Array(LOT_FLOATS);
  * #1719 each was planned with none, and a taller block's side kept its
  * windows down to the pavement against its neighbour.
  *
- * The first lap only: a plan stands in the corridor's frame, once a place.
+ * ⚠️ **One block a place — #3416.** A plan stands in the corridor's frame, so
+ * a road ridden twice (an out-and-back, a lollipop's stem) would be planned
+ * twice: the way back's plots lie on the way out's, and the two blocks of one
+ * place would each take every edge for a party wall with the other, leaving a
+ * roof floating over a strip of wall. So a block is dropped where it overlaps
+ * one already placed ({@link TERRACE_TWIN_SHRINK}); a neighbour that only
+ * shares a side wall with it is not an overlap. The way out's blocks come
+ * first, so they are the ones that stand.
  */
 function terracePlans(
   corridor: WorldCorridor,
@@ -6093,6 +6120,8 @@ function terracePlans(
   const back = front + TERRACE_DEPTH_METRES;
   const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
   const blocks: Measured[] = [];
+  // #3416: every block placed so far, so a road ridden twice is planned once.
+  const placed = new RingGrid([]);
   for (let plot = grid.first; plot <= grid.last; plot += 1) {
     const from = plot * span - shift;
     const to = (plot + 1) * span - shift;
@@ -6136,6 +6165,7 @@ function terracePlans(
       ) {
         continue;
       }
+      if (placed.meets(drawnIn(ring), -1)) continue;
       const draw = uniformFrom(
         slotHash(draws, wrappedCell(grid, plot), TERRACE_KEY + (side === 1 ? 1 : 2)),
         0,
@@ -6172,6 +6202,7 @@ function terracePlans(
       );
       if (typeof measured === 'string') continue;
       blocks.push(measured);
+      placed.add(ring);
     }
   }
   const party = partyWallsOf(blocks);

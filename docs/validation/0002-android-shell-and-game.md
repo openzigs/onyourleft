@@ -4295,3 +4295,47 @@ still leaves **on frame time** with a median well over 45 ms from the reduced ru
 people near and a lower render scale — rather than leaving. The thermal
 forecast is not an input any more (the owner's ruling above), so heat alone cannot end a ride; if the
 phone still leaves, the lines name frame time. Post the table on #2289.
+
+## Part AL — the realistic ladder's five rungs, on the owner's tablet ([#3282](https://github.com/openzigs/onyourleft/issues/3282))
+
+**Added 2026-11-27** by #3282. Checked with `grep '^## Part'` for a duplicate letter first — AK was
+the last, and AL was free. It changes no resistance: no trainer is needed.
+
+Since #3282 the realistic world has five rungs, each shedding one named thing, before a ride falls
+back to the stylised world (`quality.ts` §`REALISTIC_LADDER`): **0** everything; **1** no scenery
+cyclists or litter; **2** no park dressing, holiday decorations, far band of people or parked cars;
+**3** the trees one level of detail down and no mapped building beyond 250 m; **4** the reduced
+resolution and scenery that was the second rung before. No rung lowers the frame cap. The order is
+the issue's proposal, for the owner to approve by screenshot. The pinned Chromium counts each rung's
+held frame (`apps/web/browser/realistic-rungs.ts`); on a Mac on 2026-11-27, at a 320 × 180 page:
+
+| Rung | Wooded `at=2550`: calls / triangles | Village `route=village&at=820`, 31 Oct: calls / triangles |
+|---|---|---|
+| 0 | 34 / 153 486 | 50 / 166 372 |
+| 1 | 34 / 153 486 | 50 / 166 192 |
+| 2 | 34 / 153 486 | 48 / 165 626 |
+| 3 | 31 / 132 316 | 45 / 150 692 |
+| 4 | 31 / 131 008 | 43 / 124 772 |
+
+A wood has nothing rungs 1 and 2 shed, so they draw what rung 0 does there. What a rung saves on the
+tablet is this Part's to say, **on a moving ride**: the owner's page with the ladder held at each
+rung in turn and the rider moving (no `&at=`).
+
+| Step | What to do |
+|---|---|
+| AL1 | Build #3282's branch with the owner's page staged. Cool start (AH3's band), on charge |
+| AL2 | For each rung N from 0 to 4: the owner's page at `?ladder=0&rung=N&seconds=60&route=village&date=2026-10-31`, one minute each, and its `OYL-REALISTIC` line's frame time off `adb logcat` |
+| AL3 | The same five on the default route (`?ladder=0&rung=N&seconds=60`), the wooded road |
+| AL4 | A screenshot of each rung at the village hold (`&at=820&panel=0`), for the owner's approval of the order |
+
+| Rung | Village: frame p50 / p90 / p99, ms | Wooded: frame p50 / p90 / p99, ms | Owner approves the look |
+|---|---|---|---|
+| 0 | | | |
+| 1 | | | |
+| 2 | | | |
+| 3 | | | |
+| 4 | | | |
+
+**Reading it.** Each rung should be no slower than the one above. A rung that saves nothing on the
+tablet is a rung a slow device spends thirty frames on for nothing: say which, and the proposal for
+the owner is to fold its belts into the next. Post the table on #3282.

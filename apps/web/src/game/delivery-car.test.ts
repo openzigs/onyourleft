@@ -45,6 +45,8 @@ import {
   DELIVERY_CAR_POSE_GLSL,
   DELIVERY_OBSTACLE_TRIANGLES,
   DELIVERY_REALISTIC_OBSTACLE_TRIANGLES,
+  DOG_LEG_SWING_RADIANS,
+  DOG_TROT_STRIDE_METRES,
   DeliveryBelt,
   INDICATOR_FLASHES_PER_SECOND,
   MOST_LEAN_RADIANS,
@@ -54,6 +56,7 @@ import {
   deliveryCarBodyVertexDrawn,
   deliveryCarGeometryOf,
   deliveryCarPose,
+  deliveryDogPose,
   deliveryPieceShape,
   indicatorLit,
   type DeliveryCarGeometry,
@@ -409,9 +412,11 @@ describe('the cars in Delivery’s belt — #2847', () => {
     const realistic = new DeliveryBelt('realistic', WORN);
     expect(triangles(realistic)).toBe(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES);
     // The three bodies whole, in place of Kenney's 1 192, which stood in the
-    // stylised car's place less the 26 its trim hides and #2506's two quads.
+    // stylised car's place less the 26 its trim hides and #2506's two quads;
+    // and since #3288 the realistic world's own bin, trolley, cone and dog in
+    // place of the stylised ones (REALISTIC_PROPS, STYLISED_PROPS).
     expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - DELIVERY_OBSTACLE_TRIANGLES).toBe(
-      1_222 - (1_172 - 26) - 4,
+      1_222 - (1_172 - 26) - 4 + (84 + 72 + 42 + 65) - (58 + 100 + 42 + 66),
     );
     // The stylised world keeps its simple car, handed these or not.
     const stylised = new DeliveryBelt('stylised', WORN);
@@ -429,6 +434,11 @@ describe('the cars in Delivery’s belt — #2847', () => {
     // after: 203 263, under the owner's limit (ADR 0085 D-4).
     expect(202_663 + 20 * (1_222 - 1_192)).toBe(203_263);
     expect(203_263).toBeLessThan(DELIVERY_VILLAGE_FRAME_TRIANGLES);
+    // #3288 on the same gate (2026-11-27): 203 252 on main's head, 203 432 with
+    // the realistic props, 3 fewer an obstacle and 12 more a parcel (its
+    // second band of tape), twenty of each. Under the limit, not raised.
+    expect(203_252 + 20 * -3 + 20 * 12).toBe(203_432);
+    expect(203_432).toBeLessThan(DELIVERY_VILLAGE_FRAME_TRIANGLES);
   });
 
   it('draws every face of every body that looks down, its underside too — the owner’s ruling of 2026-11-13 on PR #2518', () => {
@@ -473,7 +483,8 @@ describe('the cars in Delivery’s belt — #2847', () => {
       const key = `${String(pivot.getW(at))}:${String(piece.getZ(at))}/${String(piece.getW(at))}/${String(piece.getY(at))}/${String(glow.getX(at))}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       const body = pivot.getW(at);
-      if (piece.getZ(at) >= 2) {
+      // #3288: a car's wheels; a realistic dog's legs (4, 5) are no car's.
+      if (piece.getZ(at) >= 2 && body >= 0) {
         // A wheel's pivot is a hub: at its body's wheels' radius, off the middle.
         const radius = GEOMETRY.bodies[body]?.wheelRadius ?? Number.NaN;
         expect(pivot.getY(at)).toBeCloseTo(radius, 5);
@@ -505,9 +516,12 @@ describe('the cars in Delivery’s belt — #2847', () => {
       expect(of('indicator-left') + of('indicator-right'), body.name).toBe(8 * 3);
     });
     // Everything else: the hazard markers glow, 6 each over #2396's three
-    // kinds, #2364's dog and rider and #2506's car pulling out.
-    expected['-1:0/0/0/0'] = (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - 1_222 - 36) * 3;
+    // kinds, #2364's dog and rider and #2506's car pulling out; and #3288's
+    // dog's four legs, 6 each, marked to swing in their diagonal pairs.
+    expected['-1:0/0/0/0'] = (DELIVERY_REALISTIC_OBSTACLE_TRIANGLES - 1_222 - 36 - 24) * 3;
     expected['-1:0/0/0/1'] = 36 * 3;
+    expected['-1:4/0/0/0'] = 12 * 3;
+    expected['-1:5/0/0/0'] = 12 * 3;
     expect(Object.fromEntries(counts)).toEqual(expected);
     belt.dispose();
   });
@@ -788,8 +802,10 @@ describe('a car’s pose — #2540', () => {
     const piece = geometry.getAttribute('oylPiece');
     const also = geometry.getAttribute('oylPieceAlso');
     const carKinds = new Set<number>();
+    const pivot = geometry.getAttribute('oylCarPivot');
     for (let at = 0; at < piece.count; at += 1) {
-      if (piece.getZ(at) >= 1) carKinds.add(also.getX(at));
+      // #3288: a car's vertices, not a realistic dog's legs, which also turn.
+      if (piece.getZ(at) >= 1 && pivot.getW(at) >= 0) carKinds.add(also.getX(at));
     }
     expect([...carKinds]).toEqual([Object.keys(OBSTACLE_KINDS).indexOf('car-pulling-out')]);
     belt.dispose();
@@ -925,5 +941,203 @@ describe('the pose’s shader text, run — #2540', () => {
     expect(program.call('oylCarLampLevel', 1, [0, 1])).toBeCloseTo(0.08, 9);
     expect(program.call('oylCarLampLevel', 2, [0, 1])).toBeCloseTo(1.25, 9);
     expect(program.call('oylCarLampLevel', 2, [1, 0])).toBeCloseTo(0.08, 9);
+  });
+});
+
+/** The triangles each realistic prop draws, its hazard marker's 6 aside — #3288. */
+const REALISTIC_PROPS = { bin: 84, trolley: 72, cone: 42, dog: 65 } as const;
+
+/** The stylised world's, as `delivery-belt.test.ts` holds them, for the realistic ones' cost. */
+const STYLISED_PROPS = { bin: 58, trolley: 100, cone: 42, dog: 66 } as const;
+
+/** One vertex of a kind in the roster: where it is, its part, its pivot and whether it glows. */
+interface RosterVertex {
+  readonly at: readonly [number, number, number];
+  readonly part: number;
+  readonly pivot: readonly [number, number, number];
+  readonly glows: boolean;
+}
+
+describe('the realistic world’s own props — #3288', () => {
+  const ROSTER = Object.keys(OBSTACLE_KINDS) as readonly (keyof typeof OBSTACLE_KINDS)[];
+  const DOG = ROSTER.indexOf('dog');
+
+  /** Each vertex of the roster's `kind` in `geometry`, read off the attributes three uploads. */
+  function verticesOf(
+    geometry: ReturnType<typeof deliveryPieceShape>,
+    kind: number,
+  ): readonly RosterVertex[] {
+    const position = geometry.getAttribute('position');
+    const piece = geometry.getAttribute('oylPiece');
+    // The stylised world's roster carries no pivots: nothing of it turns.
+    const pivot = geometry.hasAttribute('oylCarPivot')
+      ? geometry.getAttribute('oylCarPivot')
+      : undefined;
+    const glow = geometry.getAttribute('oylGlow');
+    const out: RosterVertex[] = [];
+    for (let at = 0; at < position.count; at += 1) {
+      if (piece.getX(at) !== kind) continue;
+      out.push({
+        at: [position.getX(at), position.getY(at), position.getZ(at)],
+        part: piece.getZ(at),
+        pivot: pivot ? [pivot.getX(at), pivot.getY(at), pivot.getZ(at)] : [0, 0, 0],
+        glows: glow.getX(at) === 1,
+      });
+    }
+    return out;
+  }
+
+  it('draws each prop over its own collision box, standing on the road, as fittedToFootprint holds every kind', () => {
+    const shape = deliveryPieceShape('obstacles', true, WORN);
+    for (const kind of ['bin', 'trolley', 'cone', 'dog', 'oncoming-rider'] as const) {
+      const corners = verticesOf(shape, ROSTER.indexOf(kind)).map((vertex) => vertex.at);
+      const axis = (index: 0 | 1 | 2): number[] => corners.map((corner) => corner[index]);
+      const { halfWidth: across, halfLength: along } = OBSTACLE_KINDS[kind];
+      // x across the road, y up, z along it, as the stylised world's are.
+      expect(Math.min(...axis(0)), kind).toBeCloseTo(-across, 6);
+      expect(Math.max(...axis(0)), kind).toBeCloseTo(across, 6);
+      expect(Math.min(...axis(2)), kind).toBeCloseTo(-along, 6);
+      expect(Math.max(...axis(2)), kind).toBeCloseTo(along, 6);
+      expect(Math.min(...axis(1)), kind).toBeCloseTo(0, 6);
+      expect(Math.max(...axis(1)), kind).toBeGreaterThan(0.5);
+    }
+    shape.dispose();
+  });
+
+  it('is the realistic world’s own, inside the roster’s triangles, and leaves the stylised world’s props as they were', () => {
+    const count = (shape: ReturnType<typeof deliveryPieceShape>): Record<string, number> => {
+      const counts: Record<string, number> = {};
+      for (const kind of ['bin', 'trolley', 'cone', 'dog'] as const) {
+        counts[kind] =
+          verticesOf(shape, ROSTER.indexOf(kind)).filter((vertex) => !vertex.glows).length / 3;
+      }
+      return counts;
+    };
+    const realistic = deliveryPieceShape('obstacles', true, WORN);
+    const stylised = deliveryPieceShape('obstacles', true);
+    expect(count(realistic)).toEqual(REALISTIC_PROPS);
+    expect(count(stylised)).toEqual(STYLISED_PROPS);
+    // No more than the stylised four, so the roster every instance submits did not grow.
+    const sum = (props: Readonly<Record<string, number>>): number =>
+      Object.values(props).reduce((total, each) => total + each, 0);
+    expect(sum(REALISTIC_PROPS)).toBeLessThanOrEqual(sum(STYLISED_PROPS));
+    expect(DELIVERY_REALISTIC_OBSTACLE_TRIANGLES).toBeLessThanOrEqual(1_640);
+    // Not the stylised shapes in another paint: the cone, the same count, stands elsewhere.
+    const corners = (shape: ReturnType<typeof deliveryPieceShape>): string[] =>
+      verticesOf(shape, ROSTER.indexOf('cone')).map((vertex) => vertex.at.join(','));
+    expect(corners(realistic)).not.toEqual(corners(stylised));
+    realistic.dispose();
+    stylised.dispose();
+  });
+
+  it('trots a dog’s legs through the distance it has run, and stills them when it stops', () => {
+    // Standing square before it sets out, and with no distance at all.
+    expect(deliveryDogPose(0)).toEqual(deliveryDogPose(undefined));
+    expect(deliveryDogPose(0).roll).toBe(0);
+    // A quarter of a trot on: the legs at the far end of their swing.
+    expect(deliveryDogPose(DOG_TROT_STRIDE_METRES / 4).roll).toBeCloseTo(DOG_LEG_SWING_RADIANS, 9);
+    expect(deliveryDogPose((3 * DOG_TROT_STRIDE_METRES) / 4).roll).toBeCloseTo(
+      -DOG_LEG_SWING_RADIANS,
+      9,
+    );
+    // They move as the distance does, and never past their swing.
+    const rolls = Array.from({ length: 41 }, (_, step) => deliveryDogPose(step * 0.05).roll);
+    expect(new Set(rolls.map((roll) => roll.toFixed(6))).size).toBeGreaterThan(10);
+    for (const roll of rolls) expect(Math.abs(roll)).toBeLessThanOrEqual(DOG_LEG_SWING_RADIANS);
+    // Stopped: the same distance on every frame after, the same legs.
+    expect(deliveryDogPose(2.3)).toEqual(deliveryDogPose(2.3));
+    // Nothing else of it moves: never pitched, leaned or turned (ADR 0065 D-10.6).
+    for (const ran of [0.1, 0.37, 5.2, Number.NaN]) {
+      expect(deliveryDogPose(ran)).toMatchObject({
+        steer: 0,
+        pitch: 0,
+        lean: 0,
+        left: 0,
+        right: 0,
+      });
+    }
+  });
+
+  it('hands a dog’s instance its trot, frame on frame, and every other prop none', () => {
+    const belt = new DeliveryBelt('realistic', WORN);
+    const dog = (ranMetres: number): DeliveryObstaclePiece => ({
+      x: 0,
+      y: 0,
+      z: 20,
+      yaw: 0,
+      kind: 'dog',
+      index: 1,
+      ranMetres,
+    });
+    const bin: DeliveryObstaclePiece = { x: 0, y: 0, z: 10, yaw: 0, kind: 'bin', index: 0 };
+    const rollOf = (ranMetres: number): number => {
+      belt.update({ parcels: [], markers: [], obstacles: [bin, dog(ranMetres)] });
+      const [drawnBin, drawnDog] = belt.drawn('obstacles');
+      expect(drawnBin?.pose).toBeUndefined();
+      // As uploaded: the bin's instance at rest, the dog's its own.
+      const poses = belt.meshOf('obstacles').geometry.getAttribute('oylCarPose');
+      expect(poses.getX(0)).toBe(0);
+      expect(poses.getX(1)).toBeCloseTo(drawnDog?.pose?.roll ?? Number.NaN, 6);
+      return drawnDog?.pose?.roll ?? Number.NaN;
+    };
+    expect(rollOf(DOG_TROT_STRIDE_METRES / 4)).toBeCloseTo(DOG_LEG_SWING_RADIANS, 6);
+    expect(rollOf(DOG_TROT_STRIDE_METRES / 2)).toBeCloseTo(0, 6);
+    expect(rollOf(0.6)).not.toBeCloseTo(rollOf(0.4), 3);
+    // Stopped where it ran to: the next frame draws the same legs.
+    expect(rollOf(0.6)).toBeCloseTo(rollOf(0.6), 9);
+    belt.dispose();
+  });
+
+  it('swings the diagonal pairs against each other about their hips, the dog upright, whole and inside its footprint', () => {
+    const program = new GlslProgram(DELIVERY_CAR_POSE_GLSL);
+    const shape = deliveryPieceShape('obstacles', true, WORN);
+    const dog = verticesOf(shape, DOG).filter((vertex) => !vertex.glows);
+    const { halfWidth: across, halfLength: along } = OBSTACLE_KINDS.dog;
+    // Four legs, two marked to swing with the pose and two against it.
+    const legs = dog.filter((vertex) => vertex.part >= 4);
+    expect(legs.filter((vertex) => vertex.part === 4).length / 3).toBe(12);
+    expect(legs.filter((vertex) => vertex.part === 5).length / 3).toBe(12);
+    expect(new Set(legs.map((vertex) => vertex.pivot.join(','))).size).toBe(4);
+    const posed = (roll: number): number[][] =>
+      dog.map((vertex) => {
+        const turned = program.call(
+          'oylCarTurn',
+          vertex.at.map((value, axis) => value - (vertex.pivot[axis] as number)),
+          vertex.part,
+          [roll, 0, 0, 0],
+        ) as number[];
+        return turned.map((value, axis) => value + (vertex.pivot[axis] as number));
+      });
+    for (const roll of [DOG_LEG_SWING_RADIANS, -DOG_LEG_SWING_RADIANS, 0.2]) {
+      const now = posed(roll);
+      now.forEach((corner, index) => {
+        const vertex = dog[index] as RosterVertex;
+        const [x, y, z] = corner as [number, number, number];
+        // Upright and inside its box: nothing under the road, nothing past its footprint.
+        expect(y).toBeGreaterThanOrEqual(-1e-6);
+        expect(Math.abs(x)).toBeLessThanOrEqual(across + 1e-6);
+        expect(Math.abs(z)).toBeLessThanOrEqual(along + 1e-6);
+        // Whole: its body, head, ears and tail never move, and a leg turns about
+        // its hip, so each of its corners keeps its distance from it.
+        if (vertex.part < 4) {
+          vertex.at.forEach((value, axis) => {
+            expect(corner[axis]).toBeCloseTo(value, 9);
+          });
+          return;
+        }
+        const reach = (point: readonly number[]): number =>
+          Math.hypot(...point.map((value, axis) => value - (vertex.pivot[axis] as number)));
+        expect(reach(corner)).toBeCloseTo(reach(vertex.at), 5);
+      });
+      // The diagonal pairs swing opposite ways: a lead foot forward, a trail foot back.
+      const footMoved = (part: number): number =>
+        dog.reduce((sum, vertex, index) => {
+          if (vertex.part !== part || vertex.at[1] > 0.05) return sum;
+          return sum + ((now[index] as number[])[0] as number) - vertex.at[0];
+        }, 0);
+      expect(Math.sign(footMoved(4))).toBe(Math.sign(roll));
+      expect(Math.sign(footMoved(5))).toBe(-Math.sign(roll));
+    }
+    shape.dispose();
   });
 });

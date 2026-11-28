@@ -52,7 +52,9 @@ import {
   DISPLAY_RATE,
   INITIAL_QUALITY,
   nextWorldQuality,
+  REALISTIC_LADDER,
   worldRung,
+  type QualityLevel,
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
@@ -215,6 +217,23 @@ const LOOP_METRES = 3_500;
 const TOWN_FROM_METRES = 900;
 const TOWN_METRES = 1_200;
 
+/** The canvas a gate's rung walk draws at — #3282: the page's 16:9 at 320 × 180. */
+const RUNG_WALK_SIZE = { width: 320, height: 180 } as const;
+
+/** What one rung's held frame submitted — #3282. @see Window.__oylRealisticRungs */
+export interface RungCost {
+  /** The rung's own label. */
+  readonly rung: string;
+  /** Which world the view drew it in: `'stylised'` means the world never loaded. */
+  readonly world: string;
+  /** Draw calls, counted at the WebGL entry points. */
+  readonly calls: number;
+  /** Triangles, counted there too. */
+  readonly triangles: number;
+  /** The rung's last frame as a PNG data URL, when asked for. */
+  readonly photo?: string;
+}
+
 /** One window's numbers. */
 export interface RealisticSample {
   readonly world: string;
@@ -334,6 +353,20 @@ declare global {
      * Only on `town=level`, the fixture level, with its own round's houses.
      * @see realistic/round.ts
      */
+    /**
+     * #3282: the page's held frame drawn at every rung of the realistic
+     * ladder in turn, top first, each `frames` times so the trees' hand-over
+     * and the mapped buildings' refill have settled, and what its last draw
+     * submitted, counted at the WebGL entry points — with `photograph`, and a
+     * PNG of each at the page's size, for the owner's look at every rung from
+     * one load. Without it the walk draws at a 320 × 180 canvas, the page's
+     * own 16:9 shape, which decides the calls and triangles as the size does
+     * not, so a gate's walk is cheap. The page's own rung and size are put
+     * back after. Only on a plain held load: `?at=`, no
+     * lever, layer, race or round, whose frames this does not rebuild.
+     * @see RungCost
+     */
+    __oylRealisticRungs?: (frames: number, photograph?: boolean) => readonly RungCost[];
     __oylRealisticRound?: (leads: readonly number[]) => {
       /** The houses on the round: the fixture level's own `round.houses`. */
       readonly houses: number;
@@ -998,6 +1031,57 @@ async function run(): Promise<void> {
           : { race: raceDrawnOf(view, drawn) }),
       });
     }
+  };
+  // #3282: the held frame at every realistic rung in turn, each drawn
+  // `frames` times, and what the last draw of each submitted. The levers that
+  // live on the realistic belts are applied again after each rung, as the
+  // loop applies them after the ladder moves.
+  window.__oylRealisticRungs = (frames, photograph = false) => {
+    const along = config.at;
+    if (along === undefined) throw new Error('the rungs are measured on the held frame of ?at=');
+    if (
+      config.leversOff.length > 0 ||
+      config.layersOff.length > 0 ||
+      config.race !== undefined ||
+      config.delivery !== undefined
+    ) {
+      throw new Error('the rungs are measured on a plain load: no lever, layer, race or round');
+    }
+    const applyRung = (at: WorldQualityState): void => {
+      view.setQuality(drawnRung(at));
+      foliageOrderedOf(view, foliageOrdered);
+      firDepthPrepassOf(view, firPrepass);
+      nearTreeFadeOf(view, nearTreeFade);
+      groundBlendOf(view, 1, 1, 1, crag);
+    };
+    // Small unless the owner wants pictures. @see Window.__oylRealisticRungs
+    if (!photograph) view.resize(RUNG_WALK_SIZE.width, RUNG_WALK_SIZE.height);
+    const costs = REALISTIC_LADDER.map((rung, level): RungCost => {
+      applyRung({ realistic: true, quality: { level: level as QualityLevel, pressure: 0 } });
+      let calls = 0;
+      let triangles = 0;
+      for (let frame = 0; frame < frames; frame += 1) {
+        // The loop's frame at this rung's budget, as `GameView` builds it.
+        view.render(
+          rideFrame({
+            profile,
+            origin,
+            distance: along,
+            elapsed: 0,
+            rung,
+            ...(town === undefined ? {} : { town }),
+          }),
+        );
+        calls = counter.takeCalls();
+        triangles = counter.takeTriangles();
+      }
+      const cost = { rung: rung.label, world: drawnWorldOf(view), calls, triangles };
+      // Before the next rung draws over it.
+      return photograph ? { ...cost, photo: canvas.toDataURL('image/png') } : cost;
+    });
+    applyRung(state);
+    resize();
+    return costs;
   };
   // #2453: the last frame drawn again, without one piece and with it, read
   // back between the two renders of this one call, so no other frame comes
