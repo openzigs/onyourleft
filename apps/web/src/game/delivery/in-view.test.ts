@@ -443,6 +443,45 @@ describe('a Delivery frame’s pieces — #1814', () => {
     expect(drawn[2]?.x).toBeCloseTo(2.4, 6);
   });
 
+  it('hands a dog how far it has run, growing as it crosses and still once it stops, and no other kind any — #3288', () => {
+    const dog: Obstacle = { kind: 'dog', along: RIDER + 50, from: 'left', startAfter: 1 };
+    const cone: Obstacle = { kind: 'cone', along: RIDER + 60, from: 'right', startAfter: 0 };
+    const hazards: readonly Obstacle[] = [dog, cone];
+    let state = startObstacles(hazards);
+    const ran: number[] = [];
+    for (let tick = 0; tick < 200; tick += 1) {
+      state = stepObstacles(state, {
+        rider: { along: RIDER, lateral: 0, speed: 0 },
+        obstacles: hazards,
+      }).state;
+      const [drawnDog, drawnCone] = deliveryInView(
+        input({ obstacles: hazards, obstacleState: state }),
+      ).obstacles;
+      expect(drawnCone).not.toHaveProperty('ranMetres');
+      ran.push(drawnDog?.ranMetres ?? Number.NaN);
+      // The distance between where it is drawn and where it waited.
+      expect(drawnDog?.ranMetres).toBeCloseTo(
+        Math.abs(
+          (drawnDog?.x ?? Number.NaN) -
+            (deliveryInView(input({ obstacles: [dog], obstacleState: startObstacles([dog]) }))
+              .obstacles[0]?.x ?? Number.NaN),
+        ),
+        6,
+      );
+    }
+    // Waiting off the kerb first, it has run nothing.
+    expect(ran[0]).toBe(0);
+    // Then more on every frame, never less.
+    ran.slice(1).forEach((each, index) => {
+      expect(each).toBeGreaterThanOrEqual(ran[index] as number);
+    });
+    expect(new Set(ran).size).toBeGreaterThan(20);
+    // Across: from off one kerb to off the other, and then it stops, its legs with it.
+    const whole = Math.abs(obstacleAcross(dog, 1e6) - obstacleAcross(dog, 0));
+    expect(ran.at(-1)).toBeCloseTo(whole, 9);
+    expect(ran.at(-2)).toBe(ran.at(-1));
+  });
+
   it('places on a bend by distance along the corridor, across its own normal, at the road’s height', () => {
     const corner = plannerCornerRoute(90);
     const corridor = roadCorridor(corner, corridorOrigin(corner), 400);
