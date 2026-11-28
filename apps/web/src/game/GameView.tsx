@@ -4916,7 +4916,8 @@ function GameScreen({
       // when this loop does not run. It READS the ride and writes nothing the
       // trainer is sent (DL5): the gradient above samples the simulation alone, and
       // is sampled BEFORE this, so a fault in the round cannot stop the loop
-      // short of this frame's grade write.
+      // short of this frame's grade write — and since #3404 it does not stop
+      // the loop at all: `tick` ends the round and rides on.
       // #3153: a capture's scripted presses, through the HUD's own ports, so
       // each is taken as a rider's press is.
       const cues = captureCuesRef.current;
