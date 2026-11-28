@@ -625,8 +625,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   bots' alone: it hands the rider a standing and nothing else, and nothing here changes their
   speed (D-4.5); nothing reaches a trainer (D-6.1). Built in
   `packages/domain/src/group-ride/no-drop.ts` and `step.ts`. (#3301)
-- **2026-11-28** — **Proposed, not yet accepted by the owner. On a loop, D-2.1's *"average speed
-  over the whole route"* is the average over each lap.** ADR 0101 does not mention loops. As
+- **2026-11-28** — **Accepted by the owner on 2026-11-28. On a loop, D-2.1's *"average speed
+  over the whole route"* is the average over each lap, and the group rides until the rider ends
+  the ride.** ADR 0101 does not mention loops. As
   first built, the plan covered one pass of the route and clamped the odometer to it, so from a
   loop's second lap the group rode the last cell's speed and the D-2.5 ledger stopped. #3364
   therefore offered no group on a loop. #3369 now has the plan **read at the odometer mod the
@@ -635,8 +636,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   ledger therefore keeps advancing lap after lap, and D-2.5 and D-2.6 hold as written. A loop's
   number of laps is open-ended, so the plan is still solved once for one lap (D-2.2): the
   target is the group's average over every lap, and so over any whole number of laps. A
-  target the group cannot make on one lap is refused just as on a route with a finish. The
-  questions for the owner:
+  target the group cannot make on one lap is refused just as on a route with a finish. Two
+  questions were put to the owner, each with a recommended answer:
   1. **Is "the average over each lap" what D-2.1 means on a loop?** *Recommended: yes.* The
      only other reading is the average over a number of laps that the rider names in advance.
      That needs a laps control that the group ride does not have, and it ends the group at a
@@ -644,6 +645,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   2. **Should a group on a loop ever end by itself?** *Recommended: no.* It rides until the
      rider ends the ride, like a free ride on a loop. On a route with a finish it still ends at
      the finish.
+
+  The owner accepted both recommended answers on 2026-11-28, on pull request #3403:
+
+  > **Owner ruling (2026-11-28):** on a loop, the group holds the target average **over each
+  > lap**, and it **rides until the rider ends the ride**. On a route with a finish it still
+  > ends at the finish.
 
   Nothing here reaches a trainer (D-6.1). Built in `packages/domain/src/group-ride/plan.ts`;
   the `loop` reason is gone from `apps/web/src/game/group-ride/choice.ts`

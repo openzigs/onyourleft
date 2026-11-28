@@ -64,8 +64,8 @@
  * the laps before it, a whole lap's planned time each, so the ledger keeps
  * advancing. The target is then the average over **each lap**, and so over
  * every whole number of laps (ADR 0101 D-2.1, amendment of 2026-11-28,
- * proposed). The wrap is `%`, which IEEE 754 computes exactly, so no rounding
- * can differ between two machines.
+ * accepted by the owner). The wrap is `%`, which IEEE 754 computes exactly,
+ * so no rounding can differ between two machines.
  *
  * ## Room-portable, and from no recorded ride
  *
