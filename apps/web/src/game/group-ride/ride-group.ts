@@ -37,14 +37,26 @@
  * physics is never tethered (ADR 0101 D-4.5). The drawing leaves the rider
  * where the ride put them and lays the bots out around them.
  *
- * ## The drawing is the lap race's pack layout
+ * ## The drawing is the lap race's pack layout, in single file
  *
- * `lap-race/pack-layout.ts` (#2517, #3268): rows a bike length apart, no
- * bicycle inside another, the rider never moved. Every member is handed in
- * in one lane, and the layout draws the riders a wheel gap apart as a pack,
- * up to three abreast in a row, as it draws a race's. A drawing only: nothing
- * reads it back. **Single file, and the retreating rider to one side, are
- * #3304's.**
+ * `lap-race/pack-layout.ts` (#2517, #3268) with its `singleFile` set (#3304):
+ * a row to each member of the line, a bike length and the wheel gap behind
+ * the one ahead, no bicycle inside another, the rider never moved. The line
+ * rides in {@link GROUP_LINE_LANE}. A drawing only: nothing reads it back,
+ * and no lane or place across enters the rules or the draft (ADR 0101 D-3.3).
+ *
+ * **The member who has pulled off** (`rotation.aside`: `drifting-back`, then
+ * `latching`) is drawn one lane to the side, in {@link GROUP_PULL_OFF_LANE},
+ * beside the line and no row of it, so the line keeps its shape and they
+ * drift back past it. Back in the line by the rules, they come across once
+ * the line has drawn them a bike length of room, and not before.
+ *
+ * **When that member is the rider, it is the rider's own lane that moves**,
+ * by `lanes.ts` §`stepSteer` at its 0.4 s a lane, out through
+ * `steeredLateral` as a race's steer is ({@link GroupRideSession.riderSteer}).
+ * The bots stay in the line's lane. The lane follows the rider's role, so
+ * #3307's press needs to reach the rules only (`GroupRideInput.riderSignal`).
+ * A bot moves across at the layout's own pace for a bot (#2665).
  *
  * ## The group's make-up
  *
@@ -91,11 +103,13 @@ import {
 import { groupRidePhysics } from '@onyourleft/physics';
 import { GROUP_RIDE_LOG_MOST, type GroupRideFact, type GroupRideLogEntry } from '@onyourleft/store';
 
+import { LANE_OFFSETS_METRES, sidewaysSpeedOf, stepSteer, type SteerState } from '../lanes';
 import {
+  BIKE_LENGTH_METRES,
   drawnLateral,
   drawnShift,
   drawnSway,
-  gridPackLayout,
+  NO_PACK_LAYOUT,
   stepPackLayout,
   type PackLayout,
   type PackRacer,
@@ -129,6 +143,27 @@ export const GROUP_BOT_STRENGTH_SPREAD = 0.15;
 
 /** A bot's W′, joules: **20 kJ**, the scripted rides' figure. */
 export const GROUP_BOT_W_PRIME_JOULES = 20_000;
+
+/**
+ * The lane the line rides in, an index into `lanes.ts`
+ * §`LANE_OFFSETS_METRES`: **the middle one**, where a group ride has drawn
+ * its rider since #3303.
+ */
+export const GROUP_LINE_LANE = 1;
+
+/**
+ * The lane a member who has pulled off is drawn in while they drift back:
+ * **one lane to the left** of the line, the one fixed side of Phase 1 (ADR
+ * 0101 D-3.7, Q6). Proposed: which side is the owner's to state on the ride
+ * (#3305), and this is the one figure to change.
+ */
+export const GROUP_PULL_OFF_LANE = 0;
+
+const LINE_LATERAL = LANE_OFFSETS_METRES[GROUP_LINE_LANE] as number;
+const PULL_OFF_LATERAL = LANE_OFFSETS_METRES[GROUP_PULL_OFF_LANE] as number;
+
+/** Two bicycles this near along the road are nose to tail at best, less a rounding. */
+const ROOM_METRES = BIKE_LENGTH_METRES - 1e-6;
 
 /** The line of a group of `bots`, front first, the rider on the last wheel. */
 export function groupLine(
@@ -183,6 +218,14 @@ export interface GroupRideSession {
   readonly role: RiderRole;
   /** Where the pack layout draws each bot. */
   readonly pack: PackLayout;
+  /**
+   * The rider's own lane and where they are drawn across the road: the
+   * line's, or the pull-off lane while they are the one who has pulled off.
+   * A drawing only (`lanes.ts`).
+   */
+  readonly riderSteer: SteerState;
+  /** Where the rider was drawn across a tick before: the frames between two ticks draw between. */
+  readonly steeredBefore: number;
   /** The log so far. @see GroupRideFact.log */
   readonly log: readonly GroupRideLogEntry[];
   /** Whether a change was left out of {@link log} because it was full. */
@@ -208,17 +251,74 @@ function drawGroupSeed(): number {
   return drawn[0] as number;
 }
 
-/** The line as the pack layout reads it: every member in one lane, at its odometer. */
+/** What the drawing reads of a session between ticks. */
+type Drawn = Pick<GroupRideSession, 'botIds' | 'pack' | 'riderSteer'>;
+
+/** Whether a member was drawn in the pull-off lane, or on its way there, on the tick before. */
+function wasOut(drawn: Drawn, id: string): boolean {
+  return id === GROUP_RIDE_RIDER_ID
+    ? drawn.riderSteer.lane === GROUP_PULL_OFF_LANE
+    : drawn.pack.get(id)?.aim === PULL_OFF_LATERAL;
+}
+
+/**
+ * Which members are drawn in the pull-off lane this tick: the one who has
+ * pulled off, for as long as the rules have them aside; and after that, one
+ * still out there until the line has drawn a bike length of room for them,
+ * so nobody comes across into another bicycle.
+ */
+function membersOut(drawn: Drawn, state: GroupRideState, rider: MemberView): ReadonlySet<string> {
+  const along = new Map<string, number>([[GROUP_RIDE_RIDER_ID, rider.distanceM]]);
+  for (const id of drawn.botIds) {
+    const bot = state.bots[id];
+    if (bot !== undefined) along.set(id, bot.distanceM + (drawn.pack.get(id)?.shift ?? 0));
+  }
+  const out = new Set<string>();
+  for (const [id, at] of along) {
+    if (state.rotation.aside === id) {
+      out.add(id);
+      continue;
+    }
+    if (!wasOut(drawn, id)) continue;
+    const room = [...along].every(
+      ([other, otherAt]) => other === id || Math.abs(otherAt - at) >= ROOM_METRES,
+    );
+    if (!room) out.add(id);
+  }
+  return out;
+}
+
+/** The lane the rider is drawn steering to this tick. */
+function riderLane(out: ReadonlySet<string>): number {
+  return out.has(GROUP_RIDE_RIDER_ID) ? GROUP_PULL_OFF_LANE : GROUP_LINE_LANE;
+}
+
+/**
+ * The line as the pack layout reads it: every member at its odometer, in the
+ * line's lane or the pull-off lane, and the one the rules have aside beside
+ * the line. The rider is where their own steer has them.
+ */
 function packField(
-  session: Pick<GroupRideSession, 'botIds'>,
+  drawn: Drawn,
   state: GroupRideState,
   rider: MemberView,
+  out: ReadonlySet<string>,
   before?: GroupRideState,
 ): PackRacer[] {
+  const aside = state.rotation.aside;
   const field: PackRacer[] = [
-    { id: GROUP_RIDE_RIDER_ID, along: rider.distanceM, lateral: 0, speed: rider.speedMps },
+    {
+      id: GROUP_RIDE_RIDER_ID,
+      along: rider.distanceM,
+      lateral: drawn.riderSteer.offset,
+      // Where they are steering to, so the layout keeps the bots clear of the
+      // rider's move across, as a race's does.
+      heading: LANE_OFFSETS_METRES[drawn.riderSteer.lane],
+      speed: rider.speedMps,
+      beside: aside === GROUP_RIDE_RIDER_ID,
+    },
   ];
-  for (const id of session.botIds) {
+  for (const id of drawn.botIds) {
     const bot = state.bots[id];
     if (bot === undefined) continue;
     const was = before?.bots[id];
@@ -226,8 +326,9 @@ function packField(
       id,
       along: bot.distanceM,
       ...(was === undefined ? {} : { alongBefore: was.distanceM }),
-      lateral: 0,
+      lateral: out.has(id) ? PULL_OFF_LATERAL : LINE_LATERAL,
       speed: bot.speedMps,
+      beside: aside === id,
     });
   }
   return field;
@@ -252,6 +353,7 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
   const phase = state.rotation.phase;
   const role = state.rotation.roles[GROUP_RIDE_RIDER_ID] ?? 'last-wheel';
   const groupSpeedMps: number = plan.speedNowAt(input.riderDistance);
+  const riderSteer: SteerState = { lane: GROUP_LINE_LANE, offset: LINE_LATERAL };
   return {
     choice,
     seed,
@@ -263,7 +365,17 @@ export function startGroupRideSession(input: GroupRideSessionStart): GroupRideSe
     groupSpeedMps,
     phase,
     role,
-    pack: gridPackLayout(packField({ botIds }, state, rider), GROUP_RIDE_RIDER_ID),
+    // In single file from the press: the bots nose to tail ahead of the rider.
+    pack: stepPackLayout(
+      packField({ botIds, pack: NO_PACK_LAYOUT, riderSteer }, state, rider, new Set()),
+      GROUP_RIDE_RIDER_ID,
+      NO_PACK_LAYOUT,
+      0,
+      undefined,
+      true,
+    ),
+    riderSteer,
+    steeredBefore: LINE_LATERAL,
     log: [{ at: 0, phase, role, groupSpeed: groupSpeedMps }],
     logCut: false,
   };
@@ -303,6 +415,7 @@ export function stepGroupRideSession(
   const from = session.rider;
   const to = step.rider;
   let { state, pack, riderDraft, groupSpeedMps, phase, role, logCut } = session;
+  let { riderSteer, steeredBefore } = session;
   let log = session.log;
   for (let tick = 0; tick < ticks; tick += 1) {
     const share = tick / ticks;
@@ -332,19 +445,22 @@ export function stepGroupRideSession(
     }
     // The drawing, a tick on: the rider where this tick's end has them.
     const end = (tick + 1) / ticks;
+    const riderAtEnd: MemberView = {
+      distanceM: from.distanceM + (to.distanceM - from.distanceM) * end,
+      speedMps: from.speedMps + (to.speedMps - from.speedMps) * end,
+    };
+    // Who is drawn in the pull-off lane, from the rules' word and the drawing
+    // a tick before; and the rider's own lane a tick on, by the steer's step.
+    const out = membersOut({ botIds: session.botIds, pack, riderSteer }, state, riderAtEnd);
+    steeredBefore = riderSteer.offset;
+    riderSteer = stepSteer({ ...riderSteer, lane: riderLane(out) }, SIMULATION_STEP_SECONDS);
     pack = stepPackLayout(
-      packField(
-        session,
-        state,
-        {
-          distanceM: from.distanceM + (to.distanceM - from.distanceM) * end,
-          speedMps: from.speedMps + (to.speedMps - from.speedMps) * end,
-        },
-        before,
-      ),
+      packField({ botIds: session.botIds, pack, riderSteer }, state, riderAtEnd, out, before),
       GROUP_RIDE_RIDER_ID,
       pack,
       SIMULATION_STEP_SECONDS,
+      undefined,
+      true,
     );
   }
   return {
@@ -356,14 +472,17 @@ export function stepGroupRideSession(
     phase,
     role,
     pack,
+    riderSteer,
+    steeredBefore,
     log,
     logCut,
   };
 }
 
 /**
- * Where a frame draws the group: the bots through the lap race's pack layout,
- * and the rider where the ride has them, in the line's lane.
+ * Where a frame draws the group: the bots through the lap race's pack layout
+ * in single file, and the rider where the ride has them along the road, in
+ * the lane their own steer has them in.
  * `riderDistance` is the rider's drawn odometer (`simulation.ts` §`drawnAt`,
  * a step behind the newest) and `behindSeconds` how far behind the newest
  * step that is, so each bot is drawn as far back along its own speed and the
@@ -400,10 +519,15 @@ export function groupRideDrawing(
     });
   });
   return {
-    // The rider is never moved: their own drawn odometer, in the line's lane.
+    // The rider is never moved along the road: their own drawn odometer. Across
+    // it they are where their own steer has them, between the tick before's
+    // place and the newest's, as the bots are.
     riderDistance,
-    steeredLateral: 0,
-    steeringSpeed: 0,
+    steeredLateral:
+      session.riderSteer.offset +
+      (session.steeredBefore - session.riderSteer.offset) *
+        Math.min(1, Math.max(0, behindSeconds / SIMULATION_STEP_SECONDS)),
+    steeringSpeed: sidewaysSpeedOf(session.riderSteer),
     riderHit: undefined,
     raceBots,
   };
