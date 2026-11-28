@@ -66,8 +66,9 @@
 #   `coverage` job, on a runner of its own: after browser shard 1 in `heavy`
 #   it took that job to 1 242 s of its 1 800 s stop (run 40853930991), and a
 #   slow runner would have cancelled shard 1's tests with it. Since #2285 the
-#   run is two halves, `coverage-1` and `coverage-2`, each on a runner of its
-#   own, and `coverage` merges them into the one report it publishes.
+#   run is divided between jobs, each on a runner of its own -- since #3341
+#   four, `coverage-1` to `coverage-4` -- and `coverage` merges them into the
+#   one report it publishes.
 name: Nightly heavy checks
 
 # `schedule` and `workflow_dispatch`, plus a pull request that changes THIS
@@ -212,23 +213,26 @@ jobs:
       - name: Nightly browser checks (1 of 5)
         run: pnpm run test:browser:nightly:shard-1
 
-  # The coverage report (#1280), in a job of its own since #1701 and in two
-  # since #2285: the required job's Vitest files under coverage, each half on
-  # a runner of its own, and the `coverage` job below merges the two into the
-  # one report. As one job it took 1 201 to 1 798 s of its 1 800 s stop from
-  # 2026-11-04, past nightly-split.test.ts's 60 %, and with #1688's cheaper
-  # cases still 1 015 to 1 448 s. Divided by PATH, not by Vitest project:
-  # a `--project` filter keeps only that project's files in the report, and
+  # The coverage report (#1280), in a job of its own since #1701, in two
+  # since #2285 and in four since #3341: the required job's Vitest files
+  # under coverage, each part on a runner of its own, and the `coverage` job
+  # below merges the four into the one report. As one job it took 1 201 to
+  # 1 798 s of its 1 800 s stop from 2026-11-04; as two, the game half took
+  # up to 1 607 s on 2026-11-27 and `main`'s scheduled run was cancelled at
+  # its stop, with the game's files grown from 225 to 422 (docs/agents/ci.md
+  # section 4c "Four coverage jobs -- #3341"). Divided by PATH, not by Vitest
+  # project: a `--project` filter keeps only that project's files in the
+  # report, and
   # `check:test-split` (rule 6) refuses it and holds every file of the run in
-  # exactly one half. No Chromium: the required job's Vitest files run in
+  # exactly one part. No Chromium: the required job's Vitest files run in
   # `jsdom` and Node, and its `Tests` shards install no browser either. Every
   # other step and pin is `heavy`'s, whose comments say why.
   coverage-1:
-    name: Nightly tests under coverage (1 of 2)
+    name: Nightly tests under coverage (1 of 4)
     runs-on: ubuntu-latest
-    # A stop, not a budget, and the one job's 30 minutes unchanged (#2285:
-    # never a longer stop). docs/agents/ci.md section 4c "Two coverage jobs
-    # -- #2285" has what each half measured.
+    # A stop, not a budget, and the one job's 30 minutes unchanged (#2285,
+    # #3341: never a longer stop). docs/agents/ci.md section 4c "Four
+    # coverage jobs -- #3341" has what each part measured.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -255,37 +259,36 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # `apps/web/src/game/`, about half the case time (docs/agents/ci.md
-      # section 4c "Two coverage jobs -- #2285"). ⚠️ A test that fails HERE
-      # turns this job red and opens the nightly issue, and that is meant:
-      # these are the required job's own tests, so a failure here and not
-      # there is a case that passes only without instrumentation -- a timeout
-      # tuned too close (docs/agents/ci.md section 4c), which is worth an issue.
+      # The files of `apps/web/src/game/` whose names (or directories) start
+      # with a to m or r, and `coverage-2` has the rest of that directory:
+      # divided by first letter so that the two hold about the same measured
+      # case time (docs/agents/ci.md section 4c "Four coverage jobs --
+      # #3341"). ⚠️ A test that fails HERE turns this job red and opens the
+      # nightly issue, and that is meant: these are the required job's own
+      # tests, so a failure here and not there is a case that passes only
+      # without instrumentation -- a timeout tuned too close (docs/agents/ci.md
+      # section 4c), which is worth an issue.
       #
-      # ⚠️ TWO Vitest workers, not the three Vitest starts on this runner's
-      # four vCPUs (two cores of two threads, docs/agents/ci.md section 4c
-      # "Two Vitest shards -- #2154"): with three, two share a core, and the
-      # whole-ride cases ran past their own timeouts on the EPYC 7763 in the
-      # split's first reading -- the lap race at 10.0 of its 10 s, the 32x
-      # ride at 5.0 of 5 s -- exactly as they had in the one job. On an EPYC
-      # 9V74, two workers ran those cases in two thirds of the time three
-      # did, and this half took no longer (section 4c "Two coverage jobs --
-      # #2285"). No timeout moved: a worker count is a share of the CPU, not
-      # a stop.
-      - name: Tests under coverage (1 of 2)
+      # ⚠️ TWO Vitest workers in both game parts, not the three Vitest starts
+      # on this runner's four vCPUs (two cores of two threads, docs/agents/ci.md
+      # section 4c "Two Vitest shards -- #2154"): with three, two share a core,
+      # and the whole-ride cases ran past their own timeouts on the EPYC 7763
+      # (section 4c "Two coverage jobs -- #2285"). No timeout moved: a worker
+      # count is a share of the CPU, not a stop.
+      - name: Tests under coverage (1 of 4)
         env:
           VITEST_MAX_WORKERS: '2'
         run: pnpm run test:coverage:shard-1
 
-      # What the merge reads: this half's results and coverage, which Vitest
-      # writes even when a case failed, so `!cancelled()` and a red half
+      # What the merge reads: this part's results and coverage, which Vitest
+      # writes even when a case failed, so `!cancelled()` and a red part
       # still counts in the report. A day is enough: the merge job is in
-      # the same run. `error` if it is missing: a half that wrote nothing is
-      # a report missing half its files.
+      # the same run. `error` if it is missing: a part that wrote nothing is
+      # a report missing its files.
       #
       # SHA from:
       #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
-      - name: Upload this half for the merge
+      - name: Upload this part for the merge
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -295,11 +298,9 @@ jobs:
           if-no-files-found: error
 
   coverage-2:
-    name: Nightly tests under coverage (2 of 2)
+    name: Nightly tests under coverage (2 of 4)
     runs-on: ubuntu-latest
-    # A stop, not a budget, and the one job's 30 minutes unchanged (#2285:
-    # never a longer stop). docs/agents/ci.md section 4c "Two coverage jobs
-    # -- #2285" has what each half measured.
+    # A stop, not a budget: `coverage-1`'s comment says why.
     timeout-minutes: 30
     steps:
       - name: Check out the repository
@@ -326,25 +327,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Every other file of the run. ⚠️ A failure here opens the nightly
-      # issue too, for the reason the first half's step gives. Vitest's own
-      # three workers: every case that has passed its timeout under coverage
-      # since 2026-11-04 is a game case, in the first half, and with two
-      # workers this half took 854 to 880 s on a Xeon Platinum 8573C against
-      # 780 s with three on an EPYC 7763, the slowest type the one job ran
-      # on (section 4c "Two coverage jobs -- #2285").
-      - name: Tests under coverage (2 of 2)
+      # The rest of `apps/web/src/game/`: names starting with n to q and s to
+      # z. Two workers, and a failure here opens the nightly issue, for the
+      # reasons `coverage-1`'s step gives.
+      - name: Tests under coverage (2 of 4)
+        env:
+          VITEST_MAX_WORKERS: '2'
         run: pnpm run test:coverage:shard-2
 
-      # What the merge reads: this half's results and coverage, which Vitest
-      # writes even when a case failed, so `!cancelled()` and a red half
-      # still counts in the report. A day is enough: the merge job is in
-      # the same run. `error` if it is missing: a half that wrote nothing is
-      # a report missing half its files.
+      # What the merge reads: `coverage-1`'s upload says why each line is so.
       #
       # SHA from:
       #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
-      - name: Upload this half for the merge
+      - name: Upload this part for the merge
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -353,18 +348,121 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # The one report, from the halves' blobs: `test:coverage:merge` replays
+  coverage-3:
+    name: Nightly tests under coverage (3 of 4)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: `coverage-1`'s comment says why.
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every `apps/web` file outside `src/game/`, as the required run's
+      # third part is. ⚠️ A failure here opens the nightly issue too, for the
+      # reason `coverage-1`'s step gives. Vitest's own three workers: no case
+      # outside the game has passed its timeout under coverage with three
+      # (section 4c "Two coverage jobs -- #2285").
+      - name: Tests under coverage (3 of 4)
+        run: pnpm run test:coverage:shard-3
+
+      # What the merge reads: `coverage-1`'s upload says why each line is so.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload this part for the merge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-blob-3
+          path: coverage-blobs/coverage-3.json
+          retention-days: 1
+          if-no-files-found: error
+
+  coverage-4:
+    name: Nightly tests under coverage (4 of 4)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: `coverage-1`'s comment says why.
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every file outside `apps/web`: `apps/instance`, `apps/mobile` and each
+      # package, named one by one because a path filter matches inside a
+      # project's own root (`packages/` alone selects nothing), so a package
+      # added later is in no part and `check:test-split` turns red until it
+      # is named here. Vitest's own three workers, and a failure here opens
+      # the nightly issue, as `coverage-3`'s step says.
+      - name: Tests under coverage (4 of 4)
+        run: pnpm run test:coverage:shard-4
+
+      # What the merge reads: `coverage-1`'s upload says why each line is so.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload this part for the merge
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-blob-4
+          path: coverage-blobs/coverage-4.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # The one report, from the parts' blobs: `test:coverage:merge` replays
   # their results and merges their coverage, and the two reporting steps
-  # publish it as the one job did. `!cancelled()` so a red half still has
-  # its report published; a half that uploaded nothing fails its download,
-  # and the report is then not merged from the other half alone.
+  # publish it as the one job did. `!cancelled()` so a red part still has
+  # its report published; a part that uploaded nothing fails its download,
+  # and the report is then not merged from the other parts alone.
   coverage:
     name: Nightly coverage report
-    needs: [coverage-1, coverage-2]
+    needs: [coverage-1, coverage-2, coverage-3, coverage-4]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # A stop, not a budget: the merge measured in docs/agents/ci.md section 4c
-    # "Two coverage jobs -- #2285".
+    # "Four coverage jobs -- #3341".
     timeout-minutes: 15
     steps:
       - name: Check out the repository
@@ -393,19 +491,31 @@ jobs:
 
       # SHA from:
       #   gh api repos/actions/download-artifact/git/ref/tags/v8.0.2 --jq .object.sha
-      - name: Download the first half
+      - name: Download part 1
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-blob-1
           path: coverage-blobs
 
-      - name: Download the second half
+      - name: Download part 2
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage-blob-2
           path: coverage-blobs
 
-      # Red when a half was: the replayed results include its failed cases,
+      - name: Download part 3
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-blob-3
+          path: coverage-blobs
+
+      - name: Download part 4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-blob-4
+          path: coverage-blobs
+
+      # Red when a part was: the replayed results include its failed cases,
       # and the report is still written, so the steps after it still run.
       - name: Merge the coverage report
         run: pnpm run test:coverage:merge
@@ -646,7 +756,7 @@ jobs:
     # Every job since #1675 (four since #1698, five since #1636 met #1689, six
     # since #1701's `coverage`, eight since #2285's two halves of it): a red
     # realistic shard or coverage half has to open the issue too.
-    needs: [heavy, coverage-1, coverage-2, coverage, browser-2, browser-3, browser-4, browser-5]
+    needs: [heavy, coverage-1, coverage-2, coverage-3, coverage-4, coverage, browser-2, browser-3, browser-4, browser-5]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)
