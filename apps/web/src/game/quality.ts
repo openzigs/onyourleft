@@ -946,6 +946,66 @@ export function readShadowMapChoice(
 }
 
 /**
+ * Where THIS device may cap the render scale for a measurement — #3358.
+ *
+ * ## Why it exists
+ *
+ * A realistic lap race on a high-pixel-ratio iPad ran at about 29 fps, and the
+ * ladder left it on level 0: {@link FRAME_MS_REDUCE_ABOVE} calls a 34 ms frame
+ * neither hot nor cool, so no step down is ever taken and `renderScale` stays 1.
+ * Whether that frame rate is bought with pixels is the question, and the way to
+ * answer it is to draw the same ride at 0.83 and 0.67 and read the frame times.
+ * This key is the debug override that does it in the shipped app, where the
+ * owner's harness page and its `?levers=` are not reachable.
+ *
+ * ⚠️ **There is no control for it on any screen, deliberately**, on
+ * {@link RIDER_SHADOW_MAP_STORAGE_KEY}'s ground: it exists to be MEASURED, set
+ * from the page over the Web Inspector bridge (or `webview-probe.mjs` on
+ * Android), and a starting render scale for high-DPR devices is a product
+ * decision this key only gathers the evidence for.
+ *
+ * ⚠️ **It is a ceiling, never a floor or a multiplier.** A rung that already
+ * draws at or below it is drawn as the ladder says, so a hot device still steps
+ * down to 0.67 and 0.5 underneath it, and nothing stored here can make a frame
+ * draw more pixels than the rung would ({@link capRenderScale}).
+ */
+export const RENDER_SCALE_STORAGE_KEY = 'oyl.game.renderScale';
+
+/**
+ * The render-scale ceiling this device stored under
+ * {@link RENDER_SCALE_STORAGE_KEY}, or `undefined` for none. Only a number in
+ * (0, 1] is a ceiling: anything else — absent, empty, not a number, zero,
+ * negative, above 1, or a storage that cannot be read — is no ceiling at all,
+ * because a stray value must not blur a rider's world or ask it for more pixels.
+ */
+export function readRenderScaleCap(
+  storage: { getItem(key: string): string | null } | undefined,
+): number | undefined {
+  try {
+    // Absent and not-a-number are NaN, which fails both comparisons; empty and
+    // blank are 0 to `Number`, which fails the first.
+    const cap = Number(storage?.getItem(RENDER_SCALE_STORAGE_KEY) ?? Number.NaN);
+    return cap > 0 && cap <= 1 ? cap : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A rung with its `renderScale` held to `cap` — #3358. The rung itself, the
+ * same object, when there is no cap or it does not bind, so an uncapped ride
+ * hands the renderer exactly the ladder's own settings.
+ */
+export function capRenderScale(
+  settings: QualitySettings,
+  cap: number | undefined,
+): QualitySettings {
+  return cap === undefined || settings.renderScale <= cap
+    ? settings
+    : { ...settings, renderScale: cap };
+}
+
+/**
  * The realistic world's rungs — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md)
  * D-3, above {@link QUALITY_LADDER}, coolest last.
  *

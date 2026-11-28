@@ -49,6 +49,8 @@ import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
   QUALITY_LADDER,
+  RENDER_SCALE_STORAGE_KEY,
+  RIDER_SHADOW_MAP_RUNG,
   SUSTAINED_SAMPLES,
   qualitySettings,
   type QualitySettings,
@@ -175,26 +177,32 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
   return {
     // #475: never asked — no ride in this file chose the realistic world.
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
-    create: () => ({
-      hasContext: true,
-      prepare: () => Promise.resolve(),
-      render: (frame: SceneFrame) => {
-        frames.push(frame);
-      },
-      setQuality: (settings: QualitySettings) => {
-        rungs.push(settings);
-      },
-      setRiderKit: (chosen: KitColour | undefined) => {
-        kitsHanded.push({ chosen, framesBefore: frames.length });
-      },
-      setSeason: (season: Season) => {
-        seasonsHanded.push(season);
-      },
-      resize: () => undefined,
-      destroy: () => undefined,
-    }),
+    create: (_canvas: HTMLCanvasElement, settings: QualitySettings) => {
+      created.push(settings);
+      return {
+        hasContext: true,
+        prepare: () => Promise.resolve(),
+        render: (frame: SceneFrame) => {
+          frames.push(frame);
+        },
+        setQuality: (settings: QualitySettings) => {
+          rungs.push(settings);
+        },
+        setRiderKit: (chosen: KitColour | undefined) => {
+          kitsHanded.push({ chosen, framesBefore: frames.length });
+        },
+        setSeason: (season: Season) => {
+          seasonsHanded.push(season);
+        },
+        resize: () => undefined,
+        destroy: () => undefined,
+      };
+    },
   };
 }
+
+/** The rung each view was BUILT with this test — #3358. @see capturingRenderer */
+let created: QualitySettings[] = [];
 
 /**
  * Every kit colour a view was told this test, and how many frames it had
@@ -221,6 +229,7 @@ beforeEach(() => {
   seasonsHanded = [];
   pending = [];
   rungs = [];
+  created = [];
   sensorReads = 0;
   nowMs = 1_000_000;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -1818,6 +1827,40 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     expect(drawn.scatter.length).toBeGreaterThan(
       QUALITY_LADDER[3]?.scatterItems ?? Number.POSITIVE_INFINITY,
     );
+  });
+});
+
+describe('GameView — a render-scale ceiling this device stored (#3358)', () => {
+  afterEach(() => {
+    localStorage.removeItem(RENDER_SCALE_STORAGE_KEY);
+  });
+
+  it('builds the view at the stored ceiling, and keeps it under every rung the ladder walks to', async () => {
+    localStorage.setItem(RENDER_SCALE_STORAGE_KEY, '0.67');
+    await startRiding({ pacer: false });
+
+    // The first frame: a stylised ride starts on the shadow-map rung (#547),
+    // whose 1 is held to 0.67 and nothing else changed.
+    expect(created.map((rung) => rung.renderScale)).toEqual([0.67]);
+    expect({ ...created[0], renderScale: RIDER_SHADOW_MAP_RUNG.renderScale }).toEqual(
+      RIDER_SHADOW_MAP_RUNG,
+    );
+
+    // A step down to level 1 (0.83) is still held to 0.67 …
+    await pump(SUSTAINED_SAMPLES + 2);
+    expect(rungs[rungs.length - 1]?.label).toBe(qualitySettings(1).label);
+    expect(rungs[rungs.length - 1]?.renderScale).toBe(0.67);
+    // … and the floor rung, already under it, draws at its own 0.5.
+    await pump(3 * (SUSTAINED_SAMPLES + 2));
+    expect(rungs[rungs.length - 1]?.label).toBe(qualitySettings(4).label);
+    expect(rungs[rungs.length - 1]?.renderScale).toBe(qualitySettings(4).renderScale);
+  });
+
+  it('draws the ladder’s own rungs when the device stored nothing', async () => {
+    await startRiding({ pacer: false });
+    expect(created).toEqual([RIDER_SHADOW_MAP_RUNG]);
+    await pump(SUSTAINED_SAMPLES + 2);
+    expect(rungs[rungs.length - 1]).toEqual(qualitySettings(1));
   });
 });
 
