@@ -23,7 +23,7 @@
  * are cut short by the rotation's fade rule at a crest, where the group's
  * speed steps up faster than anyone on the front can follow it, so a surge
  * seldom has its dwell. The scores show it (`presses` is 0 for the steady
- * rider there); it is a finding for the rotation, not a mark.
+ * rider there); it is a finding for the rotation (#3410), not a mark.
  */
 
 import { CUE_CEILING_PER_MINUTE } from '@onyourleft/domain';
