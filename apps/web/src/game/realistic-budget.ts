@@ -1277,8 +1277,8 @@ export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
  * draws no more cars than that, and each car submits its OWN body's triangles
  * at its own level and no other's. That is the difference from a Delivery
  * round's cars, where every obstacle instance submits the whole roster
- * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 640 an
- * instance): 36 cars there would be 59 040. A street's cars are mostly the
+ * (`three-renderer.ts` §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`, 1 637 an
+ * instance since #3288): 36 cars there would be 58 932. A street's cars are mostly the
  * lighter saloon (200 and 312), so a real frame is well under this.
  *
  * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, by that constant's own

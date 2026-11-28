@@ -363,17 +363,23 @@ describe('PR #2518’s trim is invisible — the owner’s ruling of 2026-11-13'
       [0, 3.5].map((side): Vector => [side, -grade * behind + CAMERA_ABOVE_METRES, -behind]),
     );
 
-  const cases: readonly { readonly what: 'obstacles' | 'markers'; readonly kind: string }[] = [
-    ...ROSTER.map((kind) => ({ what: 'obstacles' as const, kind })),
-    ...MARKERS.map((kind) => ({ what: 'markers' as const, kind })),
+  const cases: readonly {
+    readonly what: 'obstacles' | 'markers';
+    readonly kind: string;
+    readonly world: 'stylised' | 'realistic';
+  }[] = [
+    ...ROSTER.map((kind) => ({ what: 'obstacles' as const, kind, world: 'stylised' as const })),
+    ...MARKERS.map((kind) => ({ what: 'markers' as const, kind, world: 'stylised' as const })),
+    // #3288: the realistic world's own mailbox, its post's top inside its body.
+    { what: 'markers', kind: 'mailbox', world: 'realistic' },
   ];
 
   it.each(cases)(
-    'draws a $kind in the same pixels as every triangle it was made with, on the flat and up the steepest shipped climb',
-    ({ what, kind }) => {
+    'draws a $world $kind in the same pixels as every triangle it was made with, on the flat and up the steepest shipped climb',
+    ({ what, kind, world }) => {
       const order: readonly string[] = what === 'obstacles' ? ROSTER : MARKERS;
-      const trimmedShape = deliveryPieceShape(what, true);
-      const wholeShape = deliveryPieceShape(what, false);
+      const trimmedShape = deliveryPieceShape(what, true, undefined, world);
+      const wholeShape = deliveryPieceShape(what, false, undefined, world);
       const belt = new DeliveryBelt('stylised');
       const changed: string[] = [];
       let trimmedSomewhere = false;

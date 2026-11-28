@@ -17,10 +17,11 @@
  * The fixture is shaped as a recorded track is: points 2 to 13 m apart,
  * unevenly; a long bend of 100° over 120 m; a leg to a one-point turnaround;
  * and the way back a lane over, recorded {@link WAY_BACK_HIGHER_METRES}
- * higher, as a phone's altitude drifts. One mapped street, invented, runs
- * the whole way out. A 60 fps ride over the whole route reads every letter
- * the renderer is handed (`sceneFrame`'s `streetNames`) against the road the
- * same frame draws (its `corridor`).
+ * higher, as a phone's altitude drifts. Mapped streets, invented, run the
+ * whole way out one after another ({@link STREET_METRES} each). A 60 fps ride
+ * over the whole route reads every letter the renderer is handed
+ * (`sceneFrame`'s `streetNames`) against the road the same frame draws (its
+ * `corridor`), and every piece of it must have a letter to read (#3365).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -44,10 +45,12 @@ import { atStartLine } from './simulation';
 import {
   STREET_NAME_GLYPH_ADVANCE_METRES,
   STREET_NAME_GLYPH_HEIGHT_METRES,
+  STREET_NAME_VIEW_METRES,
+  paintedLength,
   streetNamesInView,
   type StreetNameLabel,
 } from './street-names';
-import { corridorOrigin, drawnRoadFrame } from './terrain';
+import { corridorOrigin, drawnRoadFrame, VIEW_BEHIND_METRES } from './terrain';
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
@@ -120,16 +123,57 @@ const PROFILE = realShapedOutAndBack();
 const ORIGIN = corridorOrigin(PROFILE);
 const TURN = PROFILE.totalDistance / 2;
 
+/**
+ * How long each of the way out's mapped streets is, metres. #3365: one street
+ * the whole way out put a label only near the start and past the turnaround,
+ * so 110 of the ride's 128 pieces held no letter to the road and their checks
+ * asserted nothing. A new name each {@link STREET_METRES} earns a label of
+ * its own just after the route joins it (`route-street-names.ts`), on both
+ * passes, so one is in view along the whole ride.
+ *
+ * ⚠️ **120, and not much less**: it keeps the way out's last label more than
+ * a name's view (`STREET_NAME_VIEW_METRES`, 160 m) from the turnaround. At
+ * 114 its last label is 118 m short of the turn, and from just past the turn
+ * it is drawn 2.4 m under the way back's road: the pass check's slack does
+ * not tell the two passes apart round a one-point turnaround (#3374).
+ */
+const STREET_METRES = 120;
+
 function labelsOf(profile: RouteProfile): StreetNameLabel[] {
   const road = drawnRoadPoints(profile, ORIGIN);
-  const line: number[] = [];
+  const streets: { line: number[]; name: string }[] = [];
   for (let index = 0; index <= road.points.length / 4; index += 3) {
-    line.push(road.points[index * 2] as number, road.points[index * 2 + 1] as number);
+    const which = Math.floor((index * road.step) / STREET_METRES);
+    let street = streets[which];
+    if (street === undefined) {
+      // Each street starts where the one before it ends, so none of the way out is unmapped.
+      street = {
+        line: streets[which - 1]?.line.slice(-2) ?? [],
+        name: `Testo Loop ${String(which + 1)}`,
+      };
+      streets[which] = street;
+    }
+    street.line.push(road.points[index * 2] as number, road.points[index * 2 + 1] as number);
   }
-  return routeStreetNameLabels([{ line, name: 'Testo Loop 10' }], profile, ORIGIN);
+  return routeStreetNameLabels(streets, profile, ORIGIN);
 }
 
 const LABELS = labelsOf(PROFILE);
+
+/**
+ * Where the way out runs in to the turnaround with no letter of its own pass
+ * on the road drawn, route metres: from {@link VIEW_BEHIND_METRES} past the
+ * far end of its last label to the turn. No label is laid within
+ * `ROUTE_STREET_NAME_TURN_CLEAR_METRES` of a turn, and behind the rider the
+ * road is drawn only so far. A piece wholly in it still sees a letter (the
+ * last label, behind it), but none it can hold to the road.
+ */
+const RUN_IN_FROM =
+  Math.max(
+    ...LABELS.filter((label) => (label.along as number) < TURN).map(
+      (label) => (label.along as number) + paintedLength(label.text) / 2,
+    ),
+  ) + VIEW_BEHIND_METRES;
 
 /** 36 km/h at 60 frames a second: metres a frame. */
 const FRAME_METRES = 10 / 60;
@@ -169,6 +213,14 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
     expect(LABELS.some((label) => (label.along as number) > TURN)).toBe(true);
   });
 
+  it('leaves only a short run-in to the turnaround with no letter to hold to the road — #3365', () => {
+    // The pieces wholly in it are let off holding a letter to the road. It is
+    // shorter than the distance a name is seen from (121 m today), so a
+    // fixture that names less of the ride cannot widen it unnoticed.
+    expect(RUN_IN_FROM).toBeLessThan(TURN);
+    expect(TURN - RUN_IN_FROM).toBeLessThan(STREET_NAME_VIEW_METRES);
+  });
+
   const pieces = Array.from({ length: PIECES }, (_, piece) => piece);
 
   it('cuts the ride so that every frame of it is drawn, once', () => {
@@ -185,6 +237,9 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
   it.each(pieces)('piece %d of the 60 fps ride', (piece) => {
     const start = atStartLine(PROFILE);
     const [first, end] = framesOf(piece);
+    // #3365: how many letters this piece was handed, and how many corners it held to the road.
+    let seen = 0;
+    let held = 0;
     for (let at = first; at < end; at += 1) {
       const distance = at * FRAME_METRES;
       const frame = sceneFrame({
@@ -194,6 +249,7 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
         streetNames: LABELS,
       });
       const corners = frame.streetNames?.corners ?? new Float32Array(0);
+      seen += corners.length / 12;
       if (corners.length === 0) continue;
       // The road this frame draws, on the rider's own pass.
       const outward = distance < TURN;
@@ -211,26 +267,45 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
           const x = corners[at + corner * 3] as number;
           const y = corners[at + corner * 3 + 1] as number;
           const z = corners[at + corner * 3 + 2] as number;
-          let under = -1;
+          // The nearest place on the road this frame draws. #3365: on its
+          // centreline, not at the nearest of its points: the road is drawn
+          // straight between them, and past the dense stretch ahead of the
+          // rider they are a grid step apart (`terrain.ts`
+          // §`CORRIDOR_DENSE_AHEAD_METRES`), so a letter on the road there
+          // can be 5 m from the nearest point.
           let least = Infinity;
-          for (const [index, point] of road.entries()) {
-            const gap = Math.hypot(point.x - x, point.z - z);
+          let surface = Number.NaN;
+          let past = true;
+          for (let index = 0; index + 1 < road.length; index += 1) {
+            const a = road[index] as (typeof road)[number];
+            const b = road[index + 1] as (typeof road)[number];
+            const dx = b.x - a.x;
+            const dz = b.z - a.z;
+            const span = dx * dx + dz * dz;
+            const along = span > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / span : 0;
+            const share = Math.min(1, Math.max(0, along));
+            const gap = Math.hypot(a.x + dx * share - x, a.z + dz * share - z);
             if (gap < least) {
               least = gap;
-              under = index;
+              surface = a.y + (b.y - a.y) * share;
+              past = (index === 0 && along < 0) || (index + 2 === road.length && along > 1);
             }
           }
           // Past either end of the road this frame draws, there is no road to stand on.
-          if (under <= 0 || under >= road.length - 1) continue;
+          if (past) continue;
           // On the road drawn, a lane at most from its centreline…
           expect(least).toBeLessThan(LANE_METRES + 2);
           // …and standing on it, not in the air over it.
-          expect(Math.abs(y - (road[under]?.y ?? Number.NaN) - OVER_ROAD_METRES)).toBeLessThan(
-            OVER_ROAD_TOLERANCE_METRES,
-          );
+          expect(Math.abs(y - surface - OVER_ROAD_METRES)).toBeLessThan(OVER_ROAD_TOLERANCE_METRES);
+          held += 1;
         }
       }
     }
+    // #3365: a piece with no letter in view, or none held to the road, asserted nothing above.
+    expect(seen, `piece ${String(piece)} was handed no letter`).toBeGreaterThan(0);
+    const inRunIn = first * FRAME_METRES >= RUN_IN_FROM && (end - 1) * FRAME_METRES < TURN;
+    if (!inRunIn)
+      expect(held, `piece ${String(piece)} held no letter to the road`).toBeGreaterThan(0);
   });
 });
 

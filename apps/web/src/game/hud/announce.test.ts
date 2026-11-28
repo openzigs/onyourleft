@@ -457,7 +457,9 @@ describe('a lap of the course, as it ends — #1312', () => {
     // Below the heart-rate hold and below an accepted re-plan (#1244): each
     // is about the workout the trainer is being driven through.
     expect(rank).toBeGreaterThan(PRIORITY.indexOf('hold-changed'));
-    expect(rank).toBe(PRIORITY.indexOf('plan-changed') + 1);
+    // #3305: a group ride's cue sits between the two (rank 5d′).
+    expect(rank).toBe(PRIORITY.indexOf('plan-changed') + 2);
+    expect(PRIORITY[rank - 1]).toBe('group-ride-cue');
     for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
       expect(rank).toBeLessThan(PRIORITY.indexOf(reading));
     }

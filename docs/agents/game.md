@@ -93,8 +93,9 @@ an FTMS Reset", is reading an old file. On the owner's trainer an acknowledged `
 (2026-09-21) — while also revoking control. The owner **accepted end-of-ride retention** on the
 condition, measured and met, that the app can take control again. So `TrainerControl.letGo()` in
 `packages/sensors/protocol` sends a **Stop** and keeps control, and every release goes through
-`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, and a game
-ride ending by button or by navigating away. What survives from #442 is structural: one release; it
+`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, a game
+ride ending by button or by navigating away, and (#3404) a game-ride frame that throws with no
+optional mode left to end (`game/ride-fault.ts`; `ride-loop-fault.test.tsx`). What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
 ⚠️ **Since [#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout writes the
@@ -887,7 +888,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         measured it does NOT remove the grade — nor did the
                         Reset PR #442 tried** (#372, §4h). ⚠️ It sends the **grade and nothing
                         else** — the rider's wind is out of scope and their drag
-                        area would double-count against the game's own physics
+                        area would double-count against the game's own physics.
+                        Past a point-to-point route's end (#3345) it eases the
+                        grade to 0 % over about 100 m, at 1 % a second at most
+                        and only ever toward flat; not on a loop or an
+                        open-world view (`gradient.test.ts`,
+                        `trainer-wiring.test.tsx` §"#3345")
     src/game/trainer-port.ts
                         what the game may ask of a trainer, and the five things
                         it is told when it may not (#362). ⚠️ A `*-port.ts` on
@@ -1022,6 +1028,128 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `lap-race/bot-weave.test.ts` is the gate, read at
                         60 fps through `lapRaceDrawing` and the scene's
                         markers
+    src/game/group-ride/choice.ts, ride-group.ts
+                        the AI group ride inside a game ride (#3303, epic
+                        #3296, ADR 0101): `GameView` holds one per ride,
+                        asked for by the chooser (`StageChooser.tsx`
+                        §`GroupRideControl`, *Ride with a group* in *Your
+                        ride* beside the pacer: an average speed in the
+                        rider's units and 3 to 7 bots, kept on the device by
+                        `choice.ts`; one mode a ride, so it and the pacer,
+                        the race and the round switch each other off). Not
+                        offered on a circuit, a level or the open world, and
+                        **unavailable, with the reason as the switch's
+                        description**, while a workout holds the trainer,
+                        the draft is switched off, or the route is a loop
+                        (the plan is one pass; laps are #3369). It ends at
+                        a finish: past it, *Keep riding* rides alone. A
+                        target the plan refuses
+                        on the chosen route blocks *Ride* with the most (or
+                        least) the group can average there. Solo only, never
+                        beside a race or a round. Started at the press (the
+                        bots formed up ahead of the rider, the rider on the
+                        last wheel, ONE seed kept with the ride), then
+                        stepped one tick a simulation step that ran through
+                        domain `stepGroupRide` on physics'
+                        `groupRidePhysics`, AFTER the grade is sampled. Out
+                        of each tick: the rider's draft, handed to
+                        `GameSimulation.draftWith` as a race's is (and the
+                        simulation keeps the in-draft state, so the Draft
+                        field and the saved ride's "drafted" are the solo
+                        draft's own); `groupSpeedMps`, which is the paced
+                        speed while the line is paced to the rider; and the
+                        phase and the rider's role, for the log. **The
+                        rider has stopped** (`riderStopped`) while the
+                        recording under the ride is paused, the recorder's
+                        auto-pause included, or the power reading is not
+                        live. The bots are drawn through the lap race's
+                        pack layout **in single file** (#3304:
+                        `stepPackLayout`'s `singleFile`, a row to each
+                        member, a bike length and the wheel gap apart, in
+                        the middle lane) and the rider is never moved along
+                        the road. The member the rules have aside
+                        (`rotation.aside`) is drawn one lane to the LEFT
+                        (`GROUP_PULL_OFF_LANE`), beside the line and no row
+                        of it, and comes back across only once the line has
+                        drawn them a bike length of room; when that member
+                        is the rider it is the rider's own lane that moves,
+                        by `lanes.ts` §`stepSteer`, out through
+                        `steeredLateral`, and the lane follows the role, so
+                        a pull-off press (#3307) needs to reach the rules
+                        only. A drawing only: nothing reads it back
+                        (`line-drawing.test.ts`, every step of a scripted
+                        rotation from `line-testing.ts`; the browser case
+                        is `lap-race.browser.spec.ts` §"#3304"). What
+                        the ride keeps goes through the port's
+                        `groupRideStepped` to the controller's
+                        `noteGroupRide` and is saved as
+                        `RideFacts.groupRide` (seed, average, size, rules'
+                        version, `startedAt` on the recording's clock, a
+                        log of phase and role changes); no fact is handed
+                        until a recording's elapsed time has been read.
+                        `group-ride-wiring.test.tsx` drives the real picker
+                        and reads the simulation's own draft factor, the
+                        frame's bots and what the recording is handed. ⚠️
+                        **A constant-power rider has no brake**: in the
+                        line's shelter the same watts are faster than the
+                        line, so a simulated rider drifts through the bots
+                        and off the front, then back
+    src/game/group-ride/rider-input.ts, hud/GroupRideControls.tsx
+                        what the rider can tell the group (#3307, ADR 0101
+                        D-3.7, D-6.5): **pull off**, a discrete press taken
+                        only while the rider's role is `on-front`, and **sit
+                        in**, a toggle. `GameView` hands the HUD a
+                        `GroupRideRiderInput` on a group ride
+                        (`HudPanelProps.groupRide`); the HUD draws *Pull off
+                        left* (72 px, `aria-disabled` off the front) and
+                        *Sit in* (the design toggle at the 48 px ride size)
+                        in the actions panel, inside the touch lock, held
+                        drawn while the rider is on the front
+                        (`controlsHeld`). Three inputs, one press: the lane
+                        key toward `GROUP_RIDE_PULL_OFF_SIDE` (**A**, left,
+                        one fixed side), the button, and a pad through
+                        `GamepadIntents` (`pullOffPadPorts`: a lane change
+                        left, and every button a lap race uses its item
+                        on). The press goes to `ride-group.ts`
+                        §`pressGroupPullOff`: ONE flag, handed to the
+                        rotation as `riderSignal` on the next step, so a
+                        held key or a mashed button is one pull-off; it
+                        also moves the rider's DRAWN lane a lane left
+                        through `lanes.ts` (`SceneInput.steeredLateral`),
+                        back to the line's once they are neither on the
+                        front nor drifting back. ⚠️ A press as the rider
+                        ARRIVES on the front, before the line is steady,
+                        is held by the rotation and ends the pull as soon
+                        as it is. Sit-in is `setGroupSitIn`, handed as
+                        `riderSittingIn` on every step. Neither choice
+                        outlives the ride, and **what was pressed is kept
+                        with it**: each press taken and each sit-in choice,
+                        with its ride time, in `GroupRideFact.presses`
+                        (`pull-off`, `sit-in`, `sit-out`; absent when
+                        nothing was pressed; a mashed button is one entry),
+                        because the line replays from them as well as the
+                        seed, and `GROUP_RIDE_CODE_VERSION` is **2** from
+                        here. Neither reaches the simulation, the gradient
+                        session or the trainer's port.
+                        `group-ride-wiring.test.tsx` §"#3307" ends a pull by
+                        each input through the real `GameView`, with a rider
+                        who holds a wheel. ⚠️ A group ride now mounts
+                        `GamepadIntents`, which asks for ONE animation
+                        frame at mount: a test that hands out frames one
+                        callback at a time loses a ride frame to it
+    src/game/group-ride/group-ride-cannot-reach-trainer.test.tsx
+                        ADR 0101 D-6.6, the owner's ruling 4: **its first
+                        case** (#3303). In simulation mode a ride with the
+                        group sends the trainer, write for write and the
+                        release included, what the same ride sends without
+                        the group at the same draft factors (kept from the
+                        first ride and handed to the second by a wrapped
+                        `GameSimulation`). **The presses** (#3307): a ride
+                        that presses pull off before every frame, ends a
+                        pull by a press, toggles sit-in and eases off the
+                        back is held, write for write, to the same power on
+                        the same frames at the same factors with no group.
+                        #3308 completes it (ERG, the worst case)
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says
@@ -1596,6 +1724,36 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/group-ride-hud.ts, src/game/hud/GroupRideCue.tsx
+                        an AI group ride on the HUD (#3305, ADR 0101 D-5).
+                        **The role strip** is two fields in a lap race's two
+                        places and under its class (a ride runs one mode):
+                        *In line* (place of how many; under it the pull's
+                        countdown ONLY while the rider is on the front, else
+                        the gap to the wheel ahead) and *Group* (the group's
+                        speed now; under it the average chosen). With no
+                        power reading both values are a dash, never a zero.
+                        **The cue line** is one sentence per kind of domain
+                        `CUE_KINDS` (`GROUP_RIDE_CUE_TEXT`, a record, so a
+                        kind without one is a type error; ⚠️ every sentence
+                        is the owner's to approve), a labelled notice drawn
+                        as the AI pacer's line, on the HUD for 8 s of the
+                        group's clock. `ride-group.ts` steps domain
+                        `stepCues` on each tick's rotation and the view it
+                        read (`GroupRideTick.line`) with the rider's power
+                        (no reading, no cue) and keeps the last cue;
+                        `groupRideStrip` builds the strip. The sentence is
+                        offered to `announce.ts` ONCE, as `group-ride-cue`
+                        (rank 5d′: below every safety and workout sentence,
+                        above a lap and every reading; follows the
+                        announcement setting): behind a higher sentence it
+                        is dropped, never queued, and stays on the line.
+                        The countdown is never offered.
+                        `group-ride-hud.test.tsx` rides a scripted rotation
+                        (domain `./group-ride-line-testing`) through the
+                        real selector onto the real HUD and screens every
+                        sentence; `browser/lap-race-hud.browser.spec.ts`
+                        §"#3305" holds the layout (`?group=ride`)
     src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
                         the room a race's standings have on a tablet (#2599):
                         the list is as tall as the whole lines that fit above

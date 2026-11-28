@@ -347,10 +347,24 @@ describe('the trainer never feels the draft — ADR 0066 D-7', () => {
     const drafted = await writes(profile, true);
     const alone = await writes(profile, false);
     expect(drafted.written.length).toBeGreaterThan(10);
+    const end: number = profile.totalDistance;
+    const atTheEnd: number = gradeAt(profile, metres(end));
     drafted.written.forEach((parameters, index) => {
       expect(Object.keys(parameters)).toEqual(['grade']);
-      expect(parameters.grade).toBe(gradeAt(profile, metres(drafted.at[index] as number)));
+      const odometer = drafted.at[index] as number;
+      if (odometer <= end) {
+        expect(parameters.grade).toBe(gradeAt(profile, metres(odometer)));
+      } else {
+        // #3345: past the end the grade is eased from the end's to 0 %
+        // (`gradient.test.ts` §"#3345"), still on the rider's own odometer.
+        expect(Math.abs(parameters.grade)).toBeLessThanOrEqual(Math.abs(atTheEnd));
+        expect(Math.sign(parameters.grade) * Math.sign(atTheEnd)).not.toBe(-1);
+      }
     });
+    // Non-vacuity: the road's own grade, write for write, over the whole route.
+    expect(
+      drafted.written.filter((_, index) => (drafted.at[index] as number) <= end).length,
+    ).toBeGreaterThan(10);
     // The drafted rider reaches the hill's grades sooner, and nothing else.
     expect(alone.written.every((parameters) => Object.keys(parameters).join() === 'grade')).toBe(
       true,

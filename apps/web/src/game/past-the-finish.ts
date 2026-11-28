@@ -30,10 +30,11 @@
  * Only the DRAWING. The ride's odometer, the trainer's grade, the HUD's
  * distance to go and the course line (`course-laps.ts`) all read the route
  * itself, as they did; the finish gantry stands at the route's end
- * (`scene.ts` reads `gantry.ts` on the route). ⚠️ The trainer is therefore
- * held at the route's last grade past the end while the road is drawn level:
- * changing what is written to a trainer is a safety question this issue does
- * not open.
+ * (`scene.ts` reads `gantry.ts` on the route). ⚠️ The trainer's grade past the
+ * end is not read off this drawing: since #3345 the gradient session
+ * (`gradient.ts` §"Past a route's end, flat") eases it from the route's last
+ * grade to 0 % on its own, bounded as every grade change it did not choose is,
+ * on the same routes this draws on past — not a loop, not an open-world view.
  *
  * ## The map past the end
  *
