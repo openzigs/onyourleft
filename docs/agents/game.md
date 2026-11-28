@@ -2483,7 +2483,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         trim; `metal`), its window, cornice, shop front,
                         door, an awning or a sign band, pilasters, and a
                         fire escape on some brick fronts. `kitPaletteOf`
-                        colours it from the plan's OWN paints: every vertex
+                        colours it from the plan's OWN paints (#3352: a
+                        mapped wall colour as its skin's nearest shade,
+                        `KitWrap.wallShade`, and `paintTown` keeps
+                        neighbouring wraps' shades apart): every vertex
                         carries a class (wall, trim, accent, fixed) and the
                         atlas is baked neutral where the building colours it.
                         `wrapFootprint` walks the footprint's OWN outline: 2 m

@@ -141,7 +141,7 @@
 
 import { triangulate } from '@onyourleft/map-features';
 
-import { SIGN_PAINTS, TRIM_PAINTS, WALL_PAINTS, type Rgb } from './building-paint';
+import { nearestPaint, SIGN_PAINTS, TRIM_PAINTS, WALL_PAINTS, type Rgb } from './building-paint';
 import { uniformFrom } from './seeded';
 import type { UrbanClass } from './urban-class';
 
@@ -998,26 +998,86 @@ function over(albedo: Rgb, white = 1): Rgb {
 }
 
 /**
+ * The kit's brick picture, linear: the dark brown {@link KIT_BRICK_SHADES}
+ * multiply (their comment's 0.15, 0.08, 0.06).
+ */
+export const KIT_BRICK_PICTURE: Rgb = [0.15, 0.08, 0.06];
+
+/** Each brick shade as it is drawn: the shade times the picture — #3352. */
+const KIT_BRICK_DRAWN: readonly Rgb[] = KIT_BRICK_SHADES.map((shade) => [
+  shade[0] * KIT_BRICK_PICTURE[0],
+  shade[1] * KIT_BRICK_PICTURE[1],
+  shade[2] * KIT_BRICK_PICTURE[2],
+]);
+
+/** A skin's own wall list: what {@link kitPaletteOf} picks a wall's colour from. */
+function kitWallsOf(skin: KitSkin): readonly Rgb[] {
+  return skin === 'brick'
+    ? KIT_BRICK_SHADES
+    : skin === 'metal'
+      ? KIT_METAL_SHADES
+      : skin === 'stone'
+        ? KIT_STONE_PAINTS
+        : (WALL_PAINTS.render ?? []);
+}
+
+/**
+ * The entry of `skin`'s own wall list nearest a mapped colour — #3352,
+ * `building-paint.ts` §`nearestPaint`, each entry compared as it is drawn:
+ * a brick shade times the kit's brick picture, a stone as the albedo it is,
+ * a render paint over its white, as `building-paint.ts` §`mappedPaintEntry`
+ * compares the extrusion's. ⚠️ A metal shade is compared as written, over 1:
+ * the kit's metal picture's albedo is written down nowhere, and that is how
+ * `building-paint.ts` compares every photograph's shift whose albedo is not.
+ */
+export function kitWallEntryOf(skin: KitSkin, colour: Rgb): number {
+  if (skin === 'brick') return nearestPaint(KIT_BRICK_DRAWN, colour);
+  if (skin === 'render') return nearestPaint(kitWallsOf(skin), colour, RENDER_WHITE);
+  return nearestPaint(kitWallsOf(skin), colour);
+}
+
+/** How many entries `skin`'s own wall list has. */
+export function kitWallCount(skin: KitSkin): number {
+  return kitWallsOf(skin).length;
+}
+
+/**
+ * The entry of `wrap`'s skin's wall list its wall is drawn in, for its plan's
+ * wall paint `entry` — #3352: {@link KitWrap.wallShade} where it has one, and
+ * otherwise the plan's entry, round the list.
+ */
+export function kitWallShadeOf(
+  wrap: { readonly style: { readonly skin: KitSkin }; readonly wallShade?: number },
+  entry: number,
+): number {
+  return (wrap.wallShade ?? Math.abs(Math.trunc(entry))) % kitWallCount(wrap.style.skin);
+}
+
+/**
  * A wrap's colours, from its plan's own paints (`FootprintPaint`), so that
  * `paintTown`'s rule — no two neighbours alike — holds for the wrap as for
- * the extrusion: a `render` wall is the very house paint its extrusion
- * wears, so a mapped colour holds for it too; brick, stone and metal are a
- * shade chosen by the same entry, which is NOT the mapped colour's nearest
- * (their lists are the kit's own); the trim by its trim's; and a shop front, its awning and its sign
- * band one of the main street's sign paints (`SIGN_PAINTS`), by its door's.
+ * the extrusion: a wall is its skin's shade chosen by its plan's wall entry,
+ * so a `render` wall is the very house paint its extrusion wears; or, where
+ * the wrap has one, `wallShade` (#3352, {@link KitWrap.wallShade}): a mapped
+ * colour's nearest of the skin's own list, which for brick, stone and metal is
+ * the kit's own and not the list the extrusion's entry indexes. The trim by its
+ * trim's; and a shop front, its awning and its sign band one of the main
+ * street's sign paints (`SIGN_PAINTS`), by its door's.
  */
 export function kitPaletteOf(
   skin: KitSkin,
   paint: { readonly wall: number; readonly trim: number; readonly door: number },
+  wallShade?: number,
 ): KitPalette {
+  const shade = wallShade ?? paint.wall;
   const wall =
     skin === 'brick'
-      ? pick(KIT_BRICK_SHADES, paint.wall)
+      ? pick(KIT_BRICK_SHADES, shade)
       : skin === 'metal'
-        ? pick(KIT_METAL_SHADES, paint.wall)
+        ? pick(KIT_METAL_SHADES, shade)
         : skin === 'stone'
-          ? over(pick(KIT_STONE_PAINTS, paint.wall))
-          : over(pick(WALL_PAINTS.render ?? [], paint.wall), RENDER_WHITE);
+          ? over(pick(KIT_STONE_PAINTS, shade))
+          : over(pick(WALL_PAINTS.render ?? [], shade), RENDER_WHITE);
   return {
     wall,
     trim: over(pick(KIT_TRIM_PAINTS, paint.trim)),
@@ -1136,6 +1196,15 @@ export interface KitWrap {
    * street, and what planning a ride costs.
    */
   readonly attempts: number;
+  /**
+   * #3352: the entry of its skin's own wall list it is walled in, where its
+   * plan's wall entry does not choose it: the nearest to its mapped wall
+   * colour ({@link kitWallEntryOf}) where its plan's wall paint is one
+   * (#1792); or one `footprint-buildings.ts` §`paintTown` moved it to, off a
+   * neighbouring wrap's of its skin. `undefined` where the plan's entry, round
+   * the list, chooses ({@link kitWallShadeOf}).
+   */
+  readonly wallShade?: number;
 }
 
 /** What {@link wrapFootprint} reads of a plan. */
@@ -1154,6 +1223,8 @@ export interface KitWrapInput extends KitStyleInput {
   readonly shared: ReadonlyMap<number, number>;
   /** The most triangles it may be. */
   readonly budget: number;
+  /** #3352: its mapped wall colour, linear, where its plan's wall paint is pinned to one. */
+  readonly colour?: Rgb;
 }
 
 /** An edge, measured. */
@@ -1607,6 +1678,7 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
     // The wall's outward normal: its piece's +Z, (-az, ax).
     facing: [-door.az, door.ax],
     attempts,
+    ...(input.colour === undefined ? {} : { wallShade: kitWallEntryOf(style.skin, input.colour) }),
   };
 }
 

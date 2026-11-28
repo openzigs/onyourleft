@@ -41,6 +41,10 @@ import {
   kitMeshIndex,
   kitPaletteOf,
   kitPieceIndex,
+  kitWallCount,
+  kitWallEntryOf,
+  kitWallShadeOf,
+  KIT_METAL_SHADES,
   kitPlacedPoint,
   kitProjectedUv,
   kitStyleOf,
@@ -580,6 +584,31 @@ describe('what one building looks like — #3334, the look check on PR #3343', (
     for (let trim = 0; trim < 12; trim += 1) {
       const [red, green, blue] = kitPaletteOf('brick', { ...paint, trim }).trim;
       expect(Math.min(red, green, blue) * KIT_NEUTRAL_LEVEL).toBeGreaterThan(0.25);
+    }
+  });
+
+  it('walls a wrap in the shade it carries over its plan’s entry, and a mapped colour in its skin’s nearest — #3352', () => {
+    const paint = { wall: 3, trim: 1, door: 2 };
+    // A shade carried wins over the entry, in every skin; the trim and accent are the paint's.
+    for (const skin of ['brick', 'render', 'stone', 'metal'] as const) {
+      const carried = kitPaletteOf(skin, paint, 0);
+      expect(carried.wall).toEqual(kitPaletteOf(skin, { ...paint, wall: 0 }).wall);
+      expect(carried.wall).not.toEqual(kitPaletteOf(skin, paint).wall);
+      expect(carried.trim).toEqual(kitPaletteOf(skin, paint).trim);
+      expect(kitWallShadeOf({ style: { skin }, wallShade: 0 }, 3)).toBe(0);
+      expect(kitWallShadeOf({ style: { skin } }, 3 + kitWallCount(skin))).toBe(3);
+    }
+    // Metal: its shades compared as written, as `building-paint.ts` compares a photograph's
+    // shift whose albedo is not written down. White is the pale shade, blue the dark one.
+    expect(kitWallEntryOf('metal', [0.9, 0.9, 0.86])).toBe(0);
+    expect(kitWallEntryOf('metal', [1.4, 1.4, 1.4])).toBe(3);
+    expect(kitWallEntryOf('metal', [0.07, 0.16, 0.39])).toBe(4);
+    for (const [entry, shade] of KIT_METAL_SHADES.entries()) {
+      expect(kitWallEntryOf('metal', shade)).toBe(entry);
+    }
+    // Render: the house paint the extrusion's own mapped entry is, over the same white.
+    for (const [entry, house] of (WALL_PAINTS.render ?? []).entries()) {
+      expect(kitWallEntryOf('render', house.map((each) => each * 0.89) as never)).toBe(entry);
     }
   });
 });

@@ -26837,8 +26837,9 @@ export class MappedBuildingBelt {
   /**
    * Writes a plan's wrap of facade pieces from vertex `at` of the models'
    * buffer — #3334 ({@link writeKitWrap}), in the three colours its own paints
-   * choose (`facade-kit.ts` §`kitPaletteOf`) and #621's seeded tint. Returns
-   * the vertex after it.
+   * choose (`facade-kit.ts` §`kitPaletteOf`; #3352: its wall a mapped colour's
+   * nearest shade where it has one) and #621's seeded tint. Returns the vertex
+   * after it.
    */
   #appendKit(plan: FootprintPlan, wrap: KitWrap, at: number): number {
     const kit = this.#houses?.kit;
@@ -26846,7 +26847,7 @@ export class MappedBuildingBelt {
     return writeKitWrap(
       kit,
       wrap,
-      kitPaletteOf(wrap.style.skin, plan.paint),
+      kitPaletteOf(wrap.style.skin, plan.paint, wrap.wallShade),
       plan.tint,
       {
         position: this.#modelPosition.array as Float32Array,
