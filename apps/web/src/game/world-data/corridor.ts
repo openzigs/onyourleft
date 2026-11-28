@@ -176,6 +176,29 @@ export interface WorldCorridor {
    * crosses the route at grade. Optional for {@link places}' reason: absent is none.
    */
   readonly rails?: readonly RailFeature[];
+  /**
+   * #3253: what protects a level crossing, where the map says: lights, gates
+   * or both, at a point in local metres. Read by `rail-track.ts`, which
+   * stands a crossbuck at every level crossing and adds these only at a
+   * crossing a tag is on. Optional for {@link places}' reason: absent is none.
+   *
+   * ⚠️ **No decoder fills it yet.** `@onyourleft/map-features` keeps a
+   * railway's line, detail and grade and no point of it, so every corridor
+   * the product builds ({@link worldCorridorOf}) has none and every crossing
+   * on a real map is a crossbuck alone. A corridor built by hand, a test's or
+   * a harness's, may carry them.
+   */
+  readonly railCrossings?: readonly RailCrossingTag[];
+}
+
+/** A level crossing's protection as the map tags it — #3253. A point and two flags, never a name. */
+export interface RailCrossingTag {
+  readonly x: number;
+  readonly z: number;
+  /** Flashing lights at the crossing. */
+  readonly lights: boolean;
+  /** A gate or a barrier across the road. */
+  readonly gates: boolean;
 }
 
 /** One tile of a corridor, and why it holds what it holds. */

@@ -155,7 +155,6 @@ import {
 import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
-  levelCrossings,
   mappedJunctions,
   mappedTracks,
   onSideRoad,
@@ -178,6 +177,7 @@ import {
   type NearbyStreets,
   type NearbyStreetScan,
 } from './nearby-streets';
+import { railTrack, railTrackAt } from './rail-track';
 import { TURNED_OFF_REACH_METRES, wayRoads, type WayReached } from './way-roads';
 import { junctionSurfacesAt, type JunctionSurface, type TurnedJunction } from './junction-surface';
 import { streetNamesInView, type RouteLabelRoad, type StreetNameLabel } from './street-names';
@@ -895,21 +895,12 @@ export function sceneFrame(given: SceneInput): SceneFrame {
     (corridor.centre[0] as CorridorPoint).along,
     (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
     riderDistance,
-    // #2660: and a level crossing wherever a mapped railway crosses at grade,
-    // drawn with them and kept clear of the scenery as they are.
     input.worldCorridor === undefined
       ? []
       : joinedJunctions(
-          joinedJunctions(
-            junctions ?? [],
-            levelCrossings(
-              input.worldCorridor,
-              input.profile,
-              input.origin,
-              seed,
-              input.landClass ?? NO_LAND_CLASS,
-            ),
-          ),
+          // #3253: a level crossing is no longer an arm of these. The railway
+          // is drawn along its whole line, the crossing with it (`railway` below).
+          junctions ?? [],
           // #2695: and a mapped track or bridleway, drawn unpaved.
           mappedTracks(
             input.worldCorridor,
@@ -973,14 +964,33 @@ export function sceneFrame(given: SceneInput): SceneFrame {
           riderDistance,
           input.landClass ?? NO_LAND_CLASS,
         );
+  // #3253: and the mapped railway in view — ballast, sleepers and rails along
+  // every line, the road's surface and the signs at a level crossing, a deck
+  // on a bridge. Side roads too: the same mesh draws them, in the same call,
+  // and the scenery keeps off the track as off a street.
+  const railway =
+    input.worldCorridor === undefined
+      ? NO_SIDE_ROADS
+      : railTrackAt(
+          railTrack(input.worldCorridor, input.profile, input.origin),
+          input.profile,
+          input.origin,
+          seed,
+          riderDistance,
+          input.landClass ?? NO_LAND_CLASS,
+        );
   const streetRoads =
-    crossings.roads.length === 0 && nearby.length === 0 && surfaces.length === 0
+    crossings.roads.length === 0 &&
+    nearby.length === 0 &&
+    surfaces.length === 0 &&
+    railway.length === 0
       ? crossSideRoads
       : [
           ...crossSideRoads,
           ...crossings.roads,
           ...nearby,
           ...surfaces.map((surface) => surface.road),
+          ...railway,
         ];
   // #3106: and every way out of an open-world junction, wherever none of the
   // above draws it — a fork, a street mapped on a bridge — so no way the
@@ -1150,7 +1160,13 @@ export function sceneFrame(given: SceneInput): SceneFrame {
       seed,
       nearby.length === 0
         ? sideRoads
-        : [...crossSideRoads, ...crossings.roads, ...withinPeopleReach(nearby, camera)],
+        : [
+            ...crossSideRoads,
+            ...crossings.roads,
+            // #1619, #3253: the track keeps people off it with a street in view too.
+            ...railway,
+            ...withinPeopleReach(nearby, camera),
+          ],
       ground,
     ),
     // #2722: and the other cyclists on the road, kept clear of the rider.

@@ -199,10 +199,23 @@ describe('what a level crossing is drawn as — #2660', () => {
   const at = awayFromVillages(150, 2_000);
   const corridor = corridorOf([railAcross(at)]);
   const frame = frameAt(at - 40, corridor);
-  const crossing = frame.sideRoads.find((road) => road.junction.source === 'rail') as SideRoad;
+  // ⚠️ Since #3253 a frame's railway is `rail-track.ts`', the crossing with it
+  // (`rail-track.test.ts`), and `scene.ts` hands no level crossing to
+  // `sideRoadsAt`. What `sideRoadsAt` makes of one when it IS handed one is
+  // unchanged and still held here, read from it directly.
+  const crossing = sideRoadsAt(
+    FARMLAND,
+    ORIGIN,
+    SEED,
+    at - 60,
+    at + 460,
+    at,
+    levelCrossings(corridor, FARMLAND, ORIGIN, SEED),
+  )[0] as SideRoad;
 
   it('is in the frame that can see it, in the side roads’ one mesh', () => {
     expect(crossing).toBeDefined();
+    expect(frame.sideRoads.some((road) => road.junction.source === 'rail')).toBe(true);
     // The control: the same frame with no railway draws none.
     expect(
       frameAt(at - 40, corridorOf([])).sideRoads.some((r) => r.junction.source === 'rail'),
@@ -290,7 +303,8 @@ describe('what a level crossing is drawn as — #2660', () => {
     for (let along = from; along < from + 400; along += 40) rails.push(railAcross(along, 100));
     const withTrack = frameAt(from + 100, corridorOf(rails));
     const tracks = withTrack.sideRoads.filter((road) => road.junction.source === 'rail');
-    expect(tracks.length).toBe(rails.length);
+    // Since #3253 every line's pieces in view and each crossing's signs, not an arm a line.
+    expect(tracks.length).toBeGreaterThanOrEqual(rails.length);
     const onIt = (frame: ReturnType<typeof frameAt>) =>
       frame.scatter.filter((item) =>
         onSideRoad(

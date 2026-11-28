@@ -1265,6 +1265,90 @@ export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
 export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
 
 /**
+ * The most pieces of railway track a frame draws — #3253 (`rail-track.ts`):
+ * **27**, nearest the rider first, each at most 40 m of one mapped line, so
+ * 1 080 m of track in view. It was 32 until a bridge's girder, railing and
+ * capped piers were drawn (the owner's ruling of 2026-11-26 on #3270): the
+ * heaviest piece grew, and the pieces a frame draws fell so that
+ * {@link REALISTIC_RAIL_TRACK_TRIANGLES} did not rise.
+ */
+export const RAIL_TRACK_PIECES_PER_FRAME = 27;
+
+/**
+ * How many of those may carry their sleepers and their rails' three faces:
+ * the nearest **8**, and only within `rail-track.ts` §`RAIL_TRACK_NEAR_METRES`
+ * of the rider. The rest draw a sleeper-toned strip and each rail's one
+ * upright face.
+ */
+export const RAIL_TRACK_NEAR_PIECES = 8;
+
+/**
+ * The most triangles a piece with its sleepers is: **420**, a bridge's open
+ * span. Ten steps of crown (2), of a fascia each side — the ballast's edge,
+ * the girder's web, its flange, the railing and a stiffener, five quads a
+ * side (20) — and of two rails of one face (4) are 260; 40 m holds at most 67
+ * sleepers of one quad (134); and at most three piers of a shaft and a cap
+ * (8 each: 24): 418. A piece that holds a span's end has a step fewer of
+ * fascia and an abutment of a face, two wings, the bank's front and its two
+ * corners (12), and is under that. A piece on the ground is at most 350: ten steps of bed
+ * (6) and of two rails of three faces (12), the sleepers, and a level
+ * crossing's two cuts at the carriageway's edges (`rail-track.ts`
+ * §`CROSSING_CUTS_PER_PIECE`: 36).
+ */
+export const RAIL_TRACK_NEAR_PIECE_TRIANGLES = 420;
+
+/**
+ * The most a piece without is: **152**, a bridge's open span. Ten steps of
+ * crown (2) and of a fascia of three quads a side (12), and three piers of a
+ * shaft alone (4 each); a span's end is an abutment's one face and the
+ * bank's front (4) in place of a step's fascia. A piece on the ground is at most 144: ten steps of
+ * bed (6), a strip (2) and two rails of one face (4), and the same two cuts
+ * (24).
+ */
+export const RAIL_TRACK_FAR_PIECE_TRIANGLES = 152;
+
+/** The most level crossings a frame stands signs at: the nearest **4**. */
+export const RAIL_CROSSINGS_PER_FRAME = 4;
+
+/**
+ * The most triangles one level crossing's signs are: **120**. Each of its two
+ * is a post (4), a crossbuck's two boards (4), a pair of lights (12) and a
+ * gate (12) where the map tags them: 64 at the most, both ways.
+ */
+export const RAIL_CROSSING_FURNITURE_TRIANGLES = 120;
+
+/**
+ * The most triangles a frame's railway may add — #3253: **6 728**, the pieces
+ * above at their heaviest and every crossing's signs. A class of its own, as
+ * [ADR 0099](../../../../docs/adr/0099-model-sources-for-modern-buildings-trees-and-track-and-what-a-new-model-owes.md)
+ * D-4.1 asks of a thing no existing class fits: the track is built in code
+ * (`rail-track.ts`) and is no model, so none of {@link REALISTIC_TRIANGLES}'
+ * per-model ceilings is its.
+ *
+ * ⚠️ **No ceiling above is raised, and no mesh, material or texture is
+ * added.** The track is side roads: `three-renderer.ts` §`SideRoadBelt` draws
+ * it in the road's material in its ONE call. ⚠️ That mesh is hidden on a
+ * frame with no side road in view, so a frame whose only side road is track
+ * makes that one call where it made none: measured in the pinned Chromium on
+ * `town=rail`, 33 to 34 calls beside the bridge, and 40 and 40 at a crossing,
+ * where #2660's arm already drew. Like every side road, #2660's level
+ * crossings and #2973's nearby streets (8 192 a frame), it is **outside
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame**, which counts none of the
+ * road's mesh; unlike a village side road it is drawn only where a corridor
+ * maps a railway, so only in the realistic world. So this number bounds the
+ * track and is NOT evidence that a frame with track in it holds its rate: the
+ * tablet's reading on a ride past a mapped line is the owner's, owed before
+ * #3253 merges, and nothing here has measured it.
+ *
+ * @test-facing held by `rail-track.test.ts`, which builds the heaviest pieces
+ * and a frame of more railway than fits, and counts the belt's own mesh
+ */
+export const REALISTIC_RAIL_TRACK_TRIANGLES =
+  RAIL_TRACK_NEAR_PIECES * RAIL_TRACK_NEAR_PIECE_TRIANGLES +
+  (RAIL_TRACK_PIECES_PER_FRAME - RAIL_TRACK_NEAR_PIECES) * RAIL_TRACK_FAR_PIECE_TRIANGLES +
+  RAIL_CROSSINGS_PER_FRAME * RAIL_CROSSING_FURNITURE_TRIANGLES;
+
+/**
  * The most triangles a frame's parked cars may add — #3278: **13 440**, in
  * ONE draw call of their own ({@link REALISTIC_PARKED_CAR_DRAW_CALLS}).
  *
