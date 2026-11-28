@@ -13,6 +13,8 @@
  *       the BUILT `.app`'s Info.plist, read through `plutil`: the bundle ID, the
  *       device families, the deployment target, the usage strings and exactly
  *       the background modes the shipped features use
+ *   node apps/mobile/tools/ios-ci.mjs boot
+ *       starts the simulator's boot early in the job, so it overlaps the build
  *   node apps/mobile/tools/ios-ci.mjs launch <App.app>
  *       the app installed in a booted iPad simulator, launched, and the same
  *       process still running {@link STILL_RUNNING_AFTER_S} seconds later — a
@@ -29,6 +31,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { setTimeout as wait } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -303,8 +306,9 @@ function verdict(problems, what) {
 function checkXcode() {
   const text = run('xcodebuild', ['-version']);
   console.log(text.trim());
-  console.log(`DEVELOPER_DIR=${process.env['DEVELOPER_DIR'] ?? '(unset)'}`);
-  console.log(`xcode-select -p: ${run('xcode-select', ['-p']).trim()}`);
+  // `xcode-select -p` prints the developer directory in effect, the job's
+  // DEVELOPER_DIR included, so the log names which Xcode was measured.
+  console.log(`developer directory: ${run('xcode-select', ['-p']).trim()}`);
   return verdict(xcodeProblems(text), 'the selected Xcode');
 }
 
@@ -324,26 +328,61 @@ function checkBuiltApp(app) {
 }
 
 /** @param {string} app */
-async function checkLaunch(app) {
+/** A line of the log with the seconds since this process started. */
+const phase = (/** @type {string} */ what) =>
+  console.log(`[${(performance.now() / 1000).toFixed(1)} s] ${what}`);
+
+/**
+ * The simulator to use, booted: the same choice every time on one machine, so
+ * that the `boot` step early in the job and the `launch` step after the build
+ * reach the same device.
+ *
+ * @returns {{ udid: string, name: string, runtime: string } | null}
+ */
+function bootSimulator() {
   const simulator = simulatorFor(
     JSON.parse(run('xcrun', ['simctl', 'list', 'devices', 'available', '--json'])),
   );
-  if (simulator === null)
-    return verdict(['no available iPad simulator on any iOS runtime'], 'launch');
-  console.log(`simulator: ${simulator.name} (${simulator.runtime}) ${simulator.udid}`);
-  // A runner's simulators start shut down; on a developer's Mac the chosen
-  // one may already be booted, which `boot` reports as an error.
+  if (simulator === null) return null;
+  phase(`simulator: ${simulator.name} (${simulator.runtime}) ${simulator.udid}`);
+  // Booted already when the `boot` step ran, or on a developer's Mac; `boot`
+  // reports that as an error, and it is not one here.
   const boot = spawnSync('xcrun', ['simctl', 'boot', simulator.udid], { encoding: 'utf8' });
   if (boot.status !== 0 && !String(boot.stderr).includes('current state: Booted')) {
     throw new Error(`xcrun simctl boot ${simulator.udid}: ${String(boot.stderr)}`);
   }
+  phase('boot requested');
+  return simulator;
+}
+
+/**
+ * The job's `boot` step, before the install and the build: a runner's
+ * simulator takes minutes to finish its first boot (about eight on run
+ * 46165807873), and started here it finishes while the app is built.
+ */
+function checkBoot() {
+  const simulator = bootSimulator();
+  return verdict(
+    simulator === null ? ['no available iPad simulator on any iOS runtime'] : [],
+    'boot',
+  );
+}
+
+/** @param {string} app */
+async function checkLaunch(app) {
+  const simulator = bootSimulator();
+  if (simulator === null)
+    return verdict(['no available iPad simulator on any iOS runtime'], 'launch');
   run('xcrun', ['simctl', 'bootstatus', simulator.udid, '-b']);
+  phase('booted');
   run('xcrun', ['simctl', 'install', simulator.udid, app]);
+  phase('installed');
   const launched = run('xcrun', ['simctl', 'launch', simulator.udid, EXPECTED.bundleId]);
-  console.log(launched.trim());
+  phase(launched.trim());
   const pid = launchedPid(launched, EXPECTED.bundleId);
   if (pid === null) return verdict(['`simctl launch` printed no process id'], 'launch');
   await wait(STILL_RUNNING_AFTER_S * 1000);
+  phase(`waited ${String(STILL_RUNNING_AFTER_S)} s`);
   const now = runningPid(
     run('xcrun', ['simctl', 'spawn', simulator.udid, 'launchctl', 'list']),
     EXPECTED.bundleId,
@@ -382,11 +421,12 @@ async function checkLaunch(app) {
 async function main() {
   const [command, app] = process.argv.slice(2);
   if (command === 'xcode') return checkXcode();
+  if (command === 'boot') return checkBoot();
   if ((command === 'built-app' || command === 'launch') && app !== undefined) {
     return command === 'built-app' ? checkBuiltApp(app) : checkLaunch(app);
   }
   console.error(
-    'usage: node apps/mobile/tools/ios-ci.mjs xcode | built-app <App.app> | launch <App.app>',
+    'usage: node apps/mobile/tools/ios-ci.mjs xcode | boot | built-app <App.app> | launch <App.app>',
   );
   return 2;
 }

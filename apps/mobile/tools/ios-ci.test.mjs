@@ -300,6 +300,7 @@ function iosJobProblems(workflow) {
   for (const command of [
     'pnpm install --frozen-lockfile',
     'node apps/mobile/tools/ios-ci.mjs xcode',
+    'node apps/mobile/tools/ios-ci.mjs boot',
     'pnpm --filter @onyourleft/mobile exec cap sync ios',
     'node apps/mobile/tools/ios-ci.mjs built-app ',
     'node apps/mobile/tools/ios-ci.mjs launch ',
