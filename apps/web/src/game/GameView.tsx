@@ -226,7 +226,7 @@ import {
   courseProgressEvent,
 } from './course-laps';
 import type { CueOutput } from './audio-port';
-import { RideCues } from './audio-cues';
+import { GROUP_RIDE_CUE_SOUND, RideCues } from './audio-cues';
 import {
   DEFAULT_CUES,
   readCuePreference,
@@ -4789,6 +4789,13 @@ function GameScreen({
       const groupCueOffer = groupRideCueEvent(groupCued?.cue, groupCueOfferedRef.current);
       groupCueOfferedRef.current = groupCueOffer.offered;
       if (groupCueOffer.event !== undefined) events.push(groupCueOffer.event);
+      // #3306, ADR 0101 D-5.5: and its sound, once, on the same frame: never
+      // held or dropped by the announcer's window, which only the sentence
+      // waits for (the rule the interval sound follows). `RideCues` is silent
+      // for a rider with sounds off or muted; no power reading selects no cue.
+      if (groupCueOffer.event !== undefined && groupCueOffer.offered !== undefined) {
+        cuesRef.current?.cue(GROUP_RIDE_CUE_SOUND[groupCueOffer.offered.kind]);
+      }
       // #2546: no power on its cadence while the rider is held on a race's
       // line, in a room's lobby or a countdown, as on `main` where this clock
       // stood still there: a reading would also close the window "Go." needs.

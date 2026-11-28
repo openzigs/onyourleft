@@ -1599,7 +1599,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`setTargetAtTime`, never a step; `music-duck.test.ts`).
                         Since #2219 *Mute sounds* is pressed while the master
                         mute (the header's, menu routes only) is on, and its
-                        unmuting press clears the master before `begin()`
+                        unmuting press clears the master before `begin()`.
+                        #3306: a group ride cue has a sound per kind
+                        (`GROUP_RIDE_CUE_SOUND`: one each for the eight
+                        events, one shared by every correction; synthesised
+                        notes in `web-audio.ts`, no audio file, cue bus).
+                        `GameView` plays it on the frame it offers the cue's
+                        sentence, so a sentence dropped from the window keeps
+                        its sound; a quiet mark and a ride with no power
+                        reading select no cue and sound nothing.
+                        `group-ride/cue-sounds.test.ts` reads every sound's
+                        notes back off a fake context (`notesOf`) and rides a
+                        scripted rotation; `group-ride-wiring.test.tsx`
+                        §"#3306" the real ride. ⚠️ The shapes are drafts for
+                        the owner's ear on a moving ride
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from

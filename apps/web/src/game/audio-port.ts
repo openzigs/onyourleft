@@ -25,8 +25,29 @@
  * Android WebView, and a tone is not a sentence.
  */
 
-/** The ride's two short sounds. Their shapes are `web-audio.ts`'s, and this project's own. */
-export type RideCueName = 'interval' | 'distance';
+/**
+ * The group ride's short sounds — #3306 (ADR 0101 D-5.2): one for each event
+ * kind of `@onyourleft/domain` §`CUE_EVENT_KINDS`, and **one shared by every
+ * correction**. Which kind plays which is `audio-cues.ts`
+ * §`GROUP_RIDE_CUE_SOUND`; their shapes are `web-audio.ts`'s, and this
+ * project's own.
+ */
+export type GroupRideCueName =
+  | 'group-next-up'
+  | 'group-your-pull'
+  | 'group-pull-off'
+  | 'group-ease'
+  | 'group-last-wheel'
+  | 'group-back-in-line'
+  | 'group-climb'
+  | 'group-regroup'
+  | 'group-correction';
+
+/**
+ * The ride's short sounds: the interval and distance sounds (#400) and the
+ * group ride's (#3306). Their shapes are `web-audio.ts`'s, and this project's own.
+ */
+export type RideCueName = 'interval' | 'distance' | GroupRideCueName;
 
 /**
  * The menus' three short sounds — #946: a soft *select*, a *confirm* and a

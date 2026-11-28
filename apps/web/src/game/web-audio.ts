@@ -31,6 +31,13 @@
  * - **distance**: one short low note — a mark passed.
  * - **select**, **confirm** and **back** (#946): the menus' sounds — one
  *   short high note; two rising; two falling. Each is over in 130 ms.
+ * - **the group ride's nine** (#3306, ADR 0101 D-5.2): one per event kind —
+ *   *next up* one short high note, *your pull* two rising, *pull off* the
+ *   same two falling, *ease* one long low note, *last wheel* three quick at
+ *   one pitch, *back in line* two slow at one pitch, *climb* three rising,
+ *   *regroup* the same three falling — and one short low pair shared by every
+ *   correction. On the cue bus, like the ride's other two; each is over in
+ *   under 0.6 s.
  *
  * Designed here, from nothing; ADR 0009 forbids deriving them from a product
  * and none was consulted. Each note has a 10 ms attack and a short release so
@@ -132,12 +139,60 @@ const SOUNDS: Readonly<Record<CueName, readonly Note[]>> = {
     { hz: 587.33, at: 0, seconds: 0.05 },
     { hz: 440, at: 0.06, seconds: 0.06 },
   ],
+  // #3306: the group ride's, in ADR 0101 D-5.2's draft shapes, each in a
+  // register or a rhythm of its own so no two share a note sequence
+  // (`group-ride/cue-sounds.test.ts` walks every sound here). Drafts for the
+  // owner's ear on a moving ride. `your-pull` and `interval` are both two
+  // rising notes, a fourth low against a fifth high: a group ride is never
+  // offered beside a workout (ADR 0101 D-1.5), so the two never meet.
+  'group-next-up': [{ hz: 1046.5, at: 0, seconds: 0.08 }],
+  'group-your-pull': [
+    { hz: 392, at: 0, seconds: 0.12 },
+    { hz: 523.25, at: 0.15, seconds: 0.18 },
+  ],
+  'group-pull-off': [
+    { hz: 523.25, at: 0, seconds: 0.12 },
+    { hz: 392, at: 0.15, seconds: 0.18 },
+  ],
+  'group-ease': [{ hz: 196, at: 0, seconds: 0.5 }],
+  'group-last-wheel': [
+    { hz: 659.25, at: 0, seconds: 0.06 },
+    { hz: 659.25, at: 0.1, seconds: 0.06 },
+    { hz: 659.25, at: 0.2, seconds: 0.06 },
+  ],
+  'group-back-in-line': [
+    { hz: 523.25, at: 0, seconds: 0.2 },
+    { hz: 523.25, at: 0.35, seconds: 0.2 },
+  ],
+  'group-climb': [
+    { hz: 261.63, at: 0, seconds: 0.12 },
+    { hz: 329.63, at: 0.15, seconds: 0.12 },
+    { hz: 392, at: 0.3, seconds: 0.16 },
+  ],
+  'group-regroup': [
+    { hz: 392, at: 0, seconds: 0.12 },
+    { hz: 329.63, at: 0.15, seconds: 0.12 },
+    { hz: 261.63, at: 0.3, seconds: 0.16 },
+  ],
+  'group-correction': [
+    { hz: 220, at: 0, seconds: 0.07 },
+    { hz: 220, at: 0.11, seconds: 0.07 },
+  ],
 };
 
 /** Which bus each short sound plays on: the menus' on effects, the ride's on cues. */
 const BUS_OF: Readonly<Record<CueName, 'effects' | 'cues'>> = {
   interval: 'cues',
   distance: 'cues',
+  'group-next-up': 'cues',
+  'group-your-pull': 'cues',
+  'group-pull-off': 'cues',
+  'group-ease': 'cues',
+  'group-last-wheel': 'cues',
+  'group-back-in-line': 'cues',
+  'group-climb': 'cues',
+  'group-regroup': 'cues',
+  'group-correction': 'cues',
   select: 'effects',
   confirm: 'effects',
   back: 'effects',
