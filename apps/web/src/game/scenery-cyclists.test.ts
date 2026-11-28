@@ -382,7 +382,15 @@ describe('scenery cyclists are scenery only — #2722', () => {
     };
     walk(src, '');
     expect(game.startsWith(src)).toBe(true);
-    expect(importers.sort()).toEqual(['game/port.ts', 'game/scene.ts', 'game/three-renderer.ts']);
+    // #3283: and the moving cars' placing, which keeps a car clear of the
+    // cyclists by their own encounters (`moving-cars.test.ts` holds that file
+    // to the same rule: read by the frame and the drawing alone).
+    expect(importers.sort()).toEqual([
+      'game/moving-cars.ts',
+      'game/port.ts',
+      'game/scene.ts',
+      'game/three-renderer.ts',
+    ]);
   });
 });
 

@@ -206,6 +206,8 @@ const drawnAlongInputs = vi.hoisted((): (number | undefined)[] => []);
  * scenery cars; a Delivery round's parked cars are its own obstacles.
  */
 const parkedInputs = vi.hoisted((): (boolean | undefined)[] => []);
+/** #3283: the `movingCars` of every input, in order: a round has its own car, never scenery traffic. */
+const movingInputs = vi.hoisted((): (boolean | undefined)[] => []);
 vi.mock('./scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./scene')>();
   return {
@@ -216,6 +218,7 @@ vi.mock('./scene', async (importOriginal) => {
       swayInputs.push(args[0].steeredSway);
       drawnAlongInputs.push(args[0].riderDistance);
       parkedInputs.push(args[0].parkedCars);
+      movingInputs.push(args[0].movingCars);
       const frame = actual.sceneFrame(...args);
       steerOutputs.push(frame.markers.find((marker) => marker.kind === 'rider')?.steer);
       return frame;
@@ -3181,6 +3184,17 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     // Every frame a round steered: none of them asked for scenery cars.
     const inRound = steeredInputs.flatMap((lateral, index) =>
       lateral === undefined ? [] : [parkedInputs[index]],
+    );
+    expect(inRound.length).toBeGreaterThan(20);
+    expect(new Set(inRound)).toEqual(new Set([false]));
+  });
+
+  it('builds every frame of a round saying it may put no moving car on the road — #3283', async () => {
+    steeredInputs.length = 0;
+    movingInputs.length = 0;
+    await rideLevel('normal');
+    const inRound = steeredInputs.flatMap((lateral, index) =>
+      lateral === undefined ? [] : [movingInputs[index]],
     );
     expect(inRound.length).toBeGreaterThan(20);
     expect(new Set(inRound)).toEqual(new Set([false]));

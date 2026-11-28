@@ -79,6 +79,7 @@ import {
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_PARK_DRESSING_TRIANGLES,
   REALISTIC_PARK_FIELD_TRIANGLES,
+  REALISTIC_MOVING_CAR_TRIANGLES,
   REALISTIC_PARKED_CAR_DRAW_CALLS,
   REALISTIC_PARKED_CAR_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
@@ -96,6 +97,7 @@ import { GROUND_BLOB_TRIANGLES } from './ground-blob';
 import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
 import { LITTER_CAPACITY, LITTER_KINDS } from './litter';
+import { MOVING_CARS_MAX } from './moving-cars';
 import { PARKED_CARS_MAX, PARKED_CARS_NEAR_MAX } from './parked-cars';
 import {
   chainLinkFacts,
@@ -834,6 +836,35 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
     // One call of their own, and none on the village's frozen frame, which has no car.
     expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
+  });
+
+  it('holds the moving cars inside the parked cars’ term, in their call — #3283', () => {
+    const cars = deliveryCarFacts(join(SHIPPED, REALISTIC_DELIVERY_CAR));
+    const trianglesOf = (name: string): number => {
+      const node = cars.nodes.find((each) => each.name === name);
+      if (node === undefined) throw new Error(`the cars have no ${name}`);
+      return node.geometry.position.length / 9;
+    };
+    const near = Math.max(
+      ...REALISTIC_DELIVERY_CAR_BODIES.map(
+        (name) =>
+          trianglesOf(`${name}-body`) +
+          ['front-left', 'front-right', 'back-left', 'back-right'].reduce(
+            (sum, wheel) => sum + trianglesOf(`${name}-wheel-${wheel}`),
+            0,
+          ),
+      ),
+    );
+    // The cap's worst, priced off the committed file.
+    expect(MOVING_CARS_MAX * near).toBe(REALISTIC_MOVING_CAR_TRIANGLES);
+    // Each moving car takes a parked car's place with its wheels: the parked
+    // cars' near term holds them all, so the worst-frame sum above is theirs too.
+    expect(MOVING_CARS_MAX).toBeLessThanOrEqual(PARKED_CARS_NEAR_MAX);
+    expect(REALISTIC_MOVING_CAR_TRIANGLES).toBeLessThanOrEqual(PARKED_CARS_NEAR_MAX * near);
+    // No ceiling was raised to make the room.
+    expect(REALISTIC_PARKED_CAR_TRIANGLES).toBe(13_440);
+    expect(REALISTIC_PARKED_CAR_DRAW_CALLS).toBe(1);
+    expect(REALISTIC_FRAME_TRIANGLES).toBe(300_000);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {

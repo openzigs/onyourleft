@@ -34,8 +34,11 @@ import {
   type ParkedCar,
   type ParkedCarLevel,
 } from './parked-cars';
+import type { MovingCar } from './moving-car-frame';
+import { MOVING_CARS_MAX } from './moving-cars';
 import { REALISTIC_DELIVERY_CAR, REALISTIC_DELIVERY_CAR_BODIES } from './realistic-assets';
 import {
+  REALISTIC_MOVING_CAR_TRIANGLES,
   REALISTIC_PARKED_CAR_DRAW_CALLS,
   REALISTIC_PARKED_CAR_TRIANGLES,
 } from './realistic-budget';
@@ -476,5 +479,142 @@ describe('the parked cars’ belt — #3278', () => {
     }).toThrow(/#3278's parked cars' paint/);
     other.dispose();
     belt.dispose();
+  });
+});
+
+/** A moving car as a frame carries one — #3283. */
+function moving(more: Partial<MovingCar> = {}): MovingCar {
+  return {
+    kind: 'oncoming',
+    x: 0,
+    y: 0,
+    z: 0,
+    heading: 0,
+    pitch: 0,
+    look: lookOf(0),
+    travelled: 0,
+    speed: 0,
+    curvature: 0,
+    ...more,
+  };
+}
+
+/** Which corners of a body drawn with its wheels are which part, in the order the belt lays them. */
+function partsOf(body: number): readonly ('body' | 'front-wheel' | 'back-wheel')[] {
+  const roles: ('body' | 'front-wheel' | 'back-wheel')[] = [];
+  for (const part of GEOMETRY.parts) {
+    if (part.body !== body) continue;
+    if (part.role !== 'body' && part.role !== 'front-wheel' && part.role !== 'back-wheel') continue;
+    for (let corner = 0; corner < part.position.length / 3; corner += 1) roles.push(part.role);
+  }
+  return roles;
+}
+
+/** Which parts' corners moved between two of the mesh's corner lists, from corner `from`. */
+function movedParts(
+  before: readonly (readonly [number, number, number])[],
+  after: readonly (readonly [number, number, number])[],
+  from: number,
+  roles: readonly string[],
+): ReadonlySet<string> {
+  const moved = new Set<string>();
+  roles.forEach((role, at) => {
+    const a = before[from + at] as readonly [number, number, number];
+    const b = after[from + at] as readonly [number, number, number];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > 1e-4) moved.add(role);
+  });
+  return moved;
+}
+
+describe('moving cars in the parked cars’ belt — #3283', () => {
+  it('draws them in the one mesh with their wheels, each taking a parked car’s place, so the worst frame is #3278’s', () => {
+    const heavy = REALISTIC_DELIVERY_CAR_BODIES.map((_, body) => body).sort(
+      (a, b) => committed(b, 'near') - committed(a, 'near'),
+    )[0] as number;
+    const belt = new ParkedCarBelt(WORN);
+    const added: unknown[] = [];
+    belt.addTo({ add: (mesh: unknown) => added.push(mesh) } as never);
+    // Moving cars alone show the mesh.
+    belt.update(undefined, [moving()]);
+    expect(belt.mesh.visible).toBe(true);
+    expect(belt.stats).toMatchObject({
+      cars: 1,
+      near: 1,
+      moving: 1,
+      triangles: committed(0, 'near'),
+    });
+    // A full street, every car the heaviest asking for its wheels, and the most moving cars.
+    const street = Array.from({ length: PARKED_CARS_MAX + 10 }, (_, index) =>
+      car({ look: lookOf(heavy), z: index * 6 }),
+    );
+    const driving = Array.from({ length: MOVING_CARS_MAX + 2 }, (_, index) =>
+      moving({ look: lookOf(heavy), z: -20 - index * 8 }),
+    );
+    belt.update({ cars: street }, driving);
+    expect(belt.stats).toMatchObject({
+      cars: PARKED_CARS_MAX,
+      near: PARKED_CARS_NEAR_MAX,
+      moving: MOVING_CARS_MAX,
+      triangles: REALISTIC_PARKED_CAR_TRIANGLES,
+    });
+    expect(added).toHaveLength(REALISTIC_PARKED_CAR_DRAW_CALLS);
+    // The moving cars' term, priced off the committed file: inside the parked cars'.
+    expect(REALISTIC_MOVING_CAR_TRIANGLES).toBe(MOVING_CARS_MAX * committed(heavy, 'near'));
+    expect(MOVING_CARS_MAX).toBeLessThanOrEqual(PARKED_CARS_NEAR_MAX);
+    belt.dispose();
+  });
+
+  it('rewrites only the moving cars’ corners where only they moved, in the mesh it has', () => {
+    const belt = new ParkedCarBelt(WORN);
+    const view = { cars: [car({ z: 30 }), car({ z: 40, level: 'far' })] };
+    belt.update(view, [moving({ z: -10 })]);
+    const built = belt.mesh.geometry;
+    const before = corners(belt);
+    const parked = committed(0, 'near') + committed(0, 'far');
+    expect(belt.stats).toMatchObject({ rebuilds: 1, moves: 0 });
+    // The car drove on: the same body, a new place.
+    belt.update(view, [moving({ z: -6, travelled: 4 })]);
+    expect(belt.stats).toMatchObject({ rebuilds: 1, moves: 1, moving: 1 });
+    expect(belt.mesh.geometry).toBe(built);
+    const after = corners(belt);
+    // The street as it was, and the moving car four metres on.
+    expect(after.slice(0, parked * 3)).toEqual(before.slice(0, parked * 3));
+    expect(after[parked * 3]?.[2]).toBeCloseTo((before[parked * 3]?.[2] ?? 0) + 4, 5);
+    // Only its range goes up to the GPU.
+    const position = belt.mesh.geometry.getAttribute('position') as unknown as {
+      updateRanges: readonly { start: number; count: number }[];
+    };
+    expect(position.updateRanges).toEqual([{ start: parked * 9, count: committed(0, 'near') * 9 }]);
+    // Another body is another mesh; so are other parked cars.
+    belt.update(view, [moving({ z: -6, look: lookOf(1) })]);
+    expect(belt.stats.rebuilds).toBe(2);
+    belt.update({ cars: [car({ z: 50 })] }, [moving({ z: -6, look: lookOf(1) })]);
+    expect(belt.stats.rebuilds).toBe(3);
+    belt.dispose();
+  });
+
+  it('rolls its wheels with distance and steers its front wheels into a bend, through the Delivery car’s pose', () => {
+    for (const [body] of REALISTIC_DELIVERY_CAR_BODIES.entries()) {
+      const belt = new ParkedCarBelt(WORN);
+      const roles = partsOf(body);
+      const at = (more: Partial<MovingCar>): readonly (readonly [number, number, number])[] => {
+        belt.update(undefined, [moving({ look: lookOf(body), ...more })]);
+        return corners(belt);
+      };
+      const still = at({});
+      // A third of a metre on, standing where it stood: its wheels have turned and nothing else.
+      expect(movedParts(still, at({ travelled: 0.3 }), 0, roles)).toEqual(
+        new Set(['front-wheel', 'back-wheel']),
+      );
+      // On a bend, at a standstill so its body does not lean: its front wheels alone.
+      expect(movedParts(still, at({ curvature: 0.05 }), 0, roles)).toEqual(
+        new Set(['front-wheel']),
+      );
+      // And moving round it, its body leans into it as the Delivery car's does.
+      expect(movedParts(still, at({ curvature: 0.05, speed: 12 }), 0, roles).has('body')).toBe(
+        true,
+      );
+      belt.dispose();
+    }
   });
 });

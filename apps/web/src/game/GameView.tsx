@@ -4991,6 +4991,17 @@ function GameScreen({
           // streets, on every ride but a Delivery round, whose parked cars are
           // its own obstacles. Scenery only: no simulation or trainer reads one.
           parkedCars: deliveryRef.current === undefined,
+          // #3283: cars driving on the road, on a free ride or a workout only,
+          // as the cyclists above — never in a room, a lap race, a Delivery
+          // round, or beside the pacer or a ghost. Scenery only: no
+          // simulation, event or trainer reads one.
+          movingCars:
+            roomRef.current === undefined &&
+            racing === undefined &&
+            roomRacing === undefined &&
+            deliveryRef.current === undefined &&
+            drawn.botDistance === undefined &&
+            ghostRef.current === undefined,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is

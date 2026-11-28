@@ -60,6 +60,8 @@ interface DrawnInput {
   readonly riderDistance: number;
   readonly odometer: number;
   readonly steeredLateral: number | undefined;
+  /** #3283: whether the frame asked for moving cars. */
+  readonly movingCars: boolean | undefined;
 }
 const inputs = vi.hoisted((): DrawnInput[] => []);
 vi.mock('./scene', async (importOriginal) => {
@@ -72,6 +74,7 @@ vi.mock('./scene', async (importOriginal) => {
         riderDistance: input.riderDistance ?? Number.NaN,
         odometer: input.state.ride.distance,
         steeredLateral: input.steeredLateral,
+        movingCars: input.movingCars,
       });
       return actual.sceneFrame(...args);
     },
@@ -624,6 +627,24 @@ describe('a lap race in a room, inside a game ride — #1911', () => {
       placeAcross: 1,
       across: 1,
     });
+  });
+
+  it('asks for no moving car in a room, whether or not it races — #3283', async () => {
+    // `GameView`'s ask, read off what `sceneFrame` was handed: `scene.ts`
+    // holds a race's frames off by its own backstop too, but a room's ride
+    // with nobody else on the road has only this.
+    inputs.length = 0;
+    const room = new ScriptedRoom();
+    await mountRide({ room });
+    await act(async () => {
+      room.accept();
+      room.welcome(0, 'race', 'off');
+      room.frame(0, [lapFrameRider(0, 0)]);
+      await Promise.resolve();
+    });
+    for (let index = 0; index < 4; index += 1) await pump();
+    expect(inputs.length).toBeGreaterThan(0);
+    expect(new Set(inputs.map((input) => input.movingCars))).toEqual(new Set([false]));
   });
 
   it('runs no lap race in a room that is not one: no field, no pick-ups, no input', async () => {

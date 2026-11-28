@@ -631,6 +631,8 @@ import {
   type ParkedCarLevel,
   type ParkedCarsInView,
 } from './parked-cars';
+import type { MovingCar } from './moving-car-frame';
+import { MOVING_CARS_MAX } from './moving-cars';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -18247,14 +18249,86 @@ function parkedCarMaterial(atlas: Texture | undefined): Material {
   return material;
 }
 
-/** What the parked cars' belt drew on its last frame — #3278. */
+/** What the parked cars' belt drew on its last frame — #3278, and #3283's moving cars. */
 export interface ParkedCarStats {
   readonly cars: number;
-  /** How many of them with their wheels. */
+  /** How many of them with their wheels, the moving ones included. */
   readonly near: number;
+  /** How many of them are moving — #3283: each with its wheels. */
+  readonly moving: number;
   readonly triangles: number;
   /** How many times the one mesh has been rebuilt. */
   readonly rebuilds: number;
+  /** How many times the moving cars' corners were rewritten in place, the mesh kept — #3283. */
+  readonly moves: number;
+}
+
+/**
+ * A body of the cars with its wheels, as a moving car is drawn — #3283: the
+ * near level's triangles, and for each corner which part it is and what that
+ * part turns about, so its wheels roll and its front wheels steer.
+ */
+interface MovingCarShape extends ParkedCarShape {
+  /** Each corner's part, as {@link DELIVERY_CAR_POSE_GLSL} reads one: 1 the body, 2 a front wheel, 3 a back wheel. */
+  readonly part: Uint8Array;
+  /** Each corner's part's pivot, `xyz`. */
+  readonly pivot: Float32Array;
+}
+
+/** Which part a role is, as {@link DELIVERY_CAR_POSE_GLSL} numbers them. */
+const POSE_PART: Readonly<Record<DeliveryCarRole, number>> = {
+  body: 1,
+  'front-wheel': 2,
+  'back-wheel': 3,
+  'indicator-left': 1,
+  'indicator-right': 1,
+};
+
+/** `body` of `car` with its wheels, each corner's part and pivot beside it. */
+function movingCarShapeOf(car: DeliveryCarGeometry, body: number): MovingCarShape {
+  const shape = parkedCarShapeOf(car, body, 'near');
+  const parts = car.parts.filter(
+    (part) => part.body === body && PARKED_CAR_ROLES.near.includes(part.role),
+  );
+  const part = new Uint8Array(shape.triangles * 3);
+  const pivot = new Float32Array(shape.triangles * 9);
+  let at = 0;
+  for (const each of parts) {
+    for (let corner = 0; corner < each.position.length / 3; corner += 1) {
+      part[at] = POSE_PART[each.role];
+      pivot.set(each.pivot, at * 3);
+      at += 1;
+    }
+  }
+  return { ...shape, part, pivot };
+}
+
+/**
+ * `v` turned as {@link DELIVERY_CAR_POSE_GLSL}'s `oylCarTurn` turns it, in
+ * place — #3283: the parked cars' belt bakes a moving car's pose into its
+ * corners on the CPU rather than in a program of its own, so its one call
+ * and its material are the parked cars'. A body is tipped by the pose's
+ * pitch and lean, and a wheel rolled about its axle, a front one steered too.
+ */
+function carTurned(v: Vector3, part: number, pose: DeliveryCarPose): Vector3 {
+  if (part < 0.5) return v;
+  if (part < 1.5) {
+    const cp = Math.cos(pose.pitch);
+    const sp = Math.sin(pose.pitch);
+    v.set(v.x, cp * v.y - sp * v.z, sp * v.y + cp * v.z);
+    const cl = Math.cos(pose.lean);
+    const sl = Math.sin(pose.lean);
+    return v.set(cl * v.x - sl * v.y, sl * v.x + cl * v.y, v.z);
+  }
+  const cr = Math.cos(pose.roll);
+  const sr = Math.sin(pose.roll);
+  v.set(v.x, cr * v.y - sr * v.z, sr * v.y + cr * v.z);
+  if (part < 2.5) {
+    const cs = Math.cos(pose.steer);
+    const ss = Math.sin(pose.steer);
+    v.set(cs * v.x + ss * v.z, v.y, cs * v.z - ss * v.x);
+  }
+  return v;
 }
 
 /**
@@ -18280,6 +18354,17 @@ export interface ParkedCarStats {
  * ridden along a street of cars — every 5.4 m on the page's `town=streets`,
  * 0.7 ms a rebuild at the caps on a desktop — and never per frame.
  *
+ * #3283: **and the moving cars** (`moving-cars.ts`), in the same mesh and the
+ * same call, after the parked ones and inside their caps: each moving car is
+ * drawn with its wheels and takes one of §`PARKED_CARS_NEAR_MAX`'s places and
+ * one of §`PARKED_CARS_MAX`'s, so the nearest parked cars give theirs up and
+ * the belt's worst frame is the one #3278 priced. Its pose comes from
+ * {@link deliveryCarPose}, the Delivery car's, and is baked into its corners
+ * ({@link carTurned}). A frame whose moving cars have the same bodies as the
+ * last frame's, and whose parked cars are the last frame's, rewrites only the
+ * moving cars' corners, in place, and uploads only that range: at most
+ * `moving-cars.ts` §`MOVING_CARS_MAX` cars' triangles a frame, never the street.
+ *
  * The view builds it on the first realistic frame that carries a car, so
  * every other frame — a ride with no corridor, the owner's village and wooded
  * holds, a Delivery round — makes no call and submits no triangle for it.
@@ -18290,6 +18375,8 @@ export interface ParkedCarStats {
 export class ParkedCarBelt {
   readonly #mesh: Mesh;
   readonly #shapes: Readonly<Record<ParkedCarLevel, readonly ParkedCarShape[]>>;
+  readonly #moving: readonly MovingCarShape[];
+  readonly #bodies: readonly DeliveryCarBody[];
   readonly #matrix = new Matrix4();
   readonly #turn = new Quaternion();
   readonly #pitch = new Quaternion();
@@ -18300,7 +18387,12 @@ export class ParkedCarBelt {
   readonly #corner = new Vector3();
   readonly #paint = new Color();
   #held: readonly ParkedCar[] | undefined;
-  #stats: ParkedCarStats = { cars: 0, near: 0, triangles: 0, rebuilds: 0 };
+  #driving: readonly MovingCar[] = NO_MOVING_CARS;
+  /** The body of each moving car the mesh holds, in order. */
+  #drivingBodies: readonly number[] = [];
+  /** The corner the moving cars' start at. */
+  #movingFrom = 0;
+  #stats: ParkedCarStats = { cars: 0, near: 0, moving: 0, triangles: 0, rebuilds: 0, moves: 0 };
 
   constructor(car: DeliveryCarGeometry) {
     const bodies = car.bodies.map((_, body) => body);
@@ -18308,6 +18400,8 @@ export class ParkedCarBelt {
       near: bodies.map((body) => parkedCarShapeOf(car, body, 'near')),
       far: bodies.map((body) => parkedCarShapeOf(car, body, 'far')),
     };
+    this.#moving = bodies.map((body) => movingCarShapeOf(car, body));
+    this.#bodies = car.bodies;
     this.#mesh = new Mesh(new BufferGeometry(), parkedCarMaterial(car.atlas));
     // Spread along a street: a sphere about them all culls nothing, and it is one call.
     this.#mesh.frustumCulled = false;
@@ -18328,27 +18422,48 @@ export class ParkedCarBelt {
     return this.#stats;
   }
 
-  /** This frame's cars: the mesh is rebuilt only when they are not the last frame's; none hides it. */
-  update(view: ParkedCarsInView | undefined): void {
+  /**
+   * This frame's cars: the mesh is rebuilt only when its parked cars are not
+   * the last frame's or its moving cars' bodies are not; where only the
+   * moving cars moved, their corners are rewritten in place. None hides it.
+   */
+  update(view: ParkedCarsInView | undefined, moving?: readonly MovingCar[]): void {
     const cars = view?.cars ?? NO_CARS;
-    if (cars !== this.#held) {
+    const driving = moving ?? NO_MOVING_CARS;
+    const count = Math.min(driving.length, MOVING_CARS_MAX);
+    const bodies = this.#moving.length;
+    let sameBodies = count === this.#drivingBodies.length;
+    for (let at = 0; at < count && sameBodies; at += 1) {
+      sameBodies = parkedCarBody(driving[at] as MovingCar, bodies) === this.#drivingBodies[at];
+    }
+    if (cars !== this.#held || !sameBodies) {
       this.#held = cars;
-      this.#rebuild(cars.slice(0, PARKED_CARS_MAX));
+      this.#driving = driving;
+      this.#rebuild(cars, driving.slice(0, count));
+    } else if (driving !== this.#driving) {
+      this.#driving = driving;
+      this.#move(driving.slice(0, count));
     }
     this.#mesh.visible = this.#stats.triangles > 0;
   }
 
-  #rebuild(cars: readonly ParkedCar[]): void {
+  #rebuild(cars: readonly ParkedCar[], driving: readonly MovingCar[]): void {
     const bodies = this.#shapes.near.length;
-    // No car past the near cap is drawn with its wheels, whatever the list says.
-    let nearLeft = PARKED_CARS_NEAR_MAX;
-    const drawn = cars.map((car) => {
+    // No car past the near cap is drawn with its wheels, whatever the list says;
+    // #3283: and every moving car takes one of those places, and one of the cars'.
+    let nearLeft = PARKED_CARS_NEAR_MAX - driving.length;
+    const drawn = cars.slice(0, PARKED_CARS_MAX - driving.length).map((car) => {
       const near = car.level === 'near' && nearLeft > 0;
       if (near) nearLeft -= 1;
       const shapes = near ? this.#shapes.near : this.#shapes.far;
       return { car, near, shape: shapes[parkedCarBody(car, bodies)] as ParkedCarShape };
     });
-    const corners = drawn.reduce((sum, each) => sum + each.shape.triangles * 3, 0);
+    const movingShapes = driving.map(
+      (car) => this.#moving[parkedCarBody(car, bodies)] as MovingCarShape,
+    );
+    const parkedCorners = drawn.reduce((sum, each) => sum + each.shape.triangles * 3, 0);
+    const corners =
+      parkedCorners + movingShapes.reduce((sum, shape) => sum + shape.triangles * 3, 0);
     const position = new Float32Array(corners * 3);
     const normal = new Float32Array(corners * 3);
     const colour = new Float32Array(corners * 3);
@@ -18356,11 +18471,7 @@ export class ParkedCarBelt {
     let at = 0;
     for (const { car, shape } of drawn) {
       // Its nose along `(sin heading, cos heading)`, tipped up the ground by its pitch.
-      this.#turn
-        .setFromAxisAngle(this.#up, car.heading)
-        .multiply(this.#pitch.setFromAxisAngle(this.#across, -car.pitch));
-      this.#matrix.compose(this.#at.set(car.x, car.y, car.z), this.#turn, this.#one);
-      this.#paint.set(PARKED_CAR_PAINTS[parkedCarPaintOf(car, PARKED_CAR_PAINTS.length)] as number);
+      this.#place(car);
       for (let corner = 0; corner < shape.triangles * 3; corner += 1) {
         const to = (at + corner) * 3;
         this.#corner
@@ -18378,6 +18489,9 @@ export class ParkedCarBelt {
       uv.set(shape.uv, at * 2);
       at += shape.triangles * 3;
     }
+    this.#movingFrom = parkedCorners;
+    this.#write(driving, movingShapes, position, normal, colour, uv);
+    this.#drivingBodies = driving.map((car) => parkedCarBody(car, bodies));
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(position, 3));
     geometry.setAttribute('normal', new BufferAttribute(normal, 3));
@@ -18386,11 +18500,98 @@ export class ParkedCarBelt {
     this.#mesh.geometry.dispose();
     this.#mesh.geometry = geometry;
     this.#stats = {
-      cars: drawn.length,
-      near: drawn.filter((each) => each.near).length,
+      cars: drawn.length + driving.length,
+      near: drawn.filter((each) => each.near).length + driving.length,
+      moving: driving.length,
       triangles: corners / 3,
       rebuilds: this.#stats.rebuilds + 1,
+      moves: this.#stats.moves,
     };
+  }
+
+  /** The moving cars rewritten in place, with the bodies the mesh already holds for them. */
+  #move(driving: readonly MovingCar[]): void {
+    const geometry = this.#mesh.geometry;
+    const position = geometry.getAttribute('position') as BufferAttribute;
+    const normal = geometry.getAttribute('normal') as BufferAttribute;
+    const colour = geometry.getAttribute('color') as BufferAttribute;
+    const uv = geometry.getAttribute('uv') as BufferAttribute;
+    const bodies = this.#moving.length;
+    const shapes = driving.map((car) => this.#moving[parkedCarBody(car, bodies)] as MovingCarShape);
+    this.#write(
+      driving,
+      shapes,
+      position.array as Float32Array,
+      normal.array as Float32Array,
+      colour.array as Float32Array,
+      uv.array as Float32Array,
+    );
+    const corners = shapes.reduce((sum, shape) => sum + shape.triangles * 3, 0);
+    // Only the moving cars' range is uploaded: the street's corners are as they were.
+    for (const attribute of [position, normal, colour, uv]) {
+      attribute.clearUpdateRanges();
+      attribute.addUpdateRange(this.#movingFrom * attribute.itemSize, corners * attribute.itemSize);
+      attribute.needsUpdate = true;
+    }
+    this.#stats = { ...this.#stats, moves: this.#stats.moves + 1 };
+  }
+
+  /** Each moving car's corners from {@link #movingFrom}: posed, placed and painted. */
+  #write(
+    driving: readonly MovingCar[],
+    shapes: readonly MovingCarShape[],
+    position: Float32Array,
+    normal: Float32Array,
+    colour: Float32Array,
+    uv: Float32Array,
+  ): void {
+    let at = this.#movingFrom;
+    driving.forEach((car, index) => {
+      const shape = shapes[index] as MovingCarShape;
+      const body = this.#bodies[parkedCarBody(car, this.#bodies.length)] as DeliveryCarBody;
+      // The Delivery car's pose: its wheels rolled by how far it has driven,
+      // its front ones steered into its road's bend.
+      const pose = deliveryCarPose(
+        {
+          travelledMetres: car.travelled,
+          speedMetresPerSecond: car.speed,
+          steerRadians: Math.atan(body.wheelbase * car.curvature),
+          braking: 0,
+        },
+        body,
+      );
+      this.#place(car);
+      for (let corner = 0; corner < shape.triangles * 3; corner += 1) {
+        const to = (at + corner) * 3;
+        const part = shape.part[corner] as number;
+        const px = shape.pivot[corner * 3] as number;
+        const py = shape.pivot[corner * 3 + 1] as number;
+        const pz = shape.pivot[corner * 3 + 2] as number;
+        this.#corner.fromArray(shape.position, corner * 3);
+        this.#corner.set(this.#corner.x - px, this.#corner.y - py, this.#corner.z - pz);
+        carTurned(this.#corner, part, pose);
+        this.#corner
+          .set(this.#corner.x + px, this.#corner.y + py, this.#corner.z + pz)
+          .applyMatrix4(this.#matrix)
+          .toArray(position, to);
+        this.#corner.fromArray(shape.normal, corner * 3);
+        carTurned(this.#corner, part, pose).applyQuaternion(this.#turn).toArray(normal, to);
+        colour[to] = (shape.colour[corner * 3] as number) * this.#paint.r;
+        colour[to + 1] = (shape.colour[corner * 3 + 1] as number) * this.#paint.g;
+        colour[to + 2] = (shape.colour[corner * 3 + 2] as number) * this.#paint.b;
+      }
+      uv.set(shape.uv, at * 2);
+      at += shape.triangles * 3;
+    });
+  }
+
+  /** The matrix, the turn and the paint of one car: its place, its yaw tipped by its pitch, its look. */
+  #place(car: Pick<ParkedCar, 'x' | 'y' | 'z' | 'heading' | 'pitch' | 'look'>): void {
+    this.#turn
+      .setFromAxisAngle(this.#up, car.heading)
+      .multiply(this.#pitch.setFromAxisAngle(this.#across, -car.pitch));
+    this.#matrix.compose(this.#at.set(car.x, car.y, car.z), this.#turn, this.#one);
+    this.#paint.set(PARKED_CAR_PAINTS[parkedCarPaintOf(car, PARKED_CAR_PAINTS.length)] as number);
   }
 
   dispose(): void {
@@ -18401,6 +18602,9 @@ export class ParkedCarBelt {
 
 /** No cars: a frame that carries none. @see ParkedCarBelt.update */
 const NO_CARS: readonly ParkedCar[] = [];
+
+/** No moving cars — #3283. @see ParkedCarBelt.update */
+const NO_MOVING_CARS: readonly MovingCar[] = [];
 
 /**
  * The ground's photographic material — #425.
@@ -29297,7 +29501,10 @@ class ThreeGameView implements GameView {
     this.#terrain.updatePark(park?.ground);
     this.#updateParkDressing(park);
     // #3278: the parked cars in reach, the realistic world's alone.
-    this.#updateParkedCars(this.#drawing === 'realistic' ? frame.parkedCars : undefined);
+    this.#updateParkedCars(
+      this.#drawing === 'realistic' ? frame.parkedCars : undefined,
+      this.#drawing === 'realistic' ? frame.movingCars : undefined,
+    );
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -29455,13 +29662,18 @@ class ThreeGameView implements GameView {
    * frame that carries a car, from the cars the realistic world loaded, and
    * hidden on every frame with none.
    */
-  #updateParkedCars(view: ParkedCarsInView | undefined): void {
+  #updateParkedCars(
+    view: ParkedCarsInView | undefined,
+    moving: readonly MovingCar[] | undefined,
+  ): void {
     const cars = realisticWorld?.deliveryCar;
-    if (this.#parkedCars === undefined && cars !== undefined && (view?.cars.length ?? 0) > 0) {
+    // #3283: or the first that carries a moving car.
+    const carried = (view?.cars.length ?? 0) > 0 || (moving?.length ?? 0) > 0;
+    if (this.#parkedCars === undefined && cars !== undefined && carried) {
       this.#parkedCars = new ParkedCarBelt(cars);
       this.#parkedCars.addTo(this.#scene);
     }
-    this.#parkedCars?.update(view);
+    this.#parkedCars?.update(view, moving);
   }
 
   /** @see parkedCarStatsOf */

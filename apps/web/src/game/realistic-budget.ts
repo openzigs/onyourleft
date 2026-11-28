@@ -1327,6 +1327,28 @@ export const REALISTIC_PARKED_CAR_TRIANGLES = 13_440;
 export const REALISTIC_PARKED_CAR_DRAW_CALLS = 1;
 
 /**
+ * The most triangles a frame's moving cars may submit — #3283: **1 344**,
+ * `moving-cars.ts` §`MOVING_CARS_MAX` (3) cars, each the heaviest body with
+ * its four wheels (the hatchback's 336 and 4 × 28 = 448).
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_PARKED_CAR_TRIANGLES}, not beside it.** The
+ * parked cars' belt draws the moving cars in its own mesh and its one call
+ * ({@link REALISTIC_PARKED_CAR_DRAW_CALLS}), and each moving car takes one of
+ * `parked-cars.ts` §`PARKED_CARS_NEAR_MAX`'s places with its wheels and one
+ * of §`PARKED_CARS_MAX`'s: the nearest parked cars give theirs up. So the
+ * belt's worst frame is the one #3278 priced, `realistic-budget.test.ts`'s
+ * worst-frame sum holds it unchanged, and no ceiling above was raised. No
+ * file: the bodies are the committed `realistic-assets.ts`
+ * §`REALISTIC_DELIVERY_CAR`, so the set's bytes do not change. The tablet's
+ * reading on a town street is the owner's (#733).
+ *
+ * @test-facing held by `parked-car-belt.test.ts` (the belt as built, priced
+ * off the committed file) and `realistic-budget.test.ts` (inside the parked
+ * cars' term)
+ */
+export const REALISTIC_MOVING_CAR_TRIANGLES = 1_344;
+
+/**
  * The most triangles a frame's village streets may add — #1535's pavements,
  * #1564's paths to the front doors and #1536's street furniture: **34 304**
  * in the realistic world since the owner's ruling of 2026-11-05 on #1274
