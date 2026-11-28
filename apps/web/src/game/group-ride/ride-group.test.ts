@@ -35,6 +35,7 @@ import {
   groupLine,
   groupRideDrawing,
   groupRideFact,
+  groupRideStrip,
   startGroupRideSession,
   stepGroupRideSession,
   type GroupRideSession,
@@ -341,5 +342,154 @@ describe('what the ride keeps of its group', () => {
     expect(end.logCut).toBe(true);
     expect(groupRideFact(end).logCut).toBe(true);
     expect(groupRideFact(session)).not.toHaveProperty('logCut');
+  });
+});
+
+describe("the rider's cue and the role strip — #3305", () => {
+  /** What one frame of a held-wheel ride left: the session and the strip the HUD reads. */
+  interface Held {
+    readonly session: GroupRideSession;
+    readonly strip: ReturnType<typeof groupRideStrip>;
+  }
+
+  /**
+   * A rider who holds their place exactly, put where a clean rider would be
+   * frame by frame (the rider is read and never written, so a test may place
+   * them): on the wheel ahead while in the line; at the group's speed on the
+   * front, then under it once *Pull off now* has been shown, so the line
+   * comes round; easing while drifting back; and on the last wheel after.
+   */
+  function holdTheWheel(seconds: number, power: number | null): readonly Held[] {
+    let session = started({ bots: 3 });
+    const gap =
+      (session.state.bots[last(session.botIds)]?.distanceM ?? 0) - session.rider.distanceM;
+    const held: Held[] = [];
+    const frame = FRAME_MS / 1_000;
+    for (let at = FRAME_MS; at <= seconds * 1_000; at += FRAME_MS) {
+      const { order } = session.state.rotation;
+      const seat = order.indexOf(GROUP_RIDE_RIDER_ID);
+      const wheel = seat > 0 ? order[seat - 1] : seat < 0 ? last(order) : undefined;
+      const ahead = wheel === undefined ? undefined : session.state.bots[wheel];
+      let rider = session.rider;
+      if (seat === 0) {
+        const asked = session.cue?.kind === 'pull-off' || session.cue?.kind === 'ease';
+        const speedMps = asked ? Math.max(0, session.groupSpeedMps - 1) : session.groupSpeedMps;
+        rider = { distanceM: rider.distanceM + speedMps * frame, speedMps };
+      } else if (seat < 0 && session.role === 'drifting-back') {
+        const speedMps = 0.85 * session.groupSpeedMps;
+        rider = { distanceM: rider.distanceM + speedMps * frame, speedMps };
+      } else if (ahead !== undefined) {
+        // Where the wheel will be when the frame ends, less the gap held.
+        rider = {
+          distanceM: ahead.distanceM + ahead.speedMps * frame - gap,
+          speedMps: ahead.speedMps,
+        };
+      }
+      session = stepGroupRideSession(session, {
+        ticks: Math.round(frame / SIMULATION_STEP_SECONDS),
+        rider,
+        riderStopped: false,
+        powerWatts: power,
+        thresholdWatts: null,
+      });
+      held.push({ session, strip: groupRideStrip(session, power !== null) });
+    }
+    return held;
+  }
+
+  /** The frames a new cue was selected in: a selection is an object of its own. */
+  function newCues(held: readonly Held[]): readonly Held[] {
+    return held.filter(
+      ({ session }, index) =>
+        session.cue !== undefined && session.cue !== held[index - 1]?.session.cue,
+    );
+  }
+
+  /** Each cue the ride selected, once, in order. */
+  function cuesOf(held: readonly Held[]): string[] {
+    return newCues(held).map(({ session }) => session.cue?.kind ?? '');
+  }
+
+  const TURN = ['next-up', 'your-pull', 'pull-off', 'ease', 'last-wheel', 'back-in-line'];
+
+  it('selects each event of the rider’s turn once, in order, turn after turn, on the group’s own clock', () => {
+    const held = holdTheWheel(400, 180);
+    const kinds = cuesOf(held);
+    // Three turns in 400 s behind three bots: no correction for a rider who holds the wheel.
+    expect(kinds.slice(0, 18)).toStrictEqual([...TURN, ...TURN, ...TURN]);
+    // Each is kept with the instant it was selected at.
+    const firsts = newCues(held);
+    expect(firsts).toHaveLength(kinds.length);
+    for (const { session } of firsts) {
+      const at = session.cue?.atSeconds ?? Number.NaN;
+      expect(at).toBeLessThanOrEqual(session.state.atMs / 1_000);
+      expect(at).toBeGreaterThan(session.state.atMs / 1_000 - FRAME_MS / 1_000 - 1e-9);
+    }
+    // *Your pull* is selected as the rider's role becomes on-front, and not before.
+    const pull = firsts.find(({ session }) => session.cue?.kind === 'your-pull');
+    expect(pull?.session.role).toBe('on-front');
+  });
+
+  it('selects nothing with no power reading, and for a power that is no reading', () => {
+    for (const power of [null, Number.NaN, -5]) {
+      const held = holdTheWheel(200, power);
+      expect(cuesOf(held)).toStrictEqual([]);
+      expect(last(held).session.cue).toBeUndefined();
+      // The line rode its rotation all the same: the rider was on the front.
+      expect(held.some(({ session }) => session.role === 'on-front')).toBe(true);
+    }
+    expect(last(holdTheWheel(5, null)).strip.live).toBe(false);
+  });
+
+  it('the strip counts the pull down only while the rider is on the front, from its length to nothing', () => {
+    const held = holdTheWheel(140, 180);
+    const front = held.filter(({ session }) => session.role === 'on-front');
+    const rest = held.filter(({ session }) => session.role !== 'on-front');
+    expect(front.length).toBeGreaterThan(100);
+    expect(rest.length).toBeGreaterThan(100);
+    expect(rest.every(({ strip }) => strip.pullLeftSeconds === undefined)).toBe(true);
+    const left = front.map(({ strip }) => strip.pullLeftSeconds as number);
+    expect(left.every((seconds) => Number.isInteger(seconds) && seconds >= 0)).toBe(true);
+    expect(left[0]).toBe(30);
+    expect(last(left)).toBe(0);
+    expect(
+      left.every((seconds, index) => index === 0 || seconds <= (left[index - 1] as number)),
+    ).toBe(true);
+    // On the front there is no wheel ahead, and the place is the first of four.
+    expect(front.every(({ strip }) => strip.gapMetres === undefined && strip.place === 1)).toBe(
+      true,
+    );
+  });
+
+  it('the strip reads the place in the line, the gap to the wheel ahead and both speeds', () => {
+    const held = holdTheWheel(140, 180);
+    const first = held[0] as Held;
+    // At the press: last of four, a wheel gap behind the last bot.
+    expect(first.strip.place).toBe(4);
+    expect(first.strip.of).toBe(4);
+    expect(first.strip.live).toBe(true);
+    expect(first.strip.targetSpeed).toBe(THIRTY);
+    for (const { session, strip } of held) {
+      const { order } = session.state.rotation;
+      const seat = order.indexOf(GROUP_RIDE_RIDER_ID);
+      expect(strip.groupSpeed).toBe(session.groupSpeedMps);
+      if (seat > 0) {
+        expect(strip.place).toBe(seat + 1);
+        const wheel = session.state.bots[order[seat - 1] as string]?.distanceM ?? Number.NaN;
+        expect(strip.gapMetres).toBeCloseTo(wheel - session.rider.distanceM, 9);
+        expect(strip.gapMetres).toBeGreaterThan(0);
+      }
+      // Aside, drifting back or latching on: bound for the back, and the last wheel is theirs.
+      if (seat < 0) expect(strip.place).toBe(4);
+    }
+    // The rider moved up the line as the bots took their turns.
+    expect(new Set(held.map(({ strip }) => strip.place))).toStrictEqual(new Set([4, 3, 2, 1]));
+    // Level with the wheel ahead or past it, there is no gap to close.
+    const session = first.session;
+    const wheelAt = session.state.bots[last(session.botIds)]?.distanceM ?? Number.NaN;
+    for (const past of [0, 1.5]) {
+      const overlapped = { ...session, rider: { ...session.rider, distanceM: wheelAt + past } };
+      expect(groupRideStrip(overlapped, true).gapMetres).toBeUndefined();
+    }
   });
 });

@@ -221,6 +221,13 @@ describe('one tick', () => {
     expect(tick.state.atMs).toBe(500);
     expect(tick.groupSpeedMps).toBe(GROUP_MPS);
     expect(tick.rotation.state).toBe(tick.state.rotation);
+    // #3305: and hands back what the rotation read, for the cue selector: the
+    // line as the tick began, at the group's speed now.
+    expect(tick.line.atMs).toBe(0);
+    expect(tick.line.groupSpeedMps).toBe(GROUP_MPS);
+    expect(tick.line.members.you).toEqual(RIDER_AT);
+    expect(Object.keys(tick.line.members).sort()).toEqual(['b1', 'b2', 'b3', 'you']);
+    expect(tick.line.climbAheadM).toBeNull();
     expect(tick.rotation.roles).toEqual({
       b1: 'on-front',
       b2: 'second-wheel',

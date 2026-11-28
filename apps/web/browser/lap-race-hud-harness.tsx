@@ -40,6 +40,16 @@
  * past the *Item* field's value box at every corners layout (PR #1957's first
  * run), where on a Mac it fitted by a pixel. The `held-…` stages hold all five.
  *
+ * ## `?group=ride` — an AI group ride's role strip and cue line (#3305)
+ *
+ * The same stage with a group ride on it in place of a race, through the
+ * **real** `game/hud/group-ride-hud.ts` and `GroupRideCue.tsx`: the strip's
+ * two fields take a race's two places, and the cue line is the longest
+ * sentence a cue has, on the notices cell. Three stages, each the widest of
+ * its kind: `group-wheel` (eighth of eight, a two-digit gap), `group-front`
+ * (the pull's countdown at its longest) and `group-lost` (no power reading:
+ * dashes). `?text=` sets the HUD's text size, as it does for `?corner=race`.
+ *
  * ⚠️ **What it does not prove**: the stage is not `GameView`'s. No lap race
  * runs inside a game ride until #1906, and the notices a real ride can put
  * on the HUD (the road notice, a lap's notice) are not here. The rider's box
@@ -54,6 +64,7 @@ import { flushSync } from 'react-dom';
 
 import {
   BOT_PACING_STYLES,
+  CUE_KINDS,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   altitudeMetres,
   beatsPerMinute,
@@ -84,6 +95,8 @@ import {
   HUD_TEXT_SIZES,
   type HudLayoutPreference,
 } from '../src/game/hud/hud-layout-preference';
+import { GROUP_RIDE_CUE_TEXT, type GroupRideHud } from '../src/game/hud/group-ride-hud';
+import { GROUP_RIDE_CUE_CLASS, groupCueNotice } from '../src/game/hud/GroupRideCue';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from '../src/game/lap-race/choice';
 import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
@@ -162,6 +175,22 @@ export interface LapRaceStageMeasurement {
     | undefined;
   /** *Show laps*, where the standings carry it (#2080). */
   readonly swap: Box | undefined;
+  /** #3305: the group ride's cue line, where the stage draws one. */
+  readonly cue: CueLineMeasurement | undefined;
+}
+
+/** The cue line as it is drawn: where, how large, on how many lines, and whether anything clips it. */
+export interface CueLineMeasurement {
+  readonly text: string;
+  readonly box: Box;
+  readonly fontSize: number;
+  /** A notice's own size, px: what the line is 1.5 times. */
+  readonly noticeSize: number;
+  readonly lines: number;
+  /** The line or its cell, where its content runs past its box. */
+  readonly overflows: readonly string[];
+  /** Whether the line is what a press on each of its corners lands on. */
+  readonly onTop: boolean;
 }
 
 /** One stage's standings and actions panel in the first frame drawn. */
@@ -474,8 +503,72 @@ function Corner(): JSX.Element {
   );
 }
 
+/** The longest sentence a cue has: what the cue line must hold. */
+export const LONGEST_CUE = [...CUE_KINDS]
+  .map((kind) => GROUP_RIDE_CUE_TEXT[kind])
+  .sort((a, b) => b.length - a.length)[0] as string;
+
+const GROUP = SEARCH.get('group') === 'ride';
+
+/** A group of eight at 42 km/h on a ride chosen at 38: the widest the chooser starts. */
+const GROUP_ON_A_WHEEL: GroupRideHud = {
+  place: 8,
+  of: 8,
+  gapMetres: 12.4,
+  pullLeftSeconds: undefined,
+  groupSpeed: 42 / 3.6,
+  targetSpeed: 38 / 3.6,
+  live: true,
+};
+
+const GROUP_STAGES: readonly { readonly stage: string; readonly group: GroupRideHud }[] = [
+  { stage: 'group-wheel', group: GROUP_ON_A_WHEEL },
+  {
+    stage: 'group-front',
+    group: { ...GROUP_ON_A_WHEEL, place: 1, gapMetres: undefined, pullLeftSeconds: 30 },
+  },
+  { stage: 'group-lost', group: { ...GROUP_ON_A_WHEEL, live: false } },
+];
+
+/** `?group=ride`: a group ride's strip and cue line on the widest ride's stage. @see the file header */
+function Group(): JSX.Element {
+  return (
+    <div>
+      {GROUP_STAGES.map(({ stage, group }) => (
+        <section
+          key={stage}
+          className="oyl-game oyl-game--riding"
+          style={STAGE_IN_FLOW}
+          data-oyl-lap-race-stage={stage}
+        >
+          <HudPanel
+            profile={PROFILE}
+            shownPower={SHOWN_POWER}
+            state={STATE}
+            cadence={{ value: 92, live: true }}
+            heartRate={{ value: 168, live: true }}
+            movingSeconds={MOVING_SECONDS}
+            elapsedSeconds={MOVING_SECONDS}
+            // A group ride has no pacer; the ghost's gap is still chased.
+            chases={CHASES.filter((chase) => chase.to === 'ghost')}
+            paused={false}
+            onPause={() => undefined}
+            onEnd={() => undefined}
+            announcement=""
+            trainer={{ gradePercent: -12.5, writes: 1_234 }}
+            layout={CORNER_LAYOUT}
+            groupRide={group}
+            notices={[groupCueNotice(LONGEST_CUE)]}
+          />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function Harness(): JSX.Element {
   if (CORNER) return <Corner />;
+  if (GROUP) return <Group />;
   return (
     <div>
       {STAGES.map(({ stage, race, speed }) => (
@@ -594,8 +687,50 @@ function measure(): readonly LapRaceStageMeasurement[] {
               more: list.getAttribute('data-oyl-more'),
             },
       swap: swap === null ? undefined : boxIn(swap, origin),
+      cue: cueLine(stage),
     };
   });
+}
+
+/** #3305: the stage's cue line, measured as `ride-notices.browser.spec.ts` measures the pacer's. */
+function cueLine(stage: Element): CueLineMeasurement | undefined {
+  const notice = stage.querySelector<HTMLElement>(`.oyl-hud__notices .${GROUP_RIDE_CUE_CLASS}`);
+  if (notice === null) return undefined;
+  // `topmost` scrolls the line into view, so it is asked first and the stage's
+  // origin is read after it.
+  const onTop = topmost(notice);
+  const origin = stage.getBoundingClientRect();
+  const style = getComputedStyle(notice);
+  const root = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const token = getComputedStyle(document.documentElement).getPropertyValue('--oyl-font-size-sm');
+  // Its lines: the sentence's text, a line box at a time.
+  const sentence = notice.querySelector<HTMLElement>(':scope > span:not(.oyl-status__glyph)');
+  const range = document.createRange();
+  if (sentence !== null) range.selectNodeContents(sentence);
+  const lineHeight = parseFloat(style.lineHeight);
+  const tops: number[] = [];
+  for (const rect of range.getClientRects()) {
+    if (rect.width < 1) continue;
+    if (!tops.some((top) => Math.abs(top - rect.top) < lineHeight / 2)) tops.push(rect.top);
+  }
+  const overflows: string[] = [];
+  for (const each of [notice, notice.closest<HTMLElement>('.oyl-hud__notices')]) {
+    if (each === null) continue;
+    if (each.scrollHeight > each.clientHeight + 1 || each.scrollWidth > each.clientWidth + 1) {
+      overflows.push(
+        `${each.className.split(' ')[0] ?? ''} ${String(each.scrollWidth)}×${String(each.scrollHeight)} in ${String(each.clientWidth)}×${String(each.clientHeight)}`,
+      );
+    }
+  }
+  return {
+    text: textOf(notice),
+    box: boxIn(notice, origin),
+    fontSize: parseFloat(style.fontSize),
+    noticeSize: parseFloat(token) * (token.trim().endsWith('rem') ? root : 1),
+    lines: tops.length,
+    overflows,
+    onTop,
+  };
 }
 
 function firstFrame(): readonly FirstFrame[] {
@@ -672,7 +807,7 @@ async function run(): Promise<void> {
   // frame is the layout a rider meets when a race opens, not one drawn in a
   // fallback face (on the CI runner's, the large text then had no room for a
   // line until the fonts arrived). The other stages keep the page as it was.
-  if (CORNER) await Promise.all([...document.fonts].map((face) => face.load()));
+  if (CORNER || GROUP) await Promise.all([...document.fonts].map((face) => face.load()));
   // #2600: the ride controls drawn and every panel open, as this page
   // measures them; `ride-chrome.browser.spec.ts` measures them hidden — and
   // #2837's `&controls=hide`, the corner's standings as they hide.

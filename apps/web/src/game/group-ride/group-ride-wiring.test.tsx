@@ -570,3 +570,91 @@ describe('a whole group ride with no network — ADR 0101 D-1.2', () => {
     expect(facts.at(-1)?.log.length ?? 0).toBeGreaterThan(1);
   });
 });
+
+describe('the group on the HUD: the role strip and the cue line — #3305', () => {
+  /** The cue line as the HUD draws it, label and sentence; `undefined` with none drawn. */
+  const cueLine = (): string | undefined => {
+    const line = queryAll(root(), '.oyl-hud__pacer-say')[0];
+    return line === undefined ? undefined : (line.textContent ?? '').replace(/\s+/g, ' ').trim();
+  };
+  /** The HUD's one live region, as a screen reader reads it. */
+  const region = (): string =>
+    (queryAll(root(), '[data-oyl-announcer="hud"]')[0]?.textContent ?? '').trim();
+
+  const REGROUP = 'The group is easing until you are back.';
+  const announcementsOn = (): void => {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({
+        enabled: true,
+        powerEverySeconds: 'never',
+        distanceEvery: 'never',
+        intervalLeadSeconds: 'never',
+        climbLeadMetres: 'never',
+      }),
+    );
+  };
+
+  it('shows the place in the line, the gap, the group’s speed now and the average chosen', async () => {
+    await ride({ group: true, port: ridePort() }, 20);
+    // The rider starts on the last wheel behind the default five bots.
+    expect(field('In line')).toMatch(/^6 of 6 Gap \d+\.\d m$/);
+    expect(field('Group')).toMatch(/^\d+ km\/h Target average 30$/);
+    // No cue yet, and no countdown off the front.
+    expect(cueLine()).toBeUndefined();
+    expect(field('In line')).not.toContain('Pull');
+  });
+
+  it('shows neither on the same ride without the group', async () => {
+    await ride({ port: ridePort() }, 20);
+    expect(field('In line')).toBeUndefined();
+    expect(field('Group')).toBeUndefined();
+    expect(cueLine()).toBeUndefined();
+  });
+
+  it('puts a cue on the line when it is selected, says it once in the live region, and clears it after its shown time', async () => {
+    announcementsOn();
+    let paused = false;
+    await ride({ group: true, port: ridePort({ autoPaused: () => paused }) }, 20);
+    expect(cueLine()).toBeUndefined();
+    expect(region()).toBe('');
+    // The line begins waiting: the regroup cue.
+    paused = true;
+    await frames(4);
+    expect(cueLine()).toBe(`iGroup ride: ${REGROUP}`);
+    expect(region()).toBe(REGROUP);
+    paused = false;
+    // Whatever the ride cues next, the line is empty again within two shown
+    // times of quarter-second frames, and each sentence heard was a cue's.
+    const heard = new Set<string>([region()]);
+    let emptied = false;
+    for (let frame = 0; frame < 80 && !emptied; frame += 1) {
+      await frames(1);
+      heard.add(region());
+      emptied = cueLine() === undefined;
+    }
+    expect(emptied).toBe(true);
+    expect([...heard].every((sentence) => !/\d/.test(sentence))).toBe(true);
+  });
+
+  it('shows the cue with announcements off, and says nothing', async () => {
+    let paused = false;
+    await ride({ group: true, port: ridePort({ autoPaused: () => paused }) }, 20);
+    paused = true;
+    await frames(4);
+    expect(cueLine()).toBe(`iGroup ride: ${REGROUP}`);
+    expect(region()).toBe('');
+  });
+
+  it('with no power reading shows dashes on the strip and no cue: the line waits in silence', async () => {
+    let live = true;
+    await ride({ group: true, port: ridePort(), read: () => sensors(live) }, 20);
+    live = false;
+    await frames(12);
+    expect(facts.at(-1)?.log.at(-1)?.phase).toBe('waiting');
+    expect(field('In line')).toMatch(/^— of 6/);
+    expect(field('Group')).toMatch(/^— km\/h/);
+    expect(field('In line')).not.toMatch(/\d+ of|Gap|Pull/);
+    expect(cueLine()).toBeUndefined();
+  });
+});
