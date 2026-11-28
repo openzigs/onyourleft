@@ -534,9 +534,10 @@ the table (§"Coverage out of the required job — #1280"). ⚠️ **Since
 [#1701](https://github.com/openzigs/onyourleft/issues/1701) the three are the `coverage` job, on a
 runner of its own** (§"Coverage in a job of its own — #1701" below); a reviewer who remembers them
 as the last steps of `heavy` is reading the old file. ⚠️ **Since
-[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is two jobs, `coverage-1` and
-`coverage-2`, and `coverage` merges their results into the one report** (§"Two coverage jobs —
-#2285" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
+[#2285](https://github.com/openzigs/onyourleft/issues/2285) the run is divided between jobs — since
+[#3341](https://github.com/openzigs/onyourleft/issues/3341) five, `coverage-1` to `coverage-5` —
+and `coverage` merges their results into the one report** (§"Two coverage jobs — #2285" and
+§"Five coverage jobs — #3341" below). The reporting steps carry `if: ${{ !cancelled() }}`, from
 when they followed the browser checks, so a red coverage run still publishes what it measured. A test
 that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
 same test passed in the required job, so it is one that passes only without instrumentation.
@@ -677,8 +678,9 @@ no browser either, and its stop is 30 minutes. `heavy` keeps its own 30 minutes,
 and `nightly-split.test.ts` refuses a coverage run that shares a job with any other suite.
 `nightly-split.test.ts` also holds **every nightly job's slowest measured run at or under 60 % of
 its own stop**. It reads the figures from the table between the two `nightly-measurements`
-markers, one column per job id — ⚠️ since #2285 the table in §"Two coverage jobs — #2285" below;
-the one here is #1701's, kept as it was measured. `report` is left
+markers, one column per job id — ⚠️ since #3341 the table in §"Five coverage jobs — #3341" below
+(#2285's, in §"Two coverage jobs — #2285", before it); the one here is #1701's, kept as it was
+measured. `report` is left
 out because it runs only after a red run. A new job needs a column, and the table needs at least
 three rows. Each figure is the job's own seconds, from its start to its end, as the Actions API
 gives them (`gh api repos/openzigs/onyourleft/actions/runs/<id>/jobs`), not counting the time it
@@ -776,6 +778,9 @@ fewer Vitest workers on the two-core runner — and those are the owner's to cho
 
 #### Two coverage jobs — #2285
 
+⚠️ **Five since [#3341](https://github.com/openzigs/onyourleft/issues/3341)** (§"Five coverage jobs
+— #3341" below): the game half outgrew its stop. This section is the two-job split as #2285 made it.
+
 ⚠️ **The nightly coverage report is three jobs since
 [#2285](https://github.com/openzigs/onyourleft/issues/2285)**, and a reviewer who remembers one
 `coverage` job running `test:coverage` is reading the old file. `coverage-1` (`Nightly tests under
@@ -847,10 +852,10 @@ timeout under coverage, and with two it took 925 and 939 s on the 7763 (runs 423
 not a stop, and putting the third worker back is one line of `nightly.yml`.
 
 **Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
-§"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
-reads** (between the `nightly-measurements` markers), one column per job.
+§"Coverage in a job of its own — #1701" defines them. ⚠️ Since #3341 this is **not** the table
+`nightly-split.test.ts` reads: that is §"Five coverage jobs — #3341"'s, which has a column for each
+of the five parts; this one is #2285's, kept as it was measured.
 
-<!-- nightly-measurements:start -->
 | Run | Event | heavy | coverage-1 | coverage-2 | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
 |---|---|--:|--:|--:|--:|--:|--:|--:|--:|
 | [42312238591](https://github.com/openzigs/onyourleft/actions/runs/42312238591) | `pull_request` | 456 | 454 | 733 | 29 | 337 | 319 | 261 | 195 |
@@ -859,7 +864,6 @@ reads** (between the `nightly-measurements` markers), one column per job.
 | [42318412519](https://github.com/openzigs/onyourleft/actions/runs/42318412519) | `workflow_dispatch` | 406 | 766 | 495 | 34 | 585 | 319 | 273 | 251 |
 | [42318409493](https://github.com/openzigs/onyourleft/actions/runs/42318409493) | `workflow_dispatch` | 421 | 615 | 756 | 28 | 545 | 326 | 323 | 237 |
 | [42318592284](https://github.com/openzigs/onyourleft/actions/runs/42318592284) | `pull_request` | 696 | 669 | 684 | 38 | 488 | 266 | 262 | 200 |
-<!-- nightly-measurements:end -->
 
 The first three are of commit 3ffa4ac5, and in each every job was green but `coverage-2` and
 `coverage`, red on one case alone: this table's own, before it had these columns. **The last three
@@ -889,6 +893,93 @@ halves — a filter in the first half's script and its `--exclude` in the second
 `check:test-split` holds as one partition — or add a third half: a `test:coverage:shard-3` script
 ending in its own blob, a `coverage-3` job copied from `coverage-2`, its download in `coverage` and
 its id in that job's `needs` and in `report`'s, and a column here. Not a longer stop.
+
+#### Five coverage jobs — #3341
+
+⚠️ **The nightly coverage run is five parts and a merge since
+[#3341](https://github.com/openzigs/onyourleft/issues/3341)**, and a reviewer who remembers
+`coverage-1` as the whole of `apps/web/src/game/` is reading the old file. Nothing else about
+§"Two coverage jobs — #2285" changed: each part is a `test:coverage:shard-<n>` script on a runner of
+its own, ending in its own blob; `coverage` downloads every blob and merges them; `report` needs every
+job; no stop, cap or timeout moved, and the parts keep the one job's 30 minutes.
+
+**Why.** The game half outgrew its stop. On 2026-11-27 it took 1 029 to 1 607 s of its 1 800 s
+over the nine finished runs from 46012309174 to 46083357344, `main`'s scheduled run
+[45998119783](https://github.com/openzigs/onyourleft/actions/runs/45998119783) was cancelled at the
+stop, and the other half took 739 to 1 193 s. **What grew is breadth, not one file**: the game had
+225 test files on 2026-11-07 and has 422, 198 of them added since. The new `open-world/` directory
+(44 files from 2026-11-20) is 206 to 305 s of case time on its own, and the slowest files added since
+are `drawn-line.test.ts` (166 s on an EPYC 9V74), `open-world/u-turn-press.test.tsx` (131 s),
+`route-street-names-passes.test.ts` (106 s, made cheaper by #3361), `turnaround-coast.test.ts` (65 s)
+and `lap-race/model-race.test.ts` (52 s). The oldest heavy files are where they were:
+`near-tree-fade.test.ts` 365 s, `landform.test.ts` 173 s, `near-field-street.test.ts` 156 s.
+
+**How the run is divided.** By path, as before, and by measured time rather than by count of files:
+
+| Part | Job | Selects | Workers |
+|---|---|---|--:|
+| `test:coverage:shard-1` | `coverage-1` | game files whose names start with a, i, j, k, n, o, q or u (`near-*`, `open-world/`) | 2 |
+| `test:coverage:shard-2` | `coverage-2` | game files starting with b, d or l (`drawn-line`, `delivery*`, `landform`, `lap-race*`) | 2 |
+| `test:coverage:shard-3` | `coverage-3` | game files starting with any other letter | 2 |
+| `test:coverage:shard-4` | `coverage-4` | every `apps/web` file outside `src/game/` | 3 |
+| `test:coverage:shard-5` | `coverage-5` | `apps/instance`, `apps/mobile` and each package, named one by one | 3 |
+
+A game filter is `src/game/<letter>`: Vitest matches a filter as a substring of the file's path
+inside its project, lower-cased, so `src/game/g` takes `GameView.test.tsx` and `src/game/o` takes
+all of `open-world/`. The letters come from each file's case time plus about 0.9 s per file for its
+import, environment and setup, over the 420 game
+files of run 46078613709's EPYC 9V74 log: about 940, 950 and 975 s of worker time. The fifth part
+names each package because a path filter is read inside a project's own root, and `packages/` alone
+selects nothing; a package added later is in no part, and `check:test-split` (its rule 6) turns red
+until it is named. Two workers in every game part, as `coverage-1` had since #2285.
+
+**Four parts first, and why not.** The first reading divided the game in two by letter (a to m and
+r, then the rest) and kept the rest as two parts. On an EPYC 7763 the first game part took 1 057 s
+(run [46097868936](https://github.com/openzigs/onyourleft/actions/runs/46097868936)), 23 s inside the
+60 % below (1 080 s), while the web and outside-web parts took 339 to 496 s. Its case time was
+1 263 to 1 673 s of worker time against the other game part's 940 to 1 350 s, so the two were not
+as even as the one log they were chosen from said; and even an even pair is about 900 s each on
+the 7763, with the game growing by about ten files a day. Three game parts is what fits.
+
+**Measured** on this change's own runs, each figure the job's own seconds from the Actions API as
+§"Coverage in a job of its own — #1701" defines them. **This is the table `nightly-split.test.ts`
+reads** (between the `nightly-measurements` markers), one column per job.
+
+<!-- nightly-measurements:start -->
+| Run | Event | heavy | coverage-1 | coverage-2 | coverage-3 | coverage-4 | coverage-5 | coverage | browser-2 | browser-3 | browser-4 | browser-5 |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| [46100495188](https://github.com/openzigs/onyourleft/actions/runs/46100495188) | `workflow_dispatch` | 785 | 770 | 692 | 655 | 487 | 500 | 42 | 335 | 156 | 199 | 283 |
+| [46100497329](https://github.com/openzigs/onyourleft/actions/runs/46100497329) | `workflow_dispatch` | 627 | 390 | 700 | 546 | 397 | 496 | 39 | 510 | 186 | 343 | 240 |
+| [46100499027](https://github.com/openzigs/onyourleft/actions/runs/46100499027) | `workflow_dispatch` | 707 | 517 | 539 | 544 | 509 | 369 | 37 | 510 | 157 | 260 | 319 |
+<!-- nightly-measurements:end -->
+
+The three are of commit 20318f61: 65a89af8 (this split) with one experiment-only change, the
+`report` job turned off, so that a measurement run on a branch opens no nightly issue. They ran on
+`experiment/issue-3341-reading-a` to `-c`, three names for one commit, so that three could run at
+once. In each, `coverage-4` was red on this table's own case alone, before it had these columns,
+and `coverage` with it, since the merge replays every part's cases; the merged report still counted
+all 1 503 files (`All files` 92.91 % of statements, against 92.87 % from the two halves of run
+46083357344 the night before). Also red, and not this change's: in 46100495188, `coverage-1` on an
+EPYC 7763 had `near-tree-fade.test.ts`'s cull case run 367 s of its own 300 s and
+`open-world/offered-ways.test.tsx`'s `beforeAll` 10 s of its 10 s; in 46100499027, `browser-5` on
+`realistic-lap-race.browser.spec.ts` with `browser.newContext: Failed to find browser context` (also
+in 46097866602). Those are a case's share of the CPU, the class §"Two coverage jobs — #2285" names,
+and each part's two workers are #2285's.
+
+The stops are 1 800 s for `heavy` and every part, 900 s for `coverage` and 1 200 s for each browser
+shard, so the slowest readings are 44 %, 43 %, 39 %, 36 %, 28 %, 28 %, 5 %, 43 %, 16 %, 29 % and
+27 % of them; the game parts' slowest, 770 and 700 s, were on the EPYC 7763. The CPUs of the five
+parts, in order:
+
+- 46100495188: EPYC 7763, 7763, Xeon Platinum 8370C, EPYC 9V74, 7763.
+- 46100497329: EPYC 9V45, 7763, 9V74, 9V45, 7763.
+- 46100499027: EPYC 9V74 for all five.
+
+⚠️ **When a row brings a part within reach of 60 % of its stop**, move a letter between the game
+parts, or a filter between the parts outside the game, which `check:test-split` holds as one
+partition; or add a part: a `test:coverage:shard-6` script ending in its own blob, a `coverage-6` job
+copied from its neighbour, its download in `coverage` and its id in that job's `needs` and in
+`report`'s, and a column here. Not a longer stop.
 
 #### 23m39s of 25 — #1051
 

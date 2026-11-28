@@ -25657,6 +25657,11 @@ export class MappedBuildingBelt {
   readonly #roofAt: Int32Array;
   /** Each drawn building's first vertex of its spire, in the slate's range — #2206. */
   readonly #spireAt: Int32Array;
+  /**
+   * Each drawn wrap's first vertex of its paved apron, in its wall surface's range; -1
+   * for an extrusion, a model or a wrap not paved — #3349, read by the control alone.
+   */
+  readonly #apronAt: Int32Array;
   /** Each drawn building's vertex after its model, or -1 for an extrusion — #1835. */
   readonly #modelEnd: Int32Array;
   /** Which drawn buildings the near plane would cut this frame, so are drawn as nothing — #1835. @see clearOf */
@@ -25716,6 +25721,7 @@ export class MappedBuildingBelt {
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
+    this.#apronAt = new Int32Array(this.#selection.plans.length);
     this.#materials = drawnIn.surfaces;
     const first = this.#materials.get(FOOTPRINT_SURFACES[0] as StructureSurface) as Material;
     this.#slots = Array.from({ length: MAPPED_BUILDING_DRAW_CALLS }, () => first);
@@ -26068,6 +26074,7 @@ export class MappedBuildingBelt {
       // #1585: a modelled plan's triangles are its model's, in the models' buffer.
       // #1835: a refill writes every building whole; `clearOf` hides again.
       this.#hidden[at] = 0;
+      this.#apronAt[at] = -1;
       if (selection.modelled[at] === 1 && plan.model !== undefined) {
         this.#modelAt[at] = modelEnd;
         this.#wallAt[at] = -1;
@@ -26085,6 +26092,7 @@ export class MappedBuildingBelt {
         // And its paved apron, where the selection counted it: ground, in its wall's surface.
         if (selection.paved[at] === 1) {
           const slot = surfaces.indexOf(plan.surfaces.wall);
+          this.#apronAt[at] = this.#cursors[slot] as number;
           this.#cursors[slot] = this.#append(plan, 'apron', this.#cursors[slot] as number);
         }
         continue;
@@ -26195,12 +26203,26 @@ export class MappedBuildingBelt {
     }
   }
 
-  /** The browser gate's control: a group — a draw call — per building and surface. */
+  /**
+   * The browser gate's control: a group — a draw call — per building and surface.
+   * #3349: a model or a wrap has no range here (its `#wallAt` and `#roofAt` are -1):
+   * its triangles are in the models' buffer, in that buffer's one call, and only a
+   * paved wrap's apron, written here, is a group of its own.
+   */
   #groupEachBuilding(): void {
     const selection = this.#selection;
+    const geometry = this.mesh.geometry;
+    const surfaces = selection.surfaces;
     for (let at = 0; at < selection.count; at += 1) {
-      if (selection.modelled[at] === 1) continue;
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      if (this.#wallAt[at] === -1) {
+        const apron = this.#apronAt[at] as number;
+        if (apron !== -1) {
+          const count = roleTriangles(plan, 'apron') * 3;
+          geometry.addGroup(apron, count, surfaces.indexOf(plan.surfaces.wall));
+        }
+        continue;
+      }
       let walls = 0;
       let roofs = 0;
       let spires = 0;
@@ -26209,8 +26231,6 @@ export class MappedBuildingBelt {
         else if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
         else walls += roleTriangles(plan, role) * 3;
       }
-      const geometry = this.mesh.geometry;
-      const surfaces = selection.surfaces;
       geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
       geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
       // #2206: a spire's slate, a group of its own where the roof is not slate.

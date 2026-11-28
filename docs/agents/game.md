@@ -897,7 +897,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         measured it does NOT remove the grade — nor did the
                         Reset PR #442 tried** (#372, §4h). ⚠️ It sends the **grade and nothing
                         else** — the rider's wind is out of scope and their drag
-                        area would double-count against the game's own physics
+                        area would double-count against the game's own physics.
+                        Past a point-to-point route's end (#3345) it eases the
+                        grade to 0 % over about 100 m, at 1 % a second at most
+                        and only ever toward flat; not on a loop or an
+                        open-world view (`gradient.test.ts`,
+                        `trainer-wiring.test.tsx` §"#3345")
     src/game/trainer-port.ts
                         what the game may ask of a trainer, and the five things
                         it is told when it may not (#362). ⚠️ A `*-port.ts` on
