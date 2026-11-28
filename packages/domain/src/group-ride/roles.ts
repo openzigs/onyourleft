@@ -13,7 +13,7 @@
  *
  * `waiting` and `regrouping`, and the roles `gapped`, `off-the-back` and
  * `off-the-front`, are declared here so the lists are whole; what moves a line
- * into and out of them is #3301's (no-drop).
+ * into and out of them is `no-drop.ts` (#3301).
  */
 
 import { GroupRideError } from './errors';

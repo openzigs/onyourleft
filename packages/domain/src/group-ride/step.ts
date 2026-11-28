@@ -24,16 +24,19 @@
  * | Seat | Power |
  * |---|---|
  * | on the front | the plan's power at its odometer, with the ledger's correction |
- * | on the front, with anybody ahead of it on the road | that, and never more than what holds the speed the rotation asks of it (it eases to nothing for that, and does not sit up) |
+ * | on the front, with anybody ahead of it inside the draft's reach | that, and never more than what holds the speed the rotation asks of it (it eases to nothing for that, and does not sit up) |
+ * | on the front of a line that holds for the rider (#3301) | that, and never more than what holds the eased speed; over it, it sits up |
+ * | the sweep (#3301) | the wheel rule on a place a wheel gap ahead of the rider, at the rider's speed |
  * | on a wheel | the wheel rule (below) on the member ahead of it in the line, **the rider's wheel where that is the rider** |
- * | aside, drifting back | what holds the speed the rotation asks of it |
+ * | aside, drifting back | what holds the speed the rotation asks of it, or that share under the front's own speed where the line is slower |
  * | aside, latching | the wheel rule on the last wheel |
  *
  * The second row is ADR 0101 D-3.5 and D-3.8 on the road: a bot that has just
  * come to the front still has the old front rider's shelter for a few
  * seconds, and a rider who goes off the front shelters it too. At the plan's
  * power in that shelter it would lift, or chase. Held to the speed it is
- * asked, it does neither.
+ * asked, it does neither. A rider beyond the reach gives no shelter, and the
+ * front rides the plan's power exactly: it does not chase (#3301).
  *
  * ## The wheel rule is the lap race's, not a copy
  *
@@ -74,10 +77,32 @@
  * `packages/physics/src/group-ride.test.ts` holds this file to the issue's
  * criteria on it.
  *
- * ## What is not here
+ * ## No-drop (#3301, ADR 0101 D-4)
  *
- * No-drop (the sweep, the easing, the ledger paused while the group waits) is
- * #3301's. Until then the ledger books every tick as riding.
+ * `no-drop.ts` decides, once a window, where the rider stands, which bot is
+ * the sweep and whether the line holds for the rider (`waiting`,
+ * `regrouping`) and at what speed, with no lower limit. This file rides it:
+ * the held line's speed is what the rotation is told the group rides, so
+ * {@link GroupRideTick.groupSpeedMps} is the group's speed now; the sweep
+ * rides to a place just ahead of the rider; and the rider's role carries
+ * their standing. A bot has no brake here either: a held line loses speed by
+ * pedalling nothing and sitting up, as any bot does.
+ *
+ * After the first wait the line is **paced to the rider** (`no-drop.ts` §5,
+ * the owner's ruling of 2026-11-27): it is asked a margin over the rider's
+ * remembered pace and rides that as a held line rides its eased speed.
+ *
+ * **The ledger while the line is eased**, held or paced. An eased tick is
+ * booked as paused (`plan.ts` rule 6), and the road the front covers in it is
+ * booked at the plan's own time for that road; so is every tick after it
+ * until the front is back at {@link GROUP_LEDGER_RESUME_SHARE} of the plan's
+ * speed, and so is a rider's own pull under that speed. So the group is
+ * exactly as late when it rides the plan again as it was before: **the eased
+ * pace is the rider's ride**, none of it is chased back, and a group that
+ * crawled forward is not taken to be early either.
+ *
+ * {@link GroupRoad.noDrop} `false` leaves the rule out: the line never holds,
+ * nobody sweeps and every tick is booked, as before #3301.
  *
  * ## Room-portable, seeded, and nothing reaches a trainer
  *
@@ -96,15 +121,31 @@ import { fullBotEnergy, spendableWatts, stepWbal, type BotEnergy } from '../lap-
 import { gradeAt, type RouteProfile } from '../route/profile';
 import { lineClimbAheadM } from './climb-ahead';
 import { GroupRideError } from './errors';
-import { stepGroupLedger, GROUP_LEDGER_START, type GroupLedger, type GroupPlan } from './plan';
 import {
+  noDropRole,
+  NO_DROP_REACH_METRES,
+  startNoDrop,
+  stepNoDrop,
+  type NoDropState,
+} from './no-drop';
+import { stepGroupLedger, GROUP_LEDGER_START, type GroupLedger, type GroupPlan } from './plan';
+import type { RiderRole } from './roles';
+import {
+  ROTATION_EASE_SHARE,
   startRotation,
   stepRotation,
   type LineMember,
   type MemberView,
   type RotationState,
   type RotationStep,
+  type RotationView,
 } from './rotation';
+
+/**
+ * After the line has been eased for the rider, its ticks are booked as riding
+ * again once the front is back at this share of the plan's speed: **98 %**.
+ */
+export const GROUP_LEDGER_RESUME_SHARE = 0.98;
 
 /**
  * The physics a group's bots ride through, handed in by the caller (see the
@@ -133,6 +174,8 @@ export interface GroupRoad {
   /** The plan solved for this course (#3298). */
   readonly plan: GroupPlan;
   readonly physics: GroupPhysics;
+  /** Whether the no-drop rule (#3301) is on; on unless `false`. */
+  readonly noDrop?: boolean;
 }
 
 /** A group at its start. */
@@ -167,6 +210,15 @@ export interface GroupRideState {
   readonly atMs: number;
   readonly rotation: RotationState;
   readonly ledger: GroupLedger;
+  /** The no-drop rule's state (#3301). */
+  readonly noDrop: NoDropState;
+  /**
+   * Where the front was as the last tick began, metres, if that tick was not
+   * booked as riding (the line eased for the rider, or getting back up to
+   * speed): the road covered since is booked at the plan's time. `null`
+   * after a tick that was ridden.
+   */
+  readonly heldFromM: number | null;
   /** Every bot, by id. Never the rider. */
   readonly bots: Readonly<Record<string, GroupBot>>;
   /**
@@ -187,6 +239,12 @@ export interface GroupRideInput {
   readonly riderSignal?: boolean;
   /** Whether the rider has chosen to sit in. */
   readonly riderSittingIn?: boolean;
+  /**
+   * Whether the rider has stopped pedalling, or has no power reading: the
+   * group waits (#3301, ADR 0101 D-4.4 and D-6.11). The caller's word, from
+   * the ride's own pause and sensor state; absent, riding.
+   */
+  readonly riderStopped?: boolean;
   /** The tightest bend radius on the road just ahead of the front, metres; absent or `null`, straight. */
   readonly bendRadiusM?: number | null;
 }
@@ -194,14 +252,28 @@ export interface GroupRideInput {
 /** One tick's answer. */
 export interface GroupRideTick {
   readonly state: GroupRideState;
-  /** The rotation's answer for the tick: roles, the speeds asked of the bots, and facts for the cues. */
+  /**
+   * The rotation's answer for the tick: roles, the speeds asked of the bots,
+   * and facts for the cues. The rider's role carries their standing (#3301):
+   * `gapped`, `off-the-back` or `off-the-front` where they are off the line.
+   */
   readonly rotation: RotationStep;
+  /**
+   * What the rotation read for the tick: the line as the tick began, at the
+   * group's speed now. With {@link rotation} it is what the cue selector
+   * (`cues.ts` §`stepCues`) reads, so the cues are chosen on the view the
+   * roles were (#3305).
+   */
+  readonly line: RotationView;
   /**
    * Every member's draft multiplier this tick, by id, **the rider's
    * included**: the one call the bots were ridden at.
    */
   readonly draft: Readonly<Record<string, number>>;
-  /** The group's speed now, m/s: what the plan asks of the line on the road under the front. */
+  /**
+   * The group's speed now, m/s: what the plan asks of the line on the road
+   * under the front, or less where the line holds for the rider (#3301).
+   */
   readonly groupSpeedMps: number;
 }
 
@@ -237,15 +309,24 @@ export function startGroupRide(setup: GroupRideSetup): GroupRideState {
       energy: fullBotEnergy(member.capacity),
     };
   });
-  return { atMs: setup.atMs, rotation, ledger: GROUP_LEDGER_START, bots, riderWas: null };
+  return {
+    atMs: setup.atMs,
+    rotation,
+    ledger: GROUP_LEDGER_START,
+    noDrop: startNoDrop(setup.atMs),
+    heldFromM: null,
+    bots,
+    riderWas: null,
+  };
 }
 
 /**
  * The group one tick on. See the file comment for what each bot rides.
  *
  * @throws {GroupRideError} `view-out-of-range` for a tick that does not cover
- *   a finite time above zero, and as `stepRotation` for a rider who is not
- *   somewhere finite.
+ *   a finite time above zero, for a course whose spacing is not a finite
+ *   number of metres, one metre or more (`lineClimbAheadM`), and as `stepRotation`
+ *   for a rider who is not somewhere finite.
  */
 export function stepGroupRide(
   state: GroupRideState,
@@ -273,8 +354,50 @@ export function stepGroupRide(
   // The rotation decides on the line as the tick began. A rider who is not on
   // the route yet is still on a line: the road is read where the route starts.
   const frontM = at(state.rotation.order[0] as string).distanceM;
-  const groupSpeedMps: number = plan.speedNowAt(frontM);
-  const rotation = stepRotation(state.rotation, {
+  const planSpeedMps: number = plan.speedNowAt(frontM);
+
+  // No-drop decides first, on the same windows: the rider's seat, the sweep,
+  // and whether the line holds for the rider and how fast.
+  let noDrop = state.noDrop;
+  let lineBefore = state.rotation;
+  if (road.noDrop !== false) {
+    const decided = stepNoDrop(state.noDrop, {
+      atMs: state.atMs,
+      rotation: state.rotation,
+      members,
+      groupSpeedMps: planSpeedMps,
+      course,
+      riderStopped: input.riderStopped ?? false,
+    });
+    noDrop = decided.state;
+    lineBefore = decided.rotation;
+  }
+  // Eased: held for the rider, or paced to them (#3301).
+  const easing = noDrop.easedSpeedMps !== null;
+  const groupSpeedMps = noDrop.easedSpeedMps ?? planSpeedMps;
+
+  // The road a held line covered in the last tick, at the plan's own time for it.
+  const ledger =
+    state.heldFromM === null
+      ? state.ledger
+      : stepGroupLedger(
+          state.ledger,
+          Math.max(0, plan.plannedSecondsAt(frontM) - plan.plannedSecondsAt(state.heldFromM)),
+          false,
+        );
+
+  // The eased pace is the rider's ride, not time the plan lost: an eased tick
+  // is not booked as riding, and nor is one after it until the front is back
+  // at the plan's speed, so getting back up to speed is not chased either.
+  // A rider on the front who is under the group's speed is riding their own
+  // pull: that is theirs too.
+  const frontId = state.rotation.order[0] as string;
+  const underSpeed = at(frontId).speedMps < GROUP_LEDGER_RESUME_SHARE * planSpeedMps;
+  const unbooked =
+    road.noDrop !== false &&
+    (easing || (underSpeed && (state.heldFromM !== null || frontId === riderId)));
+
+  const view: RotationView = {
     atMs: state.atMs,
     groupSpeedMps,
     members,
@@ -283,7 +406,14 @@ export function stepGroupRide(
     bendRadiusM: input.bendRadiusM ?? null,
     riderSignal: input.riderSignal ?? false,
     riderSittingIn: input.riderSittingIn ?? false,
-  });
+  };
+  const decision = stepRotation(lineBefore, view);
+  const riderRole = decision.roles[riderId] as RiderRole;
+  const standingRole = noDropRole(noDrop.standing, riderRole);
+  const rotation: RotationStep =
+    standingRole === riderRole
+      ? decision
+      : { ...decision, roles: { ...decision.roles, [riderId]: standingRole } };
 
   // One draft call for the whole line, the rider included.
   const ids = line.map((member) => member.id);
@@ -346,18 +476,40 @@ export function stepGroupRide(
     const seat = order.indexOf(id);
     const asked = rotation.demands[id] as number;
     let wanted: number;
-    if (seat === 0) {
-      const planned: number = plan.powerAt(own.distanceM, state.ledger);
-      const sheltered = ids.some((other) => at(other).distanceM > own.distanceM);
-      wanted = sheltered ? Math.min(planned, Math.max(0, held(asked))) : planned;
+    if (id === noDrop.sweep) {
+      // The sweep: a wheel gap ahead of the rider, at the rider's speed. The
+      // wheel rule on a place two gaps up the road from them.
+      const rider = at(riderId);
+      wanted = botWheelWatts({
+        gapMetres: rider.distanceM + 2 * BOT_TACTIC_WHEEL_GAP_METRES - own.distanceM,
+        closingMetresPerSecond: own.speedMps - rider.speedMps,
+        holdWatts: physics.holdWatts(rider.speedMps, grade, k) + surplusOf(riderId),
+        cpWatts,
+      });
+    } else if (seat === 0) {
+      const planned: number = plan.powerAt(own.distanceM, ledger);
+      if (easing) {
+        // A held or paced line rides the eased speed, and sits up when it is over it.
+        wanted = Math.min(planned, held(asked));
+      } else {
+        const sheltered = ids.some((other) => {
+          const ahead = at(other).distanceM - own.distanceM;
+          return ahead > 0 && ahead <= NO_DROP_REACH_METRES;
+        });
+        wanted = sheltered ? Math.min(planned, Math.max(0, held(asked))) : planned;
+      }
     } else if (seat > 0) {
       wanted = onWheel(order[seat - 1] as string);
     } else {
       // Aside: toward the last wheel from the moment it pulls off, so it
       // arrives behind it at the line's speed. Drifting back, it eases no
-      // more than the rotation asks.
+      // more than the rotation asks, and by that share of the front's own
+      // speed where the line is slower than it is asked: behind a rider on
+      // the front who cannot hold the group's speed it still drops back
+      // (#3301), and the line is not left waiting for a change to finish.
       const last = onWheel(order[order.length - 1] as string);
-      wanted = rotation.roles[id] === 'latching' ? last : Math.max(last, held(asked));
+      const drift = Math.min(asked, at(order[0] as string).speedMps * (1 - ROTATION_EASE_SHARE));
+      wanted = rotation.roles[id] === 'latching' ? last : Math.max(last, held(drift));
     }
     const powerWatts = spendableWatts(
       member.capacity,
@@ -388,11 +540,14 @@ export function stepGroupRide(
     state: {
       atMs: state.atMs + elapsed * 1_000,
       rotation: rotation.state,
-      ledger: stepGroupLedger(state.ledger, elapsed, false),
+      ledger: stepGroupLedger(ledger, elapsed, unbooked),
+      noDrop,
+      heldFromM: unbooked ? frontM : null,
       bots,
       riderWas: { speedMps: input.rider.speedMps, elapsedSeconds: elapsed },
     },
     rotation,
+    line: view,
     draft,
     groupSpeedMps,
   };

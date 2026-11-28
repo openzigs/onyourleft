@@ -116,6 +116,7 @@ import { CRASH_SECONDS } from './delivery/crash-look';
 import { LINE_LIMIT_METRES, lineOffsetAt, racingLine } from './racing-line';
 import { DELIVERY_VILLAGE_DRAW_CALLS, villageDrawCallCeiling } from './realistic-budget';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
+import { modeEndedText } from './ride-fault';
 import { GameSimulation, type RiderInput } from './simulation';
 import { corridorOrigin } from './terrain';
 import { DELIVERY_CHOICE_TEXT } from './StageChooser';
@@ -817,15 +818,32 @@ describe('a Delivery round inside a game ride — #1816', () => {
     await settle();
     await clickThrough(buttonStarting('Ride '));
     for (let index = 1; index < frame; index += 1) await pump();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     roundFaults.on = true;
     try {
-      await expect(pump()).rejects.toThrow('the round faulted');
+      // #3404: the fault is the frame's to contain, and no longer escapes it.
+      await pump();
     } finally {
       roundFaults.on = false;
     }
     await settle();
-    // The fault stopped the loop, but not before this frame's write.
+    // This frame's write went out before the round's step ran.
     expect(writes).toStrictEqual(plain.slice(0, 2));
+    // #3404: the round ended, and the ride went on. Its step is never run
+    // again, the rider is told, and the trainer is sent what the plain ride
+    // sent, write for write, through ten more seconds.
+    const stepsAtTheFault = steppedAlong.length;
+    for (let index = 0; index < 40; index += 1) await pump();
+    await settle();
+    expect(steppedAlong).toHaveLength(stepsAtTheFault);
+    expect(mounted?.container.textContent).toContain(modeEndedText(['delivery']));
+    const sentBy = plain.filter((each) => each.atMs <= nowMs);
+    expect(sentBy.length).toBeGreaterThan(2);
+    expect(writes).toStrictEqual(sentBy);
+    expect(logged.mock.calls.map((call) => String(call[0]))).toContain(
+      "On Your Left: a fault in the ride's frame (RangeError) ended the Delivery round; the ride goes on.",
+    );
+    logged.mockRestore();
   });
 
   it('keeps the week’s counts when the round ends: a fresh reader returns the next day', async () => {
