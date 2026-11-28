@@ -1062,9 +1062,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         offered on a circuit, a level or the open world, and
                         **unavailable, with the reason as the switch's
                         description**, while a workout holds the trainer,
-                        the draft is switched off, or the route is a loop
-                        (the plan is one pass; laps are #3369). It ends at
-                        a finish: past it, *Keep riding* rides alone. A
+                        or the draft is switched off; another mode switched
+                        on then leaves the device's setting alone. On a
+                        loop it rides lap after lap (#3369: the plan read at
+                        the odometer mod the lap, its time counting laps).
+                        It ends at a finish: past it, *Keep riding* rides
+                        alone. A
                         target the plan refuses
                         on the chosen route blocks *Ride* with the most (or
                         least) the group can average there. Solo only, never
