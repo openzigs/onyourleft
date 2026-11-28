@@ -228,4 +228,27 @@ test.describe('a group ride’s line — #3304', () => {
     const shot = await page.locator('#group-ride-line').screenshot();
     await testInfo.attach('group-ride-line', { body: shot, contentType: 'image/png' });
   });
+
+  test('#3371 photographs the line through the solo camera and the group ride’s, on a wheel, on the front and passing after a pull-off, at 1280×800, for the owner', async ({
+    page,
+  }, testInfo) => {
+    await open(page);
+    for (const moment of ['wheel', 'front', 'aside'] as const) {
+      for (const camera of ['solo', 'group'] as const) {
+        const id = `group-camera-${moment}-${camera}`;
+        const at = await page.evaluate(
+          ([shotId, shotMoment, shotCamera]) =>
+            window.__oylLapRace?.groupCameraShot(shotId, shotMoment, shotCamera),
+          [id, moment, camera] as const,
+        );
+        console.log(`#3371 ${id}: ride time ${String(at)} s`);
+        // The script reaches every moment, so each photograph is of what it says.
+        expect(at, id).toBeGreaterThan(0);
+        // Written to the test's output too, so a local run leaves the files.
+        const path = testInfo.outputPath(`3371-${id}-1280x800.png`);
+        await page.locator(`#${id}`).screenshot({ path });
+        await testInfo.attach(`3371-${id}-1280x800`, { path, contentType: 'image/png' });
+      }
+    }
+  });
 });
