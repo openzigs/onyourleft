@@ -175,7 +175,11 @@ export interface RotationView {
   readonly members: Readonly<Record<string, MemberView>>;
   /** Every bot's reserve now, by id (`lap-race/wbal.ts`). */
   readonly energy: Readonly<Record<string, BotEnergy>>;
-  /** Metres to the next climb's start from the front, 0 on one, `null` with none ahead (`courseHillsAhead`). */
+  /**
+   * Metres to the next climb's start from the front, 0 from a climb's start to
+   * its crest, `null` with none ahead: `lineClimbAheadM` (`climb-ahead.ts`).
+   * Not `courseHillsAhead` alone, which reports no climb in one's last 200 m (#3348).
+   */
   readonly climbAheadM: number | null;
   /** The tightest bend radius on the road just ahead, metres, `null` where it is straight. */
   readonly bendRadiusM: number | null;
