@@ -92,6 +92,8 @@ import {
 import { riderCrashPose } from '../../tools/realistic/rider-crash';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
+import { BEND_START_METRES, climbBendRoute } from './road-signs-fixtures-testing';
+import { retainedFrame } from './frame-testing';
 import { scatterSeed } from './scatter';
 import { siteAt, siteSpacing, type Site } from './settlements';
 import { streetsAt } from './streets';
@@ -426,8 +428,8 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length +
       REALISTIC_BICYCLE_MAP_NAMES.length +
       REALISTIC_RIDER_MAP_NAMES.length +
-      // #966: the wordmark.
-      1 +
+      // #966: the wordmark; #3279: the road signs' atlas.
+      2 +
       REALISTIC_VEGETATION_KINDS.flatMap((kind) => REALISTIC_VEGETATION[kind]).reduce(
         (sum, model) =>
           sum +
@@ -450,6 +452,7 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
         'bicycle',
         'rider',
         'wordmark',
+        'signs',
       ]),
     );
     expect(everyTextureCompressed(report)).toBe(true);
@@ -468,6 +471,12 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     expect(worn.filter((each) => each.role === 'wordmark').map((each) => each.format)).toEqual([
       'ETC2 RGBA',
     ]);
+    // #3279: and so is the road signs' atlas, its plates and numerals cut out, 512 px.
+    expect(
+      worn
+        .filter((each) => each.role === 'signs')
+        .map((each) => [each.format, each.width, each.height]),
+    ).toEqual([['ETC2 RGBA', 512, 512]]);
     for (const texture of worn) {
       expect(['ASTC 4x4', 'ETC2 RGB', 'ETC2 RGBA'], JSON.stringify(texture)).toContain(
         texture.format,
@@ -5440,6 +5449,68 @@ describe('the footways, drawn by a view on the loaded world — #2972', () => {
       expect((mesh?.geometry.index?.count ?? 0) / 3).toBe(triangles);
       stylised.render(framed());
       expect(renderer.footwayMeshOf(stylised)?.visible ?? false).toBe(false);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
+    }
+  });
+});
+
+describe('the road signs, drawn by a view on the loaded world — #3279', () => {
+  /** The world loaded once, in a hook, for #1688's reason (see the feet on the pedals). */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  it('draws the frame’s signs in the realistic world, one instance a sign in one mesh, and none in the stylised', async () => {
+    const route = climbBendRoute();
+    const origin = corridorOrigin(route);
+    const start = atStartLine(route);
+    // Built by the same module graph as the renderer `loadedOn` imported fresh.
+    const scene = await import('./scene');
+    const framed = (distance: number): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: route,
+        origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      });
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      // Before the bend, with the summit board and the chevrons in reach. Held,
+      // because a second frame is built before the stylised view draws it.
+      const frame = retainedFrame(framed(BEND_START_METRES - 250));
+      const signs = frame.signs ?? [];
+      expect(signs.length).toBeGreaterThanOrEqual(3);
+      realistic.render(frame);
+      const mesh = renderer.roadSignMeshOf(realistic);
+      expect(mesh?.visible).toBe(true);
+      expect(mesh?.count).toBe(signs.length);
+      // Each instance stands where its sign does.
+      signs.forEach((sign, index) => {
+        const m = mesh?.instanceMatrix.array.slice(index * 16, index * 16 + 16) ?? [];
+        expect([m[12], m[13], m[14]]).toEqual([
+          Math.fround(sign.x),
+          Math.fround(sign.y),
+          Math.fround(sign.z),
+        ]);
+      });
+      // A frame on the level road short of the climb carries none, and hides the mesh.
+      realistic.render(framed(100));
+      expect(renderer.roadSignMeshOf(realistic)?.visible).toBe(false);
+      stylised.render(frame);
+      expect(renderer.roadSignMeshOf(stylised)?.visible ?? false).toBe(false);
     } finally {
       stylised.destroy();
       realistic.destroy();

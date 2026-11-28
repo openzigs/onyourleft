@@ -35,7 +35,7 @@
  * | `surfaces` | the road, the ground, the hills on the horizon, and since #1565 the cross streets, in the road's own material, and since #2699 the overpasses' embankments, in the ground's | the same meshes, in their photographed materials, and since #2972 the mapped footways and zebras |
  * | `vegetation` | the trees, shrubs and rocks | their near meshes |
  * | `impostors` | — (there are none) | the far trees' billboards |
- * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards; since #1535 the village pavements and #1536 their street furniture | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards; since #1535 the village pavements and #1536 their street furniture; since #1541 the people on them and on the footways |
+ * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards; since #1535 the village pavements and #1536 their street furniture | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards; since #1535 the village pavements and #1536 their street furniture; since #1541 the people on them and on the footways; since #3279 the road signs |
  * | `water` | streams, lakes, bridges | the same |
  * | `riders` | the three riders, their contact shadows and the shadow map's catcher | the MakeHuman riders, and the same shadows |
  *
@@ -78,6 +78,7 @@ import {
   RealisticVegetationBelt,
   RiderBelt,
   RiderSilhouetteBelt,
+  RoadSignBelt,
   ScatterBelt,
   SideRoadBelt,
   SkyDome,
@@ -166,6 +167,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [DecorationBelt, 'structures'],
   // #1566: the villages' houses as #1585's models, realistic only.
   [VillageHouseBelt, 'structures'],
+  // #3279: the road signs, realistic only, with the signposts they stand beside.
+  [RoadSignBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],

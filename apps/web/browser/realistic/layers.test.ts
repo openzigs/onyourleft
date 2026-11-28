@@ -13,6 +13,7 @@ import {
   RealisticVegetationBelt,
   REALISTIC_PRIMITIVE_SKIP,
   RiderBelt,
+  RoadSignBelt,
   ScatterBelt,
   SkyDome,
   TerrainBelt,
@@ -85,6 +86,7 @@ function viewLikeScene(): {
   stylised: ScatterBelt;
   vegetation: RealisticVegetationBelt;
   primitives: ScatterBelt;
+  signs: RoadSignBelt;
 } {
   const scene = new FakeScene();
   const into = scene as never;
@@ -111,7 +113,11 @@ function viewLikeScene(): {
   new GroundBlobBelt().addTo(into);
   // #2972: the mapped footways and zebras, realistic only.
   new FootwayBelt().addTo(into);
-  return { scene, road, catcher, stylised, vegetation, primitives };
+  // #3279: the road signs, realistic only. A stand-in for their atlas: the belt
+  // only hands it to its material, and this file may not import `three`.
+  const signs = new RoadSignBelt({ isTexture: true } as never);
+  signs.addTo(into);
+  return { scene, road, catcher, stylised, vegetation, primitives, signs };
 }
 
 /** Draws one frame as `WebGLRenderer.render` does: everything shown, then `onBeforeRender`. */
@@ -189,9 +195,11 @@ describe('the realistic page’s layer switch — #616', () => {
 
   it('switches the structures off in both worlds, and leaves the posts beside the road', () => {
     install(['structures']);
-    const { scene, stylised, primitives } = viewLikeScene();
+    const { scene, stylised, primitives, signs } = viewLikeScene();
     frame(scene);
     for (const mesh of stylised.meshesOf('barn')) expect(mesh.visible).toBe(false);
+    // #3279: the road signs stand with the signposts.
+    expect(signs.mesh.visible).toBe(false);
     for (const mesh of stylised.meshesOf('hedge')) expect(mesh.visible).toBe(false);
     // The posts belong to no layer: every switch leaves them drawn.
     expect(stylised.meshesOf('post').length).toBeGreaterThan(0);

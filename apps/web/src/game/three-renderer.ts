@@ -539,6 +539,7 @@ import {
   REALISTIC_RIDER_BODIES,
   REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_WORDMARK,
+  REALISTIC_SIGN_ATLAS,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_HOUSE_MODEL_IDS,
   REALISTIC_DOWNTOWN_KIT,
@@ -586,6 +587,23 @@ import {
 import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
+import {
+  METAL_CELL,
+  SIGN_ATLAS_CELLS,
+  SIGN_NUMERAL_ADVANCE_METRES,
+  SIGN_NUMERAL_METRES,
+  SIGN_NUMERAL_ROW,
+  signCells,
+} from './road-sign-atlas';
+import {
+  NO_ROAD_SIGNS,
+  SIGN_PLATE_HEIGHT_METRES,
+  SIGN_PLATE_METRES,
+  SIGN_POST_FOOTING_METRES,
+  SIGN_POST_METRES,
+  SIGNS_PER_FRAME,
+  type RoadSign,
+} from './road-signs';
 import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
@@ -7318,6 +7336,8 @@ interface RealisticWorld {
   readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
   /** The game's wordmark, KTX2 — #966: on the gates (the finish since #978) and the billboards. */
   readonly wordmark: Texture;
+  /** The road signs' one atlas, KTX2 — #3279. @see RoadSignBelt */
+  readonly signs: Texture;
   /**
    * The house models and their one atlas — #1585. Absent where a loader gave
    * a scene with no mesh in it (a test's), and then every mapped building is
@@ -7855,6 +7875,7 @@ interface RealisticTextureReport {
     | 'bicycle'
     | 'rider'
     | 'wordmark'
+    | 'signs'
     | 'sky';
   readonly format: RealisticTextureFormat;
   /** Whether the GPU holds it in a block format — never true of a fallback. */
@@ -7951,6 +7972,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const map of REALISTIC_RIDER_MAP_NAMES) add(world.rider[map], 'rider');
   add(world.wordmark, 'wordmark');
+  add(world.signs, 'signs');
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
       // #639: every layer of a merged material, not only its own two maps.
@@ -7984,6 +8006,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
           world.wordmark,
+          world.signs,
           ...[...world.vegetation.values()].flatMap((shapes) =>
             shapes.flatMap((shape) => [
               ...shape.parts.flatMap((part) => texturesOf(part.material)),
@@ -8074,6 +8097,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
     // #966: the wordmark, loaded and settled with everything else.
     const wordmark = texture(() => loaders.texture(realisticUrl(REALISTIC_WORDMARK)));
+    // #3279: the road signs' atlas, loaded and settled with everything else.
+    const signAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_SIGN_ATLAS)));
     // #623: the rider's three maps, loaded and settled with everything else.
     const riderMaps = REALISTIC_RIDER_MAP_NAMES.map((map) => ({
       map,
@@ -8178,6 +8203,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       crag.normal,
       rider,
       wordmark,
+      signAtlas,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
       ...houseScenes,
@@ -8334,6 +8360,12 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     wordmarkTexture.minFilter = LinearMipmapLinearFilter;
     wordmarkTexture.wrapS = ClampToEdgeWrapping;
     wordmarkTexture.wrapT = ClampToEdgeWrapping;
+    // #3279: read by cell, never repeated; its colour is sRGB, its alpha the cut-out.
+    const signTexture = await signAtlas;
+    signTexture.colorSpace = SRGBColorSpace;
+    signTexture.minFilter = LinearMipmapLinearFilter;
+    signTexture.wrapS = ClampToEdgeWrapping;
+    signTexture.wrapT = ClampToEdgeWrapping;
     const glyphBytes = await glyphs;
     const banners = bannersOf(glyphBytes);
     if (banners !== undefined) loaded.textures.push(banners.texture);
@@ -8441,6 +8473,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       bicycle,
       ...(banners === undefined ? {} : { banners }),
       wordmark: wordmarkTexture,
+      signs: signTexture,
       ...(houses === undefined ? {} : { houses }),
       ...(roadside === undefined ? {} : { roadside }),
       ...(litter === undefined ? {} : { litter }),
@@ -8674,6 +8707,7 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   releaseWeatheredSkies(world.sky);
   world.banners?.texture.dispose();
   world.wordmark.dispose();
+  world.signs.dispose();
   // #1585: the house models' atlas; their triangles are plain arrays.
   world.houses?.atlas.dispose();
   // #3334: and the downtown kit's, a 2048 px picture the GPU holds as long as the world does.
@@ -11371,6 +11405,305 @@ export class LogoBelt {
     this.#mesh.geometry.dispose();
     this.#materials.lit.dispose();
     if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+    this.#mesh.dispose();
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * The road signs — #3279: from the route itself, in the realistic world
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The vertex attribute that says which part of a sign a vertex is — #3279:
+ * {@link SIGN_PART_FACE} the plate's face, {@link SIGN_PART_BACK} its back,
+ * 2 to 4 the three numerals' places left to right, {@link SIGN_PART_POST}
+ * the post. Each part reads its own cell of the atlas. @see RoadSignBelt
+ */
+export const SIGN_PART_ATTRIBUTE = 'oylSignPart';
+const SIGN_PART_FACE = 0;
+const SIGN_PART_BACK = 1;
+const SIGN_PART_NUMERAL = 2;
+const SIGN_PART_POST = 5;
+
+/** The instance attribute naming a sign's face and back cells. @see road-sign-atlas.ts §signCells */
+export const SIGN_PLATE_ATTRIBUTE = 'oylSignPlate';
+
+/** The instance attribute naming its three numerals' cells and how far right they move. */
+export const SIGN_NUMERALS_ATTRIBUTE = 'oylSignNumerals';
+
+/** How far in front of the post's middle a plate's face stands: just clear of the post's front. */
+const SIGN_FACE_DEPTH = SIGN_POST_METRES / 2 + 0.006;
+
+/** A quad's corners, counter-clockwise seen from where it faces. */
+type Corners = readonly (readonly [number, number, number])[];
+
+/**
+ * One sign's geometry — #3279: a square post set into the ground, and a
+ * plate on its front: a face quad, a back quad facing the other way and
+ * three numerals' quads just proud of the face. Every texture coordinate is
+ * in CELLS of the atlas (a plate's run 0 to 2, a numeral's and the post's 0
+ * to 1, `v` down the picture), and the shader adds the instance's cell.
+ * **18 triangles**: four for the plate, six for the numerals, eight for the
+ * post's four sides.
+ */
+export function roadSignGeometry(): BufferGeometry {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const parts: number[] = [];
+  const quad = (
+    corners: Corners,
+    normal: readonly [number, number, number],
+    cornerUvs: readonly (readonly [number, number])[],
+    part: number,
+  ): void => {
+    for (const index of [0, 1, 2, 0, 2, 3]) {
+      positions.push(...(corners[index] as readonly [number, number, number]));
+      normals.push(...normal);
+      uvs.push(...(cornerUvs[index] as readonly [number, number]));
+      parts.push(part);
+    }
+  };
+  const half = SIGN_PLATE_METRES / 2;
+  const top = SIGN_PLATE_HEIGHT_METRES + half;
+  const bottom = SIGN_PLATE_HEIGHT_METRES - half;
+  // The face, toward +z: its left edge `u` 0, its top edge `v` 0.
+  quad(
+    [
+      [-half, bottom, SIGN_FACE_DEPTH],
+      [half, bottom, SIGN_FACE_DEPTH],
+      [half, top, SIGN_FACE_DEPTH],
+      [-half, top, SIGN_FACE_DEPTH],
+    ],
+    [0, 0, 1],
+    [
+      [0, 2],
+      [2, 2],
+      [2, 0],
+      [0, 0],
+    ],
+    SIGN_PART_FACE,
+  );
+  // The back, toward −z, a hair behind the face: the plate's outline in grey.
+  const behind = SIGN_FACE_DEPTH - 0.002;
+  quad(
+    [
+      [half, bottom, behind],
+      [-half, bottom, behind],
+      [-half, top, behind],
+      [half, top, behind],
+    ],
+    [0, 0, -1],
+    [
+      [2, 2],
+      [0, 2],
+      [0, 0],
+      [2, 0],
+    ],
+    SIGN_PART_BACK,
+  );
+  // The numerals, a hair proud of the face, centred on the plate's row.
+  const row = top - SIGN_NUMERAL_ROW * SIGN_PLATE_METRES;
+  const glyph = SIGN_NUMERAL_METRES / 2;
+  const proud = SIGN_FACE_DEPTH + 0.002;
+  for (let place = 0; place < 3; place += 1) {
+    const x = (place - 1) * SIGN_NUMERAL_ADVANCE_METRES;
+    quad(
+      [
+        [x - glyph, row - glyph, proud],
+        [x + glyph, row - glyph, proud],
+        [x + glyph, row + glyph, proud],
+        [x - glyph, row + glyph, proud],
+      ],
+      [0, 0, 1],
+      [
+        [0, 1],
+        [1, 1],
+        [1, 0],
+        [0, 0],
+      ],
+      SIGN_PART_NUMERAL + place,
+    );
+  }
+  // The post's four sides, from its footing to under the plate's top.
+  const p = SIGN_POST_METRES / 2;
+  const low = -SIGN_POST_FOOTING_METRES;
+  const high = top - 0.05;
+  const sides: readonly {
+    readonly from: readonly [number, number];
+    readonly to: readonly [number, number];
+    readonly normal: readonly [number, number, number];
+  }[] = [
+    { from: [-p, p], to: [p, p], normal: [0, 0, 1] },
+    { from: [p, p], to: [p, -p], normal: [1, 0, 0] },
+    { from: [p, -p], to: [-p, -p], normal: [0, 0, -1] },
+    { from: [-p, -p], to: [-p, p], normal: [-1, 0, 0] },
+  ];
+  for (const side of sides) {
+    quad(
+      [
+        [side.from[0], low, side.from[1]],
+        [side.to[0], low, side.to[1]],
+        [side.to[0], high, side.to[1]],
+        [side.from[0], high, side.from[1]],
+      ],
+      side.normal,
+      [
+        [0, 1],
+        [1, 1],
+        [1, 0],
+        [0, 0],
+      ],
+      SIGN_PART_POST,
+    );
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(Float32Array.from(positions), 3));
+  geometry.setAttribute('normal', new BufferAttribute(Float32Array.from(normals), 3));
+  geometry.setAttribute('uv', new BufferAttribute(Float32Array.from(uvs), 2));
+  geometry.setAttribute(SIGN_PART_ATTRIBUTE, new BufferAttribute(Float32Array.from(parts), 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * The vertex rule {@link roadSignMaterial} splices after `uv_vertex` —
+ * #3279: each part's cell, from the instance's ({@link SIGN_PLATE_ATTRIBUTE},
+ * {@link SIGN_NUMERALS_ATTRIBUTE}) or the post's grey, turned into the
+ * atlas's coordinates.
+ *
+ * Exported for `road-signs-belt.test.ts`, which holds its program text.
+ */
+export const SIGN_CELL_GLSL = `float oylCell = ${SIGN_PART_ATTRIBUTE} < 0.5 ? ${SIGN_PLATE_ATTRIBUTE}.x
+  : ${SIGN_PART_ATTRIBUTE} < 1.5 ? ${SIGN_PLATE_ATTRIBUTE}.y
+  : ${SIGN_PART_ATTRIBUTE} < 2.5 ? ${SIGN_NUMERALS_ATTRIBUTE}.x
+  : ${SIGN_PART_ATTRIBUTE} < 3.5 ? ${SIGN_NUMERALS_ATTRIBUTE}.y
+  : ${SIGN_PART_ATTRIBUTE} < 4.5 ? ${SIGN_NUMERALS_ATTRIBUTE}.z
+  : ${String(METAL_CELL)}.0;
+vMapUv = (vec2(mod(oylCell, ${String(SIGN_ATLAS_CELLS)}.0), floor((oylCell + 0.5) / ${String(SIGN_ATLAS_CELLS)}.0)) + uv) / ${String(SIGN_ATLAS_CELLS)}.0;`;
+
+/** And the one after `begin_vertex`: the numerals moved right by the instance's shift. */
+export const SIGN_SHIFT_GLSL = `if (${SIGN_PART_ATTRIBUTE} > 1.5 && ${SIGN_PART_ATTRIBUTE} < 4.5) transformed.x += ${SIGN_NUMERALS_ATTRIBUTE}.w * ${SIGN_NUMERAL_ADVANCE_METRES.toFixed(4)};`;
+
+/**
+ * The signs' one material — #3279: lit like the world round it, every part
+ * its own cell of the atlas, cut out by the atlas's alpha (a plate's shape, a
+ * numeral's strokes), and breathing the realistic air. Constructed here
+ * (D-11).
+ */
+function roadSignMaterial(atlas: Texture): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      map: atlas,
+      alphaTest: 0.5,
+      roughness: 0.55,
+      metalness: 0,
+    }),
+  );
+  const spliced = "#3279's road signs";
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\nattribute float ${SIGN_PART_ATTRIBUTE};\nattribute vec2 ${SIGN_PLATE_ATTRIBUTE};\nattribute vec4 ${SIGN_NUMERALS_ATTRIBUTE};`,
+          'vertex',
+          spliced,
+        ),
+        '#include <uv_vertex>',
+        `#include <uv_vertex>\n#ifdef USE_MAP\n${SIGN_CELL_GLSL}\n#endif`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n${SIGN_SHIFT_GLSL}`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => 'oyl-road-signs';
+  return withAtmosphere(material);
+}
+
+/**
+ * The road signs in view — #3279 (`road-signs.ts`): every sign one instance
+ * of {@link roadSignGeometry}, in **one draw call** however many there are,
+ * and none at all where a frame carries no sign: the mesh is hidden when its
+ * count is nought, which on a level, gently bending road is every frame.
+ *
+ * ⚠️ **The realistic world's alone.** Its plates are the atlas's pictures,
+ * and the stylised world uploads one texture, the wordmark
+ * (`game.browser.spec.ts` §"uploads only the logo texture"); an unlettered
+ * sign would tell a rider nothing, so the stylised world draws none — as it
+ * draws no "to go" board (§`GantryBelt`).
+ *
+ * Each instance's matrix stands the sign on the ground at its post, turned to
+ * face the rider who rides at it; its two instance attributes name its cells
+ * (`road-sign-atlas.ts` §`signCells`). The percent is the sign's own, which
+ * `road-signs.ts` read off the HUD's own function.
+ */
+export class RoadSignBelt {
+  readonly #mesh: InstancedMesh;
+  readonly #plates: InstancedBufferAttribute;
+  readonly #numerals: InstancedBufferAttribute;
+  readonly #matrix = new Matrix4();
+  #shown = true;
+
+  constructor(atlas: Texture) {
+    const geometry = roadSignGeometry();
+    this.#plates = new InstancedBufferAttribute(new Float32Array(SIGNS_PER_FRAME * 2), 2);
+    this.#plates.setUsage(DynamicDrawUsage);
+    this.#numerals = new InstancedBufferAttribute(new Float32Array(SIGNS_PER_FRAME * 4), 4);
+    this.#numerals.setUsage(DynamicDrawUsage);
+    geometry.setAttribute(SIGN_PLATE_ATTRIBUTE, this.#plates);
+    geometry.setAttribute(SIGN_NUMERALS_ATTRIBUTE, this.#numerals);
+    this.#mesh = new InstancedMesh(geometry, roadSignMaterial(atlas), SIGNS_PER_FRAME);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the jsdom suite and the browser gate's counts. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** This frame's signs, at most {@link SIGNS_PER_FRAME}; none hides the mesh. */
+  update(signs: readonly RoadSign[]): void {
+    let count = 0;
+    if (this.#shown) {
+      for (const sign of signs) {
+        if (count >= SIGNS_PER_FRAME) break;
+        this.#matrix.makeRotationY(sign.rotation).setPosition(sign.x, sign.y, sign.z);
+        this.#mesh.setMatrixAt(count, this.#matrix);
+        const cells = signCells(sign);
+        this.#plates.setXY(count, cells.face, cells.back);
+        this.#numerals.setXYZW(count, ...cells.glyphs, cells.shift);
+        count += 1;
+      }
+    }
+    this.#mesh.count = count;
+    this.#mesh.instanceMatrix.needsUpdate = count > 0;
+    this.#plates.needsUpdate = count > 0;
+    this.#numerals.needsUpdate = count > 0;
+    this.#mesh.visible = count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
     this.#mesh.dispose();
   }
 }
@@ -27681,6 +28014,8 @@ class RealisticDrawing {
   readonly gantries: GantryBelt;
   /** The wordmark's boards, on every gate (the finish's since #978) and the billboards — #966. */
   readonly logos: LogoBelt;
+  /** The road signs placed from the route — #3279. */
+  readonly signs: RoadSignBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
   /** #2972: the corridor's mapped footways and zebras. */
@@ -27792,6 +28127,7 @@ class RealisticDrawing {
     this.grounding = new GroundBlobBelt();
     this.gantries = new GantryBelt(world.banners, 'realistic', world.roadside?.barrier);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
+    this.signs = new RoadSignBelt(world.signs);
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.furniture = new FurnitureBelt(
       'realistic',
@@ -27905,6 +28241,7 @@ class RealisticDrawing {
     this.grounding.addTo(scene);
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
+    this.signs.addTo(scene);
     this.pavements.addTo(scene);
     this.footways.addTo(scene);
     this.furniture.addTo(scene);
@@ -27923,6 +28260,7 @@ class RealisticDrawing {
     this.grounding.setShown(on);
     this.gantries.setShown(on);
     this.logos.setShown(on);
+    this.signs.setShown(on);
     this.pavements.setShown(on);
     this.footways.setShown(on);
     this.furniture.setShown(on);
@@ -28158,6 +28496,7 @@ class RealisticDrawing {
     this.grounding.dispose();
     this.gantries.dispose();
     this.logos.dispose();
+    this.signs.dispose();
     this.pavements.dispose();
     this.footways.dispose();
     this.furniture.dispose();
@@ -28269,6 +28608,7 @@ export function evictRealisticWorldFromGpu(): void {
   for (const each of WEATHERED_SKIES.get(world.sky)?.values() ?? []) each.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
+  world.signs.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
@@ -28949,6 +29289,18 @@ export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
  */
 export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
   return view instanceof ThreeGameView ? view.decorationBelt : undefined;
+}
+
+/**
+ * The realistic world's road signs' mesh — #3279 (`road-signs.ts`) — or
+ * `undefined` for a view with no realistic world.
+ *
+ * @test-facing read by `realistic-textures.test.ts` §"the road signs", which
+ * holds what the belt drew for a frame's signs; the view draws the belt itself
+ * in `render`
+ */
+export function roadSignMeshOf(view: GameView): InstancedMesh | undefined {
+  return view instanceof ThreeGameView ? view.roadSignMesh : undefined;
 }
 
 /**
@@ -29876,6 +30228,8 @@ class ThreeGameView implements GameView {
     // world's draw nothing.
     this.#realistic?.gantries.update(frame.lines);
     this.#realistic?.logos.update(frame.lines, frame.billboards);
+    // #3279: the road signs in view, in the realistic world only; none hides the mesh.
+    this.#realistic?.signs.update(frame.signs ?? NO_ROAD_SIGNS);
     this.#gantries.update(frame.lines);
     this.#logos.update(frame.lines, frame.billboards);
     // #1535: the village streets, in both worlds; the hidden world's draw nothing.
@@ -30493,6 +30847,11 @@ class ThreeGameView implements GameView {
   doorPathsShown(on: boolean): void {
     this.#realistic?.pavements.switchPathsOn(on);
     this.#pavements.switchPathsOn(on);
+  }
+
+  /** @see roadSignMeshOf — the realistic world's, whether or not it is the one drawn. */
+  get roadSignMesh(): InstancedMesh | undefined {
+    return this.#realistic?.signs.mesh;
   }
 
   /** @see footwayMeshOf — the realistic world's, whether or not it is the one drawn. */

@@ -190,6 +190,7 @@ import {
   villageRoute,
 } from '../src/demo/synthetic-road';
 import { outAndBackRoute } from '../src/game/route-fixtures-testing';
+import { climbBendRoute } from '../src/game/road-signs-fixtures-testing';
 import { fixtureLevelTown, plannedTown } from './realistic/town';
 import fixtureLevel from '../src/game/delivery/levels/fixtures/fixture-level.json';
 import { frameCensus, type FrameCensus } from './realistic/village';
@@ -644,7 +645,10 @@ async function run(): Promise<void> {
       : // #1996: the turning point the owner's course showed, for its frames.
         config.route === 'out-and-back'
         ? outAndBackRoute()
-        : realisticRoute(config.facing, config.place));
+        : // #3279: a climb, its top and a tight bend, for the road signs' frames.
+          config.route === 'signs'
+          ? climbBendRoute()
+          : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {

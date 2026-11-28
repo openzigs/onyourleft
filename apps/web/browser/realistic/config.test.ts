@@ -111,6 +111,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       '?at=1475&route=out-and-back',
     );
     expect(() => parseConfig('?route=out-back')).toThrow(/route is one of village, out-and-back/);
+    // #3279: the road signs' road.
+    expect(parseConfig('?route=signs').route).toBe('signs');
     expect(() => parseConfig('?route=out-and-back&town=mixed')).toThrow(/route and town/);
   });
 

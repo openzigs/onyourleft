@@ -1327,6 +1327,34 @@ export const REALISTIC_PARKED_CAR_TRIANGLES = 13_440;
 export const REALISTIC_PARKED_CAR_DRAW_CALLS = 1;
 
 /**
+ * The most triangles a frame's road signs may submit — #3279: **576**, the
+ * belt's room (`road-signs.ts` §`SIGNS_PER_FRAME`, 32) at one sign's
+ * triangles as `three-renderer.ts` §`roadSignGeometry` builds it, 18: a
+ * post's four sides, a plate's face and back, and three numerals.
+ *
+ * A sign is in the roadside class — a lamp post, a barrier, a sign — and is
+ * held to its {@link REALISTIC_TRIANGLES} `roadside` figure of 240 a model,
+ * which at 18 it is far inside. It carries no model file: its picture is one
+ * 512 px atlas (`realistic-assets.ts` §`REALISTIC_SIGN_ATLAS`, 19 885 bytes
+ * committed).
+ *
+ * ⚠️ **Not a raise of any ceiling.** The frame's
+ * {@link REALISTIC_FRAME_TRIANGLES} is unchanged, and
+ * `realistic-budget.test.ts` adds this term to the fullest frame the caps
+ * allow, parked cars and all (279 260 of 300 000 before it). The belt is ONE
+ * draw call, hidden on a frame with no sign in reach: the frozen village
+ * frame and the Delivery and lap-race villages ride a level road whose bends
+ * are hundreds of metres round (`demo/synthetic-road.ts` §`villageRoute`),
+ * so they carry none and {@link REALISTIC_VILLAGE_DRAW_CALLS} does not move;
+ * the wooded frame's road has none in reach either.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which prices the belt's
+ * room at the geometry the renderer builds; the product builds the belt and
+ * does not read this number
+ */
+export const REALISTIC_ROAD_SIGN_TRIANGLES = 576;
+
+/**
  * The most triangles a frame's village streets may add — #1535's pavements,
  * #1564's paths to the front doors and #1536's street furniture: **34 304**
  * in the realistic world since the owner's ruling of 2026-11-05 on #1274

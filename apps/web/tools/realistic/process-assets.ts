@@ -101,6 +101,7 @@ import { drawMark, encodePng } from '../icons/generate-icons';
 import { committedWordmark, encodeRgbaPng, rgbaDigest } from '../brand/game-wordmark';
 
 import { drawBicycleMap, pixelDigest } from './draw-bicycle-maps';
+import { drawSignAtlas, signAtlasDigest } from './draw-sign-atlas';
 import { encodeKtx2, pinnedImageEncoder, requirePinnedKtx, withKtx2Images } from './encode-ktx2';
 import { loadEzTree, stageGeneratedLevel, type EzTreeModule } from './ez-tree';
 import { LOCK, RAW } from './fetch-assets';
@@ -244,6 +245,14 @@ function make(
     writeFileSync(picture, encodePng(drawn.size, drawn.pixels));
     encodeKtx2(recipe.ktx2, picture, join(into, output.file));
     return { pixels: pixelDigest(drawn) };
+  }
+  if (recipe.how === 'signs') {
+    // #3279: the road signs' atlas, the drawn maps' shape, in RGBA.
+    const atlas = drawSignAtlas();
+    const picture = join(stage, `${output.file}.png`);
+    writeFileSync(picture, encodeRgbaPng(atlas));
+    encodeKtx2(recipe.ktx2, picture, join(into, output.file));
+    return { pixels: signAtlasDigest(atlas) };
   }
   if (recipe.how === 'wordmark') {
     // #966: keyed from the committed artwork, written as a PNG into the

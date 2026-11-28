@@ -27,7 +27,7 @@
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
  * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`: since #1625 Halloween's pumpkins, and nothing yet for winter lights). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
- * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame); since #1996 `out-and-back`, `route-fixtures-testing.ts` §`outAndBackRoute`, a road ridden out and back again, turning at half its length (`at=1475` holds the turning point 30 m ahead, `at=1512` just past it). Refused beside `town`, which is a road of its own | `village`, `out-and-back`; default none |
+ * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame); since #1996 `out-and-back`, `route-fixtures-testing.ts` §`outAndBackRoute`, a road ridden out and back again, turning at half its length (`at=1475` holds the turning point 30 m ahead, `at=1512` just past it); since #3279 `signs`, `road-signs-fixtures-testing.ts` §`climbBendRoute`, an 8 % climb, a level top and a tight bend (`at=380` holds the climb's sign ahead, `at=1000` the summit board, `at=1600` the chevrons). Refused beside `town`, which is a road of its own | `village`, `out-and-back`, `signs`; default none |
  * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
  * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles (`realistic/lap-race.ts`), drawn by the product's own belt. With `world=stylised`, in the scenery-free STYLISED frame, and REFUSED beside `route`; since #1971 in the realistic world too, on the route's own frame with its scenery (`route=village` is #1689's hold), held to §`LAP_RACE_VILLAGE_DRAW_CALLS`. REFUSED beside `delivery` and `town` in both | `worst`; default none |
  * | `cityfar` | #1638: a CANDIDATE for a city centre's far-level cap (`realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`, off in the product): a refill draws up to this many mapped buildings, every one past `MAPPED_BUILDING_MAX`'s 36 a `city-centre` building at its far level, for validation 0002 AE5's third row. A candidate to measure, never the cap: the cap is the number the tablet's rows support, which the owner rules on #1638. REFUSED unless `town=city`, the one town with a city-centre run | a whole number from 37 to 144 (`CITY_FAR_MOST`); default none, the product's cap |
@@ -669,9 +669,10 @@ export interface RealisticPageConfig {
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
    * validation 0002 AE2; since #1996 `out-and-back`, for the turning point's
-   * frames. `undefined` is the default road, unchanged.
+   * frames; since #3279 `signs`, for the road signs' frames. `undefined` is
+   * the default road, unchanged.
    */
-  readonly route: 'village' | 'out-and-back' | undefined;
+  readonly route: 'village' | 'out-and-back' | 'signs' | undefined;
   /**
    * #1622: the rider's local day the ride starts on. `undefined` is this
    * device's own day, as a ride reads it (`season.ts` §`deviceToday`).
@@ -1398,14 +1399,16 @@ export function decorationsWithConfig(config: Pick<RealisticPageConfig, 'decorat
 }
 
 /**
- * `?route=village` — #1559, and `?route=out-and-back` — #1996. Refused beside
+ * `?route=village` — #1559, `?route=out-and-back` — #1996, and `?route=signs` — #3279. Refused beside
  * `town`, which rides a road of its own: a URL naming both would measure one
  * of them under the other's name.
  */
-function routeFrom(params: URLSearchParams): 'village' | 'out-and-back' {
+function routeFrom(params: URLSearchParams): 'village' | 'out-and-back' | 'signs' {
   const value = params.get('route');
-  if (value !== 'village' && value !== 'out-and-back')
-    throw new Error(`realistic: route is one of village, out-and-back, not "${String(value)}"`);
+  if (value !== 'village' && value !== 'out-and-back' && value !== 'signs')
+    throw new Error(
+      `realistic: route is one of village, out-and-back, signs, not "${String(value)}"`,
+    );
   if (params.has('town')) {
     throw new Error('realistic: route and town are two roads; name one of them, not both');
   }

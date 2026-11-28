@@ -1366,8 +1366,8 @@ function realisticImageCount(): number {
     REALISTIC_BICYCLE_MAP_NAMES.length +
     // #623: the rider's kit, relief and occlusion maps.
     REALISTIC_RIDER_MAP_NAMES.length +
-    // #966: the wordmark.
-    1 +
+    // #966: the wordmark; #3279: the road signs' atlas.
+    2 +
     models.reduce(
       (sum, model) =>
         sum +
