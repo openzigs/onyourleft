@@ -2577,6 +2577,34 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and wreathe village doors in the belt; a MAPPED door's
                         wreath is the facade's `WREATH_GLSL` (`oylWreath`, 0
                         calls), its gate control the `facade-wreath` lever
+    src/game/roadside-safety.ts
+                        the open road's own safety furniture (#3284), placed by
+                        rule because no map carries it: a steel W-beam guard
+                        rail where the landform falls more than 3 m within
+                        24 m of the edge (`terrainHeightAt`), on the outside of
+                        a bend under 60 m radius over a 1 m fall, and 20 m along
+                        each approach to a stream bridge from its parapet's end
+                        (`waterways.ts` §`bridgeSpans`); a marker post every
+                        50 m each side (25 m on a bend under 200 m) where no
+                        rail runs. Neither across a side road's mouth or a
+                        driveway (the frame's side roads, on their own side of
+                        the centreline only), a field gate, a footway, on
+                        mapped built-up land or along a kerbed pavement
+                        (`SceneFrame.streets`). Sampled on the ODOMETER's 2 m
+                        grid, never the sliding corridor rows, so a run's ends
+                        stay put. ⚠️ **The rail's top is read off the road's own
+                        edge vertices** (`RoadCorridor.vertices`), 0.75 m over
+                        them at every row. ⚠️ **Realistic world only, and no
+                        mesh of its own**: the rail is `SceneFrame.guardRails`,
+                        instances of `BridgeBelt`'s overpass box (≤
+                        `REALISTIC_GUARD_RAIL_BOXES`, its triangle row in the
+                        worst-frame sum); the posts are
+                        `SceneFrame.markerPosts`, `post` scenery items the
+                        renderer hands its belts after the scatter
+                        (`withMarkerPosts`), kept out of `SceneFrame.scatter`
+                        whose arrangement is pinned. The stylised world's
+                        scenery-free frame is held to exactly 11 calls, so it
+                        draws neither
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a
