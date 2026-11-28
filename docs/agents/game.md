@@ -1057,8 +1057,23 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         recording under the ride is paused, the recorder's
                         auto-pause included, or the power reading is not
                         live. The bots are drawn through the lap race's
-                        pack layout (a pack, up to three abreast; single
-                        file is #3304) and the rider is never moved. What
+                        pack layout **in single file** (#3304:
+                        `stepPackLayout`'s `singleFile`, a row to each
+                        member, a bike length and the wheel gap apart, in
+                        the middle lane) and the rider is never moved along
+                        the road. The member the rules have aside
+                        (`rotation.aside`) is drawn one lane to the LEFT
+                        (`GROUP_PULL_OFF_LANE`), beside the line and no row
+                        of it, and comes back across only once the line has
+                        drawn them a bike length of room; when that member
+                        is the rider it is the rider's own lane that moves,
+                        by `lanes.ts` §`stepSteer`, out through
+                        `steeredLateral`, and the lane follows the role, so
+                        a pull-off press (#3307) needs to reach the rules
+                        only. A drawing only: nothing reads it back
+                        (`line-drawing.test.ts`, every step of a scripted
+                        rotation from `line-testing.ts`; the browser case
+                        is `lap-race.browser.spec.ts` §"#3304"). What
                         the ride keeps goes through the port's
                         `groupRideStepped` to the controller's
                         `noteGroupRide` and is saved as

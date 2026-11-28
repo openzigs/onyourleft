@@ -21,6 +21,7 @@ import { GROUP_RIDE_LOG_MOST } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import { riderMassFor } from '../../athlete/mass';
+import { LANE_OFFSETS_METRES } from '../lanes';
 import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from '../lap-race/pack-layout';
 import { rideConditionsFor } from '../rider';
 import { seededRiderBody } from '../rider-body';
@@ -31,6 +32,7 @@ import { groupRidePlan } from './choice';
 import {
   GROUP_BOT_CP_WATTS,
   GROUP_BOT_STRENGTH_SPREAD,
+  GROUP_PULL_OFF_LANE,
   GROUP_RIDE_RIDER_ID,
   groupLine,
   groupRideDrawing,
@@ -253,30 +255,40 @@ describe('the group stepped beside the rider', () => {
 
 describe('where the group is drawn', () => {
   it('draws every bot through the pack layout, none on another, and never moves the rider', () => {
-    const end = last(ride(started({ bots: 7 }), 30, 120).frames);
-    const drawing = groupRideDrawing(end, 123.4, 0.02);
-    expect(drawing.riderDistance).toBe(123.4);
-    expect(drawing.steeredLateral).toBe(0);
-    expect(drawing.steeringSpeed).toBe(0);
-    expect(drawing.riderHit).toBeUndefined();
-    expect(drawing.raceBots).toHaveLength(7);
-    for (const bot of drawing.raceBots) {
-      expect(bot.laidOut).toBe(true);
-      expect(Number.isFinite(bot.distanceMetres)).toBe(true);
-      expect(bot.distanceMetres).toBeGreaterThanOrEqual(0);
-      // In the line's lane or beside it in its row: the layout's, three abreast at most.
-      expect(Math.abs(bot.lateralMetres)).toBeLessThan(2 * PACK_ABREAST_METRES);
+    // A rider on one power rides through the line and back (#3303's finding),
+    // which the single file must draw without one bicycle inside another.
+    const { frames } = ride(started({ bots: 7 }), 120, 120);
+    for (const frame of frames) {
+      const drawing = groupRideDrawing(frame, frame.rider.distanceM, 0);
+      expect(drawing.riderDistance).toBe(frame.rider.distanceM);
+      expect(drawing.riderHit).toBeUndefined();
+      expect(drawing.raceBots).toHaveLength(7);
+      const drawn = [
+        { along: drawing.riderDistance, across: drawing.steeredLateral },
+        ...drawing.raceBots.map((bot) => {
+          expect(bot.laidOut).toBe(true);
+          expect(bot.distanceMetres).toBeGreaterThanOrEqual(0);
+          // In the line's lane, a place beside it, or the pull-off lane: never further out.
+          expect(Math.abs(bot.lateralMetres)).toBeLessThanOrEqual(
+            Math.abs(LANE_OFFSETS_METRES[GROUP_PULL_OFF_LANE] as number) + 1e-9,
+          );
+          return { along: bot.distanceMetres, across: bot.lateralMetres };
+        }),
+      ];
+      // No bicycle is drawn inside another: a bike length along the road, or a place across.
+      drawn.forEach((one, index) => {
+        for (const other of drawn.slice(index + 1)) {
+          const along = Math.abs(one.along - other.along);
+          const across = Math.abs(one.across - other.across);
+          expect(along >= BIKE_LENGTH_METRES - 1e-6 || across >= PACK_ABREAST_METRES - 1e-6).toBe(
+            true,
+          );
+        }
+      });
     }
-    // No bicycle is drawn inside another: a row apart along the road, or abreast in one.
-    drawing.raceBots.forEach((bot, index) => {
-      for (const other of drawing.raceBots.slice(index + 1)) {
-        const along = Math.abs(bot.distanceMetres - other.distanceMetres);
-        const across = Math.abs(bot.lateralMetres - other.lateralMetres);
-        expect(along > BIKE_LENGTH_METRES / 2 || across > PACK_ABREAST_METRES / 2).toBe(true);
-      }
-    });
     // Each bot keeps one body for the ride, from the line's seed and its place as set up.
-    expect(drawing.raceBots.map((bot) => bot.body)).toStrictEqual(
+    const end = last(frames);
+    expect(groupRideDrawing(end, 0, 0).raceBots.map((bot) => bot.body)).toStrictEqual(
       end.botIds.map((_, index) => seededRiderBody(end.seed, index)),
     );
   });
@@ -291,7 +303,7 @@ describe('where the group is drawn', () => {
   });
 
   it('never draws a bot behind the start of the route', () => {
-    // On the start line at speed: a second back along that speed is behind the start.
+    // On the start line at speed: two seconds back along that speed is behind the start.
     const session = startGroupRideSession({
       choice: { targetSpeed: THIRTY, bots: 5 },
       profile: FLAT,
@@ -300,7 +312,8 @@ describe('where the group is drawn', () => {
       seed: 7,
     });
     if (session === undefined) throw new Error('the group did not start');
-    const drawn = groupRideDrawing(session, 0, 1).raceBots;
+    // In single file the front bot stands 12 m up the road, so two seconds back.
+    const drawn = groupRideDrawing(session, 0, 2).raceBots;
     expect(drawn).toHaveLength(5);
     for (const bot of drawn) expect(bot.distanceMetres).toBe(0);
   });
