@@ -36,7 +36,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { decodePng, modelColours, paletteDigest, readGlb } from './model-bytes-testing';
-import { SCENERY_MODELS } from './scenery-models';
+import {
+  COMMERCIAL_ATLAS,
+  SCENERY_MODELS,
+  STYLISED_FOLD_MODELS,
+  sceneryAtlasOf,
+  type SceneryModel,
+} from './scenery-models';
 import {
   MAXIMUM_LIT_CHANNEL,
   SCENERY_PALETTE,
@@ -52,8 +58,22 @@ const MODELS = new URL('./models/', import.meta.url).pathname;
 /** The committed atlas, decoded once for the whole file. */
 const atlas = decodePng(`${MODELS}colormap.png`);
 
-/** Every model named in `scenery-models.ts`, by its own name. */
-const names = Object.values(SCENERY_MODELS).flatMap((models) => models.map((model) => model.name));
+/** City Kit (Commercial)'s own atlas, which its three buildings are painted from — #3287. */
+const commercialAtlas = decodePng(`${MODELS}${COMMERCIAL_ATLAS.name}.png`);
+
+/** Every model named in `scenery-models.ts` — each mesh's, and each file folded in beside one. */
+const models: readonly SceneryModel[] = [
+  ...Object.values(SCENERY_MODELS).flat(),
+  ...Object.values(STYLISED_FOLD_MODELS).flat(2),
+];
+const names = models.map((model) => model.name);
+
+/** The decoded atlas of the kit a model came from, as the loader routes it. */
+function atlasOf(name: string): AtlasImage {
+  const model = models.find((each) => each.name === name);
+  if (model === undefined) throw new Error(`${name}: not a model in the tables`);
+  return sceneryAtlasOf(model.url) === COMMERCIAL_ATLAS ? commercialAtlas : atlas;
+}
 
 describe('the atlas the buildings are painted from', () => {
   it('is the 8-bit palette PNG the sampler assumes', () => {
@@ -89,6 +109,44 @@ describe('the atlas the buildings are painted from', () => {
 
     expect(atlas.data[belowAt + 1]).toBeGreaterThan(0);
   });
+
+  it('is not the atlas City Kit (Commercial) paints from, which is read too — #3287', () => {
+    // The same size and the same black quarter, in another PNG colour type
+    // (6, RGBA) and with other colours below it: the reason a commercial
+    // building has to be answered with its own kit's image.
+    expect(commercialAtlas.width).toBe(512);
+    expect(commercialAtlas.height).toBe(512);
+    expect(commercialAtlas.bitDepth).toBe(8);
+    expect(commercialAtlas.colourType).toBe(6);
+    // Compared to a yes or a no: a failure must not print a million texels.
+    expect(commercialAtlas.data.some((value, at) => value !== atlas.data[at])).toBe(true);
+    for (let row = 0; row < 128; row += 16) {
+      for (let column = 0; column < commercialAtlas.width; column += 64) {
+        const at = (row * commercialAtlas.width + column) * 4;
+
+        expect([
+          commercialAtlas.data[at],
+          commercialAtlas.data[at + 1],
+          commercialAtlas.data[at + 2],
+        ]).toEqual([0, 0, 0]);
+      }
+    }
+  });
+
+  it('paints a commercial building differently from each atlas — #3287', () => {
+    // CONTROL for the routing: the same bytes read against the wrong kit's
+    // atlas are another set of colours, so a reproduced digest below says
+    // which atlas a building was read against.
+    for (const name of ['building-e', 'building-g', 'building-h']) {
+      const file = readGlb(`${MODELS}${name}.glb`);
+
+      expect(atlasOf(name) === commercialAtlas, name).toBe(true);
+      expect(paletteDigest(modelColours(file, atlas))).not.toBe(
+        paletteDigest(modelColours(file, commercialAtlas)),
+      );
+    }
+    expect(atlasOf('building-type-l') === atlas).toBe(true);
+  });
 });
 
 describe('the palette the committed models actually carry — #366', () => {
@@ -99,7 +157,7 @@ describe('the palette the committed models actually carry — #366', () => {
   for (const name of names) {
     it(`reproduces ${name}'s colours from its own bytes`, () => {
       const recorded = SCENERY_PALETTE[name];
-      const colours = modelColours(readGlb(`${MODELS}${name}.glb`), atlas);
+      const colours = modelColours(readGlb(`${MODELS}${name}.glb`), atlasOf(name));
 
       expect(recorded).toBeDefined();
       // Three independent statements about the same set, so that a red run says
@@ -167,7 +225,7 @@ describe('the light budget, applied to colours nobody here chose — #366', () =
 
   it('brings every recorded colour under the ceiling', () => {
     for (const name of names) {
-      for (const colour of modelColours(readGlb(`${MODELS}${name}.glb`), atlas)) {
+      for (const colour of modelColours(readGlb(`${MODELS}${name}.glb`), atlasOf(name))) {
         for (const channel of tonedForTheSun(colour)) {
           expect(channel * PEAK_IRRADIANCE).toBeLessThanOrEqual(1);
         }

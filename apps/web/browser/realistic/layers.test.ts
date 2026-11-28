@@ -14,6 +14,7 @@ import {
   REALISTIC_PRIMITIVE_SKIP,
   RiderBelt,
   ScatterBelt,
+  loadSceneryModels,
   SkyDome,
   TerrainBelt,
   WaterBelt,
@@ -172,6 +173,40 @@ describe('the realistic page’s layer switch — #616', () => {
     expect(hidden.length).toBe(
       near.length + SCENERY_VEGETATION.flatMap((kind) => stylised.meshesOf(kind)).length,
     );
+  });
+
+  it('places a stylised mesh of several shapes with its kind — #3287', async () => {
+    // Where the driver has multi-draw, a tree's or a house's mesh is a
+    // `BatchedMesh`, which `meshesOf` does not list.
+    const donor = new ScatterBelt();
+    const [rock] = donor.meshesOf('rock');
+    if (rock === undefined) throw new Error('no rock to borrow');
+    await loadSceneryModels(() =>
+      Promise.resolve({
+        updateWorldMatrix: () => undefined,
+        traverse: (visit: (node: unknown) => void) => {
+          visit({ isMesh: true, geometry: rock.geometry.clone(), matrixWorld: rock.matrixWorld });
+        },
+      } as never),
+    );
+    try {
+      const layers = install(['vegetation']);
+      const scene = new FakeScene();
+      const batched = new ScatterBelt(undefined, { batched: true });
+      batched.addTo(scene as never);
+      const trees = [...batched.batchesOf('tree-broadleaf'), ...batched.batchesOf('tree-conifer')];
+      const houses = batched.batchesOf('building');
+      expect(trees).toHaveLength(4);
+      expect(houses).toHaveLength(3);
+      expect(layers.census().unplaced).toEqual([]);
+      frame(scene);
+      for (const batch of trees) expect(batch.visible).toBe(false);
+      for (const batch of houses) expect(batch.visible).toBe(true);
+      batched.dispose();
+    } finally {
+      await loadSceneryModels(() => Promise.reject(new Error('no models')));
+      donor.dispose();
+    }
   });
 
   it('switches each layer off on its own, leaving the rest drawn', () => {

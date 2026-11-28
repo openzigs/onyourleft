@@ -90,6 +90,8 @@ interface GltfDocument {
   readonly meshes?: readonly {
     readonly primitives: readonly {
       readonly attributes: Readonly<Record<string, number>>;
+      /** The accessor of its index, where it has one — #3287 counts triangles by it. */
+      readonly indices?: number;
       readonly material?: number;
     }[];
   }[];

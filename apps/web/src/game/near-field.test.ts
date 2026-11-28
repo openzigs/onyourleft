@@ -79,7 +79,7 @@ import {
   sBendRoute,
 } from './route-fixtures-testing';
 import { sceneFrame, sideRoadNaturalMargin, type SceneInput } from './scene';
-import { SCENERY_MODELS } from './scenery-models';
+import { SCENERY_MODELS, STYLISED_FOLD_MODELS } from './scenery-models';
 import { drawnScale } from './scenery-plan';
 import { GROWN_SPECIES, growTree } from './grown-trees';
 import { REALISTIC_CHAIN_LINK } from './realistic-assets';
@@ -108,7 +108,9 @@ const REALISTIC_MODELS = fileURLToPath(new URL('../../public/realistic/', import
  *
  * ⚠️ **Every shape of the kind, not the one an item's variant picks.** Which
  * shape a variant slot wears depends on how many the rung draws
- * (`quality.ts` §`sceneryVariants`), so the gate asks of all of them.
+ * (`quality.ts` §`sceneryVariants`), so the gate asks of all of them — and,
+ * since #3287, of every file folded into a mesh beside its model, which an
+ * item is drawn as by where it stands.
  */
 const SHAPES: Readonly<Record<DrawnWorld, ReadonlyMap<SceneryKind, readonly ShapeTriangles[]>>> = {
   stylised: new Map(
@@ -116,11 +118,12 @@ const SHAPES: Readonly<Record<DrawnWorld, ReadonlyMap<SceneryKind, readonly Shap
       .filter(([kind]) => !isBuiltKind(kind))
       .map(([kind, models]) => [
         kind as SceneryKind,
-        (models ?? []).map((model) =>
-          fittedStylised(
-            modelTriangles(`${STYLISED_MODELS}${model.name}.glb`).triangles,
-            sceneryFitMetres(kind as SceneryKind),
-          ),
+        [...(models ?? []), ...(STYLISED_FOLD_MODELS[kind as SceneryKind] ?? []).flat()].map(
+          (model) =>
+            fittedStylised(
+              modelTriangles(`${STYLISED_MODELS}${model.name}.glb`).triangles,
+              sceneryFitMetres(kind as SceneryKind),
+            ),
         ),
       ]),
   ),
@@ -202,7 +205,15 @@ describe('the bounds — every shape a kind is drawn as fits inside its reach', 
   });
 
   it('holds the stylised house, fitted and centred, as a box turned with the item', () => {
-    for (const model of SCENERY_MODELS.building ?? []) {
+    // #3287: and the houses and commercial buildings folded in beside them. A
+    // folded building is turned half a turn about its own middle, which a
+    // box centred on its place does not see.
+    const houses = [
+      ...(SCENERY_MODELS.building ?? []),
+      ...(STYLISED_FOLD_MODELS.building ?? []).flat(),
+    ];
+    expect(houses).toHaveLength(9);
+    for (const model of houses) {
       const shape = fittedStylised(
         modelTriangles(`${STYLISED_MODELS}${model.name}.glb`).triangles,
         sceneryFitMetres('building'),

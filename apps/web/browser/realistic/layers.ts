@@ -188,6 +188,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
       const byMesh = new Map<SceneNode, Owner>();
       for (const kind of SCENERY_KINDS) {
         for (const mesh of belt.meshesOf(kind)) byMesh.set(mesh, kindLayer(kind));
+        // #3287: and the meshes of several shapes, which are a kind's too.
+        for (const batch of belt.batchesOf(kind)) byMesh.set(batch, kindLayer(kind));
       }
       return (object) => byMesh.get(object);
     },

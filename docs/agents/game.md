@@ -719,6 +719,46 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `model-bytes-testing.ts` beside it is the INDEPENDENT
                         glTF and PNG reader the gate reproduces that table with
                         — the same argument `identity-verifier.test.ts` makes
+    src/game/stylised-shapes.ts
+                        the stylised world's shapes by setting (#3287) —
+                        `buildingSettingOf`, the urban class read as rural,
+                        suburban or commercial; `stylisedFoldOf`, which of its
+                        mesh's shapes an item is; and `writeStylisedTint`, its
+                        seeded tint. The shapes are Kenney files:
+                        `scenery-models.ts` §`STYLISED_FOLD_MODELS` names the
+                        City Kit (Suburban) houses, City Kit (Commercial)
+                        buildings and Nature Kit trees and stones drawn BESIDE
+                        each mesh's own model. ⚠️ **A shape is
+                        no longer a mesh, and a reviewer who remembers "a
+                        variant is a draw call" is reading the old file**: a
+                        mesh that holds several shapes is a three
+                        `BatchedMesh` (`three-renderer.ts` §`ScatterBelt`),
+                        drawn in ONE call through `WEBGL_multi_draw`, each
+                        instance as the one shape it names. So the mesh count,
+                        `MAXIMUM_SCENERY_VARIANTS` and every draw-call ceiling
+                        are what they were, and an item submits its own
+                        shape's triangles and no other's
+                        (`STYLISED_SHAPE_TRIANGLES`: 2 006 at most for a
+                        building). ⚠️ **Only where the driver has
+                        `WEBGL_multi_draw`**: without it three draws a
+                        `BatchedMesh` one call an instance, so the view builds
+                        a belt that draws each mesh's own model alone, as
+                        before #3287. ⚠️ **A multi-draw is not one of the
+                        context's four draw entry points**: every counter in
+                        `browser/` counts it through
+                        `browser/realistic/draws.ts` §`watchMultiDraws`, and
+                        `game-harness.ts` §`countingTextures` leaves a
+                        batch's instance tables out of #366's count of
+                        pictures. ⚠️ **No shape is built in code**
+                        (they were, until the owner placed the archives on
+                        2026-11-26). ⚠️ **The two City Kits declare one atlas
+                        name for two images**: `sceneryAtlasOf` answers a
+                        commercial building with its own kit's, and a folded
+                        building is turned half a turn to face the road
+                        (`loadSceneryModels`). The setting is written on
+                        a mapped town's lot by `settlements.ts` §`lotsAt`
+                        (`ScatterItem.lotSetting`); a ride with no urban class has
+                        none, and draws the three Kenney buildings as before
     src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
                         one ASSETS.toml row each (ADR 0022 D-5). ⚠️ **"Kenney
                         CC0, upstream bytes" describes the STYLISED world only
