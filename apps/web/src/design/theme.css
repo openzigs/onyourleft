@@ -1750,6 +1750,50 @@ ul.oyl-sections.oyl-game-courses__list {
   .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) > * {
     margin-block: 0;
   }
+
+  /*
+   * #3360: a long section's own lists (Credits' works and its packages) lie
+   * across its width too, row by row in the order they are read, with no
+   * `dense` packing. Spanning every column alone left each list one item
+   * wide, so the page in columns was only as much shorter than on the measure
+   * as its wider paragraphs made it (108 px on CI with #3329's models), and a
+   * list of works in one column cost more height per work than the measure
+   * did. In tracks of at least 18rem, which a landscape tablet's `main` holds
+   * three of and an upright one two, a work costs a fraction of its height.
+   */
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair) > .oyl-sections__long > ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+    gap: var(--oyl-space-sm) var(--oyl-space-xl);
+    align-items: start;
+  }
+
+  /*
+   * A work that took many files (a kit of models, a font's weights) would be
+   * the tallest item of its row by its file list alone — 2102 px in an 18rem
+   * track for a kit of 25 — so it takes the whole row and its files flow
+   * into the same tracks as the works.
+   */
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair)
+    > .oyl-sections__long
+    > ul
+    > li:has(> ul > li:nth-child(6)) {
+    grid-column: 1 / -1;
+  }
+
+  .oyl-sections:not(.oyl-sections--broad, .oyl-sections--pair)
+    > .oyl-sections__long
+    > ul
+    > li:has(> ul > li:nth-child(6))
+    > ul {
+    columns: 18rem;
+    column-gap: var(--oyl-space-xl);
+  }
+
+  /* Its prose keeps the measure, as the paragraphs straight under `main` do. */
+  .oyl-sections > .oyl-sections__long > p {
+    max-width: var(--oyl-measure);
+  }
 }
 
 /*

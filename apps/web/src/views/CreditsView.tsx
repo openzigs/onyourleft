@@ -421,8 +421,13 @@ export function CreditsView({
       {/*
         #2067: every credited group is a section, and on a tablet the sections
         lie in rows across its width, in the order they are read.
+        #3360: every section that lists works spans the width and lays its
+        works in tracks of their own (`theme.css`), so a newly credited work
+        costs the page a fraction of what it costs on the reading measure.
+        That leaves two column sections, where this list comes from and the
+        map data, so the sections are in halves: two tracks, never three.
       */}
-      <div className="oyl-sections">
+      <div className="oyl-sections oyl-sections--halves">
         <div data-terms="attribution" className="oyl-sections__long">
           <h2>Credited because the licence asks for it</h2>
           {credits.required.length === 0 ? (
@@ -440,7 +445,7 @@ export function CreditsView({
         </div>
 
         {credits.licenceCopy.length === 0 ? null : (
-          <div data-terms="licence-copy">
+          <div data-terms="licence-copy" className="oyl-sections__long">
             <h2>Shipped with a copy of its licence</h2>
             <p>
               Each of these is published under a licence that does not ask to be credited on a
@@ -452,7 +457,7 @@ export function CreditsView({
           </div>
         )}
 
-        <div data-terms="nothing">
+        <div data-terms="nothing" className="oyl-sections__long">
           <h2>Credited as a courtesy</h2>
           {credits.courtesy.length === 0 ? (
             <p>
@@ -473,7 +478,7 @@ export function CreditsView({
         </div>
 
         {credits.unclassified.length === 0 ? null : (
-          <div data-terms="unclassified">
+          <div data-terms="unclassified" className="oyl-sections__long">
             <h2>Credited under another licence</h2>
             <p>
               This page has not been told what these licences ask for, so it says nothing about it.
