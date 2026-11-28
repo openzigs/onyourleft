@@ -136,12 +136,24 @@ export interface FakeGain extends FakeNode {
   readonly automation: FakeAutomation[];
 }
 
+/**
+ * An oscillator — #3306: the pitch it was last set to, and when it was told
+ * to start and stop on the context's clock (`undefined` until it was), so a
+ * test reads a short sound's notes as the platform was told them.
+ */
+export interface FakeOscillator extends FakeNode {
+  readonly kind: 'oscillator';
+  readonly frequency: { readonly value: number };
+  readonly startedAt: number | undefined;
+  readonly stoppedAt: number | undefined;
+}
+
 export interface FakeAudio {
   readonly context: AudioContextLike;
   readonly destination: FakeNode;
   /** Every gain made, in the order it was made. */
   readonly gains: FakeGain[];
-  readonly oscillators: FakeNode[];
+  readonly oscillators: FakeOscillator[];
   /** Every media element source made (#2058), and the element each was made for. */
   readonly media: (FakeNode & { readonly element: HTMLMediaElement })[];
 }
@@ -155,7 +167,7 @@ export interface FakeAudio {
 export function fakeAudioContext(): FakeAudio {
   const destination: FakeNode = { kind: 'destination', outputs: [] };
   const gains: FakeGain[] = [];
-  const oscillators: FakeNode[] = [];
+  const oscillators: FakeOscillator[] = [];
   const media: (FakeNode & { readonly element: HTMLMediaElement })[] = [];
   const connect =
     (from: FakeNode) =>
@@ -226,14 +238,23 @@ export function fakeAudioContext(): FakeAudio {
       return Object.assign(node, { connect: connect(node) });
     },
     createOscillator: () => {
-      const node: FakeNode = { kind: 'oscillator', outputs: [] };
+      const node = {
+        kind: 'oscillator' as const,
+        outputs: [] as FakeNode[],
+        frequency: { value: 0, setTargetAtTime: () => undefined },
+        startedAt: undefined as number | undefined,
+        stoppedAt: undefined as number | undefined,
+      };
       oscillators.push(node);
       return Object.assign(node, {
         type: 'sine',
-        frequency: { value: 0, setTargetAtTime: () => undefined },
         connect: connect(node),
-        start: () => undefined,
-        stop: () => undefined,
+        start: (at = context.currentTime) => {
+          node.startedAt = at;
+        },
+        stop: (at = context.currentTime) => {
+          node.stoppedAt = at;
+        },
       });
     },
   };
@@ -309,4 +330,35 @@ export function busOf(fake: FakeAudio, output: CueOutput, cue: CueName): FakeGai
   const asGain = fake.gains.find((gain) => gain === bus);
   if (asGain === undefined) throw new Error(`${cue}: its note feeds no bus`);
   return asGain;
+}
+
+/** One note of a short sound as the platform was told it — #3306. */
+export interface PlayedNote {
+  readonly hz: number;
+  /** When it starts, seconds after the sound's first note does. */
+  readonly at: number;
+  /** When it was told to stop, seconds after the sound's first note starts. */
+  readonly until: number;
+}
+
+/**
+ * The notes a short sound is made of: plays `cue` on `output` and reads back
+ * every oscillator that play made — its pitch, its start and its stop —
+ * timed from the first note's start, in the order they start.
+ */
+export function notesOf(fake: FakeAudio, output: CueOutput, cue: CueName): readonly PlayedNote[] {
+  const before = fake.oscillators.length;
+  output.playCue(cue, 0.1);
+  const made = fake.oscillators.slice(before);
+  if (made.length === 0) throw new Error(`${cue}: no note was made — is there a context yet?`);
+  const starts = made.map((note) => {
+    if (note.startedAt === undefined || note.stoppedAt === undefined) {
+      throw new Error(`${cue}: a note was made and never started or stopped`);
+    }
+    return { hz: note.frequency.value, from: note.startedAt, to: note.stoppedAt };
+  });
+  const first = Math.min(...starts.map((note) => note.from));
+  return starts
+    .map((note) => ({ hz: note.hz, at: note.from - first, until: note.to - first }))
+    .sort((a, b) => a.at - b.at);
 }

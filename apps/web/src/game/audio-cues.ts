@@ -28,6 +28,11 @@
  *   only when the pitch a rider could hear changes.
  * - **the interval sound** and **the distance sound** — short, played by
  *   {@link RideCues.cue}; their notes are `web-audio.ts`'s.
+ * - **the group ride's cue sounds** (#3306, ADR 0101 D-5) — short, one per
+ *   event kind and one shared by every correction
+ *   ({@link GROUP_RIDE_CUE_SOUND}), played by {@link RideCues.cue} like the two
+ *   above, at {@link RIDE_CUE_LEVEL} on the cue bus. The pull's countdown has
+ *   none.
  *
  * ## ⚠️ Silence is the answer to every "I do not know"
  *
@@ -56,6 +61,13 @@
  * - **The distance sound plays only on the frame `announce.ts` SAID the
  *   distance-tick sentence** — unchanged by #448, whose finding was about the
  *   interval sound only.
+ * - **A group ride cue's sound plays on the frame the cue is selected**, as
+ *   the interval sound does (#3306, ADR 0101 D-5.5): `GameView` plays it where
+ *   it hands the cue's sentence to the announcer, so a sentence a higher-ranked
+ *   one takes the window from is dropped and its sound is not. The sentence is
+ *   on the HUD's cue line for its shown time either way (#3305). A correction
+ *   past its limit comes back as a quiet mark, which is no cue, so it has
+ *   neither sentence nor sound; and with no power reading no cue is selected.
  *
  * A rider with the sound off loses nothing.
  *
@@ -68,7 +80,9 @@
  * press left running, and does nothing at all to one that is not.
  */
 
-import type { CueName, CueOutput } from './audio-port';
+import type { CueKind } from '@onyourleft/domain';
+
+import type { CueName, CueOutput, GroupRideCueName } from './audio-port';
 import type { CuePreference } from './cue-preference';
 
 /** The tone's pitch on target: A4. */
@@ -90,6 +104,29 @@ const TONE_LEVEL = 0.12;
  * is never louder than one a rider needs mid-ride.
  */
 export const RIDE_CUE_LEVEL = 0.3;
+
+/**
+ * The sound each group ride cue kind plays — #3306, ADR 0101 D-5.2: one of
+ * its own for every event, and **one shared by all five corrections**, so a
+ * rider hears "you are out of the band" and reads which on the cue line. The
+ * record's type makes a kind without a sound a type error, and
+ * `group-ride/cue-sounds.test.ts` walks every kind and every sound's notes.
+ */
+export const GROUP_RIDE_CUE_SOUND: Readonly<Record<CueKind, GroupRideCueName>> = {
+  'next-up': 'group-next-up',
+  'your-pull': 'group-your-pull',
+  'pull-off': 'group-pull-off',
+  ease: 'group-ease',
+  'last-wheel': 'group-last-wheel',
+  'back-in-line': 'group-back-in-line',
+  climb: 'group-climb',
+  regroup: 'group-regroup',
+  'close-gap': 'group-correction',
+  surging: 'group-correction',
+  'past-front': 'group-correction',
+  'eased-too-much': 'group-correction',
+  'shorter-pull': 'group-correction',
+};
 
 /**
  * The tone's pitch for a power against a target, in whole semitones from

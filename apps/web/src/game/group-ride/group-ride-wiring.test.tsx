@@ -29,10 +29,15 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BOT_TACTIC_WHEEL_GAP_METRES, watts } from '@onyourleft/domain';
+import { BOT_TACTIC_WHEEL_GAP_METRES, watts, type CueKind } from '@onyourleft/domain';
 import type { GroupRideFact } from '@onyourleft/store';
 
 import { chooseOption, mount, queryAll, settle, typeInto, type Mounted } from '../../testing/mount';
+import { RIDE_MAY_STOP_SPOKEN } from '../../ride/controller';
+import { GROUP_RIDE_CUE_SOUND, RIDE_CUE_LEVEL } from '../audio-cues';
+import type { CueOutput } from '../audio-port';
+import { recordingOutput, type RecordedCall } from '../audio-testing';
+import { CUES_STORAGE_KEY } from '../cue-preference';
 import { GameView, type GamePort, type RidableRoute } from '../GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY } from '../hud/announce-preference';
 import type { PadSnapshot } from '../gamepad-port';
@@ -60,6 +65,10 @@ const seen = vi.hoisted(() => ({
   frames: [] as Pick<SceneInput, 'raceBots' | 'steeredLateral' | 'botDistance' | 'state'>[],
   /** The group's session as the ride's newest step left it (#3307): read, never called. */
   session: undefined as GroupRideSession | undefined,
+  /** Each cue the group's steps selected (#3306), and the frame whose steps selected it. */
+  selected: [] as { readonly kind: CueKind; readonly frame: number }[],
+  /** How many frames {@link frames} has run, for {@link selected}. */
+  frame: 0,
 }));
 
 vi.mock('./ride-group', async (importOriginal) => {
@@ -68,6 +77,10 @@ vi.mock('./ride-group', async (importOriginal) => {
     ...actual,
     stepGroupRideSession: (...args: Parameters<typeof actual.stepGroupRideSession>) => {
       seen.session = actual.stepGroupRideSession(...args);
+      const cue = seen.session.cue;
+      if (cue !== undefined && cue !== args[0].cue) {
+        seen.selected.push({ kind: cue.kind, frame: seen.frame });
+      }
       return seen.session;
     },
   };
@@ -155,14 +168,19 @@ let drafts: SoloDraftState[];
 
 /** The game's port to the ride, keeping what it is handed. */
 function ridePort(
-  options: { readonly workout?: boolean; readonly autoPaused?: () => boolean } = {},
+  options: {
+    readonly workout?: boolean;
+    readonly autoPaused?: () => boolean;
+    /** Whether the ride may stop with the screen off (#647); never unless said. */
+    readonly mayStop?: () => boolean;
+  } = {},
 ): GameTrainerPort {
   return {
     readTrainer: () =>
       options.workout === true ? { kind: 'workout', control: undefined } : NO_GAME_TRAINER,
     askForControlOnRide: () => Promise.resolve(),
     workoutRescue: () => undefined,
-    recordingMayStop: () => false,
+    recordingMayStop: options.mayStop ?? (() => false),
     gameRideEnded: () => undefined,
     soloDraftStepped: (draft) => {
       drafts.push(draft);
@@ -182,6 +200,8 @@ beforeEach(() => {
   seen.simulations.length = 0;
   seen.frames.length = 0;
   seen.session = undefined;
+  seen.selected.length = 0;
+  seen.frame = 0;
   pending = [];
   nowMs = 1_000_000;
   facts = [];
@@ -265,6 +285,8 @@ interface Setup {
   readonly route?: RidableRoute;
   /** Props the shell or a test hands the screen, beside the picker. */
   readonly shell?: Pick<Parameters<typeof GameView>[0], 'roomId' | 'delivery' | 'lapRace'>;
+  /** Where the ride's sounds go (#3306): the platform's no-op in jsdom unless said. */
+  readonly sounds?: CueOutput;
 }
 
 async function open(setup: Setup = {}): Promise<void> {
@@ -279,6 +301,7 @@ async function open(setup: Setup = {}): Promise<void> {
       renderer={() => Promise.resolve(renderer)}
       {...(setup.port === undefined ? {} : { trainer: setup.port })}
       {...setup.shell}
+      {...(setup.sounds === undefined ? {} : { sounds: setup.sounds })}
       now={() => nowMs}
     />,
   );
@@ -304,6 +327,7 @@ async function frames(count: number): Promise<number[]> {
     if (due.length === 0) break;
     pending = [];
     nowMs += FRAME_MS;
+    seen.frame += 1;
     await act(async () => {
       for (const next of due) next(nowMs);
       await Promise.resolve();
@@ -802,6 +826,7 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     if (due.length === 0) throw new Error('the ride asked for no frame');
     pending = [];
     nowMs += FRAME_MS;
+    seen.frame += 1;
     await act(async () => {
       for (const callback of due) callback(nowMs);
       await Promise.resolve();
@@ -965,5 +990,166 @@ describe('the pull-off press and the sit-in choice reach the line — #3307', ()
     expect(hudButton('End ride')).toBeDefined();
     expect(hudButton(PULL_OFF_BUTTON_LABEL)).toBeUndefined();
     expect(hudButton(SIT_IN_BUTTON_LABEL)).toBeUndefined();
+  });
+});
+
+/**
+ * **A distinct sound for each cue kind, through the ride** — #3306, ADR 0101
+ * D-5. The real `GameView`, the real *Ride*, and the port double of
+ * `audio-testing.ts` handed in as the ride's sounds, read against every cue
+ * the group's real steps selected (by wrapping `stepGroupRideSession` and
+ * calling nothing on it). `cue-sounds.test.ts` holds the table, the notes, a
+ * scripted rotation and the quiet mark.
+ *
+ * A cue selected by one frame's steps is offered on the next frame, where its
+ * sentence goes to the announcer and its sound to the port; so the sounds
+ * owed after a run are those of every cue selected before its last frame.
+ */
+describe('the group ride’s cue sounds through the ride — #3306', () => {
+  const soundsOn = (muted = false): void => {
+    localStorage.setItem(CUES_STORAGE_KEY, JSON.stringify({ enabled: true, volume: 0.5, muted }));
+  };
+  const groupSounds = (calls: readonly RecordedCall[]): string[] =>
+    calls.flatMap((call) =>
+      call.kind === 'playCue' && call.cue.startsWith('group-') ? [call.cue] : [],
+    );
+  /** Leave the ride: the screen unmounts, as the ride's end releases its sounds. */
+  const leave = (): void => {
+    mounted?.unmount();
+    mounted = undefined;
+  };
+  const owed = (): string[] =>
+    seen.selected
+      .filter((each) => each.frame < seen.frame)
+      .map((each) => GROUP_RIDE_CUE_SOUND[each.kind]);
+
+  /** A ride that cues: on a wheel, then the recorder auto-paused so the line waits, then on again. */
+  async function cuedRide(setup: Setup): Promise<void> {
+    let paused = false;
+    await ride({ group: true, port: ridePort({ autoPaused: () => paused }), ...setup }, 20);
+    paused = true;
+    await frames(8);
+    paused = false;
+    await frames(80);
+  }
+
+  it('plays one sound per selected cue, in order, each its kind’s, with announcements off', async () => {
+    soundsOn();
+    const output = recordingOutput();
+    await cuedRide({ sounds: output });
+    // More than one kind, so the order is a claim.
+    expect(new Set(seen.selected.map((each) => each.kind)).size).toBeGreaterThanOrEqual(2);
+    expect(owed().length).toBeGreaterThanOrEqual(2);
+    // Announcements are off (beforeEach): no sentence is said, and every sound plays.
+    expect(groupSounds(output.calls)).toEqual(owed());
+    expect(
+      output.calls.every((call) => call.kind !== 'playCue' || call.gain === RIDE_CUE_LEVEL),
+    ).toBe(true);
+  });
+
+  it('with sounds off: zero calls on the port across a ride that cues', async () => {
+    const output = recordingOutput();
+    await cuedRide({ sounds: output });
+    expect(owed().length).toBeGreaterThan(0);
+    expect(output.calls).toEqual([]);
+  });
+
+  it('muted: nothing on the port after the press’s own resume', async () => {
+    soundsOn(true);
+    const output = recordingOutput();
+    await cuedRide({ sounds: output });
+    expect(owed().length).toBeGreaterThan(0);
+    expect(output.calls).toEqual([{ kind: 'resume' }]);
+  });
+
+  it('the ride not started: zero calls, with the group and the sounds on at the picker', async () => {
+    soundsOn();
+    const output = recordingOutput();
+    await open({ group: true, port: ridePort(), sounds: output });
+    await frames(40);
+    expect(output.calls).toEqual([]);
+  });
+
+  it('no power reading: no cue is selected and no sound plays while it is gone', async () => {
+    soundsOn();
+    const output = recordingOutput();
+    let live = true;
+    await ride({ group: true, port: ridePort(), read: () => sensors(live), sounds: output }, 20);
+    live = false;
+    const lostAt = { calls: output.calls.length, selected: seen.selected.length };
+    await frames(80);
+    expect(facts.at(-1)?.log.at(-1)?.phase).toBe('waiting');
+    expect(seen.selected.slice(lostAt.selected)).toEqual([]);
+    expect(output.calls.slice(lostAt.calls)).toEqual([]);
+  });
+
+  it('plays a cue’s sound when a higher-ranked sentence takes its window, and the sentence is dropped', async () => {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({
+        enabled: true,
+        powerEverySeconds: 'never',
+        distanceEvery: 'never',
+        intervalLeadSeconds: 'never',
+        climbLeadMetres: 'never',
+      }),
+    );
+    soundsOn();
+    const output = recordingOutput();
+    let paused = false;
+    // "The ride may stop with the screen off" (rank 5b, above the cue's 5d′)
+    // becomes due on the very frame the regroup cue is offered: the frame
+    // after the steps that selected it.
+    const port = ridePort({
+      autoPaused: () => paused,
+      mayStop: () => seen.session?.cue?.kind === 'regroup',
+    });
+    await ride({ group: true, port, sounds: output }, 20);
+    paused = true;
+    let frame = 0;
+    while (!groupSounds(output.calls).includes('group-regroup') && frame < 20) {
+      await frames(1);
+      frame += 1;
+    }
+    expect(groupSounds(output.calls)).toEqual(['group-regroup']);
+    const region = (): string =>
+      (queryAll(root(), '[data-oyl-announcer="hud"]')[0]?.textContent ?? '').trim();
+    const cueLine = (): string =>
+      (queryAll(root(), '.oyl-hud__pacer-say')[0]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    expect(region()).toBe(RIDE_MAY_STOP_SPOKEN);
+    expect(cueLine()).toBe('iGroup ride: The group is easing until you are back.');
+    // Dropped, not queued: the regroup sentence never reaches the region.
+    for (let more = 0; more < 20; more += 1) {
+      await frames(1);
+      expect(region()).not.toContain('The group is easing');
+    }
+  });
+
+  it('leaves the port’s other calls as they are: the same ride without the group makes the same ones', async () => {
+    soundsOn();
+    const withGroup = recordingOutput();
+    await cuedRide({ sounds: withGroup });
+    expect(groupSounds(withGroup.calls).length).toBeGreaterThan(0);
+    leave();
+    pending = [];
+    nowMs = 1_000_000;
+    // The device remembers the switch: forget it, so this ride rides alone.
+    localStorage.removeItem(GROUP_RIDE_STORAGE_KEY);
+    const alone = recordingOutput();
+    let paused = false;
+    await ride({ port: ridePort({ autoPaused: () => paused }), sounds: alone }, 20);
+    paused = true;
+    await frames(8);
+    paused = false;
+    await frames(80);
+    expect(field('In line'), 'the second ride rode with no group').toBeUndefined();
+    // Both rides left, so each one's end is in its calls too.
+    leave();
+    const others = (calls: readonly RecordedCall[]): RecordedCall[] =>
+      calls.filter((call) => call.kind !== 'playCue' || !call.cue.startsWith('group-'));
+    expect(others(withGroup.calls)).toEqual(others(alone.calls));
+    expect(groupSounds(alone.calls)).toEqual([]);
+    // No tone on either: a ride with no workout holds no target.
+    expect(withGroup.count('startTone')).toBe(0);
   });
 });
