@@ -139,7 +139,12 @@ const renderer: GameRenderer = {
     hasContext: true,
     prepare: () => Promise.resolve(),
     render: (frame) => {
-      seen.drawn.push(frame);
+      // Only the camera and the rider: a whole frame kept for every step of a
+      // long ride is memory this file's slowest cases do not need to carry.
+      seen.drawn.push({
+        camera: frame.camera,
+        markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+      });
     },
     setQuality: () => undefined,
     setRiderKit: () => undefined,
