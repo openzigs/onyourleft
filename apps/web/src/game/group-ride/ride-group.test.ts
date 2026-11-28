@@ -410,6 +410,75 @@ describe('the group ride ends at the finish — the review of PR #3364', () => {
   });
 });
 
+describe('a group ride on a loop, lap after lap — #3369', () => {
+  // The review of PR #3364 measured the clamp on this road: lap 1 gave five
+  // speeds at five points, lap 2 the same figure at all five. A circuit of
+  // about 2.5 km that climbs from its start, crests a quarter of the way
+  // round, and descends to a trough three quarters round.
+  const loop = circuitRoute(400);
+  const lap = loop.totalDistance;
+  /** Five points of a lap, as shares of it: the climb, past the crest, the descent, the trough, the climb again. */
+  const POINTS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
+  // Two laps and most of a third's start, the rider in the line at 140 W.
+  const { frames } = ride(started({ profile: loop }), 620, 140);
+
+  /** The front bot's odometer: the plan's reading is taken there. */
+  function frontM(session: GroupRideSession): number {
+    const id = session.state.rotation.order.find((member) => member !== GROUP_RIDE_RIDER_ID);
+    return session.state.bots[id ?? '']?.distanceM ?? Number.NaN;
+  }
+
+  /** The first frame whose front is at or past `share` of lap `lapIndex` (counted from 0). */
+  function at(lapIndex: number, share: number): GroupRideSession {
+    const frame = frames.find((session) => frontM(session) >= (lapIndex + share) * lap);
+    if (frame === undefined) throw new Error(`the ride did not reach lap ${String(lapIndex + 1)}`);
+    return frame;
+  }
+
+  it("follows the road on lap 2 as on lap 1: the plan's speed under the front, point by point", () => {
+    const under = (session: GroupRideSession): number =>
+      session.road.plan.speedNowAt(frontM(session));
+    const first = POINTS.map((share) => under(at(0, share)));
+    const second = POINTS.map((share) => under(at(1, share)));
+    // Lap 1 follows the road: slowest climbing, fastest descending.
+    expect(new Set(first.map((speed) => speed.toFixed(1))).size).toBe(3);
+    // Lap 2 rides the same road at the same speeds, not the last cell's at every point.
+    for (const [index, speed] of second.entries()) {
+      expect(speed, `point ${String(POINTS[index])}`).toBeCloseTo(first[index] as number, 1);
+    }
+    expect(new Set(second.map((speed) => speed.toFixed(1))).size).toBe(3);
+  });
+
+  it('reports a group speed on lap 2 that rises over the crest and down the descent, as the road does', () => {
+    const [climb, crest, descent, trough, again] = POINTS.map(
+      (share) => at(1, share).groupSpeedMps,
+    ) as [number, number, number, number, number];
+    expect(climb).toBeLessThan(crest);
+    expect(crest).toBeLessThan(descent);
+    expect(trough).toBeLessThan(descent);
+    expect(again).toBeLessThan(trough);
+  });
+
+  it('keeps the ledger advancing lap after lap, never further from the plan than its full band', () => {
+    const second = frames.filter((session) => {
+      const front = frontM(session);
+      return front >= lap && front < 2 * lap;
+    });
+    expect(second.length).toBeGreaterThan(100);
+    for (const session of second) {
+      const late =
+        session.state.ledger.ridingSeconds - session.road.plan.plannedSecondsAt(frontM(session));
+      // A frozen plan would read the group a whole lap late by lap 2's end.
+      expect(Math.abs(late)).toBeLessThan(20);
+    }
+    const ledgers = POINTS.map((share) => at(1, share).state.ledger.ridingSeconds);
+    for (let index = 1; index < ledgers.length; index += 1) {
+      expect(ledgers[index] as number).toBeGreaterThan(ledgers[index - 1] as number);
+    }
+    expect(ledgers[0] as number).toBeGreaterThan(at(0, 0.9).state.ledger.ridingSeconds);
+  });
+});
+
 describe("the rider's cue and the role strip — #3305", () => {
   /** What one frame of a held-wheel ride left: the session and the strip the HUD reads. */
   interface Held {

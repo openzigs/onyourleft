@@ -54,8 +54,18 @@
  *
  * The route's own 10 m grid: one cell between each pair of samples, at the
  * mean of their two grades (the mean of `gradeAt`'s interpolation across the
- * cell), with one power and one steady speed each. The plan is for one pass
- * of the route: an odometer is clamped to `[0, totalDistance]`, on a loop too.
+ * cell), with one power and one steady speed each. The plan is solved for
+ * one pass of the route. On a route with a finish an odometer is clamped to
+ * `[0, totalDistance]`.
+ *
+ * **On a loop the plan is ridden lap after lap** (#3369): an odometer is read
+ * at `odometer mod totalDistance`, so the power and the speed follow the road
+ * on every lap as on the first, and {@link GroupPlan.plannedSecondsAt} counts
+ * the laps before it, a whole lap's planned time each, so the ledger keeps
+ * advancing. The target is then the average over **each lap**, and so over
+ * every whole number of laps (ADR 0101 D-2.1, amendment of 2026-11-28,
+ * proposed). The wrap is `%`, which IEEE 754 computes exactly, so no rounding
+ * can differ between two machines.
  *
  * ## Room-portable, and from no recorded ride
  *
@@ -200,15 +210,18 @@ export function stepGroupLedger(
   return { ridingSeconds: ledger.ridingSeconds + seconds };
 }
 
-/** A group's plan for one pass of the route. */
+/** A group's plan for one pass of the route, ridden lap after lap on a loop. */
 export interface GroupPlan {
   /** The front's power on the flat, solved once from the course. */
   readonly basePower: Watts;
-  /** The route's length: what the target is an average over. */
+  /** The route's length: what the target is an average over (on a loop, one lap). */
   readonly distance: Metres;
   /** The average the plan makes: the rider's target. */
   readonly targetSpeed: MetresPerSecond;
-  /** The planned elapsed riding time at `odometer`, seconds; `distance ÷ target` at the end. */
+  /**
+   * The planned elapsed riding time at `odometer`, seconds: `distance ÷ target`
+   * at the end, and on a loop that again for each lap before the one `odometer` is on.
+   */
   plannedSecondsAt(odometer: number): number;
   /** The front's power at `odometer`, with the ledger's correction (rule 5). */
   powerAt(odometer: number, ledger: GroupLedger): Watts;
@@ -396,19 +409,33 @@ export function planGroupRide(input: GroupPlanInput): GroupPlan | GroupPlanRefus
     elapsed += (cells[index] as Cell).length / (speeds[index] as number);
   }
 
-  /** The cell under `odometer`, clamped to the route, found by comparisons alone. */
-  const cellIndexAt = (odometer: number): number => {
+  /** The planned time of one whole pass, seconds: `distance ÷ target`, to the solve's precision. */
+  const passSeconds = elapsed;
+  const loop = input.course.loop;
+
+  /**
+   * Where on one pass `odometer` is: on a loop, wrapped into `[0, distance)`
+   * (#3369); on a route with a finish, as it is, for the cells to clamp.
+   */
+  const passAt = (odometer: number): number => {
     if (!Number.isFinite(odometer)) {
       throw new GroupRideError(
         'odometer-not-finite',
         "a group's odometer must be a finite number of metres",
       );
     }
+    if (!loop) return odometer;
+    const on = odometer % distance;
+    return on < 0 ? on + distance : on;
+  };
+
+  /** The cell under `on`, a point of one pass, clamped to the route, found by comparisons alone. */
+  const cellIndexAt = (on: number): number => {
     let first = 0;
     let last = cells.length - 1;
     while (first < last) {
       const middle = (first + last + 1) >> 1;
-      if ((cells[middle] as Cell).start <= odometer) {
+      if ((cells[middle] as Cell).start <= on) {
         first = middle;
       } else {
         last = middle - 1;
@@ -421,8 +448,11 @@ export function planGroupRide(input: GroupPlanInput): GroupPlan | GroupPlanRefus
     return Math.min(Math.max(odometer, cell.start), cell.start + cell.length) - cell.start;
   };
   const plannedSecondsAt = (odometer: number): number => {
-    const index = cellIndexAt(odometer);
-    return (before[index] as number) + along(odometer, index) / (speeds[index] as number);
+    const on = passAt(odometer);
+    const index = cellIndexAt(on);
+    const within = (before[index] as number) + along(on, index) / (speeds[index] as number);
+    // On a loop, a whole pass's planned time for each lap before this one.
+    return loop ? ((odometer - on) / distance) * passSeconds + within : within;
   };
 
   return {
@@ -431,7 +461,7 @@ export function planGroupRide(input: GroupPlanInput): GroupPlan | GroupPlanRefus
     targetSpeed: input.targetSpeed,
     plannedSecondsAt,
     powerAt(odometer: number, ledger: GroupLedger): Watts {
-      const index = cellIndexAt(odometer);
+      const index = cellIndexAt(passAt(odometer));
       const late = ledger.ridingSeconds - plannedSecondsAt(odometer);
       const share = Math.min(1, Math.max(-1, late / GROUP_LEDGER_FULL_BAND_SECONDS));
       const factor = Math.min(
@@ -441,7 +471,7 @@ export function planGroupRide(input: GroupPlanInput): GroupPlan | GroupPlanRefus
       return watts(base * factor);
     },
     speedNowAt(odometer: number): MetresPerSecond {
-      return metresPerSecond(speeds[cellIndexAt(odometer)] as number);
+      return metresPerSecond(speeds[cellIndexAt(passAt(odometer))] as number);
     },
   };
 }

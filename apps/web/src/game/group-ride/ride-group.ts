@@ -102,8 +102,10 @@
  *
  * The plan is one pass of the route ({@link groupRideFinished}): on a route
  * with a finish, the group ride ends when the rider reaches it, and a rider
- * who answers *Keep riding* rides on alone. A loop is not offered a group
- * (`choice.ts` §`groupRideUnavailable`; laps are #3369's).
+ * who answers *Keep riding* rides on alone. A loop has no finish, and the
+ * group rides it lap after lap (#3369): `@onyourleft/domain` §`planGroupRide`
+ * reads the plan at the odometer wrapped into the lap and counts the laps in
+ * its planned time.
  *
  * ## Nothing here reaches a trainer
  *
@@ -511,7 +513,7 @@ export function groupRideTimed(
  * Whether the rider has reached the finish of the route the group rides —
  * the review of PR #3364: the plan is one pass of the route, and past its
  * end it would read the last cell for ever, so the group ride ends there.
- * Never on a loop, which has no finish (and is offered no group).
+ * Never on a loop, which has no finish: the plan is ridden lap after lap (#3369).
  */
 export function groupRideFinished(session: GroupRideSession): boolean {
   const { course } = session.road;

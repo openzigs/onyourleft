@@ -278,8 +278,9 @@ export interface GroupRideOffer {
   readonly asked: GroupRideAsked;
   /**
    * Why a group ride is not offered now, in a sentence: a workout holding
-   * the trainer at a set power, the draft switched off (ADR 0101 D-1.5), or
-   * a loop route (#3369). Present, the switch is disabled and described by it.
+   * the trainer at a set power, or the draft switched off (ADR 0101 D-1.5).
+   * A loop is offered one (#3369). Present, the switch is disabled and
+   * described by it.
    */
   readonly unavailable: string | undefined;
 }
