@@ -15,7 +15,15 @@ import type { BuildingFeature } from '@onyourleft/map-features';
 import { describe, expect, it } from 'vitest';
 
 import { FOUNDATION_METRES } from './buildings';
-import { KIT_HUNG, KIT_PIECES, KIT_RUN_FLOATS, kitPaletteOf, type KitKind } from './facade-kit';
+import {
+  bayCount,
+  KIT_HUNG,
+  KIT_PIECES,
+  KIT_RUN_FLOATS,
+  kitPaletteOf,
+  kitPieceIndex,
+  type KitKind,
+} from './facade-kit';
 import { committedKit } from './facade-kit-testing';
 import {
   FOOTPRINT_ROLES,
@@ -31,6 +39,7 @@ import {
   planFingerprint,
   rectangleBeside,
   richmondStreetFixture,
+  terraceStreetFixture,
 } from './footprint-fixtures-testing';
 import { landClassMask, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
@@ -458,5 +467,93 @@ describe('what a wrap is never drawn on — #3334', () => {
       corridorOf([buildingBeside(road, origin, [shop, courtyard], 9)]),
     );
     expect(planFingerprint([holed])).toBe(planFingerprint(off.plans.slice(0, 1)));
+  });
+});
+
+describe('a wrap’s door, where the plan’s front step is — #3351', () => {
+  /**
+   * The door's bay of `plan`'s wrap, read off its runs: where its middle is, the wall's
+   * direction, and how wide it is, metres. `undefined` where no run is its door.
+   */
+  const doorBayOf = (
+    plan: FootprintPlan,
+  ): { x: number; z: number; ax: number; az: number; width: number } | undefined => {
+    const wrap = plan.kit;
+    if (wrap === undefined) return undefined;
+    const door = kitPieceIndex(wrap.door);
+    for (let run = 0; run < wrap.runs.length / KIT_RUN_FLOATS; run += 1) {
+      const at = run * KIT_RUN_FLOATS;
+      if (wrap.runs[at] !== door) continue;
+      // A door is one bay: never a run of more than one.
+      expect(wrap.runs[at + 9]).toBe(1);
+      return {
+        x: wrap.runs[at + 2] as number,
+        z: wrap.runs[at + 4] as number,
+        ax: wrap.runs[at + 5] as number,
+        az: wrap.runs[at + 6] as number,
+        width: (wrap.runs[at + 7] as number) * (KIT_PIECES[door] as { width: number }).width,
+      };
+    }
+    return undefined;
+  };
+
+  /** How far along the wall the front step is from the middle of the door's bay, metres. */
+  const stepFromDoor = (plan: FootprintPlan): { off: number; width: number } => {
+    const step = plan.frontStep;
+    const bay = doorBayOf(plan);
+    if (step === undefined || bay === undefined) throw new Error('no front step or no door');
+    return {
+      off: Math.abs((step.x - bay.x) * bay.ax + (step.z - bay.z) * bay.az),
+      width: bay.width,
+    };
+  };
+
+  it('puts the door’s bay round the front step on a door’s wall of an odd and of an even number of bays', () => {
+    // A terrace of fronts 6 to 12 m wide, which 2 m bays cut into 3, 4, 5, 6, 4, 5 and 6.
+    const widths = [6, 8, 10, 12, 7, 9, 11];
+    expect(new Set(widths.map((width) => bayCount(width) % 2))).toEqual(new Set([0, 1]));
+    const buildings: BuildingFeature[] = [];
+    let along = 1_100;
+    for (const width of widths) {
+      buildings.push(buildingBeside(road, origin, [box(along, width, 14, 26)], 9));
+      along += width;
+    }
+    const { plans } = plansOf('town', {}, corridorOf(buildings));
+    const houses = plans.slice(0, widths.length);
+    houses.forEach((plan, at) => {
+      const label = `${String(widths[at])} m`;
+      expect(plan.kit?.kind, label).toBe('townhouse');
+      const { off, width } = stepFromDoor(plan);
+      // Inside the door's bay; and a doorstep, which is before the extrusion's door, on its
+      // middle. A porch's steps may be off the door (`porch.ts` §`stepsAt`).
+      expect(off, label).toBeLessThanOrEqual(width / 2);
+      if (plan.frontStep?.kind === 'doorstep') expect(off, label).toBeLessThan(0.01);
+    });
+    // Both a doorstep and a porch's steps are among them.
+    expect(new Set(houses.map((plan) => plan.frontStep?.kind))).toEqual(
+      new Set(['doorstep', 'porch-step']),
+    );
+  });
+
+  it('holds on every wrapped plan with a front step, on the terrace and the Richmond streets', () => {
+    let seen = 0;
+    for (const fixture of [terraceStreetFixture(), richmondStreetFixture()]) {
+      const { plans } = footprintPlans(
+        fixture.corridor,
+        landClassMask(fixture.corridor),
+        fixture.profile,
+        fixture.origin,
+        undefined,
+        everywhere('town'),
+      );
+      for (const plan of plans) {
+        if (plan.kit === undefined || plan.frontStep === undefined) continue;
+        if (doorBayOf(plan) === undefined) continue;
+        const { off, width } = stepFromDoor(plan);
+        expect(off).toBeLessThanOrEqual(width / 2);
+        seen += 1;
+      }
+    }
+    expect(seen).toBeGreaterThan(10);
   });
 });

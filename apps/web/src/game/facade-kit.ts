@@ -125,15 +125,17 @@
  * its stage draws the realistic world.
  * The worst frame is `realistic-budget.ts`' to state.
  *
- * ## A gap, from PR #3343's review, not closed here
+ * ## Gaps from PR #3343's review, closed since
  *
  * A wrapped plan's paved apron (#2848) IS drawn at the near level since the
  * rework, in its extrusion's own surface (`mapped-buildings.ts`
- * §`MappedSelection.paved`): it is ground, and no piece of the kit. Still open:
+ * §`MappedSelection.paved`): it is ground, and no piece of the kit.
  *
- * - **With an even number of bays the door is not on the middle of its
- *   edge**, where `FootprintPlan.frontStep` and the extrusion's door are: it
- *   is the bay before the middle, up to a metre along the wall.
+ * The door is on the middle of its edge, where `FootprintPlan.frontStep` and
+ * the extrusion's door are (#3351): the door's edge is cut into an odd number
+ * of bays ({@link doorBayCount}). ⚠️ Except a door's edge over 3 m and under
+ * 4.2 m, which no odd number cuts into bays in shape: its door is half a bay,
+ * up to a metre, off the middle.
  *
  * Pure, and names no rendering library. No coordinate is formatted into any
  * string here.
@@ -1088,6 +1090,33 @@ export function bayCount(length: number): number {
 }
 
 /**
+ * The bays the door's edge of `length` metres is cut into — #3351: an odd
+ * number, so the door's bay is the middle one, where `FootprintPlan.frontStep`
+ * and the extrusion's door are. Where {@link bayCount} is even, **one fewer**
+ * where that keeps the pieces within {@link KIT_STRETCH}, and one more where
+ * only that does.
+ *
+ * One fewer first, and not whichever stretches the pieces less: a bay fewer
+ * is a card fewer on every level, so the wrap never costs more than it did
+ * and never loses a row of relief to the change (one more cut an 8 m shop
+ * front into five bays, which left no room for its awning or its pilasters).
+ *
+ * ⚠️ Where neither keeps the pieces within it, the even count: a door's edge
+ * over 3 m and under 4.2 m, two bays, which one bay stretches past 1.5 and
+ * three squash under 0.7. A door half a bay off the middle, rather than a wall
+ * with no door at all (a bay out of shape is plain).
+ */
+export function doorBayCount(length: number): number {
+  const bays = bayCount(length);
+  if (bays % 2 === 1) return bays;
+  const within = (count: number): boolean => {
+    const stretch = length / count / KIT_BAY_METRES;
+    return stretch >= KIT_STRETCH.least && stretch <= KIT_STRETCH.most;
+  };
+  return within(bays - 1) ? bays - 1 : within(bays + 1) ? bays + 1 : bays;
+}
+
+/**
  * How many floats a run is, in {@link KitWrap.runs}: the piece's place in
  * {@link KIT_PIECES}; 1 in relief, 0 as its card; the middle of its first
  * repeat's foot, `x, y, z`; the unit vector along the wall, `ax, az`, which is
@@ -1272,7 +1301,8 @@ export function wrapFootprint(input: KitWrapInput): KitWrap | undefined {
       ax,
       az,
       length,
-      bays: bayCount(length),
+      // #3351: the door's edge an odd number, so its door is in the middle bay.
+      bays: index === input.frontEdge ? doorBayCount(length) : bayCount(length),
     };
   };
   const door = measure(input.frontEdge);
