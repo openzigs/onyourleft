@@ -15,6 +15,7 @@ import type { BotCapacity } from '../lap-race/wbal';
 import { metres, metresPerSecond, watts } from '../quantities';
 import { GroupRideError } from './errors';
 import { courseOf, FLAT_COURSE } from './fixtures/courses';
+import { startNoDrop, type NoDropState } from './no-drop';
 import type { GroupLedger, GroupPlan } from './plan';
 import type { LineMember, MemberView } from './rotation';
 import stepSource from './step.ts?raw';
@@ -160,7 +161,8 @@ describe('one tick', () => {
   });
 
   it("rides each bot on the grade under that bot, and reads a wheel's surplus on the road under the wheel", () => {
-    // Level to 120 m and 6 % beyond: b1 (130 m) climbs while b2 (110 m), the rider (100 m) and b3 (90 m) do not.
+    // Level to 120 m and 6 % beyond: b1 (130 m) climbs while b2 (104 m), the rider (100 m) and b3 (90 m) do not.
+    // The rider is on b2's wheel (inside `NO_DROP_GAPPED_METRES`), so b2 is nobody's sweep.
     const hill = courseOf([
       [120, 0],
       [9_880, 6],
@@ -174,7 +176,7 @@ describe('one tick', () => {
     const b1 = { ...at(130, 'b1'), powerWatts: physics.holdWatts(GROUP_MPS, 6, 1) + 30 };
     const state: GroupRideState = {
       ...form,
-      bots: { b1, b2: at(110, 'b2'), b3: at(90, 'b3') },
+      bots: { b1, b2: at(104, 'b2'), b3: at(90, 'b3') },
     };
     const tick = stepGroupRide(
       state,
@@ -187,7 +189,7 @@ describe('one tick', () => {
     expect(grades[2]).toBeCloseTo(0, 6);
     // b2 holds b1 at the gap: what holds b1's speed on b2's road, and the 30 W b1 is putting into speeding up on its own.
     const expected = botWheelWatts({
-      gapMetres: 20,
+      gapMetres: 26,
       closingMetresPerSecond: 0,
       holdWatts: physics.holdWatts(GROUP_MPS, 0, 0.6) + 30,
       cpWatts: CP,
@@ -484,6 +486,313 @@ describe('a bot asked for less than nothing', () => {
     const { call } = tickWithRider(GROUP_MPS);
     expect(call.powerWatts).toBeGreaterThan(0);
     expect(call.dragFactor).toBe(0.6);
+  });
+});
+
+describe('no-drop (#3301)', () => {
+  /** The bots as `start()` forms them up: b1 101.3 m, b2 100.65 m, b3 99.35 m, all at 8 m/s. */
+  const FRONT_M = 101.3;
+  const tick = (
+    rider: MemberView,
+    state: GroupRideState = start(),
+    more: Partial<GroupRoad> & { readonly riderStopped?: boolean } = {},
+  ) => {
+    const physics = standIn();
+    const { riderStopped, ...road } = more;
+    const answer = stepGroupRide(
+      state,
+      { elapsedSeconds: 0.5, rider, ...(riderStopped === undefined ? {} : { riderStopped }) },
+      { ...roadOn(physics), ...road },
+    );
+    return { answer, physics };
+  };
+  const withBot = (state: GroupRideState, id: string, at: Partial<MemberView>): GroupRideState => ({
+    ...state,
+    bots: {
+      ...state.bots,
+      [id]: { ...(state.bots[id] as NonNullable<typeof state.bots.b1>), ...at },
+    },
+  });
+
+  it('starts with the rule before its first window, and nothing held', () => {
+    const state = start();
+    expect(state.noDrop).toEqual(startNoDrop(0));
+    expect(state.heldFromM).toBeNull();
+  });
+
+  it('rides the sweep to a wheel gap ahead of the rider at the rider’s speed, not on the wheel ahead of it', () => {
+    // The rider 9.3 m off b1 with b2, their sweep, half a metre ahead of them at their 7 m/s.
+    const sweeping: NoDropState = { ...startNoDrop(0), standing: 'gapped', sweep: 'b2' };
+    const state = withBot({ ...start(), noDrop: sweeping }, 'b2', { distanceM: 92.5, speedMps: 7 });
+    const { answer, physics } = tick({ distanceM: 92, speedMps: 7 }, state);
+    expect(answer.state.noDrop).toMatchObject({ standing: 'gapped', sweep: 'b2', hold: null });
+    expect(answer.rotation.roles.you).toBe('gapped');
+    // The wheel rule on a place two wheel gaps up the road from the rider: 0.8 m ahead of b2.
+    const expected = botWheelWatts({
+      gapMetres: 92 + 2 * BOT_TACTIC_WHEEL_GAP_METRES - 92.5,
+      closingMetresPerSecond: 0,
+      holdWatts: physics.holdWatts(7, 0, 0.6),
+      cpWatts: CP,
+    });
+    expect(answer.state.bots.b2?.powerWatts).toBeCloseTo(expected, 9);
+    // On b1's wheel, 8.8 m and 1 m/s up the road, it would ride the rule's whole surge.
+    expect(expected).toBeLessThan(physics.holdWatts(GROUP_MPS, 0, 0.6));
+    // The rest of the line does not ease: the plan's speed, and the plan's power on the front.
+    expect(answer.groupSpeedMps).toBe(GROUP_MPS);
+    expect(answer.state.bots.b1?.powerWatts).toBe(150 - FRONT_M / GROUP_MPS);
+    expect(answer.state.ledger).toEqual({ ridingSeconds: 0.5 });
+  });
+
+  it('reads the sweep the rider’s change of speed, as any bot on their wheel does', () => {
+    const sweeping: NoDropState = { ...startNoDrop(0), standing: 'gapped', sweep: 'b2' };
+    const state = withBot(
+      { ...start(), noDrop: sweeping, riderWas: { speedMps: 6.9, elapsedSeconds: 0.5 } },
+      'b2',
+      { distanceM: 92.5, speedMps: 7 },
+    );
+    const { answer, physics } = tick({ distanceM: 92, speedMps: 7 }, state);
+    const expected = botWheelWatts({
+      gapMetres: 0.8,
+      closingMetresPerSecond: 0,
+      // 0.1 m/s gained in half a second, at a bot's mass and their 7 m/s.
+      holdWatts: physics.holdWatts(7, 0, 0.6) + MASS * 0.2 * 7,
+      cpWatts: CP,
+    });
+    expect(answer.state.bots.b2?.powerWatts).toBeCloseTo(expected, 9);
+  });
+
+  it('holds the line for a rider off the back: the eased speed is the group’s speed now, and what the bots are asked', () => {
+    // 30.65 m behind b2 at 8 m/s: 3.83 s of the 10 s at which the ease is whole.
+    const { answer } = tick({ distanceM: 70, speedMps: GROUP_MPS });
+    const eased = GROUP_MPS * (1 - 30.65 / 80);
+    expect(answer.state.rotation.phase).toBe('waiting');
+    expect(answer.rotation.roles.you).toBe('off-the-back');
+    expect(answer.groupSpeedMps).toBeCloseTo(eased, 9);
+    expect(answer.rotation.demands.b1).toBe(answer.groupSpeedMps);
+    expect(answer.state.noDrop).toMatchObject({ hold: 'waiting', sweep: 'b2' });
+    // Over that speed, the front pedals nothing.
+    expect(answer.state.bots.b1?.powerWatts).toBe(0);
+  });
+
+  it('rides the front of a held line at what holds the eased speed, and never over the plan’s power', () => {
+    const eased = GROUP_MPS * (1 - 30.65 / 80);
+    const rider = { distanceM: 70, speedMps: GROUP_MPS };
+    // At the eased speed already: the feed-forward and no correction.
+    const { answer, physics } = tick(rider, withBot(start(), 'b1', { speedMps: eased }));
+    const held = physics.holdWatts(eased, 0, 1);
+    expect(held).toBeLessThan(150 - FRONT_M / GROUP_MPS);
+    expect(answer.state.bots.b1?.powerWatts).toBeCloseTo(held, 9);
+    // A rider coming back at 16 m/s: the line is held at the plan's 8 m/s, no faster. A front
+    // a long way under that would surge by the wheel rule: the plan's power is the most it rides.
+    const slow = tick({ distanceM: 70, speedMps: 16 }, withBot(start(), 'b1', { speedMps: 1 }));
+    expect(slow.answer.groupSpeedMps).toBe(GROUP_MPS);
+    expect(physics.holdWatts(GROUP_MPS, 0, 1) + 0.15 * CP).toBeGreaterThan(
+      150 - FRONT_M / GROUP_MPS,
+    );
+    expect(slow.answer.state.bots.b1?.powerWatts).toBe(150 - FRONT_M / GROUP_MPS);
+  });
+
+  it('waits for a rider who has stopped though they are on a wheel', () => {
+    const riding = tick({ distanceM: 100, speedMps: 5 });
+    expect(riding.answer.state.rotation.phase).toBe('steady');
+    const stopped = tick({ distanceM: 100, speedMps: 5 }, start(), { riderStopped: true });
+    expect(stopped.answer.state.rotation.phase).toBe('waiting');
+    expect(stopped.answer.groupSpeedMps).toBeCloseTo(5 * (1 - 0.65 / 50), 9);
+    expect(stopped.answer.rotation.roles.you).toBe('in-line');
+  });
+
+  it('books a held tick as paused, and the road covered in it at the plan’s own time', () => {
+    const off = { distanceM: 70, speedMps: GROUP_MPS };
+    const first = tick(off).answer;
+    expect(first.state.ledger).toEqual({ ridingSeconds: 0 });
+    expect(first.state.heldFromM).toBe(FRONT_M);
+    // Half a second on, inside the window: still held. The first tick's road is booked now.
+    const frontNow = first.state.bots.b1?.distanceM as number;
+    const second = tick(off, first.state).answer;
+    expect(second.state.ledger.ridingSeconds).toBeCloseTo((frontNow - FRONT_M) / GROUP_MPS, 12);
+    expect(second.state.ledger.ridingSeconds).toBeLessThan(0.5);
+    expect(second.state.heldFromM).toBe(frontNow);
+  });
+
+  it('rides the plan’s un-chased power after a wait: the group is as late as it was before it', () => {
+    const off = { distanceM: 70, speedMps: GROUP_MPS };
+    // Every bot at 2 m/s as the wait begins, so the second it waits is mostly lost.
+    const slow = ['b1', 'b2', 'b3'].reduce(
+      (state, id) => withBot(state, id, { speedMps: 2 }),
+      start(),
+    );
+    const first = tick(off, slow).answer;
+    const second = tick(off, first.state).answer;
+    // The rider is back on b2's wheel at the next window: the line is released.
+    const b2 = second.state.bots.b2 as NonNullable<typeof second.state.bots.b2>;
+    const frontAfter = second.state.bots.b1?.distanceM as number;
+    // The pace the wait seeded is set aside, so the line is asked the plan's speed at once
+    // and what is read is the ledger alone.
+    const third = tick(
+      { distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS },
+      { ...second.state, noDrop: { ...second.state.noDrop, paceShare: null } },
+    );
+    expect(third.answer.state.noDrop.hold).toBeNull();
+    expect(third.answer.groupSpeedMps).toBe(GROUP_MPS);
+    // #3298's plan, read back: 150 W and a watt for each second late. A second of
+    // waiting changed nothing: it is as late as on the start line, −FRONT_M / 8 s.
+    expect(third.answer.state.bots.b1?.powerWatts).toBeCloseTo(150 - FRONT_M / GROUP_MPS, 9);
+    // Chased, it would ride a watt more for each second the wait cost: the second
+    // it took, less the plan's time for the road the line rolled over in it.
+    const chased = 150 + (1 - frontAfter / GROUP_MPS);
+    expect(chased - (150 - FRONT_M / GROUP_MPS)).toBeGreaterThan(0.5);
+    // Still getting back up to speed, at 2 m/s of the plan's 8: that is not riding time either.
+    expect(third.answer.state.ledger.ridingSeconds).toBeCloseTo(
+      (frontAfter - FRONT_M) / GROUP_MPS,
+      12,
+    );
+    expect(third.answer.state.heldFromM).toBe(frontAfter);
+    // Back at 98 % of the plan's speed, the tick is booked whole on top of the road so far.
+    const upToSpeed = withBot(third.answer.state, 'b1', { speedMps: 0.98 * GROUP_MPS });
+    const frontNow = upToSpeed.bots.b1?.distanceM as number;
+    const fourth = tick({ distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS }, upToSpeed);
+    expect(fourth.answer.state.heldFromM).toBeNull();
+    expect(fourth.answer.state.ledger.ridingSeconds).toBeCloseTo(
+      (frontNow - FRONT_M) / GROUP_MPS + 0.5,
+      12,
+    );
+    // A touch under it, not yet.
+    const nearly = withBot(third.answer.state, 'b1', { speedMps: 0.979 * GROUP_MPS });
+    expect(
+      tick({ distanceM: b2.distanceM - 0.65, speedMps: GROUP_MPS }, nearly).answer.state.heldFromM,
+    ).toBe(frontNow);
+  });
+
+  it('paces the line to the rider once their pace is remembered: asked a margin over it, ridden as an eased speed, and not booked', () => {
+    // Half the plan's speed remembered, and the rider on b2's wheel at 4 m/s.
+    const paced: NoDropState = { ...startNoDrop(0), paceShare: 0.5 };
+    const { answer } = tick({ distanceM: 100, speedMps: 4 }, { ...start(), noDrop: paced });
+    expect(answer.state.noDrop.hold).toBeNull();
+    expect(answer.state.rotation.phase).toBe('steady');
+    expect(answer.groupSpeedMps).toBeCloseTo(GROUP_MPS * 0.5 * 1.05, 9);
+    expect(answer.rotation.demands.b1).toBe(answer.groupSpeedMps);
+    // At the plan's 8 m/s the front is over that: it pedals nothing.
+    expect(answer.state.bots.b1?.powerWatts).toBe(0);
+    // The eased pace is the rider's ride: not riding time for the plan.
+    expect(answer.state.ledger).toEqual({ ridingSeconds: 0 });
+    expect(answer.state.heldFromM).toBe(FRONT_M);
+  });
+
+  it('does not book a rider’s own pull under the group’s speed, and books one at it', () => {
+    const riderFirst = [RIDER, bot('b1'), bot('b2'), bot('b3')];
+    const under = tick(
+      { distanceM: 100, speedMps: 0.979 * GROUP_MPS },
+      start(riderFirst, { distanceM: 100, speedMps: 0.979 * GROUP_MPS }),
+    ).answer;
+    expect(under.rotation.roles.you).toBe('on-front');
+    expect(under.state.ledger).toEqual({ ridingSeconds: 0 });
+    expect(under.state.heldFromM).toBe(100);
+    const at = tick(
+      { distanceM: 100, speedMps: 0.98 * GROUP_MPS },
+      start(riderFirst, { distanceM: 100, speedMps: 0.98 * GROUP_MPS }),
+    ).answer;
+    expect(at.state.ledger).toEqual({ ridingSeconds: 0.5 });
+    expect(at.state.heldFromM).toBeNull();
+    // With the rule left out every tick is booked, as before #3301.
+    const left = tick(
+      { distanceM: 100, speedMps: 4 },
+      start(riderFirst, { distanceM: 100, speedMps: 4 }),
+      { noDrop: false },
+    ).answer;
+    expect(left.state.ledger).toEqual({ ridingSeconds: 0.5 });
+  });
+
+  it('names a rider off the front, moves them out of the line, and has the bot that was behind them hold a bot’s wheel', () => {
+    const { answer, physics } = tick({ distanceM: 104, speedMps: 11 });
+    expect(answer.rotation.roles.you).toBe('off-the-front');
+    expect(answer.state.rotation.order).toEqual(['b1', 'b2', 'b3', 'you']);
+    expect(answer.state.rotation.phase).toBe('forming');
+    // b3 on b2's wheel, 1.3 m up the road at its own speed: not after the rider at 11 m/s.
+    const expected = botWheelWatts({
+      gapMetres: 1.3,
+      closingMetresPerSecond: 0,
+      holdWatts: physics.holdWatts(GROUP_MPS, 0, 0.6),
+      cpWatts: CP,
+    });
+    expect(answer.state.bots.b3?.powerWatts).toBeCloseTo(expected, 9);
+  });
+
+  it('does not chase a rider beyond the draft’s reach up the road: the front rides the plan’s power to the watt', () => {
+    // Half a metre a second under its speed: in the rider's shelter it would be held to that speed.
+    const state = withBot(start(), 'b1', { speedMps: GROUP_MPS + 0.5 });
+    const beyond = tick({ distanceM: FRONT_M + 30.5, speedMps: 11 }, state);
+    expect(beyond.answer.rotation.roles.you).toBe('off-the-front');
+    expect(beyond.answer.state.bots.b1?.powerWatts).toBe(150 - FRONT_M / GROUP_MPS);
+    const inside = tick({ distanceM: FRONT_M + 29.5, speedMps: 11 }, state);
+    expect(inside.answer.state.bots.b1?.powerWatts).toBe(0);
+  });
+
+  it('leaves a gapped rider who is aside after a pull their latching role', () => {
+    const state = start();
+    const { answer } = tick(
+      { distanceM: 89, speedMps: GROUP_MPS },
+      {
+        ...state,
+        rotation: { ...state.rotation, phase: 'latching', order: ['b1', 'b2', 'b3'], aside: 'you' },
+      },
+    );
+    expect(answer.state.noDrop).toMatchObject({ standing: 'gapped', sweep: 'b3' });
+    expect(answer.rotation.roles.you).toBe('latching');
+  });
+
+  it('with the rule left out, rides on: no hold, no sweep, every tick booked, the rider’s role the line’s', () => {
+    const state = start();
+    const { answer } = tick({ distanceM: 70, speedMps: GROUP_MPS }, state, { noDrop: false });
+    expect(answer.state.noDrop).toBe(state.noDrop);
+    expect(answer.state.rotation.phase).toBe('forming');
+    expect(answer.rotation.roles.you).toBe('in-line');
+    expect(answer.groupSpeedMps).toBe(GROUP_MPS);
+    expect(answer.state.ledger).toEqual({ ridingSeconds: 0.5 });
+    expect(answer.state.heldFromM).toBeNull();
+    expect(answer.state.bots.b1?.powerWatts).toBe(150 - FRONT_M / GROUP_MPS);
+  });
+
+  it('has a bot aside drift back by its share of the front’s own speed where the line is slower than it is asked', () => {
+    // b1 aside, 8 m up the road from the last wheel at the 7.04 m/s the rotation asked of it.
+    const asideTick = (frontSpeed: number) => {
+      const state = start();
+      const asked = GROUP_MPS * 0.88;
+      const physics = standIn();
+      stepGroupRide(
+        {
+          ...withBot(
+            withBot(state, 'b1', {
+              distanceM: (state.bots.b3?.distanceM as number) + 8,
+              speedMps: asked,
+            }),
+            'b2',
+            { speedMps: frontSpeed },
+          ),
+          noDrop: { ...state.noDrop, nextWindowAtMs: 1_000 },
+          rotation: {
+            ...state.rotation,
+            phase: 'changing',
+            order: ['b2', 'you', 'b3'],
+            aside: 'b1',
+            nextWindowAtMs: 1_000,
+            roles: { b1: 'drifting-back', b2: 'on-front', you: 'second-wheel', b3: 'last-wheel' },
+            demands: { b1: asked, b2: GROUP_MPS, b3: GROUP_MPS },
+          },
+        },
+        { elapsedSeconds: 0.5, rider: RIDER_AT },
+        roadOn(physics),
+      );
+      return { asked, physics, call: physics.advanced[0] as Advanced };
+    };
+    // The front at the group's speed: the speed the rotation asked, as before.
+    const level = asideTick(GROUP_MPS);
+    expect(level.call.powerWatts).toBeCloseTo(level.physics.holdWatts(level.asked, 0, 1), 9);
+    // The front at 5 m/s: 4.4 m/s is its share under that, and at 7.04 m/s it pedals nothing.
+    expect(asideTick(5).call.powerWatts).toBe(0);
+    // At 7.9 m/s: 6.952 m/s, a touch under what it rides.
+    const slower = asideTick(7.9);
+    expect(slower.call.powerWatts).toBeLessThan(level.call.powerWatts - 20);
+    expect(slower.call.powerWatts).toBeGreaterThan(0);
   });
 });
 
