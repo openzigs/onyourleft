@@ -134,8 +134,22 @@ const LABELS = labelsOf(PROFILE);
 /** 36 km/h at 60 frames a second: metres a frame. */
 const FRAME_METRES = 10 / 60;
 
-/** The ride, cut in pieces so each case is short. */
-const PIECES = 32;
+/** Every frame of the ride: frame `n` is drawn `n` {@link FRAME_METRES} from the start. */
+const FRAMES = Math.ceil(PROFILE.totalDistance / FRAME_METRES);
+
+/**
+ * The ride, cut in pieces so each case is short. #3361: 32 pieces put up to
+ * 5.5 s in one case on the nightly coverage shard, past Vitest's 5 s. The
+ * cost is the frame (`sceneFrame` draws the whole scene; the checks below are
+ * at most a sixth of a piece's time), so the ride is cut four times finer and
+ * draws no fewer frames. No timeout is raised (#1688).
+ */
+const PIECES = 128;
+
+/** The frames piece `piece` draws, `[first, end)`: the pieces cover every frame of the ride once. */
+function framesOf(piece: number): readonly [number, number] {
+  return [Math.floor((FRAMES * piece) / PIECES), Math.floor((FRAMES * (piece + 1)) / PIECES)];
+}
 
 /** What a painted letter is: its edges along and across the road, metres. */
 const EDGES = [
@@ -156,11 +170,23 @@ describe('a real-shaped out-and-back: every letter drawn at its painted size, on
   });
 
   const pieces = Array.from({ length: PIECES }, (_, piece) => piece);
+
+  it('cuts the ride so that every frame of it is drawn, once', () => {
+    const drawn = pieces.flatMap((piece) => {
+      const [first, end] = framesOf(piece);
+      return Array.from({ length: end - first }, (_, frame) => first + frame);
+    });
+    expect(drawn).toStrictEqual(Array.from({ length: FRAMES }, (_, frame) => frame));
+    // …and the last frame is at the end of the route, not short of it.
+    expect((FRAMES - 1) * FRAME_METRES).toBeLessThan(PROFILE.totalDistance);
+    expect(FRAMES * FRAME_METRES).toBeGreaterThanOrEqual(PROFILE.totalDistance);
+  });
+
   it.each(pieces)('piece %d of the 60 fps ride', (piece) => {
     const start = atStartLine(PROFILE);
-    const from = (PROFILE.totalDistance * piece) / PIECES;
-    const to = (PROFILE.totalDistance * (piece + 1)) / PIECES;
-    for (let distance = from; distance < to; distance += FRAME_METRES) {
+    const [first, end] = framesOf(piece);
+    for (let at = first; at < end; at += 1) {
+      const distance = at * FRAME_METRES;
       const frame = sceneFrame({
         profile: PROFILE,
         origin: ORIGIN,
