@@ -83,7 +83,7 @@ import { THROW_WINDOW_BEFORE_METRES } from '../src/game/delivery/throw';
 import { REALISTIC_DUSK_EXPOSURE_SHARE, REALISTIC_EXPOSURE } from '../src/game/realistic-light';
 
 import { NIGHTLY } from './nightly';
-import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
 
 /**
  * #2453: the fewest pixels one house marker, or one pick-up point, may change
@@ -106,13 +106,16 @@ const SIGHTED = `?world=stylised&ladder=0&panel=0&seconds=1&at=${String(VILLAGE_
  */
 /**
  * #3281: the page's last frame, its round taken off, drawn as an ordinary
- * ride in each of the four looks on the owner's 1280×800 — every look at the
- * clear day's calls and triangles and under its haze, the realistic world's
- * dusk at its dimmer exposure, and each frame attached for the owner. Read
- * off a load another case pays for, so it costs the shard none.
+ * ride in each of the four looks — every look at the clear day's calls and
+ * triangles and under its haze, and the realistic world's dusk at its dimmer
+ * exposure. Read off a load another case pays for, so it costs the shard
+ * none, and on a sixteenth of the page: CI draws this world in software, and
+ * at 1280×800 a frame took seconds (the first run of this case, 38 frames,
+ * ran out its case's time). The owner's photographs are taken off the same
+ * hook at the tablet's size (`realistic.html?look=`), not in the gate.
  */
-async function looksOnThePage(page: Page, testInfo: TestInfo): Promise<void> {
-  await page.setViewportSize({ width: 1280, height: 800 });
+async function looksOnThePage(page: Page): Promise<void> {
+  await page.setViewportSize(SIXTEENTH_PAGE);
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
@@ -122,24 +125,17 @@ async function looksOnThePage(page: Page, testInfo: TestInfo): Promise<void> {
   const looks = await page.evaluate(() => {
     const draw = window.__oylRealisticLooks;
     if (draw === undefined) throw new Error('the page published no looks');
-    return draw(true);
+    return draw();
   });
   const { clear } = looks;
   for (const [name, look] of Object.entries(looks)) {
-    const { photo, ...read } = look;
-    console.log(`#3281 realistic ride look ${name}: ${JSON.stringify(read)}`);
+    console.log(`#3281 realistic ride look ${name}: ${JSON.stringify(look)}`);
     expect(look.calls, `${name}: draw calls`).toBe(clear.calls);
     expect(look.triangles, `${name}: triangles`).toBe(clear.triangles);
     expect(look.weather.rain, `${name}: no falling rain`).toBe(false);
     expect(look.weather.readback?.fogDensity, `${name}: the haze`).toBe(
       clear.weather.readback?.fogDensity,
     );
-    if (photo !== undefined) {
-      await testInfo.attach(`realistic-ride-look-${name}`, {
-        body: Buffer.from(photo.slice(photo.indexOf(',') + 1), 'base64'),
-        contentType: 'image/png',
-      });
-    }
   }
   expect(clear.calls).toBeGreaterThan(0);
   expect(clear.weather.exposure).toBeCloseTo(REALISTIC_EXPOSURE, 6);
@@ -261,7 +257,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
 
   test('draws a round on the fixture level, a parked car among the obstacles, in rain and at dusk, inside DELIVERY_VILLAGE_DRAW_CALLS — #2362, #2366', async ({
     page,
-  }, testInfo) => {
+  }) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
     const level = await ride(page, ON_THE_LEVEL);
     console.log(
@@ -324,7 +320,7 @@ test.describe('the realistic page’s village frame, delivering — #1815', { ta
       expect(each.markerSide, `${where}: the marker's side`).toBe(each.hud?.side);
     }
     // #3281: the same load, its frame drawn as an ordinary ride in each look.
-    await looksOnThePage(page, testInfo);
+    await looksOnThePage(page);
   });
 });
 

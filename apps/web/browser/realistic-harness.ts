@@ -338,17 +338,15 @@ declare global {
     /**
      * #3281: the page's last frame, its round and race taken off, drawn
      * again as an ordinary ride in each look the setup offers: its calls and
-     * triangles, what it was drawn with, and with `photograph` a PNG of each.
-     * Absent until the first frame.
+     * triangles and what it was drawn with. Absent until the first frame.
      */
-    __oylRealisticLooks?: (photograph?: boolean) => Readonly<
+    __oylRealisticLooks?: () => Readonly<
       Record<
         RideLook,
         {
           readonly calls: number;
           readonly triangles: number;
           readonly weather: ReturnType<typeof deliveryWeatherOf>;
-          readonly photo?: string;
         }
       >
     >;
@@ -1062,11 +1060,14 @@ async function run(): Promise<void> {
     // The frame with the piece, as a PNG, before the next frame draws over it.
     return photograph ? { ...seen, photo: canvas.toDataURL('image/png') } : seen;
   };
-  /** #3281: frames drawn before the looks are read — more than any hand-over takes. */
-  const LOOKS_SETTLE_FRAMES = 120;
+  /**
+   * #3281: frames drawn before the looks are read — the realistic rung's
+   * `handOverFrames` (10) and a refused swap's patience (20) over.
+   */
+  const LOOKS_SETTLE_FRAMES = 30;
   // #3281: the last frame as an ordinary ride, in each look. Each is drawn
   // twice and the second counted: a look's first frame grades its sky.
-  window.__oylRealisticLooks = (photograph = false) => {
+  window.__oylRealisticLooks = () => {
     if (drawn === undefined) throw new Error('no frame has been drawn yet');
     const bare: SceneFrame = { ...drawn, delivery: undefined, lapRace: undefined };
     // Settled first: a tree moves between its levels a step a frame
@@ -1085,7 +1086,6 @@ async function run(): Promise<void> {
         calls,
         triangles,
         weather: deliveryWeatherOf(view),
-        ...(photograph ? { photo: canvas.toDataURL('image/png') } : {}),
       };
     };
     return Object.fromEntries(RIDE_LOOKS.map((look) => [look, read(look)])) as Record<
