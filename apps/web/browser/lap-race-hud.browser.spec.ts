@@ -59,6 +59,10 @@ import { applyInsets, NO_INSETS, PIXEL_TABLET_LANDSCAPE_INSETS, type Insets } fr
 
 import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
+import { CUE_KINDS } from '@onyourleft/domain';
+
+import { GROUP_RIDE_CUE_TEXT } from '../src/game/hud/group-ride-hud';
+
 const TABLETS = new Set(['1280×800', '1024×768', '800×1280']);
 const RACE_READINGS = ['Place', 'Item'] as const;
 
@@ -1055,4 +1059,133 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
     expect(linesInView(hidden)).toBe(linesInView(before));
     expect(faults.some((fault) => fault.includes('the standings no taller'))).toBe(true);
   });
+});
+
+/**
+ * #3305 — an AI group ride's role strip and cue line (ADR 0101 D-5), on the
+ * same harness page (`lap-race-hud.html?group=ride`): the strip's two fields
+ * take a lap race's two places, and the cue line is the longest sentence a
+ * cue has, drawn as the AI pacer's line is. In this file because it is this
+ * harness and these measurements; `lap-race-hud-harness.tsx` §"`?group=ride`"
+ * says what each stage holds.
+ *
+ * At every overlay viewport: each stage stays on the stage, over no panel and
+ * clear of the leaning rider; *In line* and *Group* are laid out in the
+ * secondary panel, their values fitting, on no other reading and no control;
+ * and the cue line is whole, on top and clear of the rider. On the 4:3
+ * tablet the same is held at large and extra-large text, where the line must
+ * still be 1.5 times a notice and at most three lines.
+ */
+const GROUP_READINGS = ['In line', 'Group'] as const;
+const GROUP_STAGES = ['group-wheel', 'group-front', 'group-lost'] as const;
+const LONGEST_CUE = [...CUE_KINDS]
+  .map((kind) => GROUP_RIDE_CUE_TEXT[kind])
+  .sort((a, b) => b.length - a.length)[0] as string;
+
+/** The strip's fields and the cue line as CSS that undoes #3305's placing: the control. */
+const GROUP_PLACES_UNDONE = `
+  .oyl-game--riding .oyl-hud__field--group-ride { contain: none !important; }
+  .oyl-game--riding .oyl-hud__field--group-ride .oyl-hud__detail { white-space: nowrap !important; }
+  .oyl-game--riding .oyl-hud .oyl-hud__fields--secondary > .oyl-hud__field--gives-way {
+    position: static !important; width: auto !important; height: auto !important;
+    margin: 0 !important; overflow: visible !important; clip-path: none !important;
+    white-space: normal !important;
+  }`;
+
+/** What is wrong with a group ride's stage at this viewport; empty when nothing is. */
+function groupFaults(stage: LapRaceStageMeasurement, viewport: Viewport): string[] {
+  const faults = [...stageFaults(stage, viewport)];
+  const secondary = stage.secondary;
+  if (secondary === undefined) return [...faults, 'no secondary panel'];
+  for (const label of GROUP_READINGS) {
+    const reading = stage.fields.find((each) => each.label === label);
+    if (reading === undefined) {
+      faults.push(`no ${label} field`);
+      continue;
+    }
+    if (!laidOut(reading.box)) faults.push(`${label} laid out at no size`);
+    if (!within(reading.box, secondary)) faults.push(`${label} spills out of its panel`);
+    if (reading.valueOverflows) faults.push(`${label}'s value overflows`);
+    for (const other of stage.fields.filter((each) => each.label !== label && laidOut(each.box))) {
+      if (overlap(reading.box, other.box)) faults.push(`${label} on ${other.label}`);
+    }
+    for (const control of stage.controls) {
+      if (overlap(reading.box, control.box)) faults.push(`${label} on ${control.label}`);
+    }
+  }
+  const cue = stage.cue;
+  if (cue === undefined) return [...faults, 'no cue line'];
+  if (!cue.text.includes(LONGEST_CUE)) faults.push(`the cue line reads “${cue.text}”`);
+  if (!laidOut(cue.box)) faults.push('the cue line is laid out at no size');
+  if (!inside(cue.box, viewport)) faults.push('the cue line is off the stage');
+  if (overlap(cue.box, riderBox(viewport))) faults.push('the cue line is over the rider');
+  if (cue.overflows.length > 0) faults.push(`the cue line is clipped: ${cue.overflows.join('; ')}`);
+  if (!cue.onTop) faults.push('the cue line is under something');
+  for (const control of stage.controls) {
+    if (overlap(cue.box, control.box)) faults.push(`the cue line is on ${control.label}`);
+  }
+  for (const each of stage.fields.filter((field) => laidOut(field.box))) {
+    if (overlap(cue.box, each.box)) faults.push(`the cue line is on ${each.label}`);
+  }
+  return faults;
+}
+
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test(`#3305 a group ride's role strip and cue line fit beside the HUD's fields — ${viewport.name}`, async ({
+    page,
+  }) => {
+    const measured = await open(page, viewport, '?group=ride');
+    expect(measured.map((each) => each.stage)).toEqual([...GROUP_STAGES]);
+    for (const stage of measured) {
+      expect(groupFaults(stage, viewport), `${viewport.name}, ${stage.stage}`).toEqual([]);
+    }
+    // The strip's words, as the stage drew them.
+    expect(field(stageOf(measured, 'group-wheel'), 'In line').detail).toBe('Gap 12.4 m');
+    expect(field(stageOf(measured, 'group-front'), 'In line').detail).toBe('Pull 30 s');
+    expect(field(stageOf(measured, 'group-lost'), 'In line').detail).toBeUndefined();
+    expect(field(stageOf(measured, 'group-wheel'), 'Group').detail).toBe('Target average 38');
+    // On a phone the strip adds no row: the wind and the ghost's gap give way to it.
+    if (!isTablet(viewport)) {
+      const none = stageOf(await open(page, viewport), 'none');
+      expect(rows(stageOf(measured, 'group-wheel')), `${viewport.name}: a row was added`).toBe(
+        rows(none),
+      );
+    }
+  });
+}
+
+for (const text of ['large', 'extra-large'] as const) {
+  test(`#3305 the cue line is readable at ${text} text on the 4:3 tablet — 1024×768`, async ({
+    page,
+  }) => {
+    const viewport = tablet('1024×768');
+    const measured = await open(page, viewport, `?group=ride&text=${text}`);
+    for (const stage of measured) {
+      const at = `1024×768 at ${text} text, ${stage.stage}`;
+      expect(groupFaults(stage, viewport), at).toEqual([]);
+      const cue = stage.cue;
+      expect(cue, at).toBeDefined();
+      if (cue === undefined) continue;
+      console.log(
+        `#3305 the cue line — ${at}: ${cue.fontSize.toFixed(1)} px (a notice ${cue.noticeSize.toFixed(1)} px), ${String(cue.lines)} lines, ${cue.box.width.toFixed(0)}×${cue.box.height.toFixed(0)} px`,
+      );
+      expect(cue.fontSize, `${at}: 1.5 times a notice`).toBeGreaterThanOrEqual(
+        cue.noticeSize * 1.5 - 0.05,
+      );
+      expect(cue.lines, `${at}: at most three lines`).toBeLessThanOrEqual(3);
+    }
+  });
+}
+
+test('#3305 the group ride measurement can fail: with the give-way rule undone, the strip adds a row on a phone', async ({
+  page,
+}) => {
+  const viewport = OVERLAY_VIEWPORTS.find((each) => each.width === 736 && each.height === 360);
+  if (viewport === undefined) throw new Error('no 736×360 viewport to measure at');
+  const none = stageOf(await open(page, viewport), 'none');
+  await open(page, viewport, '?group=ride');
+  await page.addStyleTag({ content: GROUP_PLACES_UNDONE });
+  const undone = stageOf(await remeasure(page), 'group-wheel');
+  const added = rows(undone) > rows(none);
+  expect(added || groupFaults(undone, viewport).length > 0).toBe(true);
 });
