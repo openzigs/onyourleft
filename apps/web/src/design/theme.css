@@ -10288,6 +10288,7 @@ html:has(.oyl-open-world__go) {
  * where that is short of every line (#2599, below).
  * `ride-room.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
  * of the leaning rider at all three, both with anchor positioning and without.
+ * Since #2286 a room's race in a laptop's window draws it compact (below).
  */
 .oyl-hud .oyl-hud__standings,
 .oyl-hud .oyl-hud__laps {
@@ -10338,6 +10339,119 @@ html:has(.oyl-open-world__go) {
     align-self: start;
     justify-self: end;
   }
+}
+
+/*
+ * A ROOM RACE'S STANDINGS IN A LAPTOP'S WINDOW — #2286, the owner's request of
+ * 2026-11-06.
+ *
+ * In a laptop's or a desktop's window 40 to 47 rem tall (a 1280×720 window,
+ * or a 1366×768 laptop under its browser's chrome, 1366×657), a room's race
+ * draws its standings COMPACT. The panel is the tablet's, in the room's
+ * `beside` area under the secondary tier at the end edge (§"THE RIDER'S
+ * EFFORT": the tier spans two rows there). Of the list it draws:
+ * - the summary, *"You are 12 of 20."*: the rider's place;
+ * - the rider's own line, and the lines just ahead and just behind it;
+ * - and the leader's (#1967, the owner's "Always show the leader"): the
+ *   window's first line where it starts at the front, and otherwise the
+ *   leader's line set before it (`room-ride.ts` §`RaceStandingsView.leader`),
+ *   which no other layout displays.
+ * Every other line gives way by clip, so a screen reader still reads the
+ * whole window (ADR 0051 D-7). The list keeps the owner's 16 px above the
+ * actions panel (`standings-room.ts`, which counts only the lines drawn), and
+ * scrolls inside itself where that is short of them.
+ *
+ * ⚠️ What gives way for it, recorded as #419 asks, in the room order
+ * (§"What gives way"): with the panel drawn, **the pacer's and the ghost's
+ * gaps and the wind, and then the ride so far**, as in a room's lap race on
+ * every tablet. Measured in the pinned Chromium on a Mac, the tier is then
+ * two rows, not three, and the panel starts 157 to 252 px down. Without them,
+ * *Report*'s reasons or a lap race left the list no line, and in a lap race
+ * with *Report* open the summary alone ran 34 px into the actions panel. The
+ * rider's own W/kg and zone stay. All are hidden by clip and still read.
+ *
+ * And where even that is not enough, the standings give way as on `main`:
+ * - **under 40 rem tall (1024×600)**, where a room's tier and actions panel
+ *   leave no row between them;
+ * - **in a room's lap race while the sound row is in the actions panel**:
+ *   with *Use item*, the room's row and the sound row the summary ran 16 to
+ *   20 px into the actions panel at 1366×657. The tier's *Place* still says
+ *   where the rider is. (That state runs off the stage on `main` with or
+ *   without standings, #3295.)
+ * - **and the swap to a loop's lap splits**, which is drawn on a tablet only,
+ *   as before.
+ * No ride-time control moves: the panel sits in the room's own `beside` area,
+ * which every room layout here already has. `ride-room.browser.spec.ts`
+ * §"#2286" holds it at both windows.
+ */
+@media (min-width: 51rem) and (min-height: 40rem) and (height < 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(.oyl-hud__field--room):not(
+      :has(.oyl-hud__field--lap-race):has(> .oyl-hud__actions > .oyl-sound)
+    )
+    > .oyl-hud__standings {
+    position: static;
+    width: min(100%, 18rem);
+    height: auto;
+    margin: 0;
+    padding: var(--oyl-space-sm);
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    border: 1px solid var(--oyl-color-hud-border);
+    align-self: start;
+    justify-self: end;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:has(.oyl-hud__field--room)
+    > .oyl-hud__standings
+    .oyl-hud__standings-line:not(
+      .oyl-hud__standings-line--you,
+      .oyl-hud__standings-line--leader,
+      :has(+ .oyl-hud__standings-line--you),
+      .oyl-hud__standings-line--you + *
+    ) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:has(.oyl-hud__field--room):has(> .oyl-hud__standings):not(
+      :has(.oyl-hud__field--lap-race):has(> .oyl-hud__actions > .oyl-sound)
+    )
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--gives-way, .oyl-hud__field--total) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:has(.oyl-hud__field--room)
+    > .oyl-hud__standings
+    .oyl-hud__standings-line--leader-only {
+    display: grid;
+  }
+}
+
+/* #2286: the leader's line before a window that does not reach the front is
+   for the compact standings above alone. */
+.oyl-hud .oyl-hud__standings-line--leader-only {
+  display: none;
 }
 
 .oyl-hud__standings-summary {

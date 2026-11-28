@@ -125,6 +125,35 @@ describe('which lines, and when — #1347', () => {
     ]);
   });
 
+  it('carries the leader beside a window that does not start at the front, and only then — #2286', async () => {
+    const { room, connection } = await race();
+    room.name(100, 'Ann');
+    const field = Array.from({ length: 20 }, (_, index) =>
+      standingsRider(index === 11 ? 3 : 100 + index, index - 11, 3),
+    );
+    room.frame(1, [frameRider(3, 30)]);
+    room.standings(1, field);
+    const view = raceStandings(connection);
+    // The leader as the room sent them: first, named, with their gap.
+    expect(view?.leader).toEqual({
+      riderId: 100,
+      place: 1,
+      who: 'Ann',
+      gap: '−11 s',
+      figure: '3.0 W/kg',
+      flagged: false,
+      you: false,
+    });
+    // The list a tablet and a screen reader read is the same window as before.
+    expect(view?.lines.map((line) => line.place)).toEqual([9, 10, 11, 12, 13, 14, 15]);
+    // Where the window starts at the front, the leader is its first line.
+    room.standings(2, [standingsRider(3, 0, 3), ...field.filter((row) => row.riderId !== 3)]);
+    expect(raceStandings(connection)?.leader).toBeUndefined();
+    // And in a field no longer than the window.
+    room.standings(3, [...field.slice(0, 3), standingsRider(3, 0, 3)]);
+    expect(raceStandings(connection)?.leader).toBeUndefined();
+  });
+
   it('has no list before the room’s first standings, nor in a group ride', async () => {
     const before = await race();
     expect(raceStandings(before.connection)).toBeUndefined();

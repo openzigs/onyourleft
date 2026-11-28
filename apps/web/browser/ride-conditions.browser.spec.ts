@@ -941,7 +941,10 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
  * two notices are drawn, the ride so far gives way (`theme.css` §"THE RIDE SO
  * FAR AT ARM'S LENGTH"). Since #2284 a room with *Report*'s reasons open,
  * sounds on and a side camera is held at 1024×600 too, where the trainer line
- * gives way and every control stays on the stage, uncovered.
+ * gives way and every control stays on the stage, uncovered. Since #2286 a
+ * room's RACE in a window 40 rem tall or more draws its standings compact,
+ * and the ride so far gives way to them, as it does in a room's lap race on
+ * every tablet; both rooms here are races.
  */
 /** A room with *Report*'s reasons open, sounds on and a side camera filming. */
 const SIDE_CAMERA_ROOM = '?room=report&sounds=on&side=filming';
@@ -983,7 +986,13 @@ for (const viewport of LAPTOP_VIEWPORTS) {
     }) => {
       const page = await sharedRide(browser, viewport, query);
       for (const [how, seen] of await bothWays(page)) {
-        const rideSoFarGivesWay = query === TWO_NOTICES && viewport.height < 640;
+        // #2286: both rooms here are races, and in a window 40 rem tall or
+        // more a race draws its standings compact, for which the pacer, the
+        // ghost and the wind and then the ride so far give way (`theme.css`
+        // §"A ROOM RACE'S STANDINGS IN A LAPTOP'S WINDOW").
+        const compactStandings = query !== '' && query !== TWO_NOTICES && viewport.height >= 640;
+        const rideSoFarGivesWay =
+          (query === TWO_NOTICES && viewport.height < 640) || compactStandings;
         for (const name of RIDE_TOTAL_READINGS) {
           if (rideSoFarGivesWay && RIDE_SO_FAR.includes(name)) {
             expect(seen.givenWay, how).toContain(name);
@@ -1014,7 +1023,8 @@ for (const viewport of LAPTOP_VIEWPORTS) {
         // camera's row (1366×657).
         const givesWay =
           (query === '?room=following' && roomGivesWay(viewport)) ||
-          (query === SIDE_CAMERA_ROOM && viewport.height < 720);
+          (query === SIDE_CAMERA_ROOM && viewport.height < 720) ||
+          compactStandings;
         // #2284: and under 40 rem tall, with a side camera's row and the
         // sound row in a room, the trainer line too.
         const trainerLineGivesWay = query === SIDE_CAMERA_ROOM && viewport.height < 640;
