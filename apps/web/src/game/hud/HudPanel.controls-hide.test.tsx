@@ -488,6 +488,31 @@ describe('the ride controls hide until touched — #2600', () => {
     expect(controls()).toBe('hidden');
   });
 
+  it('keep Pull off shown while the rider is on the front of a group ride, and a first tap pulls off (#3307)', async () => {
+    let pulls = 0;
+    const group = (onFront: boolean) => ({
+      groupRideInput: {
+        onFront,
+        sittingIn: false,
+        pullOff: () => {
+          pulls += 1;
+        },
+        sitIn: () => undefined,
+      },
+    });
+    await hud(group(true));
+    idle();
+    idle();
+    expect(controls()).toBe('shown');
+    tap(button('Pull off left'));
+    expect(pulls, 'the first tap was spent showing Pull off').toBe(1);
+
+    // The control: off the front the same ride hides as any ride does.
+    await mounted?.rerender(ride(group(false)));
+    wait(CONTROLS_HIDE_MILLISECONDS);
+    expect(controls()).toBe('hidden');
+  });
+
   it('come back on resuming, and hide again five seconds later', async () => {
     await hud({ paused: true });
     idle();

@@ -1270,6 +1270,86 @@ describe('a mailbox reads from where its throw window opens — #2507, the owner
     belt.dispose();
   });
 
+  it('draws the realistic world’s own mailbox, as long and as tall as the stylised one, in the markers’ same triangles — #3288', () => {
+    const stylised = new DeliveryBelt('stylised');
+    const realistic = new DeliveryBelt('realistic');
+    const perKind = (belt: DeliveryBelt): number[] => {
+      const kinds = belt.meshOf('markers').geometry.getAttribute('oylPiece');
+      const counts = [0, 0, 0];
+      for (let at = 0; at < kinds.count; at += 3) {
+        counts[kinds.getX(at)] = (counts[kinds.getX(at)] ?? 0) + 1;
+      }
+      return counts;
+    };
+    // A six-sided post, a body with a round roof and a flag drawn on both
+    // faces, in the stylised mailbox's triangles: every marker instance
+    // submits them all, so the frame is no heavier.
+    expect(perKind(realistic)).toEqual(perKind(stylised));
+    expect(realistic.meshOf('markers').geometry.getAttribute('position').count / 3).toBe(
+      DELIVERY_MARKER_TRIANGLES,
+    );
+    const body = (belt: DeliveryBelt) => mailboxVertices(belt).filter((each) => !each.glows);
+    // Its own shapes, not the stylised ones in another paint.
+    const corners = (belt: DeliveryBelt): string[] =>
+      body(belt).map((each) => [each.x, each.y, each.z].join(','));
+    expect(corners(realistic)).not.toEqual(corners(stylised));
+    // The same size, #2507's: on the step, as tall, and as long along its length.
+    for (const pick of [
+      (each: { y: number }) => each.y,
+      (each: { z: number }) => each.z,
+    ] as const) {
+      const span = (belt: DeliveryBelt): [number, number] => {
+        const values = body(belt).map(pick);
+        return [Math.min(...values), Math.max(...values)];
+      };
+      const [low, high] = span(realistic);
+      const [stylisedLow, stylisedHigh] = span(stylised);
+      expect(low).toBeCloseTo(stylisedLow, 6);
+      expect(high).toBeCloseTo(stylisedHigh, 6);
+    }
+    stylised.dispose();
+    realistic.dispose();
+  });
+
+  it('tapes the realistic world’s parcel both ways, and leaves the stylised parcel as it was — #3288', () => {
+    const tapeOf = (belt: DeliveryBelt) => {
+      const geometry = belt.meshOf('parcels').geometry;
+      const position = geometry.getAttribute('position');
+      const colour = geometry.getAttribute('color');
+      const xs: number[] = [];
+      const zs: number[] = [];
+      for (let at = 0; at < position.count; at += 1) {
+        // The pale tape, not the brown card (`three-renderer.ts` §`DELIVERY_PAINT`).
+        if (colour.getY(at) < 0.5) continue;
+        // The tape's top face, where the bands lie over the card.
+        if (position.getY(at) < 0.11) continue;
+        xs.push(position.getX(at));
+        zs.push(position.getZ(at));
+      }
+      return {
+        triangles: position.count / 3,
+        across: Math.max(...xs) - Math.min(...xs),
+        along: Math.max(...zs) - Math.min(...zs),
+      };
+    };
+    const stylised = new DeliveryBelt('stylised');
+    const realistic = new DeliveryBelt('realistic');
+    // One band round its length: over the whole top across, a strip of it along.
+    expect(tapeOf(stylised)).toEqual({
+      triangles: 24,
+      across: expect.closeTo(0.35, 6) as number,
+      along: expect.closeTo(0.07, 6) as number,
+    });
+    // And a second round its width, crossing it: tape the whole way both ways.
+    expect(tapeOf(realistic)).toEqual({
+      triangles: 36,
+      across: expect.closeTo(0.35, 6) as number,
+      along: expect.closeTo(0.29, 6) as number,
+    });
+    stylised.dispose();
+    realistic.dispose();
+  });
+
   it('keeps every face of an obstacle or a marker that looks straight down — the owner’s ruling of 2026-11-13 on PR #2518', () => {
     // PR #2518 first left out every such face under the chase camera's eye, as
     // seen from behind. Up a climb a piece stands above the eye, which then sees

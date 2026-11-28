@@ -695,6 +695,14 @@ export interface DeliveryObstaclePiece extends DeliveryPiece {
    * every parked car, nothing on it moves. Read for a car only.
    */
   readonly car?: DeliveryCarMotion;
+  /**
+   * How far a dog has run since it was set going, in metres — #3288: what the
+   * realistic world's dog trots through (`three-renderer.ts`
+   * §`deliveryDogPose`). It stops growing when the dog stops. Absent, as for
+   * every other kind, nothing on it moves. Read for a dog only, and by the
+   * drawing alone: nothing collides with it or scores by it.
+   */
+  readonly ranMetres?: number;
 }
 
 /**

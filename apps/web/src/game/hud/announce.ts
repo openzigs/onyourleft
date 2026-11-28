@@ -36,6 +36,7 @@
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 5c′ | an open-world ride's next junction: its ways and default, a choice made, and the lock | event (#2898) | ADR 0088 D-3 | **yes** — #2898, the module note says why |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
+ * | 5d′ | a group ride's cue, as it is selected | event (#3305) | ADR 0101 D-5.5 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
  * | 5g | a standing obstacle ahead on a level (#2362), a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2; ADR 0065 D-10.9 | the obstacle ahead **yes** (#2362, the owner's ruling of 2026-11-08); the other four no (2026-10-28) |
@@ -74,6 +75,7 @@
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
  * | `delivery-*` | `GameView`, on a ride running a round (#1816) | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
+ * | `group-ride-cue` | `GameView`, on a ride with a group (#3303) | `hud/group-ride-hud.ts` §`groupRideCueEvent`, from `group-ride/ride-group.ts`'s cue (#3305) |
  * | `lap-race-*` | nothing yet: #1906 runs a race inside a game ride | `hud/lap-race-announce.ts` §`lapRaceEvents` (#1904) |
  * | `pacer-say` | `GameView` | `game/model-pacer.ts` §`ModelPacer.frame`'s `arrived`: the AI pacer's screened line (#2712) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
@@ -178,6 +180,24 @@
  * nowhere else, and a gradient ends a hand-set target (`ride/controller.ts`
  * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
  * announcements off the form speaks it, and this region says nothing new.
+ *
+ * ⚠️ **Rank 5d′ is #3305's**: an AI group ride's cue (ADR 0101 D-5.5), one
+ * rank for every kind — "You are next on the front", "Pull off now". BELOW
+ * every safety and workout sentence, down to an accepted re-plan: nothing a
+ * cue says is the machine under the rider (nothing in the mode writes to the
+ * trainer, D-6.1). Above a lap, the room's draft, every game's sentences and
+ * every reading: a cue is a thing to do in the next second or two, and a
+ * lap's figures cost nothing a window late. A ride runs one mode, so it never
+ * meets a round's, a race's or the pacer's. **Offered once and never owed**:
+ * a cue a higher sentence took the window from is dropped, not queued
+ * (D-5.5), and it stays on the HUD's cue line. So the group's `climb` cue
+ * gives way to rank 5's climb ahead in the same window, and they stay two
+ * sentences: the group's adds what the group will do. **The pull's countdown
+ * is never offered**: it is a field on the strip (D-5.3). ⚠️ **Not in
+ * {@link ALWAYS_SPOKEN}**, on the owner's Delivery and lap-race rulings
+ * applied to this mode: the cues follow the rider's announcement setting, and
+ * every one is on the HUD line whatever it is. Proposed in #3305's pull
+ * request, for the owner; reversing it is the membership of one array.
  *
  * ⚠️ **Rank 5e is #1312's**: a lap of the course has ended, and this is its
  * time and averages and how it compares. The LOWEST event — nothing about a
@@ -325,6 +345,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'junction'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
   | { readonly kind: 'plan-changed'; readonly text: string }
+  | { readonly kind: 'group-ride-cue'; readonly text: string }
   | { readonly kind: 'lap-ended'; readonly text: string }
   | { readonly kind: 'room-draft'; readonly text: string }
   | { readonly kind: 'delivery-obstacle-ahead'; readonly text: string }
@@ -379,6 +400,10 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // segment above threshold power — `workout/replan-text.ts`
   // §`planChangeAnnouncement`.
   'plan-changed',
+  // #3305, ADR 0101 D-5.5: an AI group ride's cue. Rank 5d′: below every
+  // safety and workout sentence, above a lap and every reading. Offered once
+  // and never owed, so behind a higher sentence it is dropped, not queued.
+  'group-ride-cue',
   // #1312: a lap of the course, as it ends. The lowest event, BELOW an
   // accepted re-plan: that sentence is about the workout the trainer is
   // being driven through, and a lap is a figure about the ride. Rank 5e.
